@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "YT Automation v2.0 — Bridge ImageFX",
+  "version": "2.0.0",
+  "description": "Plan B de imágenes: captura los resultados de Google ImageFX (Labs) y los envía al backend de YT Automation como respaldo cuando se agota la cuota de Gemini.",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": [
+    "http://127.0.0.1:8000/*",
+    "https://labs.google/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "YT Automation Bridge" },
+  "content_scripts": [
+    {
+      "matches": ["https://labs.google/*", "https://labs.google/fx/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

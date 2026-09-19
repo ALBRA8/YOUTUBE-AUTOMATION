@@ -1,0 +1,20 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Hormozi,Impact,119,&H0033FFFF,&H00FFFFFF,&H00000000,&H7F000000,-1,0,0,0,100,100,1,0,1,9,4,5,60,60,576,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:00.93,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}Esto que vas
+Dialogue: 0,0:00:00.93,0:00:01.86,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}a ver casi
+Dialogue: 0,0:00:01.86,0:00:02.78,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}nadie lo sabe.
+Dialogue: 0,0:00:03.13,0:00:04.21,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}Y el final
+Dialogue: 0,0:00:04.21,0:00:05.28,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}es incluso más
+Dialogue: 0,0:00:05.28,0:00:06.35,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}extraño que el
+Dialogue: 0,0:00:06.35,0:00:06.71,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}principio.
