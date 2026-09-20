@@ -3,9 +3,11 @@ YOUTUBE AUTOMATION v2.0 — Servidor principal (FastAPI)
 Dashboard en http://127.0.0.1:8000  ·  progreso por SSE  ·  coste $0/video
 """
 import asyncio
+import io
 import json
 import logging
 import shutil
+import zipfile
 from pathlib import Path
 
 import config
@@ -26,6 +28,17 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger("main")
 
 app = FastAPI(title="YT Automation v2.0", version="2.0.0")
+
+
+@app.middleware("http")
+async def no_cache_ui(request, call_next):
+    """El dashboard (HTML/JS/CSS) siempre se revalida: evita que el navegador
+    se quede con una versión vieja de la interfaz sin claves ni botones nuevos."""
+    resp = await call_next(request)
+    p = request.url.path
+    if p.startswith("/static") or p in ("/", "/app", "/app/"):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
 
 # ────────────────────────────────────────────────────────── básicos ──
 @app.get("/api/health")
@@ -469,6 +482,23 @@ async def publish_video(pid: str, body: dict):
 
 
 # ─────────────────────────────────────────────── cola de extensión ──
+@app.get("/api/extension/download")
+async def extension_download():
+    """Descarga la extensión Chrome (Plan B) como ZIP listo para cargar."""
+    ext_dir = Path(__file__).resolve().parent.parent / "extension"
+    if not ext_dir.exists():
+        raise HTTPException(404, "carpeta extension/ no encontrada")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in sorted(ext_dir.rglob("*")):
+            if f.is_file():
+                zf.write(f, f.relative_to(ext_dir.parent))
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/zip",
+                             headers={"Content-Disposition":
+                                      "attachment; filename=yt_extension_chrome.zip"})
+
+
 @app.post("/api/extension/images")
 async def extension_images(body: dict):
     url = (body.get("url") or "").strip()

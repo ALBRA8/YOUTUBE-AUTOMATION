@@ -666,7 +666,10 @@ async function renderSettings() {
         <div style="height:16px"></div>
         <b>🧩 Extensión Chrome (Plan B)</b>
         <div class="idea-item" style="margin-top:10px"><span>Imágenes en cola</span><b>${c.ext_pending ?? 0}</b></div>
-        <p style="color:var(--muted);font-size:12.5px;margin:8px 0">Carga <code class="mini">extension/</code> en chrome://extensions (modo desarrollador). Cuando Gemini llegue a su cuota diaria, el pipeline usa automáticamente las imágenes que captures en ImageFX.</p>
+        <div class="cfg-actions">
+          <a class="btn primary small" href="/api/extension/download" download title="Descargar extensión Chrome">⬇️ Descargar extensión (.zip)</a>
+        </div>
+        <p style="color:var(--muted);font-size:12.5px;margin:8px 0;line-height:1.6"><b>1.</b> Descarga y descomprime el ZIP · <b>2.</b> En Chrome entra a <code class="mini">chrome://extensions</code> → activa <b>modo desarrollador</b> → <b>Cargar descomprimida</b> → carpeta <code class="mini">extension/</code> · <b>3.</b> Genera imágenes en <a href="https://labs.google/fx" target="_blank" rel="noopener" style="color:var(--accent)">Google ImageFX</a> y pulsa ➤ Enviar. Llegarán aquí como respaldo automático cuando Gemini llegue a su cuota diaria.</p>
       </div>
 
       <div class="card">
