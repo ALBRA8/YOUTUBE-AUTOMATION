@@ -525,21 +525,138 @@ async function doPublish() {
 }
 function goPublish(pid) { PUB_PID = pid; nav('publish'); }
 
-/* ── vista: AJUSTES ──────────────────────────────────────── */
-function renderSettings() {
-  const s = S.settings;
+/* ── vista: AJUSTES (configuración de APIs desde el dashboard) ── */
+function updatePills() {
+  const pills = [['pill-gemini', S.health.gemini], ['pill-whisper', S.health.whisper], ['pill-yt', S.health.youtube]];
+  pills.forEach(([id, on]) => { const el = $('#' + id); if (el) $('.dot', el).classList.toggle('on', !!on); });
+}
+
+async function refreshCfgStatus() {
+  try {
+    S.health = await api('/health');
+    S.settings = await api('/settings');
+    updatePills();
+  } catch {}
+}
+
+async function saveCfg(patch, okMsg) {
+  if (guardDemo()) return;
+  try {
+    const r = await api('/config', { method: 'POST', body: patch });
+    toast('✅ ' + (okMsg || r.message), 'ok');
+    await refreshCfgStatus();
+    renderSettings();
+  } catch (e) { toast('❌ ' + e.message, 'err'); }
+}
+
+async function testGemini(btn) {
+  if (guardDemo()) return;
+  btn.disabled = true; btn.textContent = '⏳ Probando…';
+  try {
+    const r = await api('/config/test-gemini', { method: 'POST', body: {} });
+    if (r.ok) toast('✅ Gemini responde: ' + r.reply, 'ok');
+    else toast('❌ ' + r.error, 'err');
+  } catch (e) { toast('❌ ' + e.message, 'err'); }
+  btn.disabled = false; btn.textContent = '🔌 Probar clave';
+}
+
+async function uploadSecret(input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  if (guardDemo()) return;
+  const fd = new FormData(); fd.append('file', f);
+  try {
+    const res = await fetch('/api/config/client-secret', { method: 'POST', body: fd });
+    const r = await res.json();
+    if (!res.ok) throw new Error(r.detail || 'Error al subir');
+    toast('✅ client_secret.json guardado — YouTube listo para conectar', 'ok');
+    await refreshCfgStatus(); renderSettings();
+  } catch (e) { toast('❌ ' + e.message, 'err'); }
+  input.value = '';
+}
+
+function toggleKeyEye() {
+  const inp = $('#cfg-key'); if (!inp) return;
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+
+async function renderSettings() {
+  $('#view').innerHTML = `<h2 class="sec">⚙️ Ajustes</h2><div class="cfg-grid"><div class="card empty" style="grid-column:1/-1">Cargando configuración…</div></div>`;
+  let c = {};
+  if (!S.demo) { try { c = await api('/config'); } catch {} }
+  const ev = S.settings.edge_voices || [];
+  const gv = S.settings.gemini_voices || [];
+  const keyChip = c.gemini_key_set
+    ? `<span class="cfg-status ok">✅ Configurada · ${esc(c.gemini_key_masked || '•••')}</span>`
+    : `<span class="cfg-status err">❌ Sin clave — modo demo (placeholders + edge-tts)</span>`;
+  const ytChip = c.youtube_token
+    ? `<span class="cfg-status ok">✅ Canal conectado</span>`
+    : c.youtube_configured
+    ? `<span class="cfg-status ok">✅ client_secret cargado</span>`
+    : `<span class="cfg-status err">❌ Sin client_secret.json</span>`;
+  const whChip = c.whisper_available
+    ? `<span class="cfg-status ok">✅ Instalado</span>`
+    : `<span class="cfg-status err">⚠️ No instalado (tiempos estimados)</span>`;
+
   $('#view').innerHTML = `
     <h2 class="sec">⚙️ Ajustes</h2>
-    <div class="factory-grid">
+    <div class="cfg-grid">
+
       <div class="card">
-        <b>🔌 Estado del sistema</b>
-        <div class="idea-item"><span>Gemini (guion + imágenes + TTS)</span><b>${s.gemini_key ? '✅' : '❌ falta GEMINI_API_KEY'}</b></div>
-        <div class="idea-item"><span>Whisper (alineación de subtítulos)</span><b>${s.whisper ? '✅' : '⚠️ modo estimado'}</b></div>
-        <div class="idea-item"><span>YouTube API</span><b>${s.youtube_configured ? '✅' : '❌ sin client_secret'}</b></div>
-        <div class="idea-item"><span>TTS por defecto</span><b>${esc(s.tts_provider || 'edge')}</b></div>
-        <div class="idea-item"><span>Imágenes en cola de la extensión</span><b>${s.ext_pending ?? 0}</b></div>
-        <p style="color:var(--muted);font-size:12.5px;margin-top:14px">Las claves se configuran en el archivo <code>backend/.env</code>. Sin clave de Gemini, el sistema funciona en modo degradado (imágenes placeholder + solo edge-tts).</p>
+        <b>🔑 Gemini API</b> <span style="float:right">${keyChip}</span>
+        <div class="keyrow" style="margin-top:14px">
+          <input type="password" id="cfg-key" autocomplete="off" spellcheck="false"
+                 placeholder="${c.gemini_key_set ? 'Escribe una clave nueva para reemplazar ' + esc(c.gemini_key_masked || '') : 'Pega aquí tu clave · AIzaSy…'}">
+          <button class="eye" onclick="toggleKeyEye()" title="Mostrar/ocultar">👁️</button>
+        </div>
+        <div class="cfg-actions">
+          <button class="btn primary small" onclick="saveCfg({GEMINI_API_KEY: document.getElementById('cfg-key').value}, 'Clave guardada y activada — sin reiniciar')">💾 Guardar clave</button>
+          <button class="btn small" onclick="testGemini(this)">🔌 Probar clave</button>
+          ${c.gemini_key_set ? `<button class="btn danger small" onclick="if(confirm('¿Quitar la clave guardada? El sistema vuelve a modo demo.'))saveCfg({GEMINI_API_KEY: ''}, 'Clave eliminada — modo demo')">Quitar</button>` : ''}
+        </div>
+        <div class="hintline">Clave <b>gratis y al instante</b> en <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> → «Create API key» → copia (AIzaSy…).<br>
+        Activa: guiones IA, imágenes reales (Gemini 2.5 Flash Image) y voz premium. Se guarda en <code class="mini">${esc(c.env_path || 'backend/.env')}</code> y <b>aplica sin reiniciar</b>.</div>
       </div>
+
+      <div class="card">
+        <b>🗣️ Locución (TTS)</b>
+        <div class="field" style="margin-top:14px"><label>Proveedor principal</label>
+          <select id="cfg-tts">
+            <option value="edge" ${c.tts_provider === 'edge' ? 'selected' : ''}>edge-tts · gratis e ilimitado (recomendado)</option>
+            <option value="gemini" ${c.tts_provider === 'gemini' ? 'selected' : ''}>Gemini TTS · voz premium (requiere clave)</option>
+          </select></div>
+        <div class="field"><label>Voz edge-tts</label>
+          <select id="cfg-edge-voice">${ev.map(v => `<option value="${v.id}" ${c.edge_tts_voice === v.id ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></div>
+        <div class="field"><label>Voz Gemini</label>
+          <select id="cfg-gemini-voice">${gv.map(v => `<option value="${v.id}" ${c.gemini_tts_voice === v.id ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></div>
+        <div class="field"><label>Velocidad (ej. +8% o -10%)</label>
+          <input type="text" id="cfg-rate" value="${esc(c.tts_rate || '+8%')}"></div>
+        <div class="cfg-actions"><button class="btn primary small"
+          onclick="saveCfg({TTS_PROVIDER: document.getElementById('cfg-tts').value, EDGE_TTS_VOICE: document.getElementById('cfg-edge-voice').value, GEMINI_TTS_VOICE: document.getElementById('cfg-gemini-voice').value, TTS_RATE: document.getElementById('cfg-rate').value}, 'Voz guardada')">💾 Guardar voz</button></div>
+        <div class="hintline">Si un proveedor falla, el sistema cae automáticamente al otro. Nunca se bloquea el render.</div>
+      </div>
+
+      <div class="card">
+        <b>📺 YouTube (autopublicar)</b> <span style="float:right">${ytChip}</span>
+        <div class="field" style="margin-top:14px"><label>1. Sube tu client_secret.json (OAuth · Aplicación de escritorio)</label>
+          <input type="file" id="cfg-secret" accept=".json" onchange="uploadSecret(this)"></div>
+        <div class="cfg-actions"><button class="btn small" onclick="nav('publish')">Conectar mi canal →</button></div>
+        <div class="hintline">Descárgalo de <a href="https://console.cloud.google.com" target="_blank" rel="noopener">console.cloud.google.com</a> → crea proyecto → habilita <b>YouTube Data API v3</b> → Credenciales → OAuth 2.0 → Aplicación de escritorio. Sin verificación de Google, los videos suben como <b>privados</b> (perfecto para revisar antes).</div>
+      </div>
+
+      <div class="card">
+        <b>🎬 Render y subtítulos</b> <span style="float:right">${whChip}</span>
+        <div class="field" style="margin-top:14px"><label>Modelo Whisper (precisión de subtítulos)</label>
+          <select id="cfg-whisper" ${c.whisper_available ? '' : 'disabled'}>
+            ${['tiny','base','small','medium'].map(m => `<option value="${m}" ${(c.whisper_model || 'small') === m ? 'selected' : ''}>${m} ${m === 'small' ? '· recomendado' : m === 'medium' ? '· máxima precisión' : '· más rápido'}</option>`).join('')}
+          </select></div>
+        <div class="field"><label>FPS del render</label>
+          <input type="number" id="cfg-fps" value="${c.fps ?? 30}" min="12" max="60"></div>
+        <div class="cfg-actions"><button class="btn primary small" ${c.whisper_available ? '' : 'disabled'}
+          onclick="saveCfg({WHISPER_MODEL: document.getElementById('cfg-whisper').value, FPS: document.getElementById('cfg-fps').value}, 'Render guardado')">💾 Guardar render</button></div>
+        <div class="hintline">${c.whisper_available ? 'Whisper activo: subtítulos con tiempos exactos por palabra.' : 'Para subtítulos exactos: <code class="mini">pip install faster-whisper</code> y reinicia. Sin él, los tiempos se estiman (funciona bien).'} FPS alto = render más lento.</div>
+      </div>
+
       <div class="card">
         <b>🎨 Apariencia</b>
         <div class="toggle" style="margin-top:12px" onclick="setTheme(S.theme==='dark'?'light':'dark');renderSettings()">
@@ -548,8 +665,21 @@ function renderSettings() {
         </div>
         <div style="height:16px"></div>
         <b>🧩 Extensión Chrome (Plan B)</b>
-        <p style="color:var(--muted);font-size:12.5px;margin:8px 0">Carga <code>extension/</code> en chrome://extensions (modo desarrollador). Las imágenes que captures en ImageFX llegarán aquí como respaldo cuando Gemini falle o llegue a su cuota.</p>
+        <div class="idea-item" style="margin-top:10px"><span>Imágenes en cola</span><b>${c.ext_pending ?? 0}</b></div>
+        <p style="color:var(--muted);font-size:12.5px;margin:8px 0">Carga <code class="mini">extension/</code> en chrome://extensions (modo desarrollador). Cuando Gemini llegue a su cuota diaria, el pipeline usa automáticamente las imágenes que captures en ImageFX.</p>
       </div>
+
+      <div class="card">
+        <b>🩺 Estado del sistema</b>
+        <div class="idea-item" style="margin-top:12px"><span>Gemini (guion + imágenes + TTS)</span><b>${S.health.gemini ? '✅ activo' : '❌ sin clave'}</b></div>
+        <div class="idea-item"><span>Locución edge-tts</span><b>✅ siempre activa</b></div>
+        <div class="idea-item"><span>Whisper (subtítulos)</span><b>${c.whisper_available ? '✅' : '⚠️ estimado'}</b></div>
+        <div class="idea-item"><span>YouTube API</span><b>${c.youtube_configured ? '✅' : '❌ sin client_secret'}</b></div>
+        <div class="idea-item"><span>Proveedor TTS por defecto</span><b>${esc(c.tts_provider || 'edge')}</b></div>
+        <div class="idea-item"><span>Coste por video</span><b style="color:var(--ok)">$0.00</b></div>
+        <div class="hintline">Todo se guarda en <code class="mini">.env</code> (claves) y la base de datos local (proyectos). Nada sale de tu PC salvo las llamadas a las APIs que tú actives.</div>
+      </div>
+
     </div>`;
 }
 
@@ -625,8 +755,7 @@ async function refreshAll() {
     S.health = { gemini: true, whisper: true, youtube: true };
   }
 
-  const pills = [['pill-gemini', S.health.gemini], ['pill-whisper', S.health.whisper], ['pill-yt', S.health.youtube]];
-  pills.forEach(([id, on]) => { const el = $('#' + id); if (el) $('.dot', el).classList.toggle('on', !!on); });
+  updatePills();
 
   if (S.demo) {
     S.styles = S.styles.length ? S.styles : [];

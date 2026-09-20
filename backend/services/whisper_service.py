@@ -9,7 +9,7 @@ import asyncio
 import logging
 import re
 
-from config import WHISPER_DEVICE, WHISPER_MODEL
+import config
 
 log = logging.getLogger("whisper")
 _model = None
@@ -29,11 +29,15 @@ def available() -> bool:
 async def _get_model():
     global _model
     async with _model_lock:
-        if _model is None:
+        # Si el modelo pedido cambia (ajustes del dashboard), se recarga
+        wanted = (config.WHISPER_MODEL, config.WHISPER_DEVICE)
+        if _model is None or getattr(_model, "_yta_sig", None) != wanted:
             def _load():
                 from faster_whisper import WhisperModel
-                return WhisperModel(WHISPER_MODEL, device=WHISPER_DEVICE,
-                                    compute_type="int8")
+                m = WhisperModel(config.WHISPER_MODEL, device=config.WHISPER_DEVICE,
+                                 compute_type="int8")
+                m._yta_sig = wanted
+                return m
             _model = await asyncio.to_thread(_load)
     return _model
 

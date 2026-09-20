@@ -41,14 +41,15 @@ uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 Abre **http://127.0.0.1:8000** 🎉
 
-### 3. Claves (opcional pero recomendado)
-```bash
-cd backend
-cp .env.example .env      # Windows: copy .env.example .env
-```
-Edita `.env` y pega tu **GEMINI_API_KEY** (gratis en [aistudio.google.com/apikey](https://aistudio.google.com/apikey)).
+### 3. Claves (opcional pero recomendado) — **directo desde el dashboard**
+**Ya no hace falta editar archivos a mano**: entra en **⚙️ Configuración** en el menú lateral y:
+1. Pega tu **GEMINI_API_KEY** (gratis en [aistudio.google.com/apikey](https://aistudio.google.com/apikey))
+2. **💾 Guardar clave** → se escribe en `backend/.env` y **se activa al instante, sin reiniciar**
+3. **🔌 Probar clave** → verifica con una llamada real que todo funciona
 
-> Sin clave: el dashboard funciona, pero los videos salen con imágenes placeholder y solo voz edge-tts. Con clave: calidad completa a $0.
+También desde ahí: elegir voz y proveedor TTS, subir el `client_secret.json` de YouTube, elegir modelo Whisper y FPS.
+
+> ¿Prefieres el archivo? `cd backend && cp .env.example .env` y edita `GEMINI_API_KEY=...`. Sin clave: el dashboard funciona, pero los videos salen con imágenes placeholder y solo voz edge-tts. Con clave: calidad completa a $0.
 
 ### 4. (Recomendado) Whisper para subtítulos perfectos
 ```bash
@@ -112,7 +113,7 @@ Prioridad de imágenes: **Gemini → cola extensión → placeholder**. Nunca se
 ## 📺 Configurar YouTube (autopublish)
 1. En [Google Cloud Console](https://console.cloud.google.com) crea un proyecto → habilita **YouTube Data API v3**
 2. Crea credenciales **OAuth 2.0 → Aplicación de escritorio** → descarga `client_secret.json`
-3. Cópialo a `backend/data/client_secret.json`
+3. Súbelo desde **⚙️ Configuración → YouTube** (o cópialo a `backend/data/client_secret.json`)
 4. En el dashboard: **Publicar → 1. Conectar mi canal** → autoriza → pega el código → **Guardar token**
 5. Listo: publica manual o activa autopublish en la Fábrica
 

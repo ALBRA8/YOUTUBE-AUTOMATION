@@ -8,9 +8,9 @@ import logging
 import shutil
 from pathlib import Path
 
+import config
 import database as db
-from config import (DATA_DIR, GEMINI_API_KEY, HOST, OUTPUT_DIR, PORT,
-                    TTS_PROVIDER, TMP_DIR)
+from config import DATA_DIR, HOST, OUTPUT_DIR, PORT, TMP_DIR
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -43,8 +43,8 @@ async def styles():
 @app.get("/api/settings")
 async def settings():
     return {
-        "gemini_key": bool(GEMINI_API_KEY),
-        "tts_provider": TTS_PROVIDER,
+        "gemini_key": gemini_client.available(),
+        "tts_provider": config.TTS_PROVIDER,
         "whisper": whisper_service.available(),
         "youtube_configured": youtube_publish.configured(),
         "youtube_token": youtube_publish.has_token(),
@@ -63,6 +63,122 @@ async def settings():
             {"id": "Aoede", "name": "Aoede — juvenil"},
         ],
     }
+
+
+# ─────────────────────────────── configuración desde el dashboard ──
+def _mask(secret: str) -> str:
+    if not secret:
+        return ""
+    return f"{secret[:6]}…{secret[-4:]}" if len(secret) > 14 else "•••"
+
+
+@app.get("/api/config")
+async def get_config():
+    """Vista de configuración para ⚙️ Ajustes. Los secretos van enmascarados."""
+    return {
+        "env_path": str(config.ENV_PATH),
+        "env_exists": config.ENV_PATH.exists(),
+        "gemini_key_set": gemini_client.available(),
+        "gemini_key_masked": _mask(config.GEMINI_API_KEY),
+        "tts_provider": config.TTS_PROVIDER,
+        "edge_tts_voice": config.EDGE_TTS_VOICE,
+        "gemini_tts_voice": config.GEMINI_TTS_VOICE,
+        "tts_rate": config.TTS_RATE,
+        "whisper_model": config.WHISPER_MODEL,
+        "whisper_device": config.WHISPER_DEVICE,
+        "whisper_available": whisper_service.available(),
+        "fps": config.FPS,
+        "youtube_configured": youtube_publish.configured(),
+        "youtube_token": youtube_publish.has_token(),
+        "ext_pending": db.count_ext_images(),
+    }
+
+
+@app.post("/api/config")
+async def save_config(body: dict):
+    """Guarda claves/ajustes en .env y aplica los cambios AL INSTANTE
+    (sin reiniciar el servidor)."""
+    updates: dict[str, str] = {}
+    for key, value in (body or {}).items():
+        if key not in config.EDITABLE_KEYS:
+            continue
+        val = str(value).strip()
+        if key == "GEMINI_API_KEY":
+            # Enmascarado (el input placeholder) = NO tocar la clave guardada.
+            # Vacío = borrado explícito (botón "Quitar clave").
+            if val.startswith("•") or "…" in val:
+                continue
+            updates[key] = val
+            continue
+        if not val:
+            continue
+        if key == "TTS_PROVIDER" and val not in ("edge", "gemini"):
+            raise HTTPException(400, "TTS_PROVIDER debe ser 'edge' o 'gemini'")
+        if key == "FPS":
+            try:
+                if not (12 <= int(val) <= 60):
+                    raise ValueError
+            except ValueError:
+                raise HTTPException(400, "FPS debe ser un número entre 12 y 60")
+        if key == "TTS_RATE":
+            try:
+                pct = int(val.replace("%", "").replace("+", ""))
+                if not (-50 <= pct <= 100):
+                    raise ValueError
+                val = f"{'+' if pct >= 0 else ''}{pct}%"
+            except ValueError:
+                raise HTTPException(400, "TTS_RATE debe ser tipo +8% o -10%")
+        if key == "WHISPER_MODEL" and val not in ("tiny", "base", "small", "medium"):
+            raise HTTPException(400, "modelo Whisper inválido")
+        if key == "WHISPER_DEVICE" and val not in ("cpu", "cuda"):
+            raise HTTPException(400, "dispositivo Whisper inválido")
+        updates[key] = val
+    if not updates:
+        raise HTTPException(400, "nada que guardar")
+    saved = config.save_env(updates)
+    return {
+        "ok": True, "saved": saved,
+        "gemini": gemini_client.available(),
+        "tts_provider": config.TTS_PROVIDER,
+        "message": "Configuración guardada y aplicada al instante",
+    }
+
+
+@app.post("/api/config/test-gemini")
+async def test_gemini():
+    """Prueba la clave de Gemini con una llamada real mínima."""
+    if not gemini_client.available():
+        return {"ok": False, "error": "No hay ninguna clave configurada"}
+    try:
+        txt = await gemini_client.generate_text("Responde únicamente: OK")
+        return {"ok": True, "reply": (txt or "").strip()[:40] or "OK"}
+    except Exception as e:  # noqa: BLE001
+        msg = str(e)[:300]
+        if "API key not valid" in msg or "API_KEY_INVALID" in msg:
+            msg = "La clave no es válida — revisa que la copiaste completa"
+        elif "429" in msg or "RESOURCE_EXHAUSTED" in msg:
+            msg = "Clave válida, pero sin cuota disponible ahora (reintenta luego)"
+        elif "not found" in msg.lower() or "ModuleNotFoundError" in msg:
+            msg = f"Falta la librería google-genai: pip install google-genai · {msg[:150]}"
+        return {"ok": False, "error": msg}
+
+
+@app.post("/api/config/client-secret")
+async def upload_client_secret(file: UploadFile = File(...)):
+    """Sube el client_secret.json de YouTube desde el dashboard."""
+    name = (file.filename or "").lower()
+    if not name.endswith(".json"):
+        raise HTTPException(400, "El archivo debe ser client_secret.json")
+    raw = await file.read()
+    try:
+        data = json.loads(raw)
+    except Exception:  # noqa: BLE001
+        raise HTTPException(400, "JSON inválido")
+    if "installed" not in data and "web" not in data:
+        raise HTTPException(400, "No parece un client_secret OAuth (falta 'installed' o 'web')")
+    dest = DATA_DIR / "client_secret.json"
+    dest.write_bytes(raw)
+    return {"ok": True, "configured": youtube_publish.configured()}
 
 
 @app.get("/api/stats")

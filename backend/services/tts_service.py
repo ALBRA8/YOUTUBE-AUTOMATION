@@ -10,7 +10,7 @@ import struct
 import subprocess
 from pathlib import Path
 
-from config import (EDGE_TTS_VOICE, GEMINI_TTS_VOICE, TTS_PROVIDER, TTS_RATE)
+import config
 from services import gemini_client
 
 log = logging.getLogger("tts")
@@ -33,15 +33,17 @@ def wav_duration(path: Path) -> float:
     return float(out.stdout.strip())
 
 
-async def synth_gemini(text: str, out_path: Path, voice: str = GEMINI_TTS_VOICE) -> float:
-    wav_bytes = await gemini_client.tts_pcm(text, voice)
+async def synth_gemini(text: str, out_path: Path, voice: str | None = None) -> float:
+    wav_bytes = await gemini_client.tts_pcm(text, voice or config.GEMINI_TTS_VOICE)
     out_path.write_bytes(wav_bytes)
     return wav_duration(out_path)
 
 
 async def synth_edge(text: str, out_path: Path,
-                     voice: str = EDGE_TTS_VOICE, rate: str = TTS_RATE) -> float:
+                     voice: str | None = None, rate: str | None = None) -> float:
     import edge_tts
+    voice = voice or config.EDGE_TTS_VOICE
+    rate = rate or config.TTS_RATE
     mp3 = out_path.with_suffix(".mp3")
     communicate = edge_tts.Communicate(text, voice, rate=rate)
     await communicate.save(str(mp3))
@@ -53,14 +55,14 @@ async def synth_edge(text: str, out_path: Path,
 async def synthesize(text: str, out_path: Path, provider: str | None = None,
                      voice: str | None = None) -> tuple[Path, float]:
     """Sintetiza con el proveedor pedido; si falla, cae al otro automáticamente."""
-    provider = (provider or TTS_PROVIDER).lower()
-    voice = voice or (GEMINI_TTS_VOICE if provider == "gemini" else EDGE_TTS_VOICE)
+    provider = (provider or config.TTS_PROVIDER).lower()
+    voice = voice or (config.GEMINI_TTS_VOICE if provider == "gemini" else config.EDGE_TTS_VOICE)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     primary = synth_gemini if provider == "gemini" else synth_edge
     fallback = synth_edge if provider == "gemini" else synth_gemini
-    fb_voice = EDGE_TTS_VOICE if provider == "gemini" else GEMINI_TTS_VOICE
+    fb_voice = config.EDGE_TTS_VOICE if provider == "gemini" else config.GEMINI_TTS_VOICE
 
     try:
         dur = await primary(text, out_path, voice)
@@ -68,7 +70,7 @@ async def synthesize(text: str, out_path: Path, provider: str | None = None,
     except Exception as e:  # noqa: BLE001
         log.warning("TTS primario '%s' falló (%s) → fallback edge/gemini", provider, e)
         if provider == "gemini":
-            dur = await fallback(text, out_path, EDGE_TTS_VOICE)
+            dur = await fallback(text, out_path, config.EDGE_TTS_VOICE)
         else:
             if not gemini_client.available():
                 raise

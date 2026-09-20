@@ -12,23 +12,26 @@ import logging
 import wave
 from typing import Any
 
-from config import (GEMINI_API_KEY, GEMINI_IMAGE_MODEL, GEMINI_TEXT_MODEL,
-                    GEMINI_TTS_MODEL, GEMINI_TTS_VOICE)
+import config
 
 log = logging.getLogger("gemini")
 
 _client = None
+_client_key = None
 
 
 def available() -> bool:
-    return bool(GEMINI_API_KEY)
+    return bool(config.GEMINI_API_KEY)
 
 
 def client():
-    global _client
-    if _client is None:
+    global _client, _client_key
+    key = config.GEMINI_API_KEY
+    # Reconstruye el cliente si la clave cambió (p. ej. guardada desde el dashboard)
+    if _client is None or _client_key != key:
         from google import genai  # import perezoso
-        _client = genai.Client(api_key=GEMINI_API_KEY)
+        _client = genai.Client(api_key=key)
+        _client_key = key
     return _client
 
 
@@ -62,7 +65,7 @@ async def generate_json(prompt: str, schema: dict | None = None,
         if system:
             cfg["system_instruction"] = system
         return client().models.generate_content(
-            model=GEMINI_TEXT_MODEL,
+            model=config.GEMINI_TEXT_MODEL,
             contents=prompt,
             config=types.GenerateContentConfig(**cfg),
         )
@@ -85,7 +88,7 @@ async def generate_text(prompt: str, system: str | None = None) -> str:
         if system:
             cfg["system_instruction"] = system
         return client().models.generate_content(
-            model=GEMINI_TEXT_MODEL, contents=prompt,
+            model=config.GEMINI_TEXT_MODEL, contents=prompt,
             config=types.GenerateContentConfig(**cfg))
 
     resp = await _retry(lambda: asyncio.to_thread(_call))
@@ -102,7 +105,7 @@ async def generate_image(prompt: str) -> bytes:
     def _call():
         from google.genai import types
         return client().models.generate_content(
-            model=GEMINI_IMAGE_MODEL,
+            model=config.GEMINI_IMAGE_MODEL,
             contents=prompt,
             config=types.GenerateContentConfig(response_modalities=["IMAGE"]),
         )
@@ -116,15 +119,16 @@ async def generate_image(prompt: str) -> bytes:
 
 
 # ───────────────────────────────────────────────────────────────── TTS ──
-async def tts_pcm(text: str, voice: str = GEMINI_TTS_VOICE) -> bytes:
+async def tts_pcm(text: str, voice: str | None = None) -> bytes:
     """TTS de Gemini → WAV (PCM s16le 24kHz mono)."""
     if not available():
         raise RuntimeError("GEMINI_API_KEY no configurada")
+    voice = voice or config.GEMINI_TTS_VOICE
 
     def _call():
         from google.genai import types
         return client().models.generate_content(
-            model=GEMINI_TTS_MODEL,
+            model=config.GEMINI_TTS_MODEL,
             contents=text,
             config=types.GenerateContentConfig(
                 response_modalities=["AUDIO"],
