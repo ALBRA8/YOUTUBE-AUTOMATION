@@ -146,7 +146,8 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
         scenes = db.get_scenes(project_id)
         n = len(scenes)
         await _emit(job_id, project_id, "scripting", 18,
-                    f"Guion listo: {n} escenas · «{result['title']}»",
+                    f"Guion listo: {n} escenas · «{result['title']}»"
+                    + (" · MODO DEMO $0" if result.get("engine") == "local-demo" else ""),
                     {"title": result["title"]})
 
         # PASO 2 — imágenes (híbridas)

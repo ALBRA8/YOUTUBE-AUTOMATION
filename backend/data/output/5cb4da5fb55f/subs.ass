@@ -1,0 +1,60 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Hormozi,Impact,119,&H0033FFFF,&H00FFFFFF,&H00000000,&H7F000000,-1,0,0,0,100,100,1,0,1,9,4,5,60,60,576,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:00.32,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}¿Crees que ya
+Dialogue: 0,0:00:00.32,0:00:00.63,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}lo sabes todo
+Dialogue: 0,0:00:00.63,0:00:00.95,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}sobre datos curiosos
+Dialogue: 0,0:00:00.95,0:00:01.26,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}del espacio que
+Dialogue: 0,0:00:01.26,0:00:01.58,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}parecen ciencia ficción?
+Dialogue: 0,0:00:01.58,0:00:01.90,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}Espera a escuchar
+Dialogue: 0,0:00:01.90,0:00:02.54,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}esto. Empecemos por
+Dialogue: 0,0:00:02.54,0:00:02.83,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}lo básico: datos
+Dialogue: 0,0:00:02.83,0:00:03.11,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}curiosos del espacio
+Dialogue: 0,0:00:03.11,0:00:03.40,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}que parecen ciencia
+Dialogue: 0,0:00:03.40,0:00:03.68,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}ficción guarda detalles
+Dialogue: 0,0:00:03.68,0:00:03.97,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}que la ciencia
+Dialogue: 0,0:00:03.97,0:00:04.25,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}apenas empieza a
+Dialogue: 0,0:00:04.25,0:00:04.91,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}entender. Los expertos
+Dialogue: 0,0:00:04.91,0:00:05.23,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}llevan años estudiando
+Dialogue: 0,0:00:05.23,0:00:05.54,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}datos curiosos del
+Dialogue: 0,0:00:05.54,0:00:05.86,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}espacio que parecen
+Dialogue: 0,0:00:05.86,0:00:06.17,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}ciencia ficción, y
+Dialogue: 0,0:00:06.17,0:00:06.49,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}cada descubrimiento contradice
+Dialogue: 0,0:00:06.49,0:00:07.16,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}al anterior. Aquí
+Dialogue: 0,0:00:07.16,0:00:07.47,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}viene lo increíble:
+Dialogue: 0,0:00:07.47,0:00:07.79,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}detrás de datos
+Dialogue: 0,0:00:07.79,0:00:08.10,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}curiosos del espacio
+Dialogue: 0,0:00:08.10,0:00:08.42,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}que parecen ciencia
+Dialogue: 0,0:00:08.42,0:00:08.73,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}ficción hay historias
+Dialogue: 0,0:00:08.73,0:00:09.05,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}que parecen inventadas.
+Dialogue: 0,0:00:09.40,0:00:09.72,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}Y no, no
+Dialogue: 0,0:00:09.72,0:00:10.03,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}es ciencia ficción:
+Dialogue: 0,0:00:10.03,0:00:10.35,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}todo esto está
+Dialogue: 0,0:00:10.35,0:00:10.66,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}documentado sobre datos
+Dialogue: 0,0:00:10.66,0:00:10.98,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}curiosos del espacio
+Dialogue: 0,0:00:10.98,0:00:11.29,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}que parecen ciencia
+Dialogue: 0,0:00:11.29,0:00:11.92,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}ficción. Y ahora,
+Dialogue: 0,0:00:11.92,0:00:12.19,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}el dato que
+Dialogue: 0,0:00:12.19,0:00:12.45,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}lo cambia todo:
+Dialogue: 0,0:00:12.45,0:00:12.71,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}lo que descubrieron
+Dialogue: 0,0:00:12.71,0:00:12.97,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}sobre datos curiosos
+Dialogue: 0,0:00:12.97,0:00:13.23,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}del espacio que
+Dialogue: 0,0:00:13.23,0:00:13.49,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}parecen ciencia ficción
+Dialogue: 0,0:00:13.49,0:00:13.75,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}supera cualquier predicción.
+Dialogue: 0,0:00:14.10,0:00:14.42,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}Si quieres más
+Dialogue: 0,0:00:14.42,0:00:14.73,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}secretos sobre datos
+Dialogue: 0,0:00:14.73,0:00:15.05,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}curiosos del espacio
+Dialogue: 0,0:00:15.05,0:00:15.36,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}que parecen ciencia
+Dialogue: 0,0:00:15.36,0:00:15.68,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}ficción, sígueme: cada
+Dialogue: 0,0:00:15.68,0:00:15.99,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}día desvelamos algo
+Dialogue: 0,0:00:15.99,0:00:16.10,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}nuevo.

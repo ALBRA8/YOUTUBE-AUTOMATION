@@ -11,6 +11,85 @@ from services.themes import get_style
 
 log = logging.getLogger("script")
 
+# ─────────────────────────── generador local (fallback $0) ────────────────
+# Sin API key (o si Gemini falla) producimos un guion estructurado local:
+# el pipeline completa de verdad con edge-tts + imágenes locales. Coste $0.
+
+_HOOKS = [
+    "¿Crees que ya lo sabes todo sobre {tema}? Espera a escuchar esto.",
+    "Esto de {tema} casi nadie lo sabe… y te va a sorprender.",
+    "Para de hacer scroll: {tema} es mucho más loco de lo que creías.",
+]
+_CUERPO = [
+    "Empecemos por lo básico: {tema} guarda detalles que la ciencia apenas empieza a entender.",
+    "Los expertos llevan años estudiando {tema}, y cada descubrimiento contradice al anterior.",
+    "Aquí viene lo increíble: detrás de {tema} hay historias que parecen inventadas.",
+    "Y no, no es ciencia ficción: todo esto está documentado sobre {tema}.",
+    "Piénsalo: cada detalle de {tema} esconde una pieza que cambia el tablero completo.",
+    "Lo mejor de {tema} es que cuanto más profundizas, más preguntas aparecen.",
+    "Hay un dato sobre {tema} que dejó a toda la comunidad con la boca abierta.",
+    "Y si eso te pareció poco, espera a lo que viene ahora con {tema}.",
+    "La pregunta que todos hacen: ¿hasta dónde puede llegar {tema}?",
+]
+_GIRO = "Y ahora, el dato que lo cambia todo: lo que descubrieron sobre {tema} supera cualquier predicción."
+_CTA = "Si quieres más secretos sobre {tema}, sígueme: cada día desvelamos algo nuevo."
+_SHOTS = [
+    "dramatic close-up shot, volumetric lighting, ultra detailed",
+    "epic wide establishing shot, cinematic composition, golden hour",
+    "dynamic action shot from below, high contrast, moody atmosphere",
+    "macro detail shot, shallow depth of field, cinematic color grading",
+    "aerial drone shot, vast landscape, dramatic clouds, cinematic",
+    "over-the-shoulder shot, mysterious silhouettes, rim lighting",
+]
+
+
+def _tema(seed: str) -> str:
+    t = (seed or "este tema").strip().rstrip(".!?¿¡")
+    return t if len(t) <= 60 else t[:57] + "…"
+
+
+def _split_sentences(text: str) -> list[str]:
+    import re
+    parts = re.split(r"(?<=[.!?…])\s+", (text or "").strip())
+    return [p.strip() for p in parts if len(p.strip()) >= 25]
+
+
+def _local_fallback(kind: str, seed: str, style_id: str, fmt: str,
+                    custom_prompt: str | None = None) -> dict:
+    """Guion estructurado sin IA externa: hook → cuerpo → giro → CTA."""
+    style = get_style(style_id)
+    style_prompt = custom_prompt or style["prompt"]
+    tema = _tema(seed)
+    body_src = _split_sentences(seed) if kind in ("script", "audio") else []
+    n_body = 4 if fmt == "short" else 10
+
+    narrations: list[str] = [_HOOKS[0].format(tema=tema)]
+    for i in range(n_body):
+        if i < len(body_src):
+            narrations.append(body_src[i])
+        else:
+            narrations.append(_CUERPO[i % len(_CUERPO)].format(tema=tema))
+    narrations.append(_GIRO.format(tema=tema))
+    narrations.append(_CTA.format(tema=tema))
+
+    titles = ["El Hook"] + [f"Pista {i}" for i in range(1, len(narrations) - 2)] + [
+        "El Giro", "Tu CTA"]
+    scenes = []
+    for i, nar in enumerate(narrations):
+        shot = _SHOTS[i % len(_SHOTS)]
+        scenes.append({
+            "title": titles[i] if i < len(titles) else f"Escena {i + 1}",
+            "narration": nar,
+            "image_prompt": f"{shot}, visual concept about {tema}, {style_prompt}, no text",
+        })
+    return {
+        "title": tema[:60].capitalize(),
+        "hook": narrations[0],
+        "cta": narrations[-1],
+        "scenes": scenes,
+        "engine": "local-demo",
+    }
+
 SYSTEM = (
     "Eres un guionista viral de YouTube Shorts/TikTok con millones de vistas. "
     "Escribes en español neutro, ritmo trepidante, frases cortas que enganchan. "
@@ -38,61 +117,86 @@ def _base_instructions(style_prompt: str, n_scenes: int, fmt: str,
 
 async def from_script(script_text: str, style_id: str, fmt: str,
                       custom_prompt: str | None = None) -> dict:
-    style = get_style(style_id)
-    n = 6 if fmt == "short" else 12
-    prompt = (
-        "Convierte el siguiente guion en un guion escena por escena para video viral. "
-        + _base_instructions(style["prompt"], n, fmt, custom_prompt)
-        + f"\n\nGUION:\n{script_text[:8000]}"
-    )
-    return await gemini_client.generate_json(prompt, gemini_client.schema_scenes(),
-                                             system=SYSTEM)
+    if not gemini_client.available():
+        return _local_fallback("script", script_text, style_id, fmt, custom_prompt)
+    try:
+        style = get_style(style_id)
+        n = 6 if fmt == "short" else 12
+        prompt = (
+            "Convierte el siguiente guion en un guion escena por escena para video viral. "
+            + _base_instructions(style["prompt"], n, fmt, custom_prompt)
+            + f"\n\nGUION:\n{script_text[:8000]}"
+        )
+        return await gemini_client.generate_json(prompt, gemini_client.schema_scenes(),
+                                                 system=SYSTEM)
+    except Exception as e:  # noqa: BLE001
+        log.warning("Gemini falló (%s) — uso generador local", str(e)[:120])
+        return _local_fallback("script", script_text, style_id, fmt, custom_prompt)
 
 
 async def from_idea(idea: str, style_id: str, fmt: str,
                     custom_prompt: str | None = None) -> dict:
-    style = get_style(style_id)
-    n = 6 if fmt == "short" else 12
-    prompt = (
-        f"Crea desde cero un guion viral a partir de esta idea: «{idea}». "
-        + _base_instructions(style["prompt"], n, fmt, custom_prompt)
-    )
-    return await gemini_client.generate_json(prompt, gemini_client.schema_scenes(),
-                                             system=SYSTEM)
+    if not gemini_client.available():
+        return _local_fallback("idea", idea, style_id, fmt, custom_prompt)
+    try:
+        style = get_style(style_id)
+        n = 6 if fmt == "short" else 12
+        prompt = (
+            f"Crea desde cero un guion viral a partir de esta idea: «{idea}». "
+            + _base_instructions(style["prompt"], n, fmt, custom_prompt)
+        )
+        return await gemini_client.generate_json(prompt, gemini_client.schema_scenes(),
+                                                 system=SYSTEM)
+    except Exception as e:  # noqa: BLE001
+        log.warning("Gemini falló (%s) — uso generador local", str(e)[:120])
+        return _local_fallback("idea", idea, style_id, fmt, custom_prompt)
 
 
 async def from_url_transcript(viral_meta: dict, transcript: str, style_id: str,
                               fmt: str, custom_prompt: str | None = None) -> dict:
     """Killer feature: recrear la ESTRUCTURA ganadora del viral con contenido original."""
-    style = get_style(style_id)
-    n = 6 if fmt == "short" else 12
-    prompt = (
-        "El siguiente texto es la transcripción de un video viral. Analiza su "
-        "estructura ganadora (hook, desarrollo, giro, CTA) y crea un guion 100% ORIGINAL "
-        "sobre el mismo tema con nuevo ángulo y nuevas frases. No reutilices frases del "
-        "original. Título del video viral: "
-        f"«{viral_meta.get('title', '')}» (canal {viral_meta.get('channel', '')}). "
-        + _base_instructions(style["prompt"], n, fmt, custom_prompt)
-        + f"\n\nTRANSCRIPCIÓN (solo referencia de estructura):\n{transcript[:9000]}"
-    )
-    return await gemini_client.generate_json(prompt, gemini_client.schema_scenes(),
-                                             system=SYSTEM)
+    seed = viral_meta.get("title") or transcript[:120]
+    if not gemini_client.available():
+        return _local_fallback("url", seed, style_id, fmt, custom_prompt)
+    try:
+        style = get_style(style_id)
+        n = 6 if fmt == "short" else 12
+        prompt = (
+            "El siguiente texto es la transcripción de un video viral. Analiza su "
+            "estructura ganadora (hook, desarrollo, giro, CTA) y crea un guion 100% ORIGINAL "
+            "sobre el mismo tema con nuevo ángulo y nuevas frases. No reutilices frases del "
+            "original. Título del video viral: "
+            f"«{viral_meta.get('title', '')}» (canal {viral_meta.get('channel', '')}). "
+            + _base_instructions(style["prompt"], n, fmt, custom_prompt)
+            + f"\n\nTRANSCRIPCIÓN (solo referencia de estructura):\n{transcript[:9000]}"
+        )
+        return await gemini_client.generate_json(prompt, gemini_client.schema_scenes(),
+                                                 system=SYSTEM)
+    except Exception as e:  # noqa: BLE001
+        log.warning("Gemini falló (%s) — uso generador local", str(e)[:120])
+        return _local_fallback("url", seed, style_id, fmt, custom_prompt)
 
 
 async def from_audio_transcript(transcript: str, style_id: str, fmt: str,
                                 custom_prompt: str | None = None) -> dict:
     """El usuario grabó su voz (modo Audio): pulimos y estructuramos su narración."""
-    style = get_style(style_id)
-    n = 6 if fmt == "short" else 12
-    prompt = (
-        "La siguiente transcripción es la narración hablada por el propio creador. "
-        "Respeta su contenido y estilo personal: solo divídela en escenas y genera los "
-        "prompts visuales. NO cambies sus frases salvo errores evidentes. "
-        + _base_instructions(style["prompt"], n, fmt, custom_prompt)
-        + f"\n\nTRANSCRIPCIÓN:\n{transcript[:8000]}"
-    )
-    return await gemini_client.generate_json(prompt, gemini_client.schema_scenes(),
-                                             system=SYSTEM)
+    if not gemini_client.available():
+        return _local_fallback("audio", transcript, style_id, fmt, custom_prompt)
+    try:
+        style = get_style(style_id)
+        n = 6 if fmt == "short" else 12
+        prompt = (
+            "La siguiente transcripción es la narración hablada por el propio creador. "
+            "Respeta su contenido y estilo personal: solo divídela en escenas y genera los "
+            "prompts visuales. NO cambies sus frases salvo errores evidentes. "
+            + _base_instructions(style["prompt"], n, fmt, custom_prompt)
+            + f"\n\nTRANSCRIPCIÓN:\n{transcript[:8000]}"
+        )
+        return await gemini_client.generate_json(prompt, gemini_client.schema_scenes(),
+                                                 system=SYSTEM)
+    except Exception as e:  # noqa: BLE001
+        log.warning("Gemini falló (%s) — uso generador local", str(e)[:120])
+        return _local_fallback("audio", transcript, style_id, fmt, custom_prompt)
 
 
 def build_result(raw: dict) -> dict:
@@ -109,4 +213,5 @@ def build_result(raw: dict) -> dict:
         "hook": (raw.get("hook") or "").strip(),
         "cta": (raw.get("cta") or "").strip(),
         "scenes": scenes,
+        "engine": raw.get("engine") or "gemini",
     }

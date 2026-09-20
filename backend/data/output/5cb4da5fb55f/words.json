@@ -1,0 +1,697 @@
+[
+ {
+  "word": "¿Crees",
+  "start": 0.0,
+  "end": 0.105
+ },
+ {
+  "word": "que",
+  "start": 0.105,
+  "end": 0.211
+ },
+ {
+  "word": "ya",
+  "start": 0.211,
+  "end": 0.316
+ },
+ {
+  "word": "lo",
+  "start": 0.316,
+  "end": 0.421
+ },
+ {
+  "word": "sabes",
+  "start": 0.421,
+  "end": 0.526
+ },
+ {
+  "word": "todo",
+  "start": 0.526,
+  "end": 0.632
+ },
+ {
+  "word": "sobre",
+  "start": 0.632,
+  "end": 0.737
+ },
+ {
+  "word": "datos",
+  "start": 0.737,
+  "end": 0.842
+ },
+ {
+  "word": "curiosos",
+  "start": 0.842,
+  "end": 0.947
+ },
+ {
+  "word": "del",
+  "start": 0.947,
+  "end": 1.053
+ },
+ {
+  "word": "espacio",
+  "start": 1.053,
+  "end": 1.158
+ },
+ {
+  "word": "que",
+  "start": 1.158,
+  "end": 1.263
+ },
+ {
+  "word": "parecen",
+  "start": 1.263,
+  "end": 1.368
+ },
+ {
+  "word": "ciencia",
+  "start": 1.368,
+  "end": 1.474
+ },
+ {
+  "word": "ficción?",
+  "start": 1.474,
+  "end": 1.579
+ },
+ {
+  "word": "Espera",
+  "start": 1.579,
+  "end": 1.684
+ },
+ {
+  "word": "a",
+  "start": 1.684,
+  "end": 1.789
+ },
+ {
+  "word": "escuchar",
+  "start": 1.789,
+  "end": 1.895
+ },
+ {
+  "word": "esto.",
+  "start": 1.895,
+  "end": 2.0
+ },
+ {
+  "word": "Empecemos",
+  "start": 2.35,
+  "end": 2.445
+ },
+ {
+  "word": "por",
+  "start": 2.445,
+  "end": 2.54
+ },
+ {
+  "word": "lo",
+  "start": 2.54,
+  "end": 2.636
+ },
+ {
+  "word": "básico:",
+  "start": 2.636,
+  "end": 2.731
+ },
+ {
+  "word": "datos",
+  "start": 2.731,
+  "end": 2.826
+ },
+ {
+  "word": "curiosos",
+  "start": 2.826,
+  "end": 2.921
+ },
+ {
+  "word": "del",
+  "start": 2.921,
+  "end": 3.017
+ },
+ {
+  "word": "espacio",
+  "start": 3.017,
+  "end": 3.112
+ },
+ {
+  "word": "que",
+  "start": 3.112,
+  "end": 3.207
+ },
+ {
+  "word": "parecen",
+  "start": 3.207,
+  "end": 3.302
+ },
+ {
+  "word": "ciencia",
+  "start": 3.302,
+  "end": 3.398
+ },
+ {
+  "word": "ficción",
+  "start": 3.398,
+  "end": 3.493
+ },
+ {
+  "word": "guarda",
+  "start": 3.493,
+  "end": 3.588
+ },
+ {
+  "word": "detalles",
+  "start": 3.588,
+  "end": 3.683
+ },
+ {
+  "word": "que",
+  "start": 3.683,
+  "end": 3.779
+ },
+ {
+  "word": "la",
+  "start": 3.779,
+  "end": 3.874
+ },
+ {
+  "word": "ciencia",
+  "start": 3.874,
+  "end": 3.969
+ },
+ {
+  "word": "apenas",
+  "start": 3.969,
+  "end": 4.064
+ },
+ {
+  "word": "empieza",
+  "start": 4.064,
+  "end": 4.16
+ },
+ {
+  "word": "a",
+  "start": 4.16,
+  "end": 4.255
+ },
+ {
+  "word": "entender.",
+  "start": 4.255,
+  "end": 4.35
+ },
+ {
+  "word": "Los",
+  "start": 4.7,
+  "end": 4.805
+ },
+ {
+  "word": "expertos",
+  "start": 4.805,
+  "end": 4.911
+ },
+ {
+  "word": "llevan",
+  "start": 4.911,
+  "end": 5.016
+ },
+ {
+  "word": "años",
+  "start": 5.016,
+  "end": 5.121
+ },
+ {
+  "word": "estudiando",
+  "start": 5.121,
+  "end": 5.226
+ },
+ {
+  "word": "datos",
+  "start": 5.226,
+  "end": 5.332
+ },
+ {
+  "word": "curiosos",
+  "start": 5.332,
+  "end": 5.437
+ },
+ {
+  "word": "del",
+  "start": 5.437,
+  "end": 5.542
+ },
+ {
+  "word": "espacio",
+  "start": 5.542,
+  "end": 5.647
+ },
+ {
+  "word": "que",
+  "start": 5.647,
+  "end": 5.753
+ },
+ {
+  "word": "parecen",
+  "start": 5.753,
+  "end": 5.858
+ },
+ {
+  "word": "ciencia",
+  "start": 5.858,
+  "end": 5.963
+ },
+ {
+  "word": "ficción,",
+  "start": 5.963,
+  "end": 6.068
+ },
+ {
+  "word": "y",
+  "start": 6.068,
+  "end": 6.174
+ },
+ {
+  "word": "cada",
+  "start": 6.174,
+  "end": 6.279
+ },
+ {
+  "word": "descubrimiento",
+  "start": 6.279,
+  "end": 6.384
+ },
+ {
+  "word": "contradice",
+  "start": 6.384,
+  "end": 6.489
+ },
+ {
+  "word": "al",
+  "start": 6.489,
+  "end": 6.595
+ },
+ {
+  "word": "anterior.",
+  "start": 6.595,
+  "end": 6.7
+ },
+ {
+  "word": "Aquí",
+  "start": 7.05,
+  "end": 7.155
+ },
+ {
+  "word": "viene",
+  "start": 7.155,
+  "end": 7.261
+ },
+ {
+  "word": "lo",
+  "start": 7.261,
+  "end": 7.366
+ },
+ {
+  "word": "increíble:",
+  "start": 7.366,
+  "end": 7.471
+ },
+ {
+  "word": "detrás",
+  "start": 7.471,
+  "end": 7.576
+ },
+ {
+  "word": "de",
+  "start": 7.576,
+  "end": 7.682
+ },
+ {
+  "word": "datos",
+  "start": 7.682,
+  "end": 7.787
+ },
+ {
+  "word": "curiosos",
+  "start": 7.787,
+  "end": 7.892
+ },
+ {
+  "word": "del",
+  "start": 7.892,
+  "end": 7.997
+ },
+ {
+  "word": "espacio",
+  "start": 7.997,
+  "end": 8.103
+ },
+ {
+  "word": "que",
+  "start": 8.103,
+  "end": 8.208
+ },
+ {
+  "word": "parecen",
+  "start": 8.208,
+  "end": 8.313
+ },
+ {
+  "word": "ciencia",
+  "start": 8.313,
+  "end": 8.418
+ },
+ {
+  "word": "ficción",
+  "start": 8.418,
+  "end": 8.524
+ },
+ {
+  "word": "hay",
+  "start": 8.524,
+  "end": 8.629
+ },
+ {
+  "word": "historias",
+  "start": 8.629,
+  "end": 8.734
+ },
+ {
+  "word": "que",
+  "start": 8.734,
+  "end": 8.839
+ },
+ {
+  "word": "parecen",
+  "start": 8.839,
+  "end": 8.945
+ },
+ {
+  "word": "inventadas.",
+  "start": 8.945,
+  "end": 9.05
+ },
+ {
+  "word": "Y",
+  "start": 9.4,
+  "end": 9.505
+ },
+ {
+  "word": "no,",
+  "start": 9.505,
+  "end": 9.611
+ },
+ {
+  "word": "no",
+  "start": 9.611,
+  "end": 9.716
+ },
+ {
+  "word": "es",
+  "start": 9.716,
+  "end": 9.821
+ },
+ {
+  "word": "ciencia",
+  "start": 9.821,
+  "end": 9.926
+ },
+ {
+  "word": "ficción:",
+  "start": 9.926,
+  "end": 10.032
+ },
+ {
+  "word": "todo",
+  "start": 10.032,
+  "end": 10.137
+ },
+ {
+  "word": "esto",
+  "start": 10.137,
+  "end": 10.242
+ },
+ {
+  "word": "está",
+  "start": 10.242,
+  "end": 10.347
+ },
+ {
+  "word": "documentado",
+  "start": 10.347,
+  "end": 10.453
+ },
+ {
+  "word": "sobre",
+  "start": 10.453,
+  "end": 10.558
+ },
+ {
+  "word": "datos",
+  "start": 10.558,
+  "end": 10.663
+ },
+ {
+  "word": "curiosos",
+  "start": 10.663,
+  "end": 10.768
+ },
+ {
+  "word": "del",
+  "start": 10.768,
+  "end": 10.874
+ },
+ {
+  "word": "espacio",
+  "start": 10.874,
+  "end": 10.979
+ },
+ {
+  "word": "que",
+  "start": 10.979,
+  "end": 11.084
+ },
+ {
+  "word": "parecen",
+  "start": 11.084,
+  "end": 11.189
+ },
+ {
+  "word": "ciencia",
+  "start": 11.189,
+  "end": 11.295
+ },
+ {
+  "word": "ficción.",
+  "start": 11.295,
+  "end": 11.4
+ },
+ {
+  "word": "Y",
+  "start": 11.75,
+  "end": 11.837
+ },
+ {
+  "word": "ahora,",
+  "start": 11.837,
+  "end": 11.924
+ },
+ {
+  "word": "el",
+  "start": 11.924,
+  "end": 12.011
+ },
+ {
+  "word": "dato",
+  "start": 12.011,
+  "end": 12.098
+ },
+ {
+  "word": "que",
+  "start": 12.098,
+  "end": 12.185
+ },
+ {
+  "word": "lo",
+  "start": 12.185,
+  "end": 12.272
+ },
+ {
+  "word": "cambia",
+  "start": 12.272,
+  "end": 12.359
+ },
+ {
+  "word": "todo:",
+  "start": 12.359,
+  "end": 12.446
+ },
+ {
+  "word": "lo",
+  "start": 12.446,
+  "end": 12.533
+ },
+ {
+  "word": "que",
+  "start": 12.533,
+  "end": 12.62
+ },
+ {
+  "word": "descubrieron",
+  "start": 12.62,
+  "end": 12.707
+ },
+ {
+  "word": "sobre",
+  "start": 12.707,
+  "end": 12.793
+ },
+ {
+  "word": "datos",
+  "start": 12.793,
+  "end": 12.88
+ },
+ {
+  "word": "curiosos",
+  "start": 12.88,
+  "end": 12.967
+ },
+ {
+  "word": "del",
+  "start": 12.967,
+  "end": 13.054
+ },
+ {
+  "word": "espacio",
+  "start": 13.054,
+  "end": 13.141
+ },
+ {
+  "word": "que",
+  "start": 13.141,
+  "end": 13.228
+ },
+ {
+  "word": "parecen",
+  "start": 13.228,
+  "end": 13.315
+ },
+ {
+  "word": "ciencia",
+  "start": 13.315,
+  "end": 13.402
+ },
+ {
+  "word": "ficción",
+  "start": 13.402,
+  "end": 13.489
+ },
+ {
+  "word": "supera",
+  "start": 13.489,
+  "end": 13.576
+ },
+ {
+  "word": "cualquier",
+  "start": 13.576,
+  "end": 13.663
+ },
+ {
+  "word": "predicción.",
+  "start": 13.663,
+  "end": 13.75
+ },
+ {
+  "word": "Si",
+  "start": 14.1,
+  "end": 14.205
+ },
+ {
+  "word": "quieres",
+  "start": 14.205,
+  "end": 14.311
+ },
+ {
+  "word": "más",
+  "start": 14.311,
+  "end": 14.416
+ },
+ {
+  "word": "secretos",
+  "start": 14.416,
+  "end": 14.521
+ },
+ {
+  "word": "sobre",
+  "start": 14.521,
+  "end": 14.626
+ },
+ {
+  "word": "datos",
+  "start": 14.626,
+  "end": 14.732
+ },
+ {
+  "word": "curiosos",
+  "start": 14.732,
+  "end": 14.837
+ },
+ {
+  "word": "del",
+  "start": 14.837,
+  "end": 14.942
+ },
+ {
+  "word": "espacio",
+  "start": 14.942,
+  "end": 15.047
+ },
+ {
+  "word": "que",
+  "start": 15.047,
+  "end": 15.153
+ },
+ {
+  "word": "parecen",
+  "start": 15.153,
+  "end": 15.258
+ },
+ {
+  "word": "ciencia",
+  "start": 15.258,
+  "end": 15.363
+ },
+ {
+  "word": "ficción,",
+  "start": 15.363,
+  "end": 15.468
+ },
+ {
+  "word": "sígueme:",
+  "start": 15.468,
+  "end": 15.574
+ },
+ {
+  "word": "cada",
+  "start": 15.574,
+  "end": 15.679
+ },
+ {
+  "word": "día",
+  "start": 15.679,
+  "end": 15.784
+ },
+ {
+  "word": "desvelamos",
+  "start": 15.784,
+  "end": 15.889
+ },
+ {
+  "word": "algo",
+  "start": 15.889,
+  "end": 15.995
+ },
+ {
+  "word": "nuevo.",
+  "start": 15.995,
+  "end": 16.1
+ }
+]

@@ -10,7 +10,7 @@ ASS_HEADER = """[Script Info]
 ScriptType: v4.00+
 PlayResX: {w}
 PlayResY: {h}
-WrapStyle: 2
+WrapStyle: 0
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
@@ -55,12 +55,18 @@ def build_ass(words: list[dict], w: int, h: int, style: str = "hormozi") -> str:
                                marginv=marginv)
 
     events: list[str] = []
+    usable = max(w - 120, 300)  # ancho útil (margins L/R de 60px)
     for group in group_words(words, cfg["chunks"]):
         start = group[0]["start"]
         end = group[-1]["end"]
         text = " ".join(x["word"] for x in group)
-        # pop: escala 118→100 en los primeros 120ms
-        fx = r"{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}"
+        # auto-escalado: la palabra más larga debe caber en el ancho útil
+        longest = max(len(x["word"]) for x in group)
+        est = 0.53 * font_size * longest  # ancho estimado de esa palabra
+        settle = min(100, max(55, int(100 * usable / est))) if est > usable else 100
+        # pop: escala 118→settle en los primeros 120ms (settle≤100 si la línea es larga)
+        fx = (r"{\fscx118\fscy118\t(0,120,\fscx%d\fscy%d)}" % (settle, settle)
+              if settle < 100 else r"{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}")
         events.append(
             f"Dialogue: 0,{_ts(start)},{_ts(end)},Hormozi,,0,0,0,,{fx}{text}")
 

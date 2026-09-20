@@ -9,7 +9,8 @@ import shutil
 from pathlib import Path
 
 import database as db
-from config import DATA_DIR, GEMINI_API_KEY, HOST, PORT, TTS_PROVIDER, TMP_DIR
+from config import (DATA_DIR, GEMINI_API_KEY, HOST, OUTPUT_DIR, PORT,
+                    TTS_PROVIDER, TMP_DIR)
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
