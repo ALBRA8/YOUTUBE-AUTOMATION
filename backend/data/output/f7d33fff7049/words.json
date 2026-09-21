@@ -1,0 +1,487 @@
+[
+ {
+  "word": "¿Crees",
+  "start": 0.0,
+  "end": 0.154
+ },
+ {
+  "word": "que",
+  "start": 0.154,
+  "end": 0.308
+ },
+ {
+  "word": "ya",
+  "start": 0.308,
+  "end": 0.462
+ },
+ {
+  "word": "lo",
+  "start": 0.462,
+  "end": 0.615
+ },
+ {
+  "word": "sabes",
+  "start": 0.615,
+  "end": 0.769
+ },
+ {
+  "word": "todo",
+  "start": 0.769,
+  "end": 0.923
+ },
+ {
+  "word": "sobre",
+  "start": 0.923,
+  "end": 1.077
+ },
+ {
+  "word": "Nuevo",
+  "start": 1.077,
+  "end": 1.231
+ },
+ {
+  "word": "proyecto?",
+  "start": 1.231,
+  "end": 1.385
+ },
+ {
+  "word": "Espera",
+  "start": 1.385,
+  "end": 1.538
+ },
+ {
+  "word": "a",
+  "start": 1.538,
+  "end": 1.692
+ },
+ {
+  "word": "escuchar",
+  "start": 1.692,
+  "end": 1.846
+ },
+ {
+  "word": "esto.",
+  "start": 1.846,
+  "end": 2.0
+ },
+ {
+  "word": "Empecemos",
+  "start": 2.35,
+  "end": 2.483
+ },
+ {
+  "word": "por",
+  "start": 2.483,
+  "end": 2.617
+ },
+ {
+  "word": "lo",
+  "start": 2.617,
+  "end": 2.75
+ },
+ {
+  "word": "básico:",
+  "start": 2.75,
+  "end": 2.883
+ },
+ {
+  "word": "Nuevo",
+  "start": 2.883,
+  "end": 3.017
+ },
+ {
+  "word": "proyecto",
+  "start": 3.017,
+  "end": 3.15
+ },
+ {
+  "word": "guarda",
+  "start": 3.15,
+  "end": 3.283
+ },
+ {
+  "word": "detalles",
+  "start": 3.283,
+  "end": 3.417
+ },
+ {
+  "word": "que",
+  "start": 3.417,
+  "end": 3.55
+ },
+ {
+  "word": "la",
+  "start": 3.55,
+  "end": 3.683
+ },
+ {
+  "word": "ciencia",
+  "start": 3.683,
+  "end": 3.817
+ },
+ {
+  "word": "apenas",
+  "start": 3.817,
+  "end": 3.95
+ },
+ {
+  "word": "empieza",
+  "start": 3.95,
+  "end": 4.083
+ },
+ {
+  "word": "a",
+  "start": 4.083,
+  "end": 4.217
+ },
+ {
+  "word": "entender.",
+  "start": 4.217,
+  "end": 4.35
+ },
+ {
+  "word": "Los",
+  "start": 4.7,
+  "end": 4.854
+ },
+ {
+  "word": "expertos",
+  "start": 4.854,
+  "end": 5.008
+ },
+ {
+  "word": "llevan",
+  "start": 5.008,
+  "end": 5.162
+ },
+ {
+  "word": "años",
+  "start": 5.162,
+  "end": 5.315
+ },
+ {
+  "word": "estudiando",
+  "start": 5.315,
+  "end": 5.469
+ },
+ {
+  "word": "Nuevo",
+  "start": 5.469,
+  "end": 5.623
+ },
+ {
+  "word": "proyecto,",
+  "start": 5.623,
+  "end": 5.777
+ },
+ {
+  "word": "y",
+  "start": 5.777,
+  "end": 5.931
+ },
+ {
+  "word": "cada",
+  "start": 5.931,
+  "end": 6.085
+ },
+ {
+  "word": "descubrimiento",
+  "start": 6.085,
+  "end": 6.238
+ },
+ {
+  "word": "contradice",
+  "start": 6.238,
+  "end": 6.392
+ },
+ {
+  "word": "al",
+  "start": 6.392,
+  "end": 6.546
+ },
+ {
+  "word": "anterior.",
+  "start": 6.546,
+  "end": 6.7
+ },
+ {
+  "word": "Aquí",
+  "start": 7.05,
+  "end": 7.204
+ },
+ {
+  "word": "viene",
+  "start": 7.204,
+  "end": 7.358
+ },
+ {
+  "word": "lo",
+  "start": 7.358,
+  "end": 7.512
+ },
+ {
+  "word": "increíble:",
+  "start": 7.512,
+  "end": 7.665
+ },
+ {
+  "word": "detrás",
+  "start": 7.665,
+  "end": 7.819
+ },
+ {
+  "word": "de",
+  "start": 7.819,
+  "end": 7.973
+ },
+ {
+  "word": "Nuevo",
+  "start": 7.973,
+  "end": 8.127
+ },
+ {
+  "word": "proyecto",
+  "start": 8.127,
+  "end": 8.281
+ },
+ {
+  "word": "hay",
+  "start": 8.281,
+  "end": 8.435
+ },
+ {
+  "word": "historias",
+  "start": 8.435,
+  "end": 8.588
+ },
+ {
+  "word": "que",
+  "start": 8.588,
+  "end": 8.742
+ },
+ {
+  "word": "parecen",
+  "start": 8.742,
+  "end": 8.896
+ },
+ {
+  "word": "inventadas.",
+  "start": 8.896,
+  "end": 9.05
+ },
+ {
+  "word": "Y",
+  "start": 9.4,
+  "end": 9.554
+ },
+ {
+  "word": "no,",
+  "start": 9.554,
+  "end": 9.708
+ },
+ {
+  "word": "no",
+  "start": 9.708,
+  "end": 9.862
+ },
+ {
+  "word": "es",
+  "start": 9.862,
+  "end": 10.015
+ },
+ {
+  "word": "ciencia",
+  "start": 10.015,
+  "end": 10.169
+ },
+ {
+  "word": "ficción:",
+  "start": 10.169,
+  "end": 10.323
+ },
+ {
+  "word": "todo",
+  "start": 10.323,
+  "end": 10.477
+ },
+ {
+  "word": "esto",
+  "start": 10.477,
+  "end": 10.631
+ },
+ {
+  "word": "está",
+  "start": 10.631,
+  "end": 10.785
+ },
+ {
+  "word": "documentado",
+  "start": 10.785,
+  "end": 10.938
+ },
+ {
+  "word": "sobre",
+  "start": 10.938,
+  "end": 11.092
+ },
+ {
+  "word": "Nuevo",
+  "start": 11.092,
+  "end": 11.246
+ },
+ {
+  "word": "proyecto.",
+  "start": 11.246,
+  "end": 11.4
+ },
+ {
+  "word": "Y",
+  "start": 11.75,
+  "end": 11.868
+ },
+ {
+  "word": "ahora,",
+  "start": 11.868,
+  "end": 11.985
+ },
+ {
+  "word": "el",
+  "start": 11.985,
+  "end": 12.103
+ },
+ {
+  "word": "dato",
+  "start": 12.103,
+  "end": 12.221
+ },
+ {
+  "word": "que",
+  "start": 12.221,
+  "end": 12.338
+ },
+ {
+  "word": "lo",
+  "start": 12.338,
+  "end": 12.456
+ },
+ {
+  "word": "cambia",
+  "start": 12.456,
+  "end": 12.574
+ },
+ {
+  "word": "todo:",
+  "start": 12.574,
+  "end": 12.691
+ },
+ {
+  "word": "lo",
+  "start": 12.691,
+  "end": 12.809
+ },
+ {
+  "word": "que",
+  "start": 12.809,
+  "end": 12.926
+ },
+ {
+  "word": "descubrieron",
+  "start": 12.926,
+  "end": 13.044
+ },
+ {
+  "word": "sobre",
+  "start": 13.044,
+  "end": 13.162
+ },
+ {
+  "word": "Nuevo",
+  "start": 13.162,
+  "end": 13.279
+ },
+ {
+  "word": "proyecto",
+  "start": 13.279,
+  "end": 13.397
+ },
+ {
+  "word": "supera",
+  "start": 13.397,
+  "end": 13.515
+ },
+ {
+  "word": "cualquier",
+  "start": 13.515,
+  "end": 13.632
+ },
+ {
+  "word": "predicción.",
+  "start": 13.632,
+  "end": 13.75
+ },
+ {
+  "word": "Si",
+  "start": 14.1,
+  "end": 14.254
+ },
+ {
+  "word": "quieres",
+  "start": 14.254,
+  "end": 14.408
+ },
+ {
+  "word": "más",
+  "start": 14.408,
+  "end": 14.562
+ },
+ {
+  "word": "secretos",
+  "start": 14.562,
+  "end": 14.715
+ },
+ {
+  "word": "sobre",
+  "start": 14.715,
+  "end": 14.869
+ },
+ {
+  "word": "Nuevo",
+  "start": 14.869,
+  "end": 15.023
+ },
+ {
+  "word": "proyecto,",
+  "start": 15.023,
+  "end": 15.177
+ },
+ {
+  "word": "sígueme:",
+  "start": 15.177,
+  "end": 15.331
+ },
+ {
+  "word": "cada",
+  "start": 15.331,
+  "end": 15.485
+ },
+ {
+  "word": "día",
+  "start": 15.485,
+  "end": 15.638
+ },
+ {
+  "word": "desvelamos",
+  "start": 15.638,
+  "end": 15.792
+ },
+ {
+  "word": "algo",
+  "start": 15.792,
+  "end": 15.946
+ },
+ {
+  "word": "nuevo.",
+  "start": 15.946,
+  "end": 16.1
+ }
+]

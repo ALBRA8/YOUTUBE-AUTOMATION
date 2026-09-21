@@ -83,12 +83,25 @@ def _local_fallback(kind: str, seed: str, style_id: str, fmt: str,
             "image_prompt": f"{shot}, visual concept about {tema}, {style_prompt}, no text",
         })
     return {
-        "title": tema[:60].capitalize(),
+        "title": _smart_title(tema),
         "hook": narrations[0],
         "cta": narrations[-1],
         "scenes": scenes,
         "engine": "local-demo",
     }
+
+
+def _smart_title(tema: str) -> str:
+    """Capitaliza el título del proyecto respetando mayúsculas propias del usuario.
+
+    Reglas: si el usuario escribió todo en minúsculas, capitaliza la 1ª letra.
+    Si ya incluye mayúsculas (Imperio, Romano, Marvel…), las respeta tal cual.
+    """
+    t = (tema or "").strip()[:60]
+    if not t:
+        return "Sin título"
+    has_upper = any(c.isupper() for c in t[1:])
+    return t if has_upper else t[:1].upper() + t[1:]
 
 SYSTEM = (
     "Eres un guionista viral de YouTube Shorts/TikTok con millones de vistas. "
