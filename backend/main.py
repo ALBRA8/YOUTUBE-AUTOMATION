@@ -606,16 +606,18 @@ async def project_srt(pid: str):
 
 # ── exportación a Google Flow (extensión Flow Script Processor) ────────────
 @app.get("/api/projects/{pid}/export/flow.json")
-async def export_flow_json(pid: str):
-    """Devuelve el script.json con el contrato exacto de la extensión (ImagePrompt/VideoPrompt)."""
-    from pipeline.flow_export import build_script_json
+async def export_flow_json(pid: str, format: str = "transformacion",
+                           brand: str | None = None):
+    """ScriptData con el contrato exacto de la extensión (método cadena: Imagen i + Video i→i+1)."""
+    from pipeline.flow_export import DEFAULT_BRAND, build_script_json
     p = db.get_project(pid)
     if not p:
         raise HTTPException(404, "no existe")
     scenes = db.get_scenes(pid)
     if not scenes:
         raise HTTPException(400, "el proyecto no tiene escenas aún")
-    data = build_script_json(p, scenes)
+    data = build_script_json(p, scenes, fmt="generic" if format == "generic" else "transformacion",
+                             brand=brand if brand is not None else DEFAULT_BRAND)
     from fastapi import Response
     return Response(json.dumps(data, ensure_ascii=False, indent=2),
                     media_type="application/json",
@@ -623,9 +625,11 @@ async def export_flow_json(pid: str):
 
 
 @app.get("/api/projects/{pid}/export/flow.zip")
-async def export_flow_zip(pid: str, idea: int = 1):
-    """ZIP con la estructura <SLUG>/out/ideas/idea_NNNNNN/ que findScriptJson autodetecta."""
-    from pipeline.flow_export import export_zip_bytes
+async def export_flow_zip(pid: str, idea: int = 1, format: str = "transformacion",
+                          ai: bool = False, brand: str | None = None):
+    """ZIP método completo: <SLUG>/out/ideas/idea_NNNNNN/{script.json, prompts_maestro,
+    guion, metodo_chatgpt} + README. format=transformacion|generic · ai=1 usa Gemini free tier."""
+    from pipeline.flow_export import DEFAULT_BRAND, export_zip_bytes
     p = db.get_project(pid)
     if not p:
         raise HTTPException(404, "no existe")
@@ -633,11 +637,15 @@ async def export_flow_zip(pid: str, idea: int = 1):
     if not scenes:
         raise HTTPException(400, "el proyecto no tiene escenas aún")
     idea = max(1, min(idea or 1, 999999))
-    content, slug = export_zip_bytes(p, scenes)
+    content, slug, ai_used = await export_zip_bytes(
+        p, scenes, idea_number=idea,
+        fmt="generic" if format == "generic" else "transformacion",
+        use_ai=bool(ai), brand=brand if brand is not None else DEFAULT_BRAND)
     from fastapi import Response
+    suffix = "_flow_ia" if ai_used else "_flow"
     return Response(content, media_type="application/zip",
                     headers={"Content-Disposition":
-                             f"attachment; filename={slug}_flow.zip"})
+                             f"attachment; filename={slug}{suffix}.zip"})
 
 
 @app.post("/api/projects/{pid}/import-flow")

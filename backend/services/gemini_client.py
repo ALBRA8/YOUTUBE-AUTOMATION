@@ -49,8 +49,9 @@ async def _retry(coro_factory, tries: int = 3, base: float = 2.0):
 
 # ─────────────────────────────────────────────────────────────── TEXTO ──
 async def generate_json(prompt: str, schema: dict | None = None,
-                        system: str | None = None) -> Any:
-    """Genera contenido estructurado JSON. Lanza si no hay key."""
+                        system: str | None = None, model: str | None = None) -> Any:
+    """Genera contenido estructurado JSON. Lanza si no hay key.
+    `model` sobreescribe GEMINI_TEXT_MODEL (candidatos si el modelo fue retirado)."""
     if not available():
         raise RuntimeError("GEMINI_API_KEY no configurada")
 
@@ -65,7 +66,7 @@ async def generate_json(prompt: str, schema: dict | None = None,
         if system:
             cfg["system_instruction"] = system
         return client().models.generate_content(
-            model=config.GEMINI_TEXT_MODEL,
+            model=model or config.GEMINI_TEXT_MODEL,
             contents=prompt,
             config=types.GenerateContentConfig(**cfg),
         )
@@ -78,7 +79,8 @@ async def generate_json(prompt: str, schema: dict | None = None,
     return await asyncio.to_thread(_parse)
 
 
-async def generate_text(prompt: str, system: str | None = None) -> str:
+async def generate_text(prompt: str, system: str | None = None,
+                        model: str | None = None) -> str:
     if not available():
         raise RuntimeError("GEMINI_API_KEY no configurada")
 
@@ -88,7 +90,7 @@ async def generate_text(prompt: str, system: str | None = None) -> str:
         if system:
             cfg["system_instruction"] = system
         return client().models.generate_content(
-            model=config.GEMINI_TEXT_MODEL, contents=prompt,
+            model=model or config.GEMINI_TEXT_MODEL, contents=prompt,
             config=types.GenerateContentConfig(**cfg))
 
     resp = await _retry(lambda: asyncio.to_thread(_call))

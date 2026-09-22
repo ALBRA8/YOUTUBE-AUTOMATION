@@ -377,7 +377,8 @@ function renderProject() {
           ${['draft','failed'].includes(p.status) ? `<button class="btn primary" onclick="startJob('${p.id}')">▶️ Generar video</button>` : ''}
           ${p.status === 'ready' ? `<button class="btn primary" onclick="goPublish('${p.id}')">📺 Publicar en YouTube</button>` : ''}
           ${p.status === 'ready' ? `<a class="btn" href="/api/projects/${p.id}/video" download>⬇️ Descargar MP4</a>` : ''}
-          <a class="btn" href="/api/projects/${p.id}/export/flow.zip" download title="ZIP con script.json en el formato de tu extensión Flow Script Processor">🌊 Exportar a Flow</a>
+          <a class="btn" href="/api/projects/${p.id}/export/flow.zip" download title="ZIP método completo: PROMPT MÁSTER (imágenes base + videos en cadena), script.json de tu extensión, método ChatGPT y guion">🌊 Flow (Método Completo)</a>
+          <a class="btn" href="/api/projects/${p.id}/export/flow.zip?ai=1" download title="Igual que el anterior, pero Gemini (free tier) escribe los prompts en inglés con calidad editorial — tarda ~1 min">✨ Flow +IA</a>
           <button class="btn ghost" onclick="copyFlowJson('${p.id}')" title="Copia el JSON para pegarlo en la extensión (plan B sin autodetección)">📋 Copiar JSON</button>
           <button class="btn" onclick="importFlow('${p.id}')" title="Importa el ZIP de carpetas Escena_XX que deja tu extensión en el disco">📥 Importar Escena_XX</button>
           ${scenes.length && scenes.every(sc => sc.image_path) ? `<button class="btn primary" onclick="renderFlow('${p.id}')" title="Ensambla el MP4 final con las imágenes reales de Flow (voz + subtítulos incluidos)">🎞️ Renderizar con Flow</button>` : ''}
