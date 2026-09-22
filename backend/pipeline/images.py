@@ -74,20 +74,51 @@ async def generate_scene_image(scene: dict, project: dict, idx: int) -> tuple[Pa
     return out, "placeholder"
 
 
+def _parse_grad(grad: str) -> tuple[str, str]:
+    """Convierte cualquier grad en (c1, c2) hex válido.
+    - 'linear-gradient(135deg,#a,#b)' → ('#a','#b')
+    - '#a' solo → ('#a','#a') (degradado plano)
+    - 3+ colores → primeros 2
+    - formato con espacios o sin ',' → fallback ('#1a1a2e','#16213e')
+    """
+    if not grad or not isinstance(grad, str):
+        return "#1a1a2e", "#16213e"
+    g = grad.replace("linear-gradient(135deg,", "").rstrip(")").strip()
+    # Tolerante a espacios
+    parts = [p.strip() for p in g.split(",") if p.strip()]
+    if len(parts) >= 2:
+        c1, c2 = parts[0], parts[1]
+    elif len(parts) == 1:
+        c1 = c2 = parts[0]
+    else:
+        c1, c2 = "#1a1a2e", "#16213e"
+    # Validar hex (#rrggbb o #rgb)
+    def _is_hex(s: str) -> bool:
+        s = s.lstrip("#")
+        return len(s) in (3, 6) and all(c in "0123456789abcdefABCDEF" for c in s)
+    if not _is_hex(c1):
+        c1 = "#1a1a2e"
+    if not _is_hex(c2):
+        c2 = "#16213e"
+    return c1, c2
+
+
 def _placeholder(out: Path, scene: dict, project: dict, idx: int) -> None:
     if not PIL_OK:
         out.write_bytes(b"")
         return
-    from services.themes import STYLES
-    grad = next((s["grad"] for s in STYLES if s["id"] == project["style"]), "#333")
-    c1, c2 = grad.replace("linear-gradient(135deg,", "").rstrip(")").split(",")
-    img = Image.new("RGB", (1080, 1920), c1.strip())
+    # Busca el grad del style del proyecto; si no existe, usa STYLES[0].
+    # Esto hace el placeholder robusto a styles inválidos sin romper el pipeline.
+    from services.themes import STYLES, get_style
+    grad = get_style(project.get("style") or "").get("grad", "#1a1a2e,#16213e")
+    c1, c2 = _parse_grad(grad)
+    img = Image.new("RGB", (1080, 1920), c1)
     draw = ImageDraw.Draw(img)
-    c2rgb = tuple(int(c2.strip().lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
+    c1rgb = tuple(int(c1.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
+    c2rgb = tuple(int(c2.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
     for y in range(1920):
         t = y / 1920
-        rgb = tuple(int(int(c1.strip().lstrip("#")[i:i + 2], 16) * (1 - t) + c2rgb[i] * t)
-                    for i in range(3))
+        rgb = tuple(int(c1rgb[i] * (1 - t) + c2rgb[i] * t) for i in range(3))
         draw.line([(0, y), (1080, y)], fill=rgb)
     out.parent.mkdir(parents=True, exist_ok=True)
     img.save(out)

@@ -340,15 +340,18 @@ def _avatar_placeholder(out: Path, av: dict) -> None:
     grad = next((s["grad"] for s in STYLES
                  if s["id"] == (av.get("style") or "")),
                 "linear-gradient(135deg,#1a1a2e,#e94560)")
-    c1, c2 = grad.replace("linear-gradient(135deg,", "").rstrip(")").split(",")
+    # Reutiliza el parser robusto de pipeline.images para evitar el bug
+    # de "not enough values to unpack" si el grad no tiene 2 colores.
+    from pipeline.images import _parse_grad
+    c1, c2 = _parse_grad(grad)
     W, H = 768, 768
-    img = Image.new("RGB", (W, H), c1.strip())
+    img = Image.new("RGB", (W, H), c1)
     draw = ImageDraw.Draw(img)
-    c2rgb = tuple(int(c2.strip().lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
+    c1rgb = tuple(int(c1.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
+    c2rgb = tuple(int(c2.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
     for y in range(H):
         t = y / H
-        rgb = tuple(int(int(c1.strip().lstrip("#")[i:i + 2], 16) * (1 - t) + c2rgb[i] * t)
-                    for i in range(3))
+        rgb = tuple(int(c1rgb[i] * (1 - t) + c2rgb[i] * t) for i in range(3))
         draw.line([(0, y), (W, y)], fill=rgb)
     initials = "".join(w[0] for w in av["name"].split()[:2]).upper() or "A"
     try:
@@ -383,8 +386,17 @@ async def avatars_prompt(aid: str):
 @app.get("/api/avatars/{aid}/image")
 async def avatars_image_get(aid: str):
     av = db.get_avatar(aid)
-    if not av or not av.get("image_path") or not Path(av["image_path"]).exists():
-        raise HTTPException(404, "sin imagen")
+    if not av:
+        raise HTTPException(404, "avatar no existe")
+    # Si no existe el retrato en disco, auto-generar uno local al vuelo.
+    # Así la UI nunca muestra 404 aunque el usuario no haya hecho clic en
+    # "Generar retrato".
+    if not av.get("image_path") or not Path(av["image_path"]).exists():
+        AVATARS_DIR.mkdir(parents=True, exist_ok=True)
+        out = AVATARS_DIR / f"{aid}.png"
+        _avatar_placeholder(out, av)
+        db.update_avatar(aid, image_path=str(out))
+        av = db.get_avatar(aid)
     return FileResponse(av["image_path"], media_type="image/png")
 
 
@@ -448,6 +460,11 @@ async def create_project(body: dict):
     voice = body.get("voice") or None
     tts_provider = body.get("tts_provider") or None
     style = body.get("style", "graphic-novel")
+    # Validar style contra la lista real de estilos disponibles.
+    # Si viene un style inválido (por API o auditoría), usar el primero.
+    valid_style_ids = {s["id"] for s in STYLES}
+    if style not in valid_style_ids:
+        style = "graphic-novel"
     if avatar_id and not db.get_avatar(avatar_id):
         avatar_id = None
     if avatar_id:
@@ -486,6 +503,11 @@ async def patch_project(pid: str, body: dict):
         raise HTTPException(404, "no existe")
     fields = {k: v for k, v in body.items()
               if k in ("title", "style", "format", "voice", "tts_provider")}
+    # Validar style si viene en el PATCH
+    if "style" in fields:
+        valid_style_ids = {s["id"] for s in STYLES}
+        if fields["style"] not in valid_style_ids:
+            del fields["style"]  # ignorar style inválido en PATCH
     if "avatar_id" in body:
         aid = (body.get("avatar_id") or "").strip() or None
         if aid and not db.get_avatar(aid):

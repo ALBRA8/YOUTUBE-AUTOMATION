@@ -1,0 +1,592 @@
+[
+ {
+  "word": "¿Crees",
+  "start": 0.0,
+  "end": 0.125
+ },
+ {
+  "word": "que",
+  "start": 0.125,
+  "end": 0.25
+ },
+ {
+  "word": "ya",
+  "start": 0.25,
+  "end": 0.375
+ },
+ {
+  "word": "lo",
+  "start": 0.375,
+  "end": 0.5
+ },
+ {
+  "word": "sabes",
+  "start": 0.5,
+  "end": 0.625
+ },
+ {
+  "word": "todo",
+  "start": 0.625,
+  "end": 0.75
+ },
+ {
+  "word": "sobre",
+  "start": 0.75,
+  "end": 0.875
+ },
+ {
+  "word": "Audit",
+  "start": 0.875,
+  "end": 1.0
+ },
+ {
+  "word": "v4",
+  "start": 1.0,
+  "end": 1.125
+ },
+ {
+  "word": "-",
+  "start": 1.125,
+  "end": 1.25
+ },
+ {
+  "word": "SSE",
+  "start": 1.25,
+  "end": 1.375
+ },
+ {
+  "word": "events?",
+  "start": 1.375,
+  "end": 1.5
+ },
+ {
+  "word": "Espera",
+  "start": 1.5,
+  "end": 1.625
+ },
+ {
+  "word": "a",
+  "start": 1.625,
+  "end": 1.75
+ },
+ {
+  "word": "escuchar",
+  "start": 1.75,
+  "end": 1.875
+ },
+ {
+  "word": "esto.",
+  "start": 1.875,
+  "end": 2.0
+ },
+ {
+  "word": "Empecemos",
+  "start": 2.35,
+  "end": 2.461
+ },
+ {
+  "word": "por",
+  "start": 2.461,
+  "end": 2.572
+ },
+ {
+  "word": "lo",
+  "start": 2.572,
+  "end": 2.683
+ },
+ {
+  "word": "básico:",
+  "start": 2.683,
+  "end": 2.794
+ },
+ {
+  "word": "Audit",
+  "start": 2.794,
+  "end": 2.906
+ },
+ {
+  "word": "v4",
+  "start": 2.906,
+  "end": 3.017
+ },
+ {
+  "word": "-",
+  "start": 3.017,
+  "end": 3.128
+ },
+ {
+  "word": "SSE",
+  "start": 3.128,
+  "end": 3.239
+ },
+ {
+  "word": "events",
+  "start": 3.239,
+  "end": 3.35
+ },
+ {
+  "word": "guarda",
+  "start": 3.35,
+  "end": 3.461
+ },
+ {
+  "word": "detalles",
+  "start": 3.461,
+  "end": 3.572
+ },
+ {
+  "word": "que",
+  "start": 3.572,
+  "end": 3.683
+ },
+ {
+  "word": "la",
+  "start": 3.683,
+  "end": 3.794
+ },
+ {
+  "word": "ciencia",
+  "start": 3.794,
+  "end": 3.906
+ },
+ {
+  "word": "apenas",
+  "start": 3.906,
+  "end": 4.017
+ },
+ {
+  "word": "empieza",
+  "start": 4.017,
+  "end": 4.128
+ },
+ {
+  "word": "a",
+  "start": 4.128,
+  "end": 4.239
+ },
+ {
+  "word": "entender.",
+  "start": 4.239,
+  "end": 4.35
+ },
+ {
+  "word": "Los",
+  "start": 4.7,
+  "end": 4.825
+ },
+ {
+  "word": "expertos",
+  "start": 4.825,
+  "end": 4.95
+ },
+ {
+  "word": "llevan",
+  "start": 4.95,
+  "end": 5.075
+ },
+ {
+  "word": "años",
+  "start": 5.075,
+  "end": 5.2
+ },
+ {
+  "word": "estudiando",
+  "start": 5.2,
+  "end": 5.325
+ },
+ {
+  "word": "Audit",
+  "start": 5.325,
+  "end": 5.45
+ },
+ {
+  "word": "v4",
+  "start": 5.45,
+  "end": 5.575
+ },
+ {
+  "word": "-",
+  "start": 5.575,
+  "end": 5.7
+ },
+ {
+  "word": "SSE",
+  "start": 5.7,
+  "end": 5.825
+ },
+ {
+  "word": "events,",
+  "start": 5.825,
+  "end": 5.95
+ },
+ {
+  "word": "y",
+  "start": 5.95,
+  "end": 6.075
+ },
+ {
+  "word": "cada",
+  "start": 6.075,
+  "end": 6.2
+ },
+ {
+  "word": "descubrimiento",
+  "start": 6.2,
+  "end": 6.325
+ },
+ {
+  "word": "contradice",
+  "start": 6.325,
+  "end": 6.45
+ },
+ {
+  "word": "al",
+  "start": 6.45,
+  "end": 6.575
+ },
+ {
+  "word": "anterior.",
+  "start": 6.575,
+  "end": 6.7
+ },
+ {
+  "word": "Aquí",
+  "start": 7.05,
+  "end": 7.175
+ },
+ {
+  "word": "viene",
+  "start": 7.175,
+  "end": 7.3
+ },
+ {
+  "word": "lo",
+  "start": 7.3,
+  "end": 7.425
+ },
+ {
+  "word": "increíble:",
+  "start": 7.425,
+  "end": 7.55
+ },
+ {
+  "word": "detrás",
+  "start": 7.55,
+  "end": 7.675
+ },
+ {
+  "word": "de",
+  "start": 7.675,
+  "end": 7.8
+ },
+ {
+  "word": "Audit",
+  "start": 7.8,
+  "end": 7.925
+ },
+ {
+  "word": "v4",
+  "start": 7.925,
+  "end": 8.05
+ },
+ {
+  "word": "-",
+  "start": 8.05,
+  "end": 8.175
+ },
+ {
+  "word": "SSE",
+  "start": 8.175,
+  "end": 8.3
+ },
+ {
+  "word": "events",
+  "start": 8.3,
+  "end": 8.425
+ },
+ {
+  "word": "hay",
+  "start": 8.425,
+  "end": 8.55
+ },
+ {
+  "word": "historias",
+  "start": 8.55,
+  "end": 8.675
+ },
+ {
+  "word": "que",
+  "start": 8.675,
+  "end": 8.8
+ },
+ {
+  "word": "parecen",
+  "start": 8.8,
+  "end": 8.925
+ },
+ {
+  "word": "inventadas.",
+  "start": 8.925,
+  "end": 9.05
+ },
+ {
+  "word": "Y",
+  "start": 9.4,
+  "end": 9.525
+ },
+ {
+  "word": "no,",
+  "start": 9.525,
+  "end": 9.65
+ },
+ {
+  "word": "no",
+  "start": 9.65,
+  "end": 9.775
+ },
+ {
+  "word": "es",
+  "start": 9.775,
+  "end": 9.9
+ },
+ {
+  "word": "ciencia",
+  "start": 9.9,
+  "end": 10.025
+ },
+ {
+  "word": "ficción:",
+  "start": 10.025,
+  "end": 10.15
+ },
+ {
+  "word": "todo",
+  "start": 10.15,
+  "end": 10.275
+ },
+ {
+  "word": "esto",
+  "start": 10.275,
+  "end": 10.4
+ },
+ {
+  "word": "está",
+  "start": 10.4,
+  "end": 10.525
+ },
+ {
+  "word": "documentado",
+  "start": 10.525,
+  "end": 10.65
+ },
+ {
+  "word": "sobre",
+  "start": 10.65,
+  "end": 10.775
+ },
+ {
+  "word": "Audit",
+  "start": 10.775,
+  "end": 10.9
+ },
+ {
+  "word": "v4",
+  "start": 10.9,
+  "end": 11.025
+ },
+ {
+  "word": "-",
+  "start": 11.025,
+  "end": 11.15
+ },
+ {
+  "word": "SSE",
+  "start": 11.15,
+  "end": 11.275
+ },
+ {
+  "word": "events.",
+  "start": 11.275,
+  "end": 11.4
+ },
+ {
+  "word": "Y",
+  "start": 11.75,
+  "end": 11.85
+ },
+ {
+  "word": "ahora,",
+  "start": 11.85,
+  "end": 11.95
+ },
+ {
+  "word": "el",
+  "start": 11.95,
+  "end": 12.05
+ },
+ {
+  "word": "dato",
+  "start": 12.05,
+  "end": 12.15
+ },
+ {
+  "word": "que",
+  "start": 12.15,
+  "end": 12.25
+ },
+ {
+  "word": "lo",
+  "start": 12.25,
+  "end": 12.35
+ },
+ {
+  "word": "cambia",
+  "start": 12.35,
+  "end": 12.45
+ },
+ {
+  "word": "todo:",
+  "start": 12.45,
+  "end": 12.55
+ },
+ {
+  "word": "lo",
+  "start": 12.55,
+  "end": 12.65
+ },
+ {
+  "word": "que",
+  "start": 12.65,
+  "end": 12.75
+ },
+ {
+  "word": "descubrieron",
+  "start": 12.75,
+  "end": 12.85
+ },
+ {
+  "word": "sobre",
+  "start": 12.85,
+  "end": 12.95
+ },
+ {
+  "word": "Audit",
+  "start": 12.95,
+  "end": 13.05
+ },
+ {
+  "word": "v4",
+  "start": 13.05,
+  "end": 13.15
+ },
+ {
+  "word": "-",
+  "start": 13.15,
+  "end": 13.25
+ },
+ {
+  "word": "SSE",
+  "start": 13.25,
+  "end": 13.35
+ },
+ {
+  "word": "events",
+  "start": 13.35,
+  "end": 13.45
+ },
+ {
+  "word": "supera",
+  "start": 13.45,
+  "end": 13.55
+ },
+ {
+  "word": "cualquier",
+  "start": 13.55,
+  "end": 13.65
+ },
+ {
+  "word": "predicción.",
+  "start": 13.65,
+  "end": 13.75
+ },
+ {
+  "word": "Si",
+  "start": 14.1,
+  "end": 14.225
+ },
+ {
+  "word": "quieres",
+  "start": 14.225,
+  "end": 14.35
+ },
+ {
+  "word": "más",
+  "start": 14.35,
+  "end": 14.475
+ },
+ {
+  "word": "secretos",
+  "start": 14.475,
+  "end": 14.6
+ },
+ {
+  "word": "sobre",
+  "start": 14.6,
+  "end": 14.725
+ },
+ {
+  "word": "Audit",
+  "start": 14.725,
+  "end": 14.85
+ },
+ {
+  "word": "v4",
+  "start": 14.85,
+  "end": 14.975
+ },
+ {
+  "word": "-",
+  "start": 14.975,
+  "end": 15.1
+ },
+ {
+  "word": "SSE",
+  "start": 15.1,
+  "end": 15.225
+ },
+ {
+  "word": "events,",
+  "start": 15.225,
+  "end": 15.35
+ },
+ {
+  "word": "sígueme:",
+  "start": 15.35,
+  "end": 15.475
+ },
+ {
+  "word": "cada",
+  "start": 15.475,
+  "end": 15.6
+ },
+ {
+  "word": "día",
+  "start": 15.6,
+  "end": 15.725
+ },
+ {
+  "word": "desvelamos",
+  "start": 15.725,
+  "end": 15.85
+ },
+ {
+  "word": "algo",
+  "start": 15.85,
+  "end": 15.975
+ },
+ {
+  "word": "nuevo.",
+  "start": 15.975,
+  "end": 16.1
+ }
+]

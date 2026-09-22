@@ -205,6 +205,7 @@ def list_projects(limit: int = 100) -> list[dict]:
 def delete_project(pid: str) -> None:
     with connect() as con:
         con.execute("DELETE FROM scenes WHERE project_id=?", (pid,))
+        con.execute("DELETE FROM jobs WHERE project_id=?", (pid,))
         con.execute("DELETE FROM projects WHERE id=?", (pid,))
 
 
