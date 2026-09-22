@@ -117,25 +117,32 @@ def build_script_json(project: dict, scenes: list[dict]) -> dict:
         env_txt = ", ".join(parts["environment"]) or f"cinematic environment inspired by: {project.get('title', '')}"
         light_txt = ", ".join(parts["lighting"])
 
-        scenes_out.append({
+        image_prompt = {
+            "subjects": [
+                f"{title} — {_first_sentence(narration) or 'main subject of the scene'}",
+            ],
+            "environment": env_txt,
+            "lighting": light_txt,
+            "composition": f"{comp}, vertical 9:16 framing",
+            "style": f"{style_txt}, hyper-realistic cinematic quality, 8K",
+        }
+        video_prompt = {
+            "motion": _first_sentence(narration, 120) or f"{title}: main visual action",
+            "camera_movement": _cam_move(comp),
+        }
+        entry = {
             "scene_number": i,
             "title": title,
             "narration": narration,
             "duration": sc.get("duration") or 5,
-            "image_prompt": {
-                "subjects": [
-                    f"{title} — {_first_sentence(narration) or 'main subject of the scene'}",
-                ],
-                "environment": env_txt,
-                "lighting": light_txt,
-                "composition": f"{comp}, vertical 9:16 framing",
-                "style": f"{style_txt}, hyper-realistic cinematic quality, 8K",
-            },
-            "video_prompt": {
-                "motion": _first_sentence(narration, 120) or f"{title}: main visual action",
-                "camera_movement": _cam_move(comp),
-            },
-        })
+            "image_prompt": image_prompt,
+            "video_prompt": video_prompt,
+            # Alias camelCase (compatibilidad con interfaces TypeScript que usan
+            # imagePrompt/videoPrompt — parser.ts ignora los campos que no lee)
+            "imagePrompt": image_prompt,
+            "videoPrompt": video_prompt,
+        }
+        scenes_out.append(entry)
 
     return {
         "project_name": slugify(project.get("title") or "PROYECTO"),
@@ -206,15 +213,31 @@ Cómo usar este paquete con la extensión Flow Script Processor:
 1. Descomprime este ZIP en tu disco (ej: d:\\PROYECTOS\\YOUTUBE AUTOMATION\\projects\\).
    Obtendrás la carpeta <PROYECTO>/out/ideas/idea_000001/script.json
 2. Abre Google Labs (Flow / ImageFX) en Chrome.
-3. Extension "Flow Script Processor" → "Vincular Proyecto" → selecciona la carpeta <PROYECTO>.
+3. Extension "Flow Script Processor" → "Vincular Proyecto" → selecciona la carpeta
+   <PROYECTO> (la que contiene "out"), NO la carpeta "projects" contenedora.
    La extensión autodetecta el script.json más reciente (idea_000001) y lista las escenas.
 4. Elige Imágenes (PNG) o Videos (MP4/WebM) y presiona "Iniciar Generación".
 5. Los archivos quedan en <PROYECTO>/Escena_XX/imagen_1.png | video_1.mp4
 
-Contenido:
+CONTENIDO
+---------
 - script.json          → escenas estructuradas (contrato ImagePrompt/VideoPrompt)
 - prompts_maestro.txt  → documento de pasos para uso manual en Flow o re-edición con ChatGPT
 - guion.txt            → narración completa (voz en off / referencia)
+
+DIAGNÓSTICO: SI LA EXTENSIÓN NO CARGA LAS ESCENAS
+-------------------------------------------------
+A) ¿Vinculaste la carpeta correcta? El handle debe apuntar a la carpeta que contiene
+   "out/ideas/" (ej: ...\\projects\\MI_PROYECTO). Si vinculaste "projects" (la contenedora),
+   findScriptJson no baja más de 2 niveles y no encontrará nada.
+B) Cache de la extensión:
+   1. chrome://extensions → busca "Flow Script Processor" → pulsa el botón de recarga (⟳)
+   2. Cierra y reabre el popup.
+   3. Re-vincula: "Vincular Proyecto" → concede "Ver y editar" de nuevo.
+C) Plan B (sin autodetección): usa el botón "Subir JSON" del popup y selecciona
+   directamente el archivo script.json de este paquete.
+D) Verifica en DevTools del popup (clic derecho sobre el popup → Inspeccionar):
+   en la pestaña Console no debe haber errores rojos al vincular.
 
 Nota: si ya habías exportado antes y no quieres sobrescribir, renombra idea_000001
 por el siguiente número libre (idea_000002, ...) — la extensión siempre toma el mayor.

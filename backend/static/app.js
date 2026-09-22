@@ -305,6 +305,41 @@ async function startJob(pid) {
   } catch (e) { toast(e.message, 'err'); }
 }
 
+/* ── Flow: importar assets reales y renderizar ─────── */
+function importFlow(pid) {
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.zip';
+  inp.onchange = async () => {
+    if (!inp.files[0]) return;
+    toast('Importando Escena_XX de Flow… 📦');
+    const fd = new FormData(); fd.append('file', inp.files[0]);
+    try {
+      const res = await fetch(`/api/projects/${pid}/import-flow`, { method: 'POST', body: fd });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || 'Error al importar');
+      toast(`Importadas ${d.applied}/${d.scenes_in_project} escenas ✅`, 'ok');
+      openProject(pid);
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  inp.click();
+}
+
+async function renderFlow(pid) {
+  try {
+    const r = await api(`/projects/${pid}/render-flow`, { method: 'POST' });
+    showProgress(r.job_id, pid);
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function copyFlowJson(pid) {
+  try {
+    const r = await fetch(`/api/projects/${pid}/export/flow.json`);
+    const text = await r.text();
+    await navigator.clipboard.writeText(text);
+    toast('JSON copiado — pégalo en la extensión 📋', 'ok');
+  } catch (e) { toast('No se pudo copiar: ' + e.message, 'err'); }
+}
+
 /* ── vista: PROYECTOS ────────────────────────────────────── */
 function renderProjects() {
   $('#view').innerHTML = `<h2 class="sec">🗂️ Todos los proyectos (${S.projects.length})</h2>
@@ -343,6 +378,9 @@ function renderProject() {
           ${p.status === 'ready' ? `<button class="btn primary" onclick="goPublish('${p.id}')">📺 Publicar en YouTube</button>` : ''}
           ${p.status === 'ready' ? `<a class="btn" href="/api/projects/${p.id}/video" download>⬇️ Descargar MP4</a>` : ''}
           <a class="btn" href="/api/projects/${p.id}/export/flow.zip" download title="ZIP con script.json en el formato de tu extensión Flow Script Processor">🌊 Exportar a Flow</a>
+          <button class="btn ghost" onclick="copyFlowJson('${p.id}')" title="Copia el JSON para pegarlo en la extensión (plan B sin autodetección)">📋 Copiar JSON</button>
+          <button class="btn" onclick="importFlow('${p.id}')" title="Importa el ZIP de carpetas Escena_XX que deja tu extensión en el disco">📥 Importar Escena_XX</button>
+          ${scenes.length && scenes.every(sc => sc.image_path) ? `<button class="btn primary" onclick="renderFlow('${p.id}')" title="Ensambla el MP4 final con las imágenes reales de Flow (voz + subtítulos incluidos)">🎞️ Renderizar con Flow</button>` : ''}
           <a class="btn ghost" href="/api/projects/${p.id}/subtitles.srt" download>💬 Subtítulos SRT</a>
           <button class="btn danger" onclick="delProject('${p.id}')">🗑️</button>
         </div>

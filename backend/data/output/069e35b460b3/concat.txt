@@ -1,0 +1,3 @@
+file '/home/z/my-project/yt_automation_v2/backend/data/output/069e35b460b3/clips/clip_00.mp4'
+file '/home/z/my-project/yt_automation_v2/backend/data/output/069e35b460b3/clips/clip_01.mp4'
+file '/home/z/my-project/yt_automation_v2/backend/data/output/069e35b460b3/clips/clip_02.mp4'

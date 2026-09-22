@@ -90,6 +90,96 @@ async def start_pipeline(project_id: str, autopublish: bool = False) -> str:
     return job_id
 
 
+async def start_flow_render(project_id: str) -> str:
+    """Renderiza con los assets REALES importados de Flow (sin regenerar guion ni imágenes).
+
+    Saltos: PASO 0-2 del pipeline normal. Ejecuta TTS → alineación → Ken Burns
+    → mezcla → subtítulos → thumbnail, usando scene.image_path tal cual está en BD.
+    """
+    project = db.get_project(project_id)
+    if not project:
+        raise ValueError("proyecto no existe")
+    active = db.active_job_for_project(project_id)
+    if active:
+        return active["id"]
+
+    job_id = db.create_job(project_id, kind="flow_render")
+    JOBS[job_id] = {"task": None, "cancelled": False}
+    task = asyncio.create_task(_run_flow_render(job_id, project_id))
+    JOBS[job_id]["task"] = task
+    task.add_done_callback(lambda t: JOBS.pop(job_id, None) if not JOBS.get(job_id, {}).get("task") else None)
+    return job_id
+
+
+async def _run_flow_render(job_id: str, project_id: str) -> None:
+    try:
+        scenes = db.get_scenes(project_id)
+        if not scenes:
+            raise RuntimeError("El proyecto no tiene escenas")
+        faltan_img = [i + 1 for i, sc in enumerate(scenes) if not sc.get("image_path")
+                      or not Path(str(sc["image_path"])).exists()]
+        if faltan_img:
+            raise RuntimeError(f"Escenas sin imagen de Flow: {faltan_img}. "
+                               "Importa el ZIP de Escena_XX primero.")
+        db.update_project(project_id, status="processing", error=None,
+                          step_label="Render Flow", progress=50)
+        await _emit(job_id, project_id, "tts", 50, "Sintetizando voz (assets Flow)…")
+
+        async def tts_prog(i, total, used):
+            await _emit(job_id, project_id, "tts", 50 + int(20 * i / total),
+                        f"Locución {i}/{total} ({used})")
+
+        durations, words_per_scene = await tts_step.synthesize_scenes(
+            db.get_project(project_id), scenes, tts_prog, is_cancelled(job_id))
+        await _emit(job_id, project_id, "align", 72, "Alineando palabras (Whisper)…")
+        voice_full = await tts_step.build_full_track(db.get_project(project_id), durations)
+        words_path = tts_step.save_words_timeline(db.get_project(project_id),
+                                                  words_per_scene)
+        meta = {**(db.get_project(project_id).get("meta") or {}), "durations": durations}
+        db.update_project(project_id, meta=meta)
+
+        await _emit(job_id, project_id, "render", 76, "Renderizando escenas Flow (Ken Burns)…")
+        clips = await video.render_scenes(db.get_project(project_id), scenes, durations,
+                                          None, is_cancelled(job_id))
+        await _emit(job_id, project_id, "render", 82, "Uniendo clips…")
+        silent = await video.concat_clips(db.get_project(project_id), clips)
+        await _emit(job_id, project_id, "render", 86, "Mezclando voz y música…")
+        raw_video = await video.mux_audio_music(db.get_project(project_id),
+                                                silent, voice_full)
+        await _emit(job_id, project_id, "subtitles", 90, "Quemando subtítulos Hormozi…")
+        final = await video.burn_subtitles(db.get_project(project_id), raw_video, words_path)
+        thumb = video.make_thumbnail(db.get_project(project_id), scenes[0].get("image_path"))
+
+        total_dur = sum(durations)
+        db.update_project(project_id, status="ready", progress=100,
+                          step_label="Listo (Flow)", video_url=str(final),
+                          thumbnail_url=str(thumb) if thumb else None)
+        db.update_job(job_id, status="done", progress=100, step="done",
+                      message=f"Video Flow listo · {total_dur:.0f}s")
+        await broker.publish(job_id, {
+            "type": "done", "job_id": job_id, "project_id": project_id,
+            "video_url": f"/api/projects/{project_id}/video",
+            "thumbnail_url": f"/api/projects/{project_id}/thumbnail",
+            "duration": total_dur,
+            "message": f"¡Video con assets Flow listo en {total_dur:.0f}s!"})
+    except asyncio.CancelledError:
+        db.update_job(job_id, status="cancelled", step="cancelled",
+                      message="Cancelado por el usuario")
+        db.update_project(project_id, status="failed", step_label="Cancelado",
+                          error="cancelado")
+        await broker.publish(job_id, {"type": "cancelled", "job_id": job_id,
+                                      "project_id": project_id})
+    except Exception as e:  # noqa: BLE001
+        log.error("flow_render %s: %s\n%s", job_id, e, traceback.format_exc())
+        db.update_job(job_id, status="failed", step="failed", error=str(e)[:500],
+                      message=f"Error: {str(e)[:120]}")
+        db.update_project(project_id, status="failed", error=str(e)[:500],
+                          step_label="Error")
+        await broker.publish(job_id, {"type": "error", "job_id": job_id,
+                                      "project_id": project_id,
+                                      "message": str(e)[:200]})
+
+
 # ── pipeline completo ─────────────────────────────────────────────────────
 async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
     project = db.get_project(project_id)

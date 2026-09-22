@@ -640,6 +640,44 @@ async def export_flow_zip(pid: str, idea: int = 1):
                              f"attachment; filename={slug}_flow.zip"})
 
 
+@app.post("/api/projects/{pid}/import-flow")
+async def import_flow(pid: str, file: UploadFile = File(...), overwrite: bool = True):
+    """Importa el ZIP de Escena_XX generado por la extensión Flow Script Processor.
+
+    Mapea cada Escena_XX a la escena X del proyecto y actualiza image_path.
+    """
+    from pipeline import flow_import
+    p = db.get_project(pid)
+    if not p:
+        raise HTTPException(404, "no existe")
+    scenes = db.get_scenes(pid)
+    if not scenes:
+        raise HTTPException(400, "el proyecto no tiene escenas aún")
+    data = await file.read()
+    try:
+        result = flow_import.import_flow_zip(pid, data, OUTPUT_DIR / pid,
+                                             overwrite=overwrite)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    applied = flow_import.apply_to_scenes(scenes, result)
+    return {**result, "applied": applied,
+            "scenes_in_project": len(scenes),
+            "next": f"POST /api/projects/{pid}/render-flow para ensamblar el video"}
+
+
+@app.post("/api/projects/{pid}/render-flow")
+async def render_flow(pid: str):
+    """Ensambla el MP4 final con las imágenes reales de Flow (sin regenerar guion/imágenes)."""
+    from pipeline import orchestrator
+    scenes = db.get_scenes(pid)
+    sin_img = [i + 1 for i, sc in enumerate(scenes)
+               if not sc.get("image_path") or not Path(sc["image_path"]).exists()]
+    if sin_img:
+        raise HTTPException(400, f"Escenas sin imagen de Flow: {sin_img}. Importa el ZIP primero.")
+    job_id = await orchestrator.start_flow_render(pid)
+    return {"job_id": job_id}
+
+
 # ── editor de escenas ─────────────────────────────────────────────────────
 @app.patch("/api/scenes/{scene_id}")
 async def patch_scene(scene_id: str, body: dict):
