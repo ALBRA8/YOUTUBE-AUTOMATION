@@ -605,10 +605,14 @@ async def project_srt(pid: str):
 
 
 # ── exportación a Google Flow (extensión Flow Script Processor) ────────────
+_FMTS_FLOW = ("transformacion", "generic", "artesano")
+
+
 @app.get("/api/projects/{pid}/export/flow.json")
 async def export_flow_json(pid: str, format: str = "transformacion",
-                           brand: str | None = None):
-    """ScriptData con el contrato exacto de la extensión (método cadena: Imagen i + Video i→i+1)."""
+                           brand: str | None = None, character: str | None = None):
+    """ScriptData con el contrato exacto de la extensión.
+    format=transformacion|generic|artesano (fabricación de personaje)."""
     from pipeline.flow_export import DEFAULT_BRAND, build_script_json
     p = db.get_project(pid)
     if not p:
@@ -616,8 +620,9 @@ async def export_flow_json(pid: str, format: str = "transformacion",
     scenes = db.get_scenes(pid)
     if not scenes:
         raise HTTPException(400, "el proyecto no tiene escenas aún")
-    data = build_script_json(p, scenes, fmt="generic" if format == "generic" else "transformacion",
-                             brand=brand if brand is not None else DEFAULT_BRAND)
+    data = build_script_json(p, scenes, fmt=format if format in _FMTS_FLOW else "transformacion",
+                             brand=brand if brand is not None else DEFAULT_BRAND,
+                             character=character or None)
     from fastapi import Response
     return Response(json.dumps(data, ensure_ascii=False, indent=2),
                     media_type="application/json",
@@ -626,9 +631,11 @@ async def export_flow_json(pid: str, format: str = "transformacion",
 
 @app.get("/api/projects/{pid}/export/flow.zip")
 async def export_flow_zip(pid: str, idea: int = 1, format: str = "transformacion",
-                          ai: bool = False, brand: str | None = None):
+                          ai: bool = False, brand: str | None = None,
+                          character: str | None = None):
     """ZIP método completo: <SLUG>/out/ideas/idea_NNNNNN/{script.json, prompts_maestro,
-    guion, metodo_chatgpt} + README. format=transformacion|generic · ai=1 usa Gemini free tier."""
+    guion, metodo_chatgpt} + README. format=transformacion|generic|artesano · ai=1 usa
+    Gemini free tier · character= nombre del héroe (modo artesano)."""
     from pipeline.flow_export import DEFAULT_BRAND, export_zip_bytes
     p = db.get_project(pid)
     if not p:
@@ -639,8 +646,9 @@ async def export_flow_zip(pid: str, idea: int = 1, format: str = "transformacion
     idea = max(1, min(idea or 1, 999999))
     content, slug, ai_used = await export_zip_bytes(
         p, scenes, idea_number=idea,
-        fmt="generic" if format == "generic" else "transformacion",
-        use_ai=bool(ai), brand=brand if brand is not None else DEFAULT_BRAND)
+        fmt=format if format in _FMTS_FLOW else "transformacion",
+        use_ai=bool(ai), brand=brand if brand is not None else DEFAULT_BRAND,
+        character=character or None)
     from fastapi import Response
     suffix = "_flow_ia" if ai_used else "_flow"
     return Response(content, media_type="application/zip",

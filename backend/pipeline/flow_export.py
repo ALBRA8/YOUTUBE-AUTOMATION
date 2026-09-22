@@ -12,11 +12,19 @@ Estructura del ZIP:
   <SLUG>/out/ideas/idea_NNNNNN/prompts_maestro.txt  → PROMPT MÁSTER completo
   <SLUG>/out/ideas/idea_NNNNNN/guion.txt            → narración (voz en off)
   <SLUG>/out/ideas/idea_NNNNNN/metodo_chatgpt.txt   → PASO 1 + PASO 2 para iterar en ChatGPT
+  <SLUG>/out/ideas/idea_NNNNNN/secuencia_flow.txt   → (solo modo artesano) secuencia iterativa
+  <SLUG>/out/ideas/idea_NNNNNN/prompt_edicion_chatgpt.txt → (solo artesano) re-editar el TXT
   README.txt                                        → instrucciones + diagnóstico
 
 Modos (parámetro fmt):
   transformacion → construcción/remodelación con constructor fijo (estilo MINA ABANDONADA)
   generic        → evolución cinematográfica sin constructor (cualquier nicho)
+  artesano       → FABRICACIÓN DE PERSONAJE: un artesano mayor construye al héroe con
+                   materiales naturales (método real del usuario: "palma verde + pino —
+                   CAPITÁN AMÉRICA"). Imagen 1 = ANCLA (hero shot final); escenas 2..N =
+                   prompts iterativos en español ("tallando...", "replicate", "remplazando
+                   el de arriba"), SIEMPRE con la primera imagen de referencia. Incluye el
+                   meta-prompt para re-editar el maestro a otro personaje en ChatGPT.
 
 Enriquecimiento IA (use_ai=True): Gemini 2.5 Flash free tier escribe los bloques
 en inglés con calidad editorial; si falla o no hay key → fallback determinista
@@ -256,6 +264,244 @@ def _pool_for(stage_idx: int, total: int) -> dict:
     return _STAGE_POOLS[2]
 
 # --------------------------------------------------------------------------------------
+# MODO ARTESANO — fabricación de personaje (método real del usuario: "GENERAL CON HOJAS
+# DE PALMA + MADERA DE PINO — CAPITÁN AMÉRICA"). El artesano aparece en TODAS las tomas
+# (a diferencia del modo transformacion). Escena 1 = ANCLA (hero shot del resultado final);
+# escenas 2..N = fabricación iterativa con la primera imagen de referencia.
+# --------------------------------------------------------------------------------------
+
+DEFAULT_MATERIALS = "fresh green palm leaves and carved pine wood"
+DEFAULT_MATERIALS_ES = "palma verde fresca y madera de pino tallada"
+DEFAULT_PROP = "el emblema icónico"
+
+ARTISAN_PROMPT = (
+    'An elderly South Asian master artisan with long white hair slicked back and a flowing '
+    'white beard stands barefoot, wearing a white sleeveless tank top with the text "{brand}" '
+    'printed clearly on the chest, and a brown plaid lungi. His hands are weathered - deep '
+    'wrinkles, prominent veins, tiny scars, plant fibers stuck to damp skin - and he works '
+    'with calm, surgical precision.'
+)
+
+_NEGATIVE_ARTESANO = (
+    "cartoon, anime, illustration, CGI, 3D render, cosplay, fabric suit, foam armor, plastic, "
+    "metal, paint, colored dye, glossy varnish, fantasy art, neon glow, magical effects, text "
+    "overlay, watermark, blur, low detail, distorted anatomy, extra limbs, bad hands"
+)
+
+# Escena 2 (verbatim del usuario): acercamiento al rostro del personaje
+_FAB_FACE = "acerca el rostro de '{p}', que se vea bien de cerca en primer plano"
+
+# Fases de fabricación: cada item = (flujo_es, action_en, part_en, shot)
+_FAB_POOLS = [
+    # FASE 1 — TALLADO (estructura de madera)
+    [
+        ("ahora quiero que el hombre este sentado en una silla este tallando la cabeza de '{p}', "
+         "la cabeza sea de madera tallada de pino y este en una mesa, primer plano",
+         "seated on a simple chair, carving the head of {p} out of solid pine wood with hand "
+         "chisels at a rough workbench, the carved head resting on the table in front of him",
+         "head", "medium close-up"),
+        ("ahora quiero que el hombre este sentado en una silla este tallando el torso de '{p}', "
+         "el torso sea de madera tallada y este en un soporte, primer plano",
+         "seated on a simple chair, carving the muscular torso of {p} from pine wood, the torso "
+         "mounted upright on a rough wooden support frame",
+         "torso", "medium shot"),
+        ("ahora quiero que el hombre este sentado en una silla este tallando las piernas de '{p}', "
+         "las piernas sean de madera tallada y esten en un soporte, primer plano",
+         "carving the legs of {p} from pine wood, the legs mounted on a wooden support frame",
+         "legs", "medium shot"),
+        ("ahora quiero que el hombre este tallando la espalda de '{p}', no modifiques al hombre",
+         "carving the back of {p}, sculpting the spine channel and the shoulder blades in raw "
+         "pine wood",
+         "back", "medium shot"),
+    ],
+    # FASE 2 — TEJIDO / ENSAMBLAJE (palma sobre la estructura)
+    [
+        ("ahora quiero que el hombre le ponga palma en un brazo a '{p}', que el brazo ya este con "
+         "la palma, que este cerca la camara en primer plano / remplazando el de arriba",
+         "weaving fresh green palm strips over the arm of {p}, the forearm already half covered "
+         "in tight palm weave, held close to the camera",
+         "arm", "close-up"),
+        ("ahora quiero que el hombre este tejiendo las botas de '{p}' con hojas de palma, usando "
+         "de referencia la primera foto que generaste",
+         "weaving the boots of {p} from fresh green palm leaves, one finished boot standing "
+         "beside him and the other resting in his lap",
+         "boots", "medium shot"),
+        ("ahora quiero que el hombre este ensamblando la pierna a '{p}' con hojas de palma, en "
+         "primera plana",
+         "assembling and lacing the palm-woven legs onto the body of {p}, locking every strip "
+         "tight",
+         "legs assembly", "close-up"),
+        ("ahora quiero que el hombre ponga hojas de palma en la espalda de '{p}', cuerpo completo, "
+         "que en la espalda se vea un poco la madera de pino tallada, y acerca un poco la toma en "
+         "primer plano",
+         "threading long palm strips across the back of {p} in a symmetrical V-shaped diagonal "
+         "weave, full body shot, carved pine faintly visible under the weave",
+         "back weave", "full-body shot"),
+    ],
+    # FASE 3 — ACABADO (limpieza y revelado)
+    [
+        ("que el hombre este con una toalla y un splash con agua limpiando a '{p}', cuerpo completo",
+         "gently spraying clean water over {p} with a simple spray bottle and wiping with a rough "
+         "cloth, tiny droplets glistening on the leaf armor, like a final ritual of care",
+         "final cleaning", "full-body shot"),
+        ("quitale la mascara que solo sea rostro de '{p}'",
+         "removing the mask-like layer so only the natural carved face of {p} remains, the "
+         "features expressed purely through material geometry, no paint",
+         "final face reveal", "medium close-up"),
+    ],
+    # FASE 4 — EMBLEMA / OBJETO ICÓNICO
+    [
+        ("ahora quiero que el hombre este trabajando con {o} de '{p}' sentado en una silla con "
+         "una mesa en primer plano",
+         "seated at a wooden bench, working on {o} of {p}, the emblem built purely from carved "
+         "pine wood and woven palm strips",
+         "iconic emblem work", "medium close-up"),
+        ("ahora quiero que el hombre este ensamblando con palma los brazos de '{p}', en primera "
+         "plana",
+         "assembling the final palm-woven arms onto the body of {p}, compressing the strips into "
+         "believable muscle volumes",
+         "final arm assembly", "close-up"),
+    ],
+]
+
+
+def _fab_pool_for(k: int, n: int) -> list:
+    p = 0.0 if n <= 2 else (k - 2) / (n - 2)
+    if p < 0.40:
+        return _FAB_POOLS[0]
+    if p < 0.70:
+        return _FAB_POOLS[1]
+    if p < 0.85:
+        return _FAB_POOLS[2]
+    return _FAB_POOLS[3]
+
+
+def _fab_item(k: int, n: int) -> tuple:
+    """(flujo_es, action_en, part_en, shot) para la escena k (k >= 3)."""
+    pool = _fab_pool_for(k, n)
+    return pool[(k - 3) % len(pool)]
+
+
+def _artesano_flujo_prompt(k: int, n: int, char: str, prop: str) -> str:
+    """Prompt iterativo en español (estilo exacto del usuario) para la escena k."""
+    if k == 2:
+        return _FAB_FACE.format(p=char)
+    flujo, _, _, _ = _fab_item(k, n)
+    return flujo.format(p=char, o=prop)
+
+
+def _artesano_part_en(k: int, n: int) -> str:
+    if k == 2:
+        return "face"
+    _, _, part, _ = _fab_item(k, n)
+    return part
+
+
+def _artesano_shot(k: int, n: int) -> str:
+    if k == 1:
+        return "full-body shot"
+    if k == 2:
+        return "extreme close-up"
+    return _fab_item(k, n)[3]
+
+
+def _artesano_anchor_block(sc: dict, char: str, mat: str, brand: str) -> str:
+    """PASO 1 — hero shot de presentación final (la IMAGEN ANCLA del método)."""
+    parts = _split_prompt(sc.get("image_prompt") or "")
+    env = ", ".join(parts["environment"]) or (
+        "a tropical coconut grove: a rustic thatched-roof hut of bamboo and palm, tall coconut "
+        "palms arching overhead, sandy ground with scattered dried leaves and palm scraps")
+    return (
+        "Tall vertical 9:16 cinematic portrait. Hyper-realistic documentary photography, "
+        "full-body shot.\n\n"
+        f"{ARTISAN_PROMPT.format(brand=brand)}\n\n"
+        "He is smiling broadly, eyes full of pride and disbelief, gesturing with open hands "
+        "toward the figure beside him, as if presenting something that should be impossible "
+        "to create by human hands.\n\n"
+        f"Next to him stands {char}, fully formed, life-sized, human-proportioned, appearing "
+        "not as a costume, sculpture, or cosplay, but as a real physical being standing in "
+        "daylight.\n\n"
+        f"{char} is recreated through an impossible level of organic craftsmanship using only "
+        f"{mat}: every muscle group is defined through layered, believable material geometry; "
+        "the iconic elements of the character exist only through form, relief, weaving, "
+        "carving and the natural contrast of the materials. No paint, no metal, no fabric, "
+        "no plastic. The result looks structurally impossible yet 100% photographic and real.\n\n"
+        f"ENVIRONMENT\n- {env}\n\n"
+        "CAMERA & REALISM\nShot on 24mm lens\nf/5.6 for full-body clarity\nNatural tropical "
+        "daylight, no studio lighting\nUltra-sharp textures\n8K resolution\nRAW photography "
+        "look\nNational Geographic documentary style\n\n"
+        f"NEGATIVE PROMPT (CRITICAL)\n{_NEGATIVE_ARTESANO}"
+    )
+
+
+def _artesano_image_block(k: int, sc: dict, n: int, char: str, mat: str, prop: str,
+                          brand: str) -> str:
+    """Bloque EN estilo PASO (documento maestro de fabricación) para la escena k."""
+    if k == 1:
+        return _artesano_anchor_block(sc, char, mat, brand)
+    if k == 2:
+        flujo = _FAB_FACE.format(p=char)
+        action = ("framing an extreme close-up of the face of {p}: the camera moves very "
+                  "close, revealing the carved geometry of the features - jawline, "
+                  "cheekbones, brow ridge - expressed through natural material relief"
+                  ).format(p=char)
+    else:
+        flujo, action_t, _, shot = _fab_item(k, n)
+        action = action_t.format(p=char, o=prop)
+        flujo = flujo.format(p=char, o=prop)
+    parts = _split_prompt(sc.get("image_prompt") or "")
+    env = ", ".join(parts["environment"]) or (
+        "rustic workshop and tropical grove, sandy ground with material scraps and hand tools")
+    shot = _artesano_shot(k, n)
+    return (
+        f"Tall vertical 9:16 cinematic portrait. Hyper-realistic documentary photography, "
+        f"{shot}.\n\n"
+        f"{ARTISAN_PROMPT.format(brand=brand)}\n\n"
+        f"The artisan is {action}. {char} stays exactly the same as in the first reference "
+        "image: same face, same proportions, same materials. Do not modify the artisan.\n\n"
+        f"EL DETALLE IRREAL EN ESTA TOMA\n- Built only with {mat}.\n- Every change is caused "
+        "by visible physical work: threading, tightening, carving, wiping. Nothing appears "
+        "by magic.\n- The anatomy reads as impossible organic craftsmanship, yet 100% "
+        "photographic.\n\n"
+        f"ENVIRONMENT\n- {env}\n\n"
+        "CAMERA & REALISM\nShot on 35mm lens\nf/2.8 shallow depth of field\nFocus on hands, "
+        "material texture and tension\nNatural daylight only\n8K resolution\nRAW photography "
+        "look\n\n"
+        f"NEGATIVE PROMPT (CRITICO)\n{_NEGATIVE_ARTESANO}\n\n"
+        f"Prompt corto para Flow: {flujo}"
+    )
+
+
+def _artesano_video_block(k: int, n: int, sc: dict, char: str, mat: str, prop: str) -> str:
+    part = _artesano_part_en(k, n)
+    return (
+        f"Animate this image as a {VIDEO_SECONDS}-second vertical 9:16 ultra-realistic video.\n\n"
+        "Use the uploaded image as the exact starting frame. Do not redesign the character, "
+        "the artisan, the materials or the environment. Same camera angle, same lighting "
+        "direction, same composition.\n\n"
+        f"MAIN GOAL:\nThe artisan continues his real physical work on the {part} of {char}, "
+        "advancing the fabrication one believable step.\n\n"
+        "ACTION:\nSlow, precise, realistic handwork: carving, threading palm strips, "
+        "tightening the weave, wiping dust. Every change happens through visible physical "
+        "work in front of the camera. Nothing appears by magic, no morphing.\n\n"
+        "CAMERA:\nFixed vertical 9:16, subtle natural handheld stability, no camera spin, "
+        "no angle change.\n\n"
+        "End on a clean static final frame showing this stage completed, usable as the next "
+        "reference image.\n\n"
+        f"NEGATIVE GUIDANCE:\n{NEGATIVE_VIDEOS_GENERAL}"
+    )
+
+
+def _artesano_ctx(project: dict, ai: dict | None, character: str | None) -> tuple:
+    """(char, mat, mat_es, prop) con prioridad: param URL > IA > fallback determinista."""
+    char = (character or (ai or {}).get("personaje")
+            or (project.get("title") or "EL PERSONAJE").upper()).strip()
+    mat = (ai or {}).get("materiales") or DEFAULT_MATERIALS
+    mat_es = (ai or {}).get("materiales_es") or DEFAULT_MATERIALS_ES
+    prop = (ai or {}).get("objeto_iconico") or DEFAULT_PROP
+    return char, mat, mat_es, prop
+
+# --------------------------------------------------------------------------------------
 # Generadores de bloques (plantilla determinista, inglés — calidad editorial con IA)
 # --------------------------------------------------------------------------------------
 
@@ -385,10 +631,77 @@ def _image_prompt_obj(i: int, sc: dict, fmt: str, brand: str, block_en: str) -> 
     }
 
 
+def _build_script_json_artesano(project: dict, scenes: list[dict], ai: dict | None,
+                                brand: str, character: str | None) -> dict:
+    """Contrato extensión en modo fabricación: escena 1 = ancla (EN);
+    escenas 2..N = prompts iterativos en español con la referencia incrustada."""
+    n = len(scenes)
+    ai_stages = (ai or {}).get("stages") or []
+    char, mat, _, prop = _artesano_ctx(project, ai, character)
+
+    scenes_out = []
+    for k, sc in enumerate(scenes):
+        i = k + 1
+        title = (ai_stages[k].get("stage_title") if k < len(ai_stages) and ai_stages[k].get("stage_title")
+                 else sc.get("title") or f"Paso {i}")
+        if i == 1:
+            subj = [(ai_stages[0].get("image_prompt_en") if ai_stages and ai_stages[0].get("image_prompt_en")
+                     else _artesano_anchor_block(sc, char, mat, brand))]
+        else:
+            flujo = (ai_stages[k].get("prompt_flujo_es") if k < len(ai_stages) and ai_stages[k].get("prompt_flujo_es")
+                     else _artesano_flujo_prompt(i, n, char, prop))
+            subj = [f"{flujo} (SIEMPRE usando la primera imagen de referencia, no modifiques al hombre)"]
+        image_prompt = {
+            "subjects": subj,
+            "environment": "tropical coconut grove with a rustic thatched-roof hut and sandy ground",
+            "lighting": "natural tropical daylight, no studio lighting",
+            "composition": f"{_artesano_shot(i, n)}, vertical 9:16 framing",
+            "style": ("hyper-realistic documentary photography, National Geographic "
+                      "myth-meets-reality style, 8K RAW"
+                      + (f', artisan tank top printed with text "{brand}"' if brand else "")),
+        }
+        entry = {
+            "scene_number": i,
+            "title": title,
+            "narration": sc.get("narration") or "",
+            "duration": sc.get("duration") or VIDEO_SECONDS,
+            "image_prompt": image_prompt,
+            "imagePrompt": image_prompt,  # alias camelCase (interfaces TS)
+        }
+        if i < n:
+            motion = (ai_stages[k].get("video_prompt_en") if k < len(ai_stages) and ai_stages[k].get("video_prompt_en")
+                      else _artesano_video_block(i, n, sc, char, mat, prop))
+            video_prompt = {
+                "motion": motion,
+                "camera_movement": "fixed vertical 9:16, natural handheld stability, no camera spin",
+            }
+            entry["video_prompt"] = video_prompt
+            entry["videoPrompt"] = video_prompt
+        scenes_out.append(entry)
+
+    return {
+        "project_name": slugify(project.get("title") or "PROYECTO"),
+        "title": project.get("title") or "",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "format": project.get("format") or "short",
+        "method": "artesano-fabrication",
+        "character": char,
+        "materials": mat,
+        "total_base_images": n,
+        "total_videos": max(0, n - 1),
+        "style": {"id": "artesano", "name": "Fabricación de personaje",
+                  "prompt": "hyper-realistic documentary photography, myth-meets-reality"},
+        "scenes": scenes_out,
+    }
+
+
 def build_script_json(project: dict, scenes: list[dict], ai: dict | None = None,
-                      fmt: str = "transformacion", brand: str = DEFAULT_BRAND) -> dict:
+                      fmt: str = "transformacion", brand: str = DEFAULT_BRAND,
+                      character: str | None = None) -> dict:
     """ScriptData del contrato: escena i = Imagen Base i + Video i (imagen i → imagen i+1).
     La última escena es SOLO imagen (revelación final), igual que el método 9+8."""
+    if fmt == "artesano":
+        return _build_script_json_artesano(project, scenes, ai, brand, character)
     style_id = project.get("style") or "graphic-novel"
     st = get_style(style_id)
     n = len(scenes)
@@ -438,8 +751,97 @@ def build_script_json(project: dict, scenes: list[dict], ai: dict | None = None,
 # PROMPT MÁSTER — réplica exacta de la estructura de PROMPT GUIA.txt
 # --------------------------------------------------------------------------------------
 
+def _build_maestro_artesano(project: dict, scenes: list[dict], ai: dict | None = None,
+                            brand: str = DEFAULT_BRAND, character: str | None = None) -> str:
+    """Maestro de FABRICACIÓN (estructura exacta del método real del usuario:
+    REGLA ABSOLUTA DE MATERIALES + ESTILO VISUAL + NOTA DE IDENTIDAD + PASOS)."""
+    n = len(scenes)
+    ai_stages = (ai or {}).get("stages") or []
+    char, mat, mat_es, prop = _artesano_ctx(project, ai, character)
+    sep40 = "-" * 40
+
+    def stage_title(k: int) -> str:
+        if k < len(ai_stages) and ai_stages[k].get("stage_title"):
+            return ai_stages[k]["stage_title"]
+        return scenes[k].get("title") or f"Paso {k + 1}"
+
+    def block(k: int) -> str:
+        if k < len(ai_stages) and ai_stages[k].get("image_prompt_en"):
+            return ai_stages[k]["image_prompt_en"]
+        return _artesano_image_block(k + 1, scenes[k], n, char, mat, prop, brand)
+
+    L: list[str] = [
+        f"GENERAL CON {mat_es.upper()} — {char}",
+        "",
+        "REGLA ABSOLUTA DE MATERIALES (NO NEGOCIABLE)",
+        f"- ÚNICOS materiales visibles: {mat_es}.",
+        "- NO pintura, NO metal, NO tela, NO cuero, NO plástico, NO resina, NO pegatinas, "
+        "NO logos impresos.",
+        f"- Todo lo \"icónico\" de {char} debe existir únicamente por forma, relieve, tejido, "
+        "tallado y contraste natural entre los materiales.",
+        "",
+        "ESTILO VISUAL (IGUAL QUE LA REFERENCIA)",
+        "- Vertical 9:16, cinematográfico, hiper-realista, fotografía documental tipo "
+        "National Geographic / \"myth-meets-reality\".",
+        "- Realismo crudo: poros de la hoja, venas vegetales, microfibras, savia, polvo, "
+        "vetas de la madera, manos envejecidas con arrugas y venas, humedad real.",
+        "- Nada de efectos mágicos ni brillos de fantasía: todo debe sentirse capturado por "
+        "una cámara real en luz natural.",
+        "",
+        f"NOTA DE IDENTIDAD ({char})",
+        f"- El héroe es {char}, recreado como \"ser físico\" imposible hecho solo con "
+        f"{mat_es}.",
+        "- Rasgos sugeridos por tallado y geometría (pómulos, mandíbula, cejas) SIN parecer "
+        "máscara de plástico o cosplay.",
+        "",
+        "## EL ARTESANO (FIJO EN TODAS LAS TOMAS)",
+        "```text",
+        ARTISAN_PROMPT.format(brand=brand),
+        "```",
+        "",
+        "## ESTRUCTURA DE LA FABRICACIÓN",
+        f"- Cantidad exacta de imágenes: {n} (una por escena).",
+        "- PASO 1 = IMAGEN ANCLA: hero shot de cuerpo completo del artesano presentando al "
+        "personaje YA terminado. Todas las demás tomas la usan de referencia para no perder "
+        "el diseño.",
+        f"- PASOS 2..{n}: fabricación iterativa en primer plano (tallado → tejido → "
+        "ensamblaje → limpieza → emblema), SIEMPRE tomando de referencia la primera imagen.",
+        "- Secuencia corta lista para pegar en Flow: ver secuencia_flow.txt de este paquete.",
+    ]
+
+    L += ["", sep40, "", "# PASO 1 — ANCLA (HERO SHOT / PRESENTACIÓN FINAL)", "", "```text",
+          block(0), "```"]
+    for k in range(1, n):
+        flujo = _artesano_flujo_prompt(k + 1, n, char, prop)
+        L += ["", sep40, "", f"# PASO {k + 1} — {stage_title(k).upper()}",
+              "", f"(SIEMPRE con la primera imagen de referencia. Prompt corto para Flow: "
+                  f"\"{flujo}\")",
+              "", "```text", block(k), "```"]
+
+    L += ["", sep40, "",
+          "# NEGATIVE PROMPT GENERAL PARA TODAS LAS IMÁGENES", "```text",
+          _NEGATIVE_ARTESANO, "```",
+          "",
+          "# RE-EDICIÓN PARA OTRO PERSONAJE",
+          "Este documento se re-edita en ChatGPT para crear la versión de un nuevo héroe:",
+          "usa el meta-prompt incluido en prompt_edicion_chatgpt.txt junto con este TXT",
+          "(materiales, estilo, pasos y marca se mantienen; solo cambia el personaje).",
+          "",
+          "MÉTODO DE TRABAJO RESUMIDO",
+          "1. Genera la IMAGEN ANCLA (PASO 1) en Gemini/Flow y NO la borres nunca.",
+          "2. Sigue la secuencia iterativa (secuencia_flow.txt), un prompt por imagen.",
+          "3. Si el diseño se desvía: REPLICATE - foto de referencia.",
+          "4. Si un paso sale mal: repítelo terminando con '/ remplazando el de arriba'.",
+          "5. Los videos animan cada toma (el artesano sigue trabajando, frame final limpio).",
+          ]
+    return "\n".join(L)
+
+
 def build_prompts_maestro(project: dict, scenes: list[dict], ai: dict | None = None,
-                          fmt: str = "transformacion", brand: str = DEFAULT_BRAND) -> str:
+                          fmt: str = "transformacion", brand: str = DEFAULT_BRAND,
+                          character: str | None = None) -> str:
+    if fmt == "artesano":
+        return _build_maestro_artesano(project, scenes, ai=ai, brand=brand, character=character)
     st = get_style(project.get("style") or "graphic-novel")
     n = len(scenes)
     ai_stages = (ai or {}).get("stages") or []
@@ -561,6 +963,113 @@ def build_guion(project: dict, scenes: list[dict]) -> str:
     for k, sc in enumerate(scenes):
         lines += [f"[Etapa {k + 1}] {sc.get('title', '')}", sc.get("narration", ""), ""]
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------------------
+# MODO ARTESANO — secuencia_flow.txt y prompt_edicion_chatgpt.txt
+# --------------------------------------------------------------------------------------
+
+def build_secuencia_flujo(project: dict, scenes: list[dict], ai: dict | None = None,
+                          brand: str = DEFAULT_BRAND, character: str | None = None) -> str:
+    """La secuencia iterativa REAL del usuario en Flow (español, un prompt por imagen)."""
+    n = len(scenes)
+    ai_stages = (ai or {}).get("stages") or []
+    char, mat, _, prop = _artesano_ctx(project, ai, character)
+    anchor = (ai_stages[0].get("image_prompt_en") if ai_stages and ai_stages[0].get("image_prompt_en")
+              else _artesano_anchor_block(scenes[0], char, mat, brand))
+
+    L = [
+        f"SECUENCIA FLOW — FABRICACIÓN DE {char}",
+        "=" * 60,
+        "",
+        "REGLA DE ORO (NO NEGOCIABLE):",
+        "- SIEMPRE toma de referencia LA PRIMERA IMAGEN que generes de tu personaje.",
+        "- NO modifiques al hombre (el artesano) entre pasos.",
+        "- Si el diseño se desvía, escribe: REPLICATE - foto de referencia.",
+        "- Si un paso sale mal y lo quieres reemplazar, termina el prompt con: "
+        "/ remplazando el de arriba",
+        "- Todas las tomas verticales 9:16, en primer plano salvo indicación contraria.",
+        "- Cada prompt genera UNA imagen = una escena (Escena_01, Escena_02, ...).",
+        "",
+        "-" * 60,
+        "",
+        "PROMPT 1 — IMAGEN ANCLA (Escena_01)",
+        "Genera primero esta imagen completa (pégala tal cual) y guárdala:",
+        "",
+        anchor,
+        "",
+        "-" * 60,
+        "",
+        f"SECUENCIA ITERATIVA (Escenas 2..{n}) — un prompt por imagen, en orden:",
+        "",
+    ]
+    for k in range(1, n):
+        flujo = (ai_stages[k].get("prompt_flujo_es") if k < len(ai_stages) and ai_stages[k].get("prompt_flujo_es")
+                 else _artesano_flujo_prompt(k + 1, n, char, prop))
+        titulo = scenes[k].get("title") or f"Paso {k + 1}"
+        L += [f"PROMPT {k + 1} (Escena_{k + 1:02d} — {titulo}):",
+              flujo,
+              ""]
+    L += [
+        "-" * 60,
+        "",
+        "FRASES DE APOYO (se usan a mano; no generan escena nueva):",
+        "",
+        "- REPLICATE - foto de referencia",
+        "- REPLICATE PRIMERA FOTO DE REFERENCIA",
+        "- replicate --ar 9:16 usar para no perder el diseño principal",
+        "- no modifiques al hombre",
+        "- ... / remplazando el de arriba",
+        "- acerca mas la camara",
+        "- USA EL PROMPT DE LAS BOTAS USANDO DE REFERENCIA LA PRIMERA FOTO QUE GENERASTE",
+        "",
+        "NOTA: si trabajas con la extensión (script.json), cada escena ya lleva la regla",
+        "de referencia incrustada, así que puedes procesar 1..N seguido sin pasar por",
+        "las frases de apoyo. La escena 1 es el ancla; las demás son iterativas.",
+    ]
+    return "\n".join(L)
+
+
+def build_prompt_edicion(project: dict, ai: dict | None = None, brand: str = DEFAULT_BRAND,
+                         character: str | None = None) -> str:
+    """Meta-prompt verbatim del usuario para re-editar el maestro a OTRO personaje."""
+    char, _, mat_es, _ = _artesano_ctx(project, ai, character)
+    meta = ("TE VOY A PASAR UN TXT DE PROMPT DE FABRICACION DE " + mat_es.upper() + " DE " + char
+            + ", QUIERO QUE LO LEAS Y ME LO REEDITES QUE AHORA QUIERO QUE MI HEROE SEA "
+            "[NUEVO PERSONAJE] RECUERDA QUE LO UNICOS MATERIALES SERAN " + mat_es.upper()
+            + " , despues editarlo mandamelo en txt o pdf, que tenga los mismos referencias "
+            "prompts, que todos los pasos sean detallados y largos como la referencias "
+            "tomate tu tiempo , si puedes agregar un prompt extra de TALLADO DEL ROSTRO "
+            "(PRIMER PLANO) y la camisa diga " + brand)
+    ejemplo = meta.replace("[NUEVO PERSONAJE]", "Capitan America de Chris Evans")
+    return f"""PROMPT PARA RE-EDITAR EL TXT EN CHATGPT (cambio de personaje)
+====================================================================
+Método real: el TXT maestro se re-edita en ChatGPT para crear la versión
+de un NUEVO héroe manteniendo materiales, estilo, pasos detallados y marca.
+
+CÓMO USAR
+---------
+1. Abre prompts_maestro.txt de este paquete y copia TODO el contenido.
+2. Pega en ChatGPT el prompt de abajo (bloque <<< >>>), reemplazando
+   [NUEVO PERSONAJE] por tu héroe (ej: SPIDERMAN, THOR, GOKU...).
+3. Inmediatamente debajo del prompt, pega el contenido de prompts_maestro.txt.
+4. ChatGPT devuelve el TXT re-editado: guárdalo como tu nuevo prompts_maestro
+   y actualiza el nombre del personaje en secuencia_flow.txt.
+
+PROMPT (copiar desde aquí)
+--------------------------
+<<<
+{meta}
+
+[AQUÍ VA EL TXT COMPLETO DE prompts_maestro.txt]
+>>>
+
+EJEMPLO REAL (cómo queda rellenado)
+-----------------------------------
+<<<
+{ejemplo}
+>>>
+"""
 
 # --------------------------------------------------------------------------------------
 # metodo_chatgpt.txt — PASO 1 y PASO 2 verbatim (el flujo del usuario con ChatGPT)
@@ -874,6 +1383,56 @@ def build_metodo_chatgpt() -> str:
 # --------------------------------------------------------------------------------------
 
 def build_readme(fmt: str, ai_used: bool) -> str:
+    if fmt == "artesano":
+        return f"""FLOW EXPORT — MÉTODO COMPLETO (YOUTUBE AUTOMATION v2)
+======================================================
+Modo: FABRICACIÓN DE PERSONAJE CON ARTESANO (método palma+pino / PRIMITIVE VIRAL)
+IA Gemini: {"SÍ (prompts enriquecidos)" if ai_used else "NO (plantillas deterministas)"}
+
+CONTENIDO
+---------
+- script.json                 → contrato de la extensión Flow Script Processor:
+                                escena 1 = IMAGEN ANCLA (hero shot del personaje terminado);
+                                escenas 2..N = prompts iterativos en español, cada uno con la
+                                regla de referencia incrustada
+- prompts_maestro.txt         → GENERAL DE FABRICACIÓN: REGLA ABSOLUTA DE MATERIALES,
+                                ESTILO VISUAL, NOTA DE IDENTIDAD, artesano fijo,
+                                PASO 1..N detallados (cámara + negative prompt incluidos)
+- secuencia_flow.txt          → LA SECUENCIA REAL para Flow: regla de oro (siempre con la
+                                primera imagen de referencia), prompt 1 = ancla, prompts 2..N
+                                iterativos + frases de apoyo (REPLICATE, remplazando el de
+                                arriba, no modifiques al hombre, --ar 9:16)
+- prompt_edicion_chatgpt.txt  → meta-prompt para re-editar el maestro a OTRO personaje
+                                en ChatGPT (manteniendo materiales, pasos y marca)
+- metodo_chatgpt.txt          → tus PASOS 1 y 2 (banco de ideas + desarrollo)
+- guion.txt                   → narración en español (voz en off / referencia)
+
+CÓMO USAR (FABRICACIÓN)
+-----------------------
+1. Descomprime el ZIP: obtendrás <PROYECTO>/out/ideas/idea_NNNNNN/
+2. Genera la IMAGEN ANCLA (PROMPT 1 de secuencia_flow.txt) en Gemini/Flow.
+   ESA IMAGEN ES EL DISEÑO MAESTRO: no la borres nunca.
+3. Opción extensión: vincula la carpeta <PROYECTO> y ejecuta "Iniciar Generacion"
+   en modo IMÁGENES — la escena 1 regenera el ancla y las escenas 2..N siguen la
+   fabricación (tallado → tejido → ensamblaje → limpieza → emblema).
+4. Opción manual: sigue secuencia_flow.txt en orden. Si el diseño se desvía usa
+   "REPLICATE - foto de referencia"; para reemplazar un paso: "/ remplazando el de arriba".
+5. Videos (opcional, modo VIDEOS de la extensión): cada video anima la toma con el
+   artesano trabajando; el frame final queda limpio como siguiente referencia.
+6. Importa las carpetas Escena_XX al dashboard ("Importar Escena_XX") → MP4 final.
+
+PARÁMETROS DE EXPORTACIÓN (URL)
+-------------------------------
+  ?format=artesano          → este modo
+  ?character=CAPITAN+AMERICA→ nombre del héroe (si falta usa el título del proyecto)
+  ?ai=1                     → Gemini (free tier) extrae personaje/materiales/emblema y
+                              escribe los PASOS en inglés con calidad editorial
+  ?brand=Johan%20Monetiza   → texto de la camiseta del artesano (marca del canal)
+  ?idea=7                   → número de carpeta idea_000007 (si ya tienes ideas)
+
+Nota: sin ?character ni IA, el personaje = título del proyecto y los materiales =
+palma verde + pino (tu nicho actual). Edítalos en el TXT si hace falta.
+"""
     modo = ("CONSTRUCTOR FIJO (transformación/construcción)" if fmt == "transformacion"
             else "EVOLUCIÓN CINEMATOGRÁFICA (genérico, sin constructor)")
     return f"""FLOW EXPORT — MÉTODO COMPLETO (YOUTUBE AUTOMATION v2)
@@ -952,6 +1511,85 @@ _AI_SCHEMA = {
     "required": ["concepto_general", "estilo_visual", "stages"],
 }
 
+_AI_SCHEMA_ARTESANO = {
+    "type": "object",
+    "properties": {
+        "personaje": {"type": "string"},
+        "materiales": {"type": "string"},
+        "materiales_es": {"type": "string"},
+        "objeto_iconico": {"type": "string"},
+        "concepto_general": {"type": "string"},
+        "estilo_visual": {"type": "string"},
+        "stages": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "stage_title": {"type": "string"},
+                    "image_prompt_en": {"type": "string"},
+                    "video_prompt_en": {"type": "string"},
+                    "prompt_flujo_es": {"type": "string"},
+                },
+                "required": ["stage_title", "image_prompt_en", "video_prompt_en", "prompt_flujo_es"],
+            },
+        },
+    },
+    "required": ["personaje", "materiales", "materiales_es", "objeto_iconico",
+                 "concepto_general", "estilo_visual", "stages"],
+}
+
+
+def _ai_user_prompt_artesano(project: dict, scenes: list[dict], brand: str) -> str:
+    esc = "\n".join(
+        f"  {k + 1}. {sc.get('title', '')} | Narración: {sc.get('narration', '')[:200]}"
+        for k, sc in enumerate(scenes))
+    brand_rule = (f'\n- El artesano lleva una camiseta sin mangas blanca con el texto "{brand}" '
+                  'impreso claramente en el pecho.' if brand else "")
+    return f"""Eres un experto en videos virales de fabricación imposible: un artesano mayor construye
+a un héroe usando ÚNICAMENTE materiales naturales (ej: palma verde fresca y madera de pino tallada),
+estilo documental hiper-realista "myth-meets-reality" (National Geographic), vertical 9:16,
+capturado como por una cámara real en luz natural. Nada de pintura, metal, tela, plástico ni CGI.
+
+PROYECTO: {project.get('title', '')}
+Escenas (cada una = una toma de la fabricación):
+{esc}
+
+MÉTODO (obligatorio):
+- La Imagen 1 es el ANCLA: hero shot de cuerpo completo del artesano presentando al personaje YA
+  terminado, sonriendo con orgullo y disbelief. Ese diseño es la referencia de todas las demás tomas.
+- Desde la Imagen 2, cada prompt_flujo_es es un PROMPT CORTO EN ESPAÑOL, conversacional, como los
+  que se escriben a mano en Flow: "acerca el rostro de '<PERSONAJE>'", "ahora quiero que el hombre
+  este sentado en una silla este tallando el torso de '<PERSONAJE>', el torso sea de madera tallada
+  y este en un soporte, primer plano", "que el hombre este con una toalla y un splash con agua
+  limpiando a '<PERSONAJE>', cuerpo completo", "quitale la mascara que solo sea rostro de
+  '<PERSONAJE>'". Reglas: siempre tomando de referencia la primera imagen, "no modifiques al
+  hombre", primer plano, progresión lógica de fabricación (rostro → cabeza → torso → piernas →
+  espalda → tejido de palma → ensamblaje → limpieza → emblema icónico). Máximo 35 palabras.
+- image_prompt_en: prompt detallado estilo PASO en inglés (90-140 palabras) que empiece con
+  "Tall vertical 9:16 cinematic portrait. Hyper-realistic documentary photography...", describa al
+  artesano trabajando sobre esa parte del personaje, los materiales visibles, el detalle irreal,
+  el entorno, cámara (lente y apertura), luz natural, y termine con "NEGATIVE PROMPT (CRITICAL):
+  cartoon, anime, illustration, CGI, 3D render, cosplay, fabric suit, foam armor, plastic, metal,
+  paint, colored dye, glossy varnish, fantasy art, neon glow, magical effects, text overlay,
+  watermark, blur, low detail, distorted anatomy, extra limbs, bad hands".
+- video_prompt_en: animación de 15 segundos vertical 9:16 de esa toma: el artesano sigue trabajando
+  con movimientos lentos y precisos, cada cambio por trabajo físico visible, sin morphing ni magia,
+  terminando en frame limpio y estático usable como siguiente referencia. Incluye NEGATIVE GUIDANCE
+  sin texto digital ni marcas de agua. Para el ÚLTIMO stage deja video_prompt_en como cadena vacía ("").{brand_rule}
+
+DEVUELVE JSON:
+- personaje: nombre del héroe EN MAYÚSCULAS (ej: "CAPTAIN AMERICA").
+- materiales: los materiales en inglés (ej: "fresh green palm leaves and carved pine wood").
+- materiales_es: los materiales en español (ej: "palma verde fresca y madera de pino tallada").
+- objeto_iconico: el objeto o emblema icónico del héroe en español (ej: "el escudo redondo").
+- concepto_general: 3-5 frases en español del concepto viral.
+- estilo_visual: 1-2 frases en español del estilo visual.
+- stages: EXACTAMENTE {len(scenes)} elementos en orden, cada uno con:
+  - stage_title: título corto en español (3-7 palabras, ej: "TALLADO DE LA CABEZA").
+  - image_prompt_en: el prompt PASO detallado en inglés.
+  - video_prompt_en: el prompt de video en inglés ("" en el último).
+  - prompt_flujo_es: el prompt corto iterativo en español para Flow."""
+
 
 def _ai_user_prompt(project: dict, scenes: list[dict], fmt: str, brand: str) -> str:
     fmt_rules = (
@@ -1017,12 +1655,15 @@ async def enrich_scenes_ai(project: dict, scenes: list[dict], fmt: str = "transf
         from services import gemini_client
         if not gemini_client.available():
             return None
-        prompt = _ai_user_prompt(project, scenes, fmt, brand)
+        artesano = fmt == "artesano"
+        prompt = (_ai_user_prompt_artesano(project, scenes, brand) if artesano
+                  else _ai_user_prompt(project, scenes, fmt, brand))
+        schema = _AI_SCHEMA_ARTESANO if artesano else _AI_SCHEMA
         raw, last_err = None, None
         for cand in _MODEL_CANDIDATES:
             try:
                 raw = await asyncio.wait_for(
-                    gemini_client.generate_json(prompt, schema=_AI_SCHEMA, model=cand),
+                    gemini_client.generate_json(prompt, schema=schema, model=cand),
                     timeout=timeout_s)
                 break
             except Exception as e:  # noqa: BLE001
@@ -1040,9 +1681,19 @@ async def enrich_scenes_ai(project: dict, scenes: list[dict], fmt: str = "transf
             s["video_prompt_en"] = (s.get("video_prompt_en") or "").strip()
             s.setdefault("image_prompt_en", "")
             s.setdefault("stage_title", "")
-        return {"concepto_general": (raw.get("concepto_general") or "").strip(),
+            if artesano:
+                s.setdefault("prompt_flujo_es", "")
+        base = {"concepto_general": (raw.get("concepto_general") or "").strip(),
                 "estilo_visual": (raw.get("estilo_visual") or "").strip(),
                 "stages": stages}
+        if artesano:
+            base.update({
+                "personaje": (raw.get("personaje") or "").strip(),
+                "materiales": (raw.get("materiales") or "").strip(),
+                "materiales_es": (raw.get("materiales_es") or "").strip(),
+                "objeto_iconico": (raw.get("objeto_iconico") or "").strip(),
+            })
+        return base
     except Exception as e:  # noqa: BLE001 — degradación graceful SIEMPRE
         import logging
         logging.getLogger("flow_export").warning("Enriquecimiento IA falló: %s", e)
@@ -1055,11 +1706,12 @@ async def enrich_scenes_ai(project: dict, scenes: list[dict], fmt: str = "transf
 
 async def export_zip_bytes(project: dict, scenes: list[dict], idea_number: int = 1,
                            fmt: str = "transformacion", use_ai: bool = False,
-                           brand: str = DEFAULT_BRAND) -> tuple[bytes, str, bool]:
+                           brand: str = DEFAULT_BRAND,
+                           character: str | None = None) -> tuple[bytes, str, bool]:
     """Devuelve (zip_bytes, slug, ai_used). Estructura: <SLUG>/out/ideas/idea_NNNNNN/..."""
     slug = slugify(project.get("title") or "PROYECTO")
     ai = await enrich_scenes_ai(project, scenes, fmt=fmt, brand=brand) if use_ai else None
-    script = build_script_json(project, scenes, ai=ai, fmt=fmt, brand=brand)
+    script = build_script_json(project, scenes, ai=ai, fmt=fmt, brand=brand, character=character)
     idea_dir = f"{slug}/out/ideas/idea_{max(1, min(idea_number, 999999)):06d}"
 
     buf = io.BytesIO()
@@ -1067,8 +1719,15 @@ async def export_zip_bytes(project: dict, scenes: list[dict], idea_number: int =
         z.writestr(f"{idea_dir}/script.json",
                    json.dumps(script, ensure_ascii=False, indent=2))
         z.writestr(f"{idea_dir}/prompts_maestro.txt",
-                   build_prompts_maestro(project, scenes, ai=ai, fmt=fmt, brand=brand))
+                   build_prompts_maestro(project, scenes, ai=ai, fmt=fmt, brand=brand,
+                                         character=character))
         z.writestr(f"{idea_dir}/guion.txt", build_guion(project, scenes))
         z.writestr(f"{idea_dir}/metodo_chatgpt.txt", build_metodo_chatgpt())
+        if fmt == "artesano":
+            z.writestr(f"{idea_dir}/secuencia_flow.txt",
+                       build_secuencia_flujo(project, scenes, ai=ai, brand=brand,
+                                             character=character))
+            z.writestr(f"{idea_dir}/prompt_edicion_chatgpt.txt",
+                       build_prompt_edicion(project, ai=ai, brand=brand, character=character))
         z.writestr("README.txt", build_readme(fmt, ai_used=ai is not None))
     return buf.getvalue(), slug, ai is not None
