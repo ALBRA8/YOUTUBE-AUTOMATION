@@ -342,6 +342,7 @@ function renderProject() {
           ${['draft','failed'].includes(p.status) ? `<button class="btn primary" onclick="startJob('${p.id}')">▶️ Generar video</button>` : ''}
           ${p.status === 'ready' ? `<button class="btn primary" onclick="goPublish('${p.id}')">📺 Publicar en YouTube</button>` : ''}
           ${p.status === 'ready' ? `<a class="btn" href="/api/projects/${p.id}/video" download>⬇️ Descargar MP4</a>` : ''}
+          <a class="btn" href="/api/projects/${p.id}/export/flow.zip" download title="ZIP con script.json en el formato de tu extensión Flow Script Processor">🌊 Exportar a Flow</a>
           <a class="btn ghost" href="/api/projects/${p.id}/subtitles.srt" download>💬 Subtítulos SRT</a>
           <button class="btn danger" onclick="delProject('${p.id}')">🗑️</button>
         </div>

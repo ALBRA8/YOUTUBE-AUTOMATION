@@ -604,6 +604,42 @@ async def project_srt(pid: str):
                     headers={"Content-Disposition": "attachment"})
 
 
+# ── exportación a Google Flow (extensión Flow Script Processor) ────────────
+@app.get("/api/projects/{pid}/export/flow.json")
+async def export_flow_json(pid: str):
+    """Devuelve el script.json con el contrato exacto de la extensión (ImagePrompt/VideoPrompt)."""
+    from pipeline.flow_export import build_script_json
+    p = db.get_project(pid)
+    if not p:
+        raise HTTPException(404, "no existe")
+    scenes = db.get_scenes(pid)
+    if not scenes:
+        raise HTTPException(400, "el proyecto no tiene escenas aún")
+    data = build_script_json(p, scenes)
+    from fastapi import Response
+    return Response(json.dumps(data, ensure_ascii=False, indent=2),
+                    media_type="application/json",
+                    headers={"Content-Disposition": "attachment; filename=script.json"})
+
+
+@app.get("/api/projects/{pid}/export/flow.zip")
+async def export_flow_zip(pid: str, idea: int = 1):
+    """ZIP con la estructura <SLUG>/out/ideas/idea_NNNNNN/ que findScriptJson autodetecta."""
+    from pipeline.flow_export import export_zip_bytes
+    p = db.get_project(pid)
+    if not p:
+        raise HTTPException(404, "no existe")
+    scenes = db.get_scenes(pid)
+    if not scenes:
+        raise HTTPException(400, "el proyecto no tiene escenas aún")
+    idea = max(1, min(idea or 1, 999999))
+    content, slug = export_zip_bytes(p, scenes)
+    from fastapi import Response
+    return Response(content, media_type="application/zip",
+                    headers={"Content-Disposition":
+                             f"attachment; filename={slug}_flow.zip"})
+
+
 # ── editor de escenas ─────────────────────────────────────────────────────
 @app.patch("/api/scenes/{scene_id}")
 async def patch_scene(scene_id: str, body: dict):
