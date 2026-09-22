@@ -115,12 +115,26 @@ SYSTEM = (
 
 
 def _base_instructions(style_prompt: str, n_scenes: int, fmt: str,
-                       custom_prompt: str | None = None) -> str:
+                       custom_prompt: str | None = None,
+                       avatar: dict | None = None) -> str:
     dur = "30-50 segundos" if fmt == "short" else "2-4 minutos"
     style_line = (f"Estilo visual de las imágenes: {custom_prompt or style_prompt}.")
+    avatar_line = ""
+    if avatar:
+        ap = avatar.get("appearance") or {}
+        look = ", ".join(f"{k.replace('_', ' ')}: {v}" for k, v in ap.items() if v)
+        avatar_line = (
+            f"\nPERSONAJE RECURRENTE (consistencia obligatoria en TODAS las escenas): "
+            f"se llama {avatar['name']}. "
+            f"Personalidad/rol: {avatar.get('description') or 'narrador carismático'}. "
+            + (f"Apariencia física: {look}. " if look else "")
+            + "La locución y el tono reflejan su personalidad. Si aparece o se menciona "
+              "visualmente, conserva EXACTAMENTE esta apariencia en cada image_prompt "
+              "(mismas palabras clave del personaje en inglés)."
+        )
     return (
         f"Genera un guion de video de {dur} dividido en EXACTAMENTE {n_scenes} escenas. "
-        f"{style_line} "
+        f"{style_line} {avatar_line}"
         "Cada escena: título corto (3-5 palabras), narration (1-3 frases potentes "
         "para locución, máximo 40 palabras) e image_prompt EN INGLÉS describiendo la "
         "imagen cinematográfica de esa escena (sin texto/letras en la imagen). "
@@ -129,7 +143,8 @@ def _base_instructions(style_prompt: str, n_scenes: int, fmt: str,
 
 
 async def from_script(script_text: str, style_id: str, fmt: str,
-                      custom_prompt: str | None = None) -> dict:
+                      custom_prompt: str | None = None,
+                      avatar: dict | None = None) -> dict:
     if not gemini_client.available():
         return _local_fallback("script", script_text, style_id, fmt, custom_prompt)
     try:
@@ -137,7 +152,7 @@ async def from_script(script_text: str, style_id: str, fmt: str,
         n = 6 if fmt == "short" else 12
         prompt = (
             "Convierte el siguiente guion en un guion escena por escena para video viral. "
-            + _base_instructions(style["prompt"], n, fmt, custom_prompt)
+            + _base_instructions(style["prompt"], n, fmt, custom_prompt, avatar)
             + f"\n\nGUION:\n{script_text[:8000]}"
         )
         return await gemini_client.generate_json(prompt, gemini_client.schema_scenes(),
@@ -148,7 +163,8 @@ async def from_script(script_text: str, style_id: str, fmt: str,
 
 
 async def from_idea(idea: str, style_id: str, fmt: str,
-                    custom_prompt: str | None = None) -> dict:
+                    custom_prompt: str | None = None,
+                    avatar: dict | None = None) -> dict:
     if not gemini_client.available():
         return _local_fallback("idea", idea, style_id, fmt, custom_prompt)
     try:
@@ -156,7 +172,7 @@ async def from_idea(idea: str, style_id: str, fmt: str,
         n = 6 if fmt == "short" else 12
         prompt = (
             f"Crea desde cero un guion viral a partir de esta idea: «{idea}». "
-            + _base_instructions(style["prompt"], n, fmt, custom_prompt)
+            + _base_instructions(style["prompt"], n, fmt, custom_prompt, avatar)
         )
         return await gemini_client.generate_json(prompt, gemini_client.schema_scenes(),
                                                  system=SYSTEM)
@@ -166,7 +182,8 @@ async def from_idea(idea: str, style_id: str, fmt: str,
 
 
 async def from_url_transcript(viral_meta: dict, transcript: str, style_id: str,
-                              fmt: str, custom_prompt: str | None = None) -> dict:
+                              fmt: str, custom_prompt: str | None = None,
+                              avatar: dict | None = None) -> dict:
     """Killer feature: recrear la ESTRUCTURA ganadora del viral con contenido original."""
     seed = viral_meta.get("title") or transcript[:120]
     if not gemini_client.available():
@@ -180,7 +197,7 @@ async def from_url_transcript(viral_meta: dict, transcript: str, style_id: str,
             "sobre el mismo tema con nuevo ángulo y nuevas frases. No reutilices frases del "
             "original. Título del video viral: "
             f"«{viral_meta.get('title', '')}» (canal {viral_meta.get('channel', '')}). "
-            + _base_instructions(style["prompt"], n, fmt, custom_prompt)
+            + _base_instructions(style["prompt"], n, fmt, custom_prompt, avatar)
             + f"\n\nTRANSCRIPCIÓN (solo referencia de estructura):\n{transcript[:9000]}"
         )
         return await gemini_client.generate_json(prompt, gemini_client.schema_scenes(),
@@ -191,7 +208,8 @@ async def from_url_transcript(viral_meta: dict, transcript: str, style_id: str,
 
 
 async def from_audio_transcript(transcript: str, style_id: str, fmt: str,
-                                custom_prompt: str | None = None) -> dict:
+                                custom_prompt: str | None = None,
+                                avatar: dict | None = None) -> dict:
     """El usuario grabó su voz (modo Audio): pulimos y estructuramos su narración."""
     if not gemini_client.available():
         return _local_fallback("audio", transcript, style_id, fmt, custom_prompt)
@@ -202,7 +220,7 @@ async def from_audio_transcript(transcript: str, style_id: str, fmt: str,
             "La siguiente transcripción es la narración hablada por el propio creador. "
             "Respeta su contenido y estilo personal: solo divídela en escenas y genera los "
             "prompts visuales. NO cambies sus frases salvo errores evidentes. "
-            + _base_instructions(style["prompt"], n, fmt, custom_prompt)
+            + _base_instructions(style["prompt"], n, fmt, custom_prompt, avatar)
             + f"\n\nTRANSCRIPCIÓN:\n{transcript[:8000]}"
         )
         return await gemini_client.generate_json(prompt, gemini_client.schema_scenes(),

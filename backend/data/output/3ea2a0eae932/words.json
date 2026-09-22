@@ -1,0 +1,662 @@
+[
+ {
+  "word": "¿Crees",
+  "start": 0.0,
+  "end": 0.111
+ },
+ {
+  "word": "que",
+  "start": 0.111,
+  "end": 0.222
+ },
+ {
+  "word": "ya",
+  "start": 0.222,
+  "end": 0.333
+ },
+ {
+  "word": "lo",
+  "start": 0.333,
+  "end": 0.444
+ },
+ {
+  "word": "sabes",
+  "start": 0.444,
+  "end": 0.556
+ },
+ {
+  "word": "todo",
+  "start": 0.556,
+  "end": 0.667
+ },
+ {
+  "word": "sobre",
+  "start": 0.667,
+  "end": 0.778
+ },
+ {
+  "word": "los",
+  "start": 0.778,
+  "end": 0.889
+ },
+ {
+  "word": "misterios",
+  "start": 0.889,
+  "end": 1.0
+ },
+ {
+  "word": "del",
+  "start": 1.0,
+  "end": 1.111
+ },
+ {
+  "word": "triangulo",
+  "start": 1.111,
+  "end": 1.222
+ },
+ {
+  "word": "de",
+  "start": 1.222,
+  "end": 1.333
+ },
+ {
+  "word": "las",
+  "start": 1.333,
+  "end": 1.444
+ },
+ {
+  "word": "bermudas?",
+  "start": 1.444,
+  "end": 1.556
+ },
+ {
+  "word": "Espera",
+  "start": 1.556,
+  "end": 1.667
+ },
+ {
+  "word": "a",
+  "start": 1.667,
+  "end": 1.778
+ },
+ {
+  "word": "escuchar",
+  "start": 1.778,
+  "end": 1.889
+ },
+ {
+  "word": "esto.",
+  "start": 1.889,
+  "end": 2.0
+ },
+ {
+  "word": "Empecemos",
+  "start": 2.35,
+  "end": 2.45
+ },
+ {
+  "word": "por",
+  "start": 2.45,
+  "end": 2.55
+ },
+ {
+  "word": "lo",
+  "start": 2.55,
+  "end": 2.65
+ },
+ {
+  "word": "básico:",
+  "start": 2.65,
+  "end": 2.75
+ },
+ {
+  "word": "los",
+  "start": 2.75,
+  "end": 2.85
+ },
+ {
+  "word": "misterios",
+  "start": 2.85,
+  "end": 2.95
+ },
+ {
+  "word": "del",
+  "start": 2.95,
+  "end": 3.05
+ },
+ {
+  "word": "triangulo",
+  "start": 3.05,
+  "end": 3.15
+ },
+ {
+  "word": "de",
+  "start": 3.15,
+  "end": 3.25
+ },
+ {
+  "word": "las",
+  "start": 3.25,
+  "end": 3.35
+ },
+ {
+  "word": "bermudas",
+  "start": 3.35,
+  "end": 3.45
+ },
+ {
+  "word": "guarda",
+  "start": 3.45,
+  "end": 3.55
+ },
+ {
+  "word": "detalles",
+  "start": 3.55,
+  "end": 3.65
+ },
+ {
+  "word": "que",
+  "start": 3.65,
+  "end": 3.75
+ },
+ {
+  "word": "la",
+  "start": 3.75,
+  "end": 3.85
+ },
+ {
+  "word": "ciencia",
+  "start": 3.85,
+  "end": 3.95
+ },
+ {
+  "word": "apenas",
+  "start": 3.95,
+  "end": 4.05
+ },
+ {
+  "word": "empieza",
+  "start": 4.05,
+  "end": 4.15
+ },
+ {
+  "word": "a",
+  "start": 4.15,
+  "end": 4.25
+ },
+ {
+  "word": "entender.",
+  "start": 4.25,
+  "end": 4.35
+ },
+ {
+  "word": "Los",
+  "start": 4.7,
+  "end": 4.811
+ },
+ {
+  "word": "expertos",
+  "start": 4.811,
+  "end": 4.922
+ },
+ {
+  "word": "llevan",
+  "start": 4.922,
+  "end": 5.033
+ },
+ {
+  "word": "años",
+  "start": 5.033,
+  "end": 5.144
+ },
+ {
+  "word": "estudiando",
+  "start": 5.144,
+  "end": 5.256
+ },
+ {
+  "word": "los",
+  "start": 5.256,
+  "end": 5.367
+ },
+ {
+  "word": "misterios",
+  "start": 5.367,
+  "end": 5.478
+ },
+ {
+  "word": "del",
+  "start": 5.478,
+  "end": 5.589
+ },
+ {
+  "word": "triangulo",
+  "start": 5.589,
+  "end": 5.7
+ },
+ {
+  "word": "de",
+  "start": 5.7,
+  "end": 5.811
+ },
+ {
+  "word": "las",
+  "start": 5.811,
+  "end": 5.922
+ },
+ {
+  "word": "bermudas,",
+  "start": 5.922,
+  "end": 6.033
+ },
+ {
+  "word": "y",
+  "start": 6.033,
+  "end": 6.144
+ },
+ {
+  "word": "cada",
+  "start": 6.144,
+  "end": 6.256
+ },
+ {
+  "word": "descubrimiento",
+  "start": 6.256,
+  "end": 6.367
+ },
+ {
+  "word": "contradice",
+  "start": 6.367,
+  "end": 6.478
+ },
+ {
+  "word": "al",
+  "start": 6.478,
+  "end": 6.589
+ },
+ {
+  "word": "anterior.",
+  "start": 6.589,
+  "end": 6.7
+ },
+ {
+  "word": "Aquí",
+  "start": 7.05,
+  "end": 7.161
+ },
+ {
+  "word": "viene",
+  "start": 7.161,
+  "end": 7.272
+ },
+ {
+  "word": "lo",
+  "start": 7.272,
+  "end": 7.383
+ },
+ {
+  "word": "increíble:",
+  "start": 7.383,
+  "end": 7.494
+ },
+ {
+  "word": "detrás",
+  "start": 7.494,
+  "end": 7.606
+ },
+ {
+  "word": "de",
+  "start": 7.606,
+  "end": 7.717
+ },
+ {
+  "word": "los",
+  "start": 7.717,
+  "end": 7.828
+ },
+ {
+  "word": "misterios",
+  "start": 7.828,
+  "end": 7.939
+ },
+ {
+  "word": "del",
+  "start": 7.939,
+  "end": 8.05
+ },
+ {
+  "word": "triangulo",
+  "start": 8.05,
+  "end": 8.161
+ },
+ {
+  "word": "de",
+  "start": 8.161,
+  "end": 8.272
+ },
+ {
+  "word": "las",
+  "start": 8.272,
+  "end": 8.383
+ },
+ {
+  "word": "bermudas",
+  "start": 8.383,
+  "end": 8.494
+ },
+ {
+  "word": "hay",
+  "start": 8.494,
+  "end": 8.606
+ },
+ {
+  "word": "historias",
+  "start": 8.606,
+  "end": 8.717
+ },
+ {
+  "word": "que",
+  "start": 8.717,
+  "end": 8.828
+ },
+ {
+  "word": "parecen",
+  "start": 8.828,
+  "end": 8.939
+ },
+ {
+  "word": "inventadas.",
+  "start": 8.939,
+  "end": 9.05
+ },
+ {
+  "word": "Y",
+  "start": 9.4,
+  "end": 9.511
+ },
+ {
+  "word": "no,",
+  "start": 9.511,
+  "end": 9.622
+ },
+ {
+  "word": "no",
+  "start": 9.622,
+  "end": 9.733
+ },
+ {
+  "word": "es",
+  "start": 9.733,
+  "end": 9.844
+ },
+ {
+  "word": "ciencia",
+  "start": 9.844,
+  "end": 9.956
+ },
+ {
+  "word": "ficción:",
+  "start": 9.956,
+  "end": 10.067
+ },
+ {
+  "word": "todo",
+  "start": 10.067,
+  "end": 10.178
+ },
+ {
+  "word": "esto",
+  "start": 10.178,
+  "end": 10.289
+ },
+ {
+  "word": "está",
+  "start": 10.289,
+  "end": 10.4
+ },
+ {
+  "word": "documentado",
+  "start": 10.4,
+  "end": 10.511
+ },
+ {
+  "word": "sobre",
+  "start": 10.511,
+  "end": 10.622
+ },
+ {
+  "word": "los",
+  "start": 10.622,
+  "end": 10.733
+ },
+ {
+  "word": "misterios",
+  "start": 10.733,
+  "end": 10.844
+ },
+ {
+  "word": "del",
+  "start": 10.844,
+  "end": 10.956
+ },
+ {
+  "word": "triangulo",
+  "start": 10.956,
+  "end": 11.067
+ },
+ {
+  "word": "de",
+  "start": 11.067,
+  "end": 11.178
+ },
+ {
+  "word": "las",
+  "start": 11.178,
+  "end": 11.289
+ },
+ {
+  "word": "bermudas.",
+  "start": 11.289,
+  "end": 11.4
+ },
+ {
+  "word": "Y",
+  "start": 11.75,
+  "end": 11.841
+ },
+ {
+  "word": "ahora,",
+  "start": 11.841,
+  "end": 11.932
+ },
+ {
+  "word": "el",
+  "start": 11.932,
+  "end": 12.023
+ },
+ {
+  "word": "dato",
+  "start": 12.023,
+  "end": 12.114
+ },
+ {
+  "word": "que",
+  "start": 12.114,
+  "end": 12.205
+ },
+ {
+  "word": "lo",
+  "start": 12.205,
+  "end": 12.295
+ },
+ {
+  "word": "cambia",
+  "start": 12.295,
+  "end": 12.386
+ },
+ {
+  "word": "todo:",
+  "start": 12.386,
+  "end": 12.477
+ },
+ {
+  "word": "lo",
+  "start": 12.477,
+  "end": 12.568
+ },
+ {
+  "word": "que",
+  "start": 12.568,
+  "end": 12.659
+ },
+ {
+  "word": "descubrieron",
+  "start": 12.659,
+  "end": 12.75
+ },
+ {
+  "word": "sobre",
+  "start": 12.75,
+  "end": 12.841
+ },
+ {
+  "word": "los",
+  "start": 12.841,
+  "end": 12.932
+ },
+ {
+  "word": "misterios",
+  "start": 12.932,
+  "end": 13.023
+ },
+ {
+  "word": "del",
+  "start": 13.023,
+  "end": 13.114
+ },
+ {
+  "word": "triangulo",
+  "start": 13.114,
+  "end": 13.205
+ },
+ {
+  "word": "de",
+  "start": 13.205,
+  "end": 13.295
+ },
+ {
+  "word": "las",
+  "start": 13.295,
+  "end": 13.386
+ },
+ {
+  "word": "bermudas",
+  "start": 13.386,
+  "end": 13.477
+ },
+ {
+  "word": "supera",
+  "start": 13.477,
+  "end": 13.568
+ },
+ {
+  "word": "cualquier",
+  "start": 13.568,
+  "end": 13.659
+ },
+ {
+  "word": "predicción.",
+  "start": 13.659,
+  "end": 13.75
+ },
+ {
+  "word": "Si",
+  "start": 14.1,
+  "end": 14.211
+ },
+ {
+  "word": "quieres",
+  "start": 14.211,
+  "end": 14.322
+ },
+ {
+  "word": "más",
+  "start": 14.322,
+  "end": 14.433
+ },
+ {
+  "word": "secretos",
+  "start": 14.433,
+  "end": 14.544
+ },
+ {
+  "word": "sobre",
+  "start": 14.544,
+  "end": 14.656
+ },
+ {
+  "word": "los",
+  "start": 14.656,
+  "end": 14.767
+ },
+ {
+  "word": "misterios",
+  "start": 14.767,
+  "end": 14.878
+ },
+ {
+  "word": "del",
+  "start": 14.878,
+  "end": 14.989
+ },
+ {
+  "word": "triangulo",
+  "start": 14.989,
+  "end": 15.1
+ },
+ {
+  "word": "de",
+  "start": 15.1,
+  "end": 15.211
+ },
+ {
+  "word": "las",
+  "start": 15.211,
+  "end": 15.322
+ },
+ {
+  "word": "bermudas,",
+  "start": 15.322,
+  "end": 15.433
+ },
+ {
+  "word": "sígueme:",
+  "start": 15.433,
+  "end": 15.544
+ },
+ {
+  "word": "cada",
+  "start": 15.544,
+  "end": 15.656
+ },
+ {
+  "word": "día",
+  "start": 15.656,
+  "end": 15.767
+ },
+ {
+  "word": "desvelamos",
+  "start": 15.767,
+  "end": 15.878
+ },
+ {
+  "word": "algo",
+  "start": 15.878,
+  "end": 15.989
+ },
+ {
+  "word": "nuevo.",
+  "start": 15.989,
+  "end": 16.1
+ }
+]

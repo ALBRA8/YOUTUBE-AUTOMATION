@@ -87,6 +87,18 @@ CREATE TABLE IF NOT EXISTS ext_images (    -- cola Plan B desde la extensión Ch
     used       INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS avatars (       -- personajes consistentes del canal
+    id           TEXT PRIMARY KEY,
+    name         TEXT NOT NULL,
+    description  TEXT NOT NULL DEFAULT '',  -- personalidad / rol del personaje
+    appearance   TEXT NOT NULL DEFAULT '{}',-- JSON: piel, ojos, cabello, cuerpo, vestuario
+    voice        TEXT,                      -- voz edge-tts asociada
+    tts_provider TEXT,                      -- edge | gemini
+    style        TEXT,                      -- estilo visual por defecto
+    image_path   TEXT,                      -- retrato generado
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_scenes_project ON scenes(project_id, idx);
 """
 
@@ -94,6 +106,16 @@ CREATE INDEX IF NOT EXISTS idx_scenes_project ON scenes(project_id, idx);
 def init_db() -> None:
     with connect() as con:
         con.executescript(SCHEMA)
+        _migrate(con)
+
+
+def _migrate(con: sqlite3.Connection) -> None:
+    """Migraciones incrementales seguras (ALTER solo si falta la columna)."""
+    cols = [r[1] for r in con.execute("PRAGMA table_info(projects)").fetchall()]
+    if "avatar_id" not in cols:
+        con.execute("ALTER TABLE projects ADD COLUMN avatar_id TEXT")
+    if "platforms" not in cols:
+        con.execute("ALTER TABLE projects ADD COLUMN platforms TEXT NOT NULL DEFAULT '[]'")
 
 
 # ── helpers genéricos ─────────────────────────────────────────────────────
@@ -131,7 +153,7 @@ def kv_set(key: str, value: Any) -> None:
 def create_project(**fields) -> dict:
     pid = new_id()
     fields = {"id": pid, "created_at": now(), "updated_at": now(), **fields}
-    fields = {k: (json.dumps(v, ensure_ascii=False) if isinstance(v, dict) else v)
+    fields = {k: (json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v)
               for k, v in fields.items()}
     cols = ", ".join(fields)
     marks = ", ".join("?" for _ in fields)
@@ -143,7 +165,15 @@ def create_project(**fields) -> dict:
 def get_project(pid: str) -> dict | None:
     with connect() as con:
         row = con.execute("SELECT * FROM projects WHERE id=?", (pid,)).fetchone()
-    return row_to_dict(row) if row else None
+    if not row:
+        return None
+    d = row_to_dict(row)
+    if isinstance(d.get("platforms"), str):
+        try:
+            d["platforms"] = json.loads(d["platforms"] or "[]")
+        except json.JSONDecodeError:
+            d["platforms"] = []
+    return d
 
 
 def update_project(pid: str, **fields) -> None:
@@ -160,7 +190,16 @@ def list_projects(limit: int = 100) -> list[dict]:
         rows = con.execute(
             "SELECT * FROM projects ORDER BY created_at DESC LIMIT ?", (limit,)
         ).fetchall()
-    return [row_to_dict(r) for r in rows]
+    out = []
+    for r in rows:
+        d = row_to_dict(r)
+        if isinstance(d.get("platforms"), str):
+            try:
+                d["platforms"] = json.loads(d["platforms"] or "[]")
+            except json.JSONDecodeError:
+                d["platforms"] = []
+        out.append(d)
+    return out
 
 
 def delete_project(pid: str) -> None:
@@ -274,6 +313,56 @@ def count_ext_images(project_id: str | None = None) -> int:
         else:
             row = con.execute("SELECT COUNT(*) c FROM ext_images WHERE used=0").fetchone()
     return row["c"]
+
+
+# ── avatars (personajes consistentes) ──────────────────────────────────────
+def create_avatar(**fields) -> dict:
+    aid = new_id()
+    fields = {"id": aid, "created_at": now(), "updated_at": now(), **fields}
+    fields = {k: (json.dumps(v, ensure_ascii=False) if isinstance(v, dict) else v)
+              for k, v in fields.items()}
+    cols = ", ".join(fields)
+    marks = ", ".join("?" for _ in fields)
+    with connect() as con:
+        con.execute(f"INSERT INTO avatars({cols}) VALUES({marks})", tuple(fields.values()))
+    return get_avatar(aid)
+
+
+def get_avatar(aid: str) -> dict | None:
+    with connect() as con:
+        row = con.execute("SELECT * FROM avatars WHERE id=?", (aid,)).fetchone()
+    return _avatar_dict(row) if row else None
+
+
+def list_avatars() -> list[dict]:
+    with connect() as con:
+        rows = con.execute("SELECT * FROM avatars ORDER BY created_at DESC").fetchall()
+    return [_avatar_dict(r) for r in rows]
+
+
+def update_avatar(aid: str, **fields) -> None:
+    fields["updated_at"] = now()
+    fields = {k: (json.dumps(v, ensure_ascii=False) if isinstance(v, dict) else v)
+              for k, v in fields.items()}
+    sets = ", ".join(f"{k}=?" for k in fields)
+    with connect() as con:
+        con.execute(f"UPDATE avatars SET {sets} WHERE id=?", (*fields.values(), aid))
+
+
+def delete_avatar(aid: str) -> None:
+    with connect() as con:
+        con.execute("DELETE FROM avatars WHERE id=?", (aid,))
+    # los proyectos conservan avatar_id huérfano → el pipeline lo ignora
+
+
+def _avatar_dict(row: sqlite3.Row) -> dict:
+    d = dict(row)
+    if isinstance(d.get("appearance"), str):
+        try:
+            d["appearance"] = json.loads(d["appearance"] or "{}")
+        except json.JSONDecodeError:
+            d["appearance"] = {}
+    return d
 
 
 # ── KPIs para el dashboard ────────────────────────────────────────────────

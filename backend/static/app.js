@@ -7,9 +7,17 @@
 const S = {            // estado global
   view: 'home', theme: localStorage.getItem('yta-theme') || 'dark',
   demo: false, health: {}, styles: [], settings: {}, stats: {},
-  projects: [], project: null, factory: null, ideas: [],
+  projects: [], project: null, factory: null, ideas: [], avatars: [],
+  chat: [], chatBusy: false,
   wizard: null, es: null,
 };
+
+const PLATFORMS = [
+  { id: 'youtube',   emoji: '▶️', name: 'YouTube' },
+  { id: 'tiktok',    emoji: '🎵', name: 'TikTok' },
+  { id: 'instagram', emoji: '📷', name: 'Instagram' },
+  { id: 'facebook',  emoji: '👤', name: 'Facebook' },
+];
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
@@ -50,7 +58,7 @@ function nav(view) {
   $$('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === view));
   const views = { home: renderHome, create: renderCreate, projects: renderProjects,
                   factory: renderFactory, publish: renderPublish, settings: renderSettings,
-                  project: renderProject };
+                  project: renderProject, agent: renderAgent, avatars: renderAvatars };
   (views[view] || renderHome)();
 }
 
@@ -63,6 +71,12 @@ function renderHome() {
   const spark = Array.from({length: 7}, (_, i) => `<i style="height:${18 + Math.sin(i * 1.7) * 10 + 8}%"></i>`).join('');
   $('#view').innerHTML = `
     ${S.demo ? `<div class="demo-banner">⚠️ Modo DEMO — no detecto el backend en :8000. Arranca el servidor o los datos son de muestra.</div>` : ''}
+    <div class="agent-banner" onclick="nav('agent')">
+      <div class="ab-ico">🤖</div>
+      <div class="ab-txt"><b>NUEVO · Agente VÓRTICE</b>
+        <small>Habla con tu fábrica: «crea un video sobre el imperio romano» y listo — el motor produce todo.</small></div>
+      <button class="btn primary small">Probar →</button>
+    </div>
     <div class="grid-kpis">
       <div class="card kpi"><div class="num">${st.today ?? 0}</div><div class="lbl">Videos hoy</div><div class="spark">${spark}</div></div>
       <div class="card kpi"><div class="num">${st.total ?? 0}</div><div class="lbl">Proyectos totales</div></div>
@@ -84,6 +98,13 @@ function renderHome() {
     <div class="proj-grid">${renderProjectCards(S.projects.slice(0, 4))}</div>`;
 }
 
+function platformIcons(list) {
+  return (list || []).map(id => {
+    const p = PLATFORMS.find(x => x.id === id);
+    return p ? `<span class="plat-badge" title="${p.name}">${p.emoji}</span>` : '';
+  }).join('');
+}
+
 function renderProjectCards(list) {
   if (!list.length) return `<div class="card empty" style="grid-column:1/-1"><div class="big">🎬</div>Aún no hay proyectos. Crea tu primer video en 2 minutos.</div>`;
   return list.map(p => {
@@ -93,17 +114,19 @@ function renderProjectCards(list) {
       : ['draft','queued'].includes(p.status) ? '<span class="badge draft">BORRADOR</span>'
       : '<span class="badge working">…' + esc(p.step_label || p.status) + '</span>';
     const thumb = p.thumbnail_url ? `/api/projects/${p.id}/thumbnail?v=${p.updated_at}` : '';
+    const av = S.avatars.find(a => a.id === p.avatar_id);
     return `<div class="card proj-card" onclick="openProject('${p.id}')">
       ${thumb ? `<img class="thumb" src="${thumb}" loading="lazy">` : `<div class="thumb" style="display:grid;place-items:center;font-size:34px">🎞️</div>`}
       <div class="body"><b>${esc(p.title)}</b>
-        <div class="meta">${badge}<span>${esc(p.format === 'short' ? '9:16 Short' : '16:9 Largo')}</span></div>
+        <div class="meta">${badge}<span>${esc(p.format === 'short' ? '9:16 Short' : '16:9 Largo')}</span>${platformIcons(p.platforms)}${av ? `<span class="plat-badge" title="Avatar: ${esc(av.name)}">🎭</span>` : ''}</div>
       </div></div>`;
   }).join('');
 }
 
 /* ── vista: WIZARD CREAR (4 pasos como Labsia) ───────────── */
 const W = { step: 1, mode: 'idea', format: 'short', style: 'graphic-novel',
-            title: '', idea: '', script: '', url: '', custom: '', voice: '', tts: '' };
+            title: '', idea: '', script: '', url: '', custom: '', voice: '', tts: '',
+            avatar: '', platforms: ['youtube', 'tiktok'] };
 
 function renderCreate() {
   const modes = [
@@ -153,14 +176,29 @@ function renderCreate() {
       : `<div class="field"><label>🎙️ Grabación de voz (mp3/wav/m4a)</label><input type="file" id="audio-file" accept="audio/*"></div>`;
     body = f + `
       <div class="row">
-        <div class="field"><label>Voz (opcional, luego puedes cambiarla)</label>
+        <div class="field"><label>🎭 Avatar (personaje consistente)</label>
+          <select onchange="W.avatar=this.value">
+            <option value="">— sin avatar —</option>
+            ${S.avatars.map(a => `<option value="${a.id}" ${W.avatar === a.id ? 'selected' : ''}>${esc(a.name)}${a.voice ? ' · ' + esc(voiceName(a.voice)) : ''}</option>`).join('')}
+          </select>
+          ${S.avatars.length ? '' : '<small style="color:var(--muted);display:block;margin-top:4px">Crea personajes en la pestaña 🎭 Avatares</small>'}</div>
+        <div class="field"><label>Voz (opcional, la del avatar manda si no eliges)</label>
           <select onchange="W.tts=this.value">
             <option value="">edge-tts · Salomé 🇨🇴 (gratis ilimitado)</option>
             <option value="gemini" ${S.health.gemini ? '' : 'disabled'}>Gemini TTS · Fenrir 🎖️ (premium)</option>
           </select></div>
-        <div class="field"><label>Título interno (máx 60)</label>
-          <input type="text" maxlength="60" value="${esc(W.title)}" oninput="W.title=this.value" placeholder="solo referencia, lo genera la IA si lo dejas vacío"></div>
-      </div>`;
+      </div>
+      <div class="field"><label>📡 Plataformas destino</label>
+        <div class="plats">${PLATFORMS.map(p => `
+          <label class="plat-check ${W.platforms.includes(p.id) ? 'on' : ''}">
+            <input type="checkbox" ${W.platforms.includes(p.id) ? 'checked' : ''}
+              onchange="W.platforms = this.checked ? [...new Set([...W.platforms, '${p.id}'])] : W.platforms.filter(x => x !== '${p.id}'); this.closest('.plat-check').classList.toggle('on', this.checked)">
+            ${p.emoji} ${p.name}
+          </label>`).join('')}</div>
+        <small style="color:var(--muted);display:block;margin-top:4px">YouTube se publica directo con tu canal (OAuth). Para TikTok/IG/FB descarga el MP4 9:16 y súbelo — te preparamos el kit en 📺 Publicar.</small>
+      </div>
+      <div class="field"><label>Título interno (máx 60)</label>
+        <input type="text" maxlength="60" value="${esc(W.title)}" oninput="W.title=this.value" placeholder="solo referencia, lo genera la IA si lo dejas vacío"></div>`;
   }
 
   $('#view').innerHTML = `<div class="wizard">
@@ -199,7 +237,9 @@ async function createProject() {
   try {
     const body = { mode: W.mode, style: W.style, format: W.format,
                    title: W.title || null, voice: W.voice || null,
-                   tts_provider: W.tts || null };
+                   tts_provider: W.tts || null,
+                   avatar_id: W.avatar || null,
+                   platforms: W.platforms.length ? W.platforms : ['youtube'] };
     if (W.mode === 'idea') body.idea = W.idea;
     if (W.mode === 'script') { body.script = W.script; body.title = W.title || W.script.slice(0, 50); }
     if (W.mode === 'url') body.url = W.url;
@@ -285,14 +325,18 @@ function renderProject() {
   if (!p) return nav('projects');
   const scenes = p.scenes || [];
   const canPublish = p.status === 'ready';
+  const av = S.avatars.find(a => a.id === p.avatar_id);
+  const plats = (p.platforms && p.platforms.length ? p.platforms : ['youtube']);
+  const social = plats.filter(x => x !== 'youtube');
   $('#view').innerHTML = `
     <button class="btn ghost small" onclick="nav('projects')">← Volver</button>
     <div class="editor-head" style="margin-top:16px">
       ${p.status === 'ready' ? `<video controls src="/api/projects/${p.id}/video"></video>` : ''}
       <div style="flex:1;min-width:240px">
         <h2 style="margin-bottom:6px">${esc(p.title)} ${p.status === 'published' ? '<span class="badge published">PUBLICADO</span>' : p.status === 'ready' ? '<span class="badge ready">LISTO</span>' : ''}</h2>
-        <p style="color:var(--muted);font-size:13px;margin-bottom:12px">
+        <p style="color:var(--muted);font-size:13px;margin-bottom:8px">
           ${esc(p.format === 'short' ? '9:16 Short' : '16:9')} · ${esc(getStyleName(p.style))} · modo ${esc(p.mode)} · ${scenes.length} escenas
+          ${av ? ` · 🎭 ${esc(av.name)}` : ''} · ${platformIcons(plats)}
           ${p.youtube_id ? ` · <a href="https://youtube.com/watch?v=${p.youtube_id}" target="_blank">ver en YouTube ↗</a>` : ''}</p>
         <div style="display:flex;gap:9px;flex-wrap:wrap">
           ${['draft','failed'].includes(p.status) ? `<button class="btn primary" onclick="startJob('${p.id}')">▶️ Generar video</button>` : ''}
@@ -304,6 +348,15 @@ function renderProject() {
         ${p.error ? `<p style="color:var(--err);font-size:12.5px;margin-top:10px">⚠️ ${esc(p.error)}</p>` : ''}
       </div>
     </div>
+    ${p.status === 'ready' && social.length ? `
+    <div class="card" style="margin-top:16px">
+      <b>📡 Kit multi-plataforma</b>
+      <p style="color:var(--muted);font-size:13px;margin:6px 0">Tu video es MP4 9:16 listo para subir manualmente. Descárgalo y publícalo en:</p>
+      <div class="plats">${social.map(id => {
+        const pl = PLATFORMS.find(x => x.id === id);
+        return pl ? `<span class="plat-check on">${pl.emoji} ${pl.name}</span>` : '';
+      }).join('')}</div>
+    </div>` : ''}
     <h2 class="sec">🎬 Escenas <span class="hint">arrastra ⟺ para reordenar · clic en la imagen para regenerar</span></h2>
     <div class="scene-list" id="scene-list">${scenes.map(sc => sceneCard(sc)).join('') || '<div class="empty">Sin escenas todavía — genera el video primero</div>'}</div>`;
 
@@ -686,6 +739,210 @@ async function renderSettings() {
     </div>`;
 }
 
+/* ── vista: AGENTE (chat v2.1) ───────────────────────────── */
+function renderAgent() {
+  $('#greet').innerHTML = `Agente VÓRTICE 🤖<small id="greet-sub">Habla y el motor produce — sin tocar un solo botón</small>`;
+  const msgs = S.chat.map((m, i) => {
+    if (m.role === 'user')
+      return `<div class="chat-msg user"><div class="bubble">${mmd(m.text)}</div><div class="who">Tú</div></div>`;
+    let extra = '';
+    if (m.project) extra += `<div class="chat-proj" onclick="openProject('${m.project.id}')">🎬 ${esc(m.project.title)} <small>ver proyecto →</small></div>`;
+    if (m.projects && m.projects.length)
+      extra = m.projects.map(p =>
+        `<div class="chat-proj" onclick="openProject('${p.id}')">${p.status === 'ready' ? '✅' : p.status === 'failed' ? '❌' : '🎞️'} ${esc(p.title)} <small>${esc(p.status)}</small></div>`).join('');
+    return `<div class="chat-msg bot"><div class="bubble">${mmd(m.text)}${extra}</div><div class="who">VÓRTICE${m.engine === 'gemini' ? ' · Gemini' : ''}</div></div>`;
+  }).join('');
+  const chips = ['crea un video sobre el imperio romano',
+                 'muéstrame mis proyectos',
+                 S.avatars[0] ? `crea un video de mystery con ${S.avatars[0].name}` : 'crea un video de misterios del océano',
+                 '¿qué puedes hacer?'];
+  $('#view').innerHTML = `
+    <div class="chat-wrap">
+      <div class="chat-scroll" id="chat-scroll">${msgs}</div>
+      <div class="chat-chips">${chips.map(c => `<button class="chip" onclick="sendChat(${JSON.stringify(c).replace(/"/g, '&quot;')})">${esc(c)}</button>`).join('')}</div>
+      <div class="chat-input">
+        <input type="text" id="chat-text" placeholder="Pide un video, el estado, tus proyectos…"
+               onkeydown="if(event.key==='Enter')sendChat()">
+        <button class="btn primary" id="chat-send" onclick="sendChat()">➤</button>
+      </div>
+    </div>`;
+  const sc = $('#chat-scroll'); sc.scrollTop = sc.scrollHeight;
+  if (!S.demo) $('#chat-text').focus();
+}
+
+function mmd(text) {
+  // mini-markdown: **negrita**, saltos y listas simples → HTML seguro
+  return esc(text)
+    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/«(.+?)»/g, '«<i>$1</i>»')
+    .replace(/\n/g, '<br>');
+}
+
+async function sendChat(preset) {
+  const inp = $('#chat-text');
+  const text = (preset !== undefined && typeof preset === 'string' ? preset : inp?.value || '').trim();
+  if (!text || S.chatBusy) return;
+  if (guardDemo()) return;
+  S.chat.push({ role: 'user', text });
+  S.chatBusy = true;
+  if (inp) inp.value = '';
+  renderAgent();
+  try {
+    const r = await api('/chat', { method: 'POST', body: { message: text,
+      history: S.chat.slice(-8).map(m => ({ role: m.role, text: m.text })) } });
+    const entry = { role: 'bot', text: r.reply || 'Hecho ✅', engine: r.engine,
+                    project: r.project, projects: r.projects };
+    S.chat.push(entry);
+    S.chatBusy = false;
+    renderAgent();
+    refreshAll();
+    if (r.action === 'create_video' && r.project && r.job_id) {
+      toast('🎬 Producción lanzada por el agente', 'ok');
+      showProgress(r.job_id, r.project.id);
+    }
+  } catch (e) {
+    S.chatBusy = false;
+    S.chat.push({ role: 'bot', text: '⚠️ ' + e.message });
+    renderAgent();
+  }
+}
+
+/* ── vista: AVATARES (v2.1) ──────────────────────────────── */
+const AV_FORM = { editing: null, fields: {} };
+
+function renderAvatars() {
+  $('#greet').innerHTML = `Avatares 🎭<small id="greet-sub">Personajes consistentes: misma cara, voz y estilo en todos tus videos</small>`;
+  if (AV_FORM.editing !== null) return renderAvatarForm();
+  const cards = S.avatars.map(a => {
+    const img = a.image_path ? `<img src="/api/avatars/${a.id}/image?v=${a.updated_at}" loading="lazy">`
+      : `<div class="av-ph">${esc((a.name || 'A').slice(0, 1).toUpperCase())}</div>`;
+    const look = Object.values(a.appearance || {}).slice(0, 3).join(' · ');
+    return `<div class="card av-card">
+      <div class="av-img">${img}</div>
+      <div class="av-body">
+        <b>${esc(a.name)}</b>
+        <small class="av-desc">${esc(a.description || 'Sin personalidad definida')}</small>
+        ${look ? `<small class="av-look">🎨 ${esc(look)}</small>` : ''}
+        <div class="av-meta">
+          ${a.voice ? `<span class="badge draft">🗣️ ${esc(voiceName(a.voice))}</span>` : ''}
+          ${a.style ? `<span class="badge draft">${esc(getStyleName(a.style))}</span>` : ''}
+        </div>
+        <div class="av-actions">
+          <button class="btn small ghost" onclick="editAvatar('${a.id}')">✏️ Editar</button>
+          <button class="btn small ghost" onclick="genAvatarImage('${a.id}', this)">🖼️ ${a.image_path ? 'Regenerar' : 'Imagen'}</button>
+          <button class="btn small danger ghost" onclick="delAvatar('${a.id}')">🗑</button>
+        </div>
+      </div></div>`;
+  }).join('');
+  $('#view').innerHTML = `
+    <div class="row" style="align-items:center;margin-bottom:14px">
+      <h2 class="sec" style="margin:0">🎭 Tus personajes (${S.avatars.length})</h2>
+      <button class="btn primary small" style="margin-left:auto" onclick="newAvatar()">➕ Nuevo avatar</button>
+    </div>
+    ${S.avatars.length ? `<div class="av-grid">${cards}</div>` :
+      `<div class="card empty"><div class="big">🎭</div>Crea tu primer personaje: misma apariencia, voz y estilo en todos sus videos.<br><br>
+       <button class="btn primary" onclick="newAvatar()">➕ Crear avatar</button></div>`}`;
+}
+
+function voiceName(id) {
+  const all = [...(S.settings.edge_voices || []), ...(S.settings.gemini_voices || [])];
+  return all.find(v => v.id === id)?.name || id;
+}
+
+function newAvatar() {
+  AV_FORM.editing = null;
+  AV_FORM.fields = { name: '', description: '', piel: '', ojos: '', cabello: '',
+                     cuerpo: '', ropa: '', voice: '', style: '' };
+  renderAvatarForm();
+}
+
+function editAvatar(id) {
+  const a = S.avatars.find(x => x.id === id);
+  if (!a) return;
+  const ap = a.appearance || {};
+  AV_FORM.editing = id;
+  AV_FORM.fields = { name: a.name || '', description: a.description || '',
+                     piel: ap.piel || '', ojos: ap.ojos || '', cabello: ap.cabello || '',
+                     cuerpo: ap.cuerpo || '', ropa: ap.estilo_ropa || ap.ropa || '',
+                     voice: a.voice || '', style: a.style || '' };
+  renderAvatarForm();
+}
+
+function renderAvatarForm() {
+  const f = AV_FORM.fields;
+  const edgeVoices = S.settings.edge_voices || [];
+  $('#view').innerHTML = `
+    <div class="card" style="max-width:760px;margin:0 auto">
+      <h2 class="sec" style="margin-top:0">${AV_FORM.editing ? '✏️ Editar avatar' : '🎭 Nuevo avatar'}</h2>
+      <div class="field"><label>Nombre del personaje *</label>
+        <input type="text" value="${esc(f.name)}" oninput="AV_FORM.fields.name=this.value" placeholder="Ej: Sofía Explora"></div>
+      <div class="field"><label>Personalidad / rol (afecta al guion)</label>
+        <textarea rows="2" oninput="AV_FORM.fields.description=this.value"
+          placeholder="Exploradora curiosa y enérgica que narra misterios con tono envolvente…">${esc(f.description)}</textarea></div>
+      <div class="row">
+        <div class="field"><label>Piel</label><input type="text" value="${esc(f.piel)}" oninput="AV_FORM.fields.piel=this.value" placeholder="morena"></div>
+        <div class="field"><label>Ojos</label><input type="text" value="${esc(f.ojos)}" oninput="AV_FORM.fields.ojos=this.value" placeholder="verdes"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Cabello</label><input type="text" value="${esc(f.cabello)}" oninput="AV_FORM.fields.cabello=this.value" placeholder="castaño rizado largo"></div>
+        <div class="field"><label>Vestuario</label><input type="text" value="${esc(f.ropa)}" oninput="AV_FORM.fields.ropa=this.value" placeholder="chaqueta de exploradora"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Voz (edge-tts)</label>
+          <select onchange="AV_FORM.fields.voice=this.value">
+            <option value="">— sin voz fija —</option>
+            ${edgeVoices.map(v => `<option value="${v.id}" ${f.voice === v.id ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}
+          </select></div>
+        <div class="field"><label>Estilo visual por defecto</label>
+          <select onchange="AV_FORM.fields.style=this.value">
+            <option value="">— sin estilo fijo —</option>
+            ${S.styles.map(s => `<option value="${s.id}" ${f.style === s.id ? 'selected' : ''}>${s.emoji} ${esc(s.name)}</option>`).join('')}
+          </select></div>
+      </div>
+      <small style="color:var(--muted);display:block;margin:4px 0 14px">💡 Al crear un video con este avatar, su apariencia se inyecta en cada escena para mantener el mismo personaje, y su voz/estilo se usan por defecto.</small>
+      <div style="display:flex;gap:10px">
+        <button class="btn primary" onclick="saveAvatar()">💾 Guardar avatar</button>
+        <button class="btn ghost" onclick="AV_FORM.editing=null;renderAvatars()">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+async function saveAvatar() {
+  if (guardDemo()) return;
+  const f = AV_FORM.fields;
+  if (!f.name.trim()) return toast('Ponle un nombre al personaje', 'err');
+  const body = { name: f.name.trim(), description: f.description.trim(),
+                 appearance: { piel: f.piel.trim(), ojos: f.ojos.trim(),
+                               cabello: f.cabello.trim(), estilo_ropa: f.ropa.trim() },
+                 voice: f.voice, style: f.style };
+  try {
+    if (AV_FORM.editing) await api(`/avatars/${AV_FORM.editing}`, { method: 'PATCH', body });
+    else await api('/avatars', { method: 'POST', body });
+    AV_FORM.editing = null;
+    await refreshAll();
+    renderAvatars();
+    toast('Avatar guardado ✅', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function genAvatarImage(id, btn) {
+  if (guardDemo()) return;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Generando…'; }
+  try {
+    const r = await api(`/avatars/${id}/image`, { method: 'POST' });
+    await refreshAll();
+    renderAvatars();
+    toast(r.method === 'gemini' ? 'Retrato IA generado 🎨' : 'Retrato generado (modo $0) 🎨', 'ok');
+  } catch (e) { toast(e.message, 'err'); if (btn) { btn.disabled = false; btn.textContent = '🖼️ Imagen'; } }
+}
+
+async function delAvatar(id) {
+  const a = S.avatars.find(x => x.id === id);
+  if (!a || !confirm(`¿Eliminar el avatar «${a.name}»? Los videos ya creados no se tocan.`)) return;
+  try { await api(`/avatars/${id}`, { method: 'DELETE' }); await refreshAll(); renderAvatars(); toast('Avatar eliminado'); }
+  catch (e) { toast(e.message, 'err'); }
+}
+
 /* ── datos de muestra para la DEMO web sin backend ───────── */
 const DEMO_STYLES = [
   {id:'graphic-novel',name:'Graphic Novel',emoji:'🖋️',desc:'Cómic negro con tinta dramática',grad:'linear-gradient(135deg,#1a1a2e,#e94560)'},
@@ -731,6 +988,7 @@ async function refreshAll() {
   const [stats, projects, factory, ideas] = await Promise.all([
     api('/stats'), api('/projects'), api('/factory'), api('/factory/ideas')]);
   S.stats = stats; S.projects = projects; S.factory = factory; S.ideas = ideas;
+  try { S.avatars = await api('/avatars'); } catch { S.avatars = []; }
 }
 
 (async function boot() {
@@ -763,6 +1021,13 @@ async function refreshAll() {
   if (S.demo) {
     S.styles = S.styles.length ? S.styles : [];
     $('#greet-sub').textContent = 'MODO DEMO — inicia el servidor backend';
+  }
+  if (!S.chat.length) {
+    S.chat = [{ role: 'bot', text: '¡Hola! Soy VÓRTICE 🤖, el agente de esta fábrica. '
+      + 'Pídeme lo que quieras en lenguaje natural:\n'
+      + '• «crea un video sobre el imperio romano»\n'
+      + '• «muéstrame mis proyectos»\n'
+      + '• «¿cómo va el video de las bermudas?»' }];
   }
   renderHome();
   // refresco suave de KPIs cada 20s

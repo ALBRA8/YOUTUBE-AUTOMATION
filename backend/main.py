@@ -19,15 +19,18 @@ from fastapi.staticfiles import StaticFiles
 from pipeline import images as imgs_pipeline
 from pipeline import orchestrator
 from pipeline.subtitles import words_to_srt
-from services import (gemini_client, scheduler, tts_service, url_mode,
-                      whisper_service, youtube_publish)
+from services import (agent as agent_svc, gemini_client, scheduler, tts_service,
+                      url_mode, whisper_service, youtube_publish)
 from services.themes import STYLES, get_style
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("main")
 
-app = FastAPI(title="YT Automation v2.0", version="2.0.0")
+app = FastAPI(title="YT Automation v2.0", version="2.1.0")
+
+AVATARS_DIR = DATA_DIR / "avatars"
+VALID_PLATFORMS = ("youtube", "tiktok", "instagram", "facebook")
 
 
 @app.middleware("http")
@@ -43,7 +46,7 @@ async def no_cache_ui(request, call_next):
 # ────────────────────────────────────────────────────────── básicos ──
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "version": "2.0.0", "gemini": gemini_client.available(),
+    return {"ok": True, "version": "2.1.0", "gemini": gemini_client.available(),
             "whisper": whisper_service.available(),
             "youtube": youtube_publish.configured()}
 
@@ -199,6 +202,166 @@ async def stats():
     return db.stats()
 
 
+# ─────────────────────────────── avatars (v2.1 · personajes) ──
+def _clean_appearance(raw) -> dict:
+    """Normaliza la apariencia del avatar a un dict limpio de strings."""
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for k, v in raw.items():
+        key = str(k).strip().lower().replace(" ", "_")[:30]
+        val = str(v).strip()[:60]
+        if key and val:
+            out[key] = val
+    return out
+
+
+@app.get("/api/avatars")
+async def avatars_list():
+    return db.list_avatars()
+
+
+@app.post("/api/avatars")
+async def avatars_create(body: dict):
+    name = (body.get("name") or "").strip()[:60]
+    if not name:
+        raise HTTPException(400, "el avatar necesita un nombre")
+    voice = (body.get("voice") or "").strip() or None
+    tts_provider = (body.get("tts_provider") or "").strip().lower() or None
+    if tts_provider and tts_provider not in ("edge", "gemini"):
+        raise HTTPException(400, "tts_provider debe ser edge o gemini")
+    style = (body.get("style") or "").strip() or None
+    av = db.create_avatar(
+        name=name,
+        description=(body.get("description") or "").strip()[:400],
+        appearance=_clean_appearance(body.get("appearance")),
+        voice=voice, tts_provider=tts_provider, style=style)
+    return av
+
+
+@app.patch("/api/avatars/{aid}")
+async def avatars_update(aid: str, body: dict):
+    av = db.get_avatar(aid)
+    if not av:
+        raise HTTPException(404, "avatar no existe")
+    fields = {}
+    if "name" in body:
+        name = (body.get("name") or "").strip()[:60]
+        if not name:
+            raise HTTPException(400, "el nombre no puede quedar vacío")
+        fields["name"] = name
+    for k in ("description", "voice", "style"):
+        if k in body:
+            fields[k] = (str(body.get(k) or "").strip() or None)
+    if "tts_provider" in body:
+        tp = (body.get("tts_provider") or "").strip().lower() or None
+        if tp and tp not in ("edge", "gemini"):
+            raise HTTPException(400, "tts_provider debe ser edge o gemini")
+        fields["tts_provider"] = tp
+    if "appearance" in body:
+        fields["appearance"] = _clean_appearance(body.get("appearance"))
+    if fields:
+        db.update_avatar(aid, **fields)
+    return db.get_avatar(aid)
+
+
+@app.delete("/api/avatars/{aid}")
+async def avatars_delete(aid: str):
+    av = db.get_avatar(aid)
+    if not av:
+        raise HTTPException(404, "avatar no existe")
+    if av.get("image_path"):
+        Path(av["image_path"]).unlink(missing_ok=True)
+    db.delete_avatar(aid)
+    return {"ok": True}
+
+
+@app.post("/api/avatars/{aid}/image")
+async def avatars_image(aid: str):
+    """Genera el retrato del avatar: Gemini si hay clave; si no, retrato
+    local elegante con Pillow (coste $0)."""
+    av = db.get_avatar(aid)
+    if not av:
+        raise HTTPException(404, "avatar no existe")
+    AVATARS_DIR.mkdir(parents=True, exist_ok=True)
+    out = AVATARS_DIR / f"{aid}.png"
+    ap = av.get("appearance") or {}
+    look_en = ", ".join(str(v) for v in ap.values() if v)
+    prompt = (f"cinematic portrait of a character named {av['name']}, "
+              f"{av.get('description', 'charismatic narrator')}, {look_en}, "
+              "front facing, studio lighting, ultra detailed, 4k")
+    method = "placeholder"
+    if gemini_client.available():
+        try:
+            data = await gemini_client.generate_image(prompt)
+            out.write_bytes(data)
+            method = "gemini"
+        except Exception as e:  # noqa: BLE001
+            log.warning("Retrato Gemini falló: %s", str(e)[:120])
+    if method == "placeholder":
+        _avatar_placeholder(out, av)
+    db.update_avatar(aid, image_path=str(out))
+    return {"ok": True, "method": method, "image_url": f"/api/avatars/{aid}/image"}
+
+
+def _avatar_placeholder(out: Path, av: dict) -> None:
+    """Retrato local con Pillow: gradiente según estilo + iniciales grandes."""
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        out.write_bytes(b"")
+        return
+    grad = next((s["grad"] for s in STYLES
+                 if s["id"] == (av.get("style") or "")),
+                "linear-gradient(135deg,#1a1a2e,#e94560)")
+    c1, c2 = grad.replace("linear-gradient(135deg,", "").rstrip(")").split(",")
+    W, H = 768, 768
+    img = Image.new("RGB", (W, H), c1.strip())
+    draw = ImageDraw.Draw(img)
+    c2rgb = tuple(int(c2.strip().lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
+    for y in range(H):
+        t = y / H
+        rgb = tuple(int(int(c1.strip().lstrip("#")[i:i + 2], 16) * (1 - t) + c2rgb[i] * t)
+                    for i in range(3))
+        draw.line([(0, y), (W, y)], fill=rgb)
+    initials = "".join(w[0] for w in av["name"].split()[:2]).upper() or "A"
+    try:
+        from PIL import ImageFont
+        font = ImageFont.truetype(
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 240)
+    except Exception:  # noqa: BLE001
+        font = None
+    bbox = draw.textbbox((0, 0), initials, font=font) if font else (0, 0, 200, 240)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    draw.text(((W - tw) / 2 - bbox[0], (H - th) / 2 - bbox[1]), initials,
+              fill=(255, 255, 255), font=font)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    img.save(out)
+
+
+@app.get("/api/avatars/{aid}/image")
+async def avatars_image_get(aid: str):
+    av = db.get_avatar(aid)
+    if not av or not av.get("image_path") or not Path(av["image_path"]).exists():
+        raise HTTPException(404, "sin imagen")
+    return FileResponse(av["image_path"], media_type="image/png")
+
+
+# ────────────────────────────── chat-agente (v2.1) ──
+@app.post("/api/chat")
+async def chat(body: dict):
+    """Agente conversacional: traduce lenguaje natural en acciones reales del
+    motor (crear videos, consultar proyectos/estado)."""
+    message = (body.get("message") or "").strip()
+    history = body.get("history") or []
+    if not message:
+        raise HTTPException(400, "mensaje vacío")
+    plan = await agent_svc.plan(message, history, db.list_avatars())
+    result = await agent_svc.execute(plan, db, orchestrator, db.list_avatars())
+    result["engine"] = plan.get("engine", "local")
+    return result
+
+
 # ──────────────────────────────────────────────────────── proyectos ──
 @app.get("/api/projects")
 async def projects():
@@ -239,10 +402,28 @@ async def create_project(body: dict):
     if body.get("custom_style_prompt"):
         meta["custom_style_prompt"] = body["custom_style_prompt"].strip()
 
+    # v2.1 — avatar + plataformas multi-red
+    avatar_id = (body.get("avatar_id") or "").strip() or None
+    voice = body.get("voice") or None
+    tts_provider = body.get("tts_provider") or None
+    style = body.get("style", "graphic-novel")
+    if avatar_id and not db.get_avatar(avatar_id):
+        avatar_id = None
+    if avatar_id:
+        av = db.get_avatar(avatar_id)
+        voice = voice or av.get("voice")
+        tts_provider = tts_provider or av.get("tts_provider")
+        style = style or av.get("style") or style
+    platforms = body.get("platforms")
+    if not isinstance(platforms, list):
+        platforms = ["youtube"]
+    platforms = [p for p in platforms if p in VALID_PLATFORMS] or ["youtube"]
+
     project = db.create_project(
-        title=title, mode=mode, style=body.get("style", "graphic-novel"),
-        format=body.get("format", "short"), voice=body.get("voice"),
-        tts_provider=body.get("tts_provider"), meta=meta)
+        title=title, mode=mode, style=style,
+        format=body.get("format", "short"), voice=voice,
+        tts_provider=tts_provider, meta=meta,
+        avatar_id=avatar_id, platforms=platforms)
     return project
 
 
@@ -264,6 +445,15 @@ async def patch_project(pid: str, body: dict):
         raise HTTPException(404, "no existe")
     fields = {k: v for k, v in body.items()
               if k in ("title", "style", "format", "voice", "tts_provider")}
+    if "avatar_id" in body:
+        aid = (body.get("avatar_id") or "").strip() or None
+        if aid and not db.get_avatar(aid):
+            aid = None
+        fields["avatar_id"] = aid
+    if "platforms" in body:
+        plats = body.get("platforms")
+        fields["platforms"] = ([p for p in plats if p in VALID_PLATFORMS]
+                               if isinstance(plats, list) else ["youtube"])
     meta_patch = body.get("meta_patch")
     if meta_patch:
         fields["meta"] = {**(p.get("meta") or {}), **meta_patch}

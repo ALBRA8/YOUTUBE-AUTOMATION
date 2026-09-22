@@ -1,0 +1,55 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Hormozi,Impact,119,&H0033FFFF,&H00FFFFFF,&H00000000,&H7F000000,-1,0,0,0,100,100,1,0,1,9,4,5,60,60,576,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:00.35,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}¿Crees que ya
+Dialogue: 0,0:00:00.35,0:00:00.71,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}lo sabes todo
+Dialogue: 0,0:00:00.71,0:00:01.06,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}sobre los agujeros
+Dialogue: 0,0:00:01.06,0:00:01.41,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}negros con Capitán
+Dialogue: 0,0:00:01.41,0:00:01.76,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}Nova? Espera a
+Dialogue: 0,0:00:01.76,0:00:02.46,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}escuchar esto. Empecemos
+Dialogue: 0,0:00:02.46,0:00:02.77,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}por lo básico:
+Dialogue: 0,0:00:02.77,0:00:03.09,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}los agujeros negros
+Dialogue: 0,0:00:03.09,0:00:03.40,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}con Capitán Nova
+Dialogue: 0,0:00:03.40,0:00:03.72,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}guarda detalles que
+Dialogue: 0,0:00:03.72,0:00:04.03,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}la ciencia apenas
+Dialogue: 0,0:00:04.03,0:00:04.35,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}empieza a entender.
+Dialogue: 0,0:00:04.70,0:00:05.05,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}Los expertos llevan
+Dialogue: 0,0:00:05.05,0:00:05.41,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}años estudiando los
+Dialogue: 0,0:00:05.41,0:00:05.76,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}agujeros negros con
+Dialogue: 0,0:00:05.76,0:00:06.11,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}Capitán Nova, y
+Dialogue: 0,0:00:06.11,0:00:06.46,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}cada descubrimiento contradice
+Dialogue: 0,0:00:06.46,0:00:07.17,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}al anterior. Aquí
+Dialogue: 0,0:00:07.17,0:00:07.52,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}viene lo increíble:
+Dialogue: 0,0:00:07.52,0:00:07.87,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}detrás de los
+Dialogue: 0,0:00:07.87,0:00:08.23,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}agujeros negros con
+Dialogue: 0,0:00:08.23,0:00:08.58,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}Capitán Nova hay
+Dialogue: 0,0:00:08.58,0:00:08.93,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}historias que parecen
+Dialogue: 0,0:00:08.93,0:00:09.63,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}inventadas. Y no,
+Dialogue: 0,0:00:09.63,0:00:09.99,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}no es ciencia
+Dialogue: 0,0:00:09.99,0:00:10.34,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}ficción: todo esto
+Dialogue: 0,0:00:10.34,0:00:10.69,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}está documentado sobre
+Dialogue: 0,0:00:10.69,0:00:11.05,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}los agujeros negros
+Dialogue: 0,0:00:11.05,0:00:11.40,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}con Capitán Nova.
+Dialogue: 0,0:00:11.75,0:00:12.04,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}Y ahora, el
+Dialogue: 0,0:00:12.04,0:00:12.32,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}dato que lo
+Dialogue: 0,0:00:12.32,0:00:12.61,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}cambia todo: lo
+Dialogue: 0,0:00:12.61,0:00:12.89,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}que descubrieron sobre
+Dialogue: 0,0:00:12.89,0:00:13.18,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}los agujeros negros
+Dialogue: 0,0:00:13.18,0:00:13.46,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}con Capitán Nova
+Dialogue: 0,0:00:13.46,0:00:13.75,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}supera cualquier predicción.
+Dialogue: 0,0:00:14.10,0:00:14.45,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}Si quieres más
+Dialogue: 0,0:00:14.45,0:00:14.81,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}secretos sobre los
+Dialogue: 0,0:00:14.81,0:00:15.16,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}agujeros negros con
+Dialogue: 0,0:00:15.16,0:00:15.51,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}Capitán Nova, sígueme:
+Dialogue: 0,0:00:15.51,0:00:15.87,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}cada día desvelamos
+Dialogue: 0,0:00:15.87,0:00:16.10,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}algo nuevo.

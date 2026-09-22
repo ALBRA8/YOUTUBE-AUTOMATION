@@ -61,11 +61,27 @@ Sin Whisper, los tiempos de subtítulo se estiman (funciona bien, pero el exacto
 
 ## 🧭 El flujo en el dashboard
 
+### 🤖 Agente VÓRTICE (nuevo en v2.1) — habla con tu fábrica
+Chat conversacional que ejecuta acciones reales del motor:
+- «**crea un video sobre el imperio romano**» → produce el video completo y abre el progreso
+- «**muéstrame mis proyectos**» → lista clicable con el estado de cada uno
+- «**¿cómo va el video de las bermudas?**» → estado y avance
+- «**crea un video de misterios con Sofía Explora**» → vincula tu avatar/personaje automáticamente
+
+Funciona con Gemini (respuestas redactadas por IA) o sin clave (detección de intención local, coste $0). Nunca se rompe.
+
+### 🎭 Avatares (nuevo en v2.1) — personajes consistentes
+Crea un personaje con nombre, personalidad, apariencia (piel/ojos/cabello/vestuario), voz y estilo visual por defecto. Al usarlo en un video:
+- La **personalidad** guía el tono del guion
+- La **apariencia** se inyecta en todas las escenas para mantener el mismo personaje
+- Su **voz y estilo** se usan automáticamente
+- Retrato del avatar: IA de Gemini o generación local $0
+
 ### Crear (wizard de 4 pasos, como Labsia y mejorado)
 1. **Modo** — 📜 Guion · 💡 Idea · 🔗 **URL** · 🎙️ Audio
 2. **Formato** — Short 9:16 (1080×1920) o Largo 16:9 (1920×1080)
 3. **Estilo** — 25 estilos (los 20 de Labsia + 5 exclusivos v2: MRI Brainrot, Claymation, Barroqueremax, Holo-Ghost, Papercraft) + Custom Studio
-4. **Detalles** — tu entrada, voz, título interno → **🚀 Crear**
+4. **Detalles** — tu entrada, avatar opcional, plataformas destino (▶️ YouTube · 🎵 TikTok · 📷 Instagram · 👤 Facebook), voz, título → **🚀 Crear**
 
 Veras el progreso en vivo por pasos (guion → imágenes → locución → render → subtítulos). Al terminar, el editor de escenas se abre solo.
 
@@ -85,6 +101,7 @@ Veras el progreso en vivo por pasos (guion → imágenes → locución → rende
 
 ### 📺 Publicar en YouTube
 Ver §Configurar YouTube abajo. El video se sube con OAuth de tu propio canal; puedes programar fecha/hora.
+Si elegiste TikTok/Instagram/Facebook en el wizard, el editor muestra el **kit multi-plataforma**: descargas el MP4 9:16 y lo subes en cada red (la API de TikTok requiere aprobación externa; no fingimos botones que no funcionan).
 
 ---
 

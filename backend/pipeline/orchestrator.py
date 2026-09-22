@@ -98,6 +98,17 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
         meta = project.get("meta") or {}
         viral_ctx = None
 
+        # Avatar (personaje consistente): se carga una vez y se inyecta en
+        # meta para guion (personalidad) e imágenes (apariencia estable).
+        avatar = None
+        if project.get("avatar_id"):
+            avatar = db.get_avatar(project["avatar_id"])
+            if avatar:
+                meta["avatar"] = {"name": avatar["name"],
+                                  "description": avatar.get("description", ""),
+                                  "appearance": avatar.get("appearance") or {}}
+                db.update_project(project_id, meta=meta)
+
         if project["mode"] == "url" and meta.get("source_url"):
             await _emit(job_id, project_id, "importing", 3,
                         "Descargando audio del video viral…")
@@ -123,20 +134,21 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
         if project["mode"] == "script" and meta.get("script_text"):
             raw = await script_gen.from_script(
                 meta["script_text"], project["style"], project["format"],
-                meta.get("custom_style_prompt"))
+                meta.get("custom_style_prompt"), avatar)
         elif project["mode"] == "url" and viral_ctx:
             raw = await script_gen.from_url_transcript(
                 viral_ctx["metadata"], viral_ctx["transcript"],
-                project["style"], project["format"], meta.get("custom_style_prompt"))
+                project["style"], project["format"], meta.get("custom_style_prompt"),
+                avatar)
         elif project["mode"] == "audio" and meta.get("audio_text"):
             raw = await script_gen.from_audio_transcript(
                 meta["audio_text"], project["style"], project["format"],
-                meta.get("custom_style_prompt"))
+                meta.get("custom_style_prompt"), avatar)
         else:
             await _emit(job_id, project_id, "scripting", 10, "Generando guion viral…")
             raw = await script_gen.from_idea(
                 meta.get("idea") or project["title"], project["style"],
-                project["format"], meta.get("custom_style_prompt"))
+                project["format"], meta.get("custom_style_prompt"), avatar)
 
         result = script_gen.build_result(raw)
         if not result["scenes"]:
