@@ -11,6 +11,7 @@ from pathlib import Path
 import database as db
 from config import OUTPUT_DIR
 from services import gemini_client
+from services import avatar_schema
 from services.themes import get_style
 
 log = logging.getLogger("images")
@@ -33,16 +34,11 @@ def full_prompt(scene: dict, project: dict) -> str:
     style_desc = custom or style["prompt"]
     extra = ", no text, no letters, no watermark"
     # Consistencia de personaje: si el proyecto tiene avatar, fijamos su
-    # apariencia en inglés en TODOS los prompts para que el personaje sea igual
-    # en cada escena (misma cara, cabello y vestuario).
+    # apariencia (traducida a inglés por el schema PRO) en TODOS los prompts
+    # para que el personaje sea igual en cada escena.
     avatar = (project.get("meta") or {}).get("avatar") or None
     if avatar:
-        ap = avatar.get("appearance") or {}
-        bits = [f"{k.replace('_', ' ')} {v}" for k, v in ap.items() if v]
-        if bits or avatar.get("name"):
-            extra += (f", consistent recurring character named {avatar.get('name', '')}"
-                      + (": " + ", ".join(bits) if bits else "")
-                      + ", same face and outfit in every scene")
+        extra += (", " + avatar_schema.scene_suffix(avatar))
     return f"{scene['image_prompt']}, {style_desc}{extra}"
 
 

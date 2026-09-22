@@ -315,6 +315,23 @@ code.mini { background: var(--bg2); border: 1px solid var(--border); border-radi
 .plat-check.on { border-color: var(--accent2); color: var(--accent2); background: rgba(0, 224, 198, .07); }
 .nav-item .tag { font-size: 9px; padding: 2px 7px; }
 
+/* ── v2.1.1 · avatares PRO (desplegables + chips + prompts) ── */
+.av-chips { display: flex; gap: 5px; flex-wrap: wrap; }
+.av-chips .chip { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 10.8px; font-weight: 700;
+  background: rgba(124, 92, 255, .12); border: 1px solid rgba(124, 92, 255, .35); color: var(--accent2); }
+.av-sec { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px 4px; margin: 10px 0 14px; background: var(--bg2); }
+.av-sec-title { font-size: 12px; font-weight: 800; letter-spacing: .4px; text-transform: uppercase; color: var(--accent2); margin-bottom: 12px; }
+.av-form-pro select, .av-form-pro input { max-width: 100%; }
+.prompt-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .62); backdrop-filter: blur(6px);
+  display: grid; place-items: center; z-index: 90; padding: 20px; }
+.prompt-modal { width: min(720px, 100%); max-height: 86vh; overflow: auto; padding: 22px 24px; }
+.prompt-block { margin: 14px 0; }
+.prompt-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.prompt-head small { color: var(--muted); }
+.prompt-block pre { white-space: pre-wrap; word-break: break-word; font-size: 12.2px; line-height: 1.55;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin: 0 0 6px;
+  font-family: ui-monospace, 'Sarasa Mono SC', monospace; }
+
 /* ── v2.1 · banner del agente en Inicio ─────────────────── */
 .agent-banner { display: flex; align-items: center; gap: 16px; padding: 16px 20px; border-radius: var(--radius); cursor: pointer;
   background: linear-gradient(120deg, rgba(124, 92, 255, .16), rgba(0, 224, 198, .1)); border: 1px solid rgba(124, 92, 255, .35); margin-bottom: 18px; transition: transform .15s, border-color .15s; }

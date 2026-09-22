@@ -70,11 +70,14 @@ Chat conversacional que ejecuta acciones reales del motor:
 
 Funciona con Gemini (respuestas redactadas por IA) o sin clave (detección de intención local, coste $0). Nunca se rompe.
 
-### 🎭 Avatares (nuevo en v2.1) — personajes consistentes
-Crea un personaje con nombre, personalidad, apariencia (piel/ojos/cabello/vestuario), voz y estilo visual por defecto. Al usarlo en un video:
-- La **personalidad** guía el tono del guion
-- La **apariencia** se inyecta en todas las escenas para mantener el mismo personaje
-- Su **voz y estilo** se usan automáticamente
+### 🎭 Avatares PRO (v2.1.1) — personajes consistentes con menús desplegables
+Crea un personaje completo con **15 menús desplegables** (89 opciones): género, edad aparente, tono de piel, color y forma de ojos, cabello (color/largo/textura), tipo de cuerpo, estilo de ropa, maquillaje, arquetipo (12: Rebelde, Seductora, Exploradora, Sabio Mentor…), personalidad, acento al hablar (costeño, bogotano, paisa, mexicano…) y jerga regional — más texto libre para accesorios, referencia de influencer y otros detalles.
+Al usarlo en un video:
+- Cada característica se **traduce a inglés y se inyecta en los prompts reales** (ver el botón 📄 Prompt del avatar: retrato + consistencia de escenas + persona del guion)
+- La **apariencia** acompaña a TODAS las escenas para mantener el mismo personaje
+- El **arquetipo/acento/jerga** moldean narración y tono del guion
+- Al elegir el **acento** se sugiere automáticamente una voz edge-tts acorde (10 voces es-*)
+- Su **voz y estilo visual** se usan por defecto en cada video
 - Retrato del avatar: IA de Gemini o generación local $0
 
 ### Crear (wizard de 4 pasos, como Labsia y mejorado)

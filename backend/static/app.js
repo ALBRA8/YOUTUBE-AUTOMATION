@@ -807,22 +807,109 @@ async function sendChat(preset) {
   }
 }
 
-/* ── vista: AVATARES (v2.1) ──────────────────────────────── */
+/* ── vista: AVATARES (v2.1.1 PRO con menús desplegables) ── */
 const AV_FORM = { editing: null, fields: {} };
 
-function renderAvatars() {
+/* Opciones PRO — espejo de backend/services/avatar_schema.py.
+   Se refresca en vivo desde /api/avatars/schema; esto es el fallback. */
+const AV_OPTS_FALLBACK = {
+  genero: ['Femenino', 'Masculino', 'Andrógino'],
+  edad: ['18-24', '25-34', '35-44', '45-54', '55+'],
+  piel: ['Clara', 'Media', 'Morena', 'Oscura'],
+  ojos_color: ['Azules', 'Verdes', 'Marrones', 'Negros', 'Grises', 'Avellana'],
+  ojos_forma: ['Almendrados', 'Redondos', 'Rasgados', 'Caídos'],
+  cabello_color: ['Rubio', 'Castaño', 'Negro', 'Pelirrojo', 'Gris plateado', 'Degradado', 'Azul eléctrico', 'Rosa pastel'],
+  cabello_largo: ['Corto', 'Mediano', 'Largo', 'Extra largo'],
+  cabello_textura: ['Liso', 'Ondulado', 'Rizado', 'Afro'],
+  cuerpo: ['Delgado', 'Atlético', 'Curvilíneo', 'Voluptuoso', 'Robusto'],
+  ropa: ['Casual elegante', 'Streetwear', 'Formal', 'Deportivo', 'Bohemio', 'Aventurero', 'Vintage', 'Urbano oscuro'],
+  maquillaje: ['Natural', 'Glam', 'Dramático', 'Artístico', 'Ninguno'],
+  arquetipo: ['🔥 Rebelde', '💋 Seductora', '✨ Carismática', '💥 Explosiva', '🌙 Misteriosa', '🧠 Calculadora', '🎪 Playful', '👑 Empoderada', '🧭 Exploradora', '🔬 Científica', '🧙 Sabio Mentor', '🦸 Heroica'],
+  personalidad: ['Irreverente', 'Misteriosa', 'Carismática', 'Explosiva', 'Cálida', 'Intelectual', 'Optimista', 'Sarcástica', 'Inspiradora', 'Extrovertida'],
+  acento: ['Costeño', 'Bogotano', 'Paisa', 'Mexicano', 'Argentino', 'Neutro latino', 'España', 'Otro'],
+  jerga: ['Regional', 'Neutro', 'Mixto'],
+};
+const AV_LABELS = {
+  genero: 'Género', edad: 'Edad aparente', piel: 'Tono de piel',
+  ojos_color: 'Color de ojos', ojos_forma: 'Forma de ojos',
+  cabello_color: 'Color de cabello', cabello_largo: 'Largo de cabello',
+  cabello_textura: 'Textura de cabello', cuerpo: 'Tipo de cuerpo',
+  ropa: 'Estilo de ropa', maquillaje: 'Estilo de maquillaje',
+  arquetipo: 'Arquetipo', personalidad: 'Personalidad predominante',
+  acento: 'Acento al hablar', jerga: 'Tipo de jerga regional',
+};
+const AV_FIELDS = Object.keys(AV_OPTS_FALLBACK);   // 15 desplegables
+const AV_FREE = ['accesorios', 'referencia', 'extras']; // texto libre
+let AV_OPTS = null; // opciones vivas del backend cuando esté disponible
+
+async function loadAvatarSchema() {
+  if (AV_OPTS) return;
+  try { const s = await api('/avatars/schema'); AV_OPTS = s.options || AV_OPTS_FALLBACK; }
+  catch { AV_OPTS = AV_OPTS_FALLBACK; }
+}
+
+function avSelect(field, placeholder) {
+  const opts = (AV_OPTS && AV_OPTS[field]) || AV_OPTS_FALLBACK[field] || [];
+  const cur = AV_FORM.fields[field] || '';
+  return `<select onchange="AV_FORM.fields['${field}']=this.value${field === 'acento' ? ';suggestVoiceForAccent()' : ''}">
+    <option value="">${placeholder || '— sin especificar —'}</option>
+    ${opts.map(o => `<option ${cur === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}
+  </select>`;
+}
+function avFree(field, placeholder) {
+  return `<input type="text" value="${esc(AV_FORM.fields[field] || '')}"
+    oninput="AV_FORM.fields['${field}']=this.value" placeholder="${esc(placeholder)}">`;
+}
+function suggestVoiceForAccent() {
+  const a = AV_FORM.fields.acento, g = AV_FORM.fields.genero || 'Femenino';
+  if (!a || a === 'Otro') return;
+  const map = {
+    'Costeño':    { 'Femenino': 'es-CO-SalomeNeural', 'Masculino': 'es-CO-GonzaloNeural' },
+    'Bogotano':   { 'Femenino': 'es-CO-SalomeNeural', 'Masculino': 'es-CO-GonzaloNeural' },
+    'Paisa':      { 'Femenino': 'es-CO-SalomeNeural', 'Masculino': 'es-CO-GonzaloNeural' },
+    'Mexicano':   { 'Femenino': 'es-MX-DaliaNeural', 'Masculino': 'es-MX-JorgeNeural' },
+    'Argentino':  { 'Femenino': 'es-AR-ElenaNeural', 'Masculino': 'es-AR-TomasNeural' },
+    'Neutro latino': { 'Femenino': 'es-US-IsabellaNeural', 'Masculino': 'es-US-AlonsoNeural' },
+    'España':     { 'Femenino': 'es-ES-ElviraNeural', 'Masculino': 'es-ES-AlvaroNeural' },
+  };
+  const vid = (map[a] || {})[g];
+  if (vid && (S.settings.edge_voices || []).some(v => v.id === vid)) {
+    AV_FORM.fields.voice = vid;
+    const sel = document.querySelector('#av-voice-select');
+    if (sel) sel.value = vid;
+    toast(`🗣️ Voz sugerida por acento ${a}: ${voiceName(vid)}`, 'ok');
+  }
+}
+
+function avatarChips(a) {
+  const ap = a.appearance || {};
+  const chips = [];
+  if (ap.arquetipo) chips.push(esc(ap.arquetipo));
+  if (ap.personalidad) chips.push(esc(ap.personalidad));
+  if (ap.genero || ap.edad) chips.push(esc([ap.genero, ap.edad].filter(Boolean).join(' · ')));
+  if (ap.piel) chips.push('piel ' + esc(ap.piel.toLowerCase()));
+  if (ap.ojos_color) chips.push('ojos ' + esc(ap.ojos_color.toLowerCase()));
+  const hair = [ap.cabello_largo, ap.cabello_textura, ap.cabello_color].filter(Boolean).join(' ').toLowerCase();
+  if (hair) chips.push(' cabello ' + esc(hair));
+  if (ap.cuerpo) chips.push(esc(ap.cuerpo.toLowerCase()));
+  if (ap.ropa) chips.push(esc(ap.ropa.toLowerCase()));
+  if (ap.acento) chips.push('🎙️ ' + esc(ap.acento));
+  return chips.map(c => `<span class="chip">${c.trim()}</span>`).join('');
+}
+
+async function renderAvatars() {
+  await loadAvatarSchema();          // opciones vivas del backend (fallback local)
   $('#greet').innerHTML = `Avatares 🎭<small id="greet-sub">Personajes consistentes: misma cara, voz y estilo en todos tus videos</small>`;
   if (AV_FORM.editing !== null) return renderAvatarForm();
   const cards = S.avatars.map(a => {
     const img = a.image_path ? `<img src="/api/avatars/${a.id}/image?v=${a.updated_at}" loading="lazy">`
       : `<div class="av-ph">${esc((a.name || 'A').slice(0, 1).toUpperCase())}</div>`;
-    const look = Object.values(a.appearance || {}).slice(0, 3).join(' · ');
     return `<div class="card av-card">
       <div class="av-img">${img}</div>
       <div class="av-body">
         <b>${esc(a.name)}</b>
         <small class="av-desc">${esc(a.description || 'Sin personalidad definida')}</small>
-        ${look ? `<small class="av-look">🎨 ${esc(look)}</small>` : ''}
+        <div class="av-chips">${avatarChips(a) || '<small class="av-look">Sin características aún</small>'}</div>
         <div class="av-meta">
           ${a.voice ? `<span class="badge draft">🗣️ ${esc(voiceName(a.voice))}</span>` : ''}
           ${a.style ? `<span class="badge draft">${esc(getStyleName(a.style))}</span>` : ''}
@@ -830,6 +917,7 @@ function renderAvatars() {
         <div class="av-actions">
           <button class="btn small ghost" onclick="editAvatar('${a.id}')">✏️ Editar</button>
           <button class="btn small ghost" onclick="genAvatarImage('${a.id}', this)">🖼️ ${a.image_path ? 'Regenerar' : 'Imagen'}</button>
+          <button class="btn small ghost" onclick="showAvatarPrompt('${a.id}')">📄 Prompt</button>
           <button class="btn small danger ghost" onclick="delAvatar('${a.id}')">🗑</button>
         </div>
       </div></div>`;
@@ -849,10 +937,16 @@ function voiceName(id) {
   return all.find(v => v.id === id)?.name || id;
 }
 
+function blankAvatarFields() {
+  const f = { name: '', description: '', voice: '', style: '' };
+  AV_FIELDS.forEach(k => f[k] = '');
+  AV_FREE.forEach(k => f[k] = '');
+  return f;
+}
+
 function newAvatar() {
   AV_FORM.editing = null;
-  AV_FORM.fields = { name: '', description: '', piel: '', ojos: '', cabello: '',
-                     cuerpo: '', ropa: '', voice: '', style: '' };
+  AV_FORM.fields = blankAvatarFields();
   renderAvatarForm();
 }
 
@@ -861,45 +955,55 @@ function editAvatar(id) {
   if (!a) return;
   const ap = a.appearance || {};
   AV_FORM.editing = id;
-  AV_FORM.fields = { name: a.name || '', description: a.description || '',
-                     piel: ap.piel || '', ojos: ap.ojos || '', cabello: ap.cabello || '',
-                     cuerpo: ap.cuerpo || '', ropa: ap.estilo_ropa || ap.ropa || '',
-                     voice: a.voice || '', style: a.style || '' };
+  AV_FORM.fields = blankAvatarFields();
+  AV_FORM.fields.name = a.name || '';
+  AV_FORM.fields.description = a.description || '';
+  AV_FORM.fields.voice = a.voice || '';
+  AV_FORM.fields.style = a.style || '';
+  AV_FIELDS.concat(AV_FREE).forEach(k => { if (ap[k]) AV_FORM.fields[k] = ap[k]; });
   renderAvatarForm();
 }
 
 function renderAvatarForm() {
   const f = AV_FORM.fields;
   const edgeVoices = S.settings.edge_voices || [];
+  const sec = (title, inner) => `
+    <div class="av-sec"><div class="av-sec-title">${title}</div>${inner}</div>`;
+  const grid2 = (pairs) => `<div class="row">${pairs.map(p =>
+    `<div class="field"><label>${p[0]}</label>${p[1]}</div>`).join('')}</div>`;
   $('#view').innerHTML = `
-    <div class="card" style="max-width:760px;margin:0 auto">
-      <h2 class="sec" style="margin-top:0">${AV_FORM.editing ? '✏️ Editar avatar' : '🎭 Nuevo avatar'}</h2>
-      <div class="field"><label>Nombre del personaje *</label>
-        <input type="text" value="${esc(f.name)}" oninput="AV_FORM.fields.name=this.value" placeholder="Ej: Sofía Explora"></div>
-      <div class="field"><label>Personalidad / rol (afecta al guion)</label>
+    <div class="card av-form-pro" style="max-width:860px;margin:0 auto">
+      <h2 class="sec" style="margin-top:0">${AV_FORM.editing ? '✏️ Editar avatar' : '🎭 Nuevo avatar PRO'}</h2>
+      <div class="row">
+        <div class="field" style="flex:1.2"><label>Nombre del personaje *</label>
+          <input type="text" value="${esc(f.name)}" oninput="AV_FORM.fields.name=this.value" placeholder="Ej: Sofía Explora"></div>
+        <div class="field"><label>${AV_LABELS.arquetipo}</label>${avSelect('arquetipo')}</div>
+        <div class="field"><label>${AV_LABELS.personalidad}</label>${avSelect('personalidad')}</div>
+      </div>
+      <div class="field"><label>Personalidad / rol en detalle (afecta al guion)</label>
         <textarea rows="2" oninput="AV_FORM.fields.description=this.value"
           placeholder="Exploradora curiosa y enérgica que narra misterios con tono envolvente…">${esc(f.description)}</textarea></div>
-      <div class="row">
-        <div class="field"><label>Piel</label><input type="text" value="${esc(f.piel)}" oninput="AV_FORM.fields.piel=this.value" placeholder="morena"></div>
-        <div class="field"><label>Ojos</label><input type="text" value="${esc(f.ojos)}" oninput="AV_FORM.fields.ojos=this.value" placeholder="verdes"></div>
-      </div>
-      <div class="row">
-        <div class="field"><label>Cabello</label><input type="text" value="${esc(f.cabello)}" oninput="AV_FORM.fields.cabello=this.value" placeholder="castaño rizado largo"></div>
-        <div class="field"><label>Vestuario</label><input type="text" value="${esc(f.ropa)}" oninput="AV_FORM.fields.ropa=this.value" placeholder="chaqueta de exploradora"></div>
-      </div>
-      <div class="row">
-        <div class="field"><label>Voz (edge-tts)</label>
-          <select onchange="AV_FORM.fields.voice=this.value">
+      ${sec('🎨 Rostro', grid2([[AV_LABELS.piel, avSelect('piel')],
+        [AV_LABELS.ojos_color, avSelect('ojos_color')], [AV_LABELS.ojos_forma, avSelect('ojos_forma')]])
+        + grid2([[AV_LABELS.cabello_color, avSelect('cabello_color')],
+        [AV_LABELS.cabello_largo, avSelect('cabello_largo')], [AV_LABELS.cabello_textura, avSelect('cabello_textura')]]))}
+      ${sec('🧍 Cuerpo y estilo', grid2([[AV_LABELS.genero, avSelect('genero')],
+        [AV_LABELS.edad, avSelect('edad')], [AV_LABELS.cuerpo, avSelect('cuerpo')]])
+        + grid2([[AV_LABELS.ropa, avSelect('ropa')], [AV_LABELS.maquillaje, avSelect('maquillaje')],
+        ['Accesorios distintivos', avFree('accesorios', 'Ej: aretes dorados, gafas de aviador')]])
+        + grid2([['Referencia de influencer', avFree('referencia', 'Ej: Kylie Jenner, Chiara Ferragni')],
+        ['Otros detalles (texto libre)', avFree('extras', 'Ej: cicatriz en la ceja, tatuaje de brújula')]]))}
+      ${sec('🎙️ Voz y habla', grid2([[AV_LABELS.acento, avSelect('acento')],
+        [AV_LABELS.jerga, avSelect('jerga')],
+        ['Voz (edge-tts)', `<select id="av-voice-select" onchange="AV_FORM.fields.voice=this.value">
             <option value="">— sin voz fija —</option>
             ${edgeVoices.map(v => `<option value="${v.id}" ${f.voice === v.id ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}
-          </select></div>
-        <div class="field"><label>Estilo visual por defecto</label>
-          <select onchange="AV_FORM.fields.style=this.value">
+          </select>`]])
+        + grid2([['Estilo visual por defecto', `<select onchange="AV_FORM.fields.style=this.value">
             <option value="">— sin estilo fijo —</option>
             ${S.styles.map(s => `<option value="${s.id}" ${f.style === s.id ? 'selected' : ''}>${s.emoji} ${esc(s.name)}</option>`).join('')}
-          </select></div>
-      </div>
-      <small style="color:var(--muted);display:block;margin:4px 0 14px">💡 Al crear un video con este avatar, su apariencia se inyecta en cada escena para mantener el mismo personaje, y su voz/estilo se usan por defecto.</small>
+          </select>`]]))}
+      <small style="color:var(--muted);display:block;margin:4px 0 14px">💡 Cada característica se traduce a inglés y se inyecta en el retrato del avatar, en TODAS las escenas del video (consistencia del personaje) y en el guion (arquetipo, acento y jerga). Al elegir acento se sugiere una voz edge-tts acorde.</small>
       <div style="display:flex;gap:10px">
         <button class="btn primary" onclick="saveAvatar()">💾 Guardar avatar</button>
         <button class="btn ghost" onclick="AV_FORM.editing=null;renderAvatars()">Cancelar</button>
@@ -911,10 +1015,10 @@ async function saveAvatar() {
   if (guardDemo()) return;
   const f = AV_FORM.fields;
   if (!f.name.trim()) return toast('Ponle un nombre al personaje', 'err');
+  const appearance = {};
+  AV_FIELDS.concat(AV_FREE).forEach(k => { const v = (f[k] || '').trim(); if (v) appearance[k] = v; });
   const body = { name: f.name.trim(), description: f.description.trim(),
-                 appearance: { piel: f.piel.trim(), ojos: f.ojos.trim(),
-                               cabello: f.cabello.trim(), estilo_ropa: f.ropa.trim() },
-                 voice: f.voice, style: f.style };
+                 appearance, voice: f.voice, style: f.style };
   try {
     if (AV_FORM.editing) await api(`/avatars/${AV_FORM.editing}`, { method: 'PATCH', body });
     else await api('/avatars', { method: 'POST', body });
@@ -923,6 +1027,37 @@ async function saveAvatar() {
     renderAvatars();
     toast('Avatar guardado ✅', 'ok');
   } catch (e) { toast(e.message, 'err'); }
+}
+
+async function showAvatarPrompt(id) {
+  let p;
+  try { p = await api(`/avatars/${id}/prompt`); }
+  catch (e) { return toast(e.message, 'err'); }
+  const block = (title, text, hint) => `
+    <div class="prompt-block">
+      <div class="prompt-head"><b>${title}</b>${hint ? `<small>${hint}</small>` : ''}</div>
+      <pre>${esc(text)}</pre>
+      <button class="btn small ghost" onclick="copyText(this.previousElementSibling.textContent)">📋 Copiar</button>
+    </div>`;
+  const ov = document.createElement('div');
+  ov.className = 'prompt-overlay';
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  ov.innerHTML = `<div class="prompt-modal card">
+    <div class="row" style="align-items:center;margin-bottom:8px">
+      <h3 style="margin:0">📄 Prompts de «${esc(p.name)}»</h3>
+      <button class="btn small ghost" style="margin-left:auto" onclick="this.closest('.prompt-overlay').remove()">✕</button>
+    </div>
+    <small style="color:var(--muted)">Así de transparente es el motor: estos prompts exactos (generados con las características del menú desplegable) se envían a la IA.</small>
+    ${block('🖼️ Prompt de retrato', p.portrait, 'para generar la cara oficial del personaje')}
+    ${block('🎬 Prompt de escenas (consistencia)', p.scene, 'se añade a TODAS las escenas del video')}
+    ${block('📝 Persona del guion', p.persona, 'influencia narración, acento y jerga')}
+  </div>`;
+  document.body.appendChild(ov);
+}
+
+function copyText(t) {
+  navigator.clipboard.writeText(t.trim()).then(() => toast('Prompt copiado 📋', 'ok'))
+    .catch(() => toast('No se pudo copiar', 'err'));
 }
 
 async function genAvatarImage(id, btn) {

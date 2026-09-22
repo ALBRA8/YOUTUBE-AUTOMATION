@@ -21,13 +21,14 @@ from pipeline import orchestrator
 from pipeline.subtitles import words_to_srt
 from services import (agent as agent_svc, gemini_client, scheduler, tts_service,
                       url_mode, whisper_service, youtube_publish)
+from services import avatar_schema
 from services.themes import STYLES, get_style
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("main")
 
-app = FastAPI(title="YT Automation v2.0", version="2.1.0")
+app = FastAPI(title="YT Automation v2.0", version="2.1.1")
 
 AVATARS_DIR = DATA_DIR / "avatars"
 VALID_PLATFORMS = ("youtube", "tiktok", "instagram", "facebook")
@@ -46,7 +47,7 @@ async def no_cache_ui(request, call_next):
 # ────────────────────────────────────────────────────────── básicos ──
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "version": "2.1.0", "gemini": gemini_client.available(),
+    return {"ok": True, "version": "2.1.1", "gemini": gemini_client.available(),
             "whisper": whisper_service.available(),
             "youtube": youtube_publish.configured()}
 
@@ -66,10 +67,15 @@ async def settings():
         "youtube_token": youtube_publish.has_token(),
         "edge_voices": [
             {"id": "es-CO-SalomeNeural", "name": "Salomé (Colombia)"},
-            {"id": "es-ES-ElviraNeural", "name": "Elvira (España)"},
+            {"id": "es-CO-GonzaloNeural", "name": "Gonzalo (Colombia)"},
             {"id": "es-MX-JorgeNeural", "name": "Jorge (México)"},
-            {"id": "es-US-AlonsoNeural", "name": "Alonso (US Latino)"},
+            {"id": "es-MX-DaliaNeural", "name": "Dalia (México)"},
             {"id": "es-AR-ElenaNeural", "name": "Elena (Argentina)"},
+            {"id": "es-AR-TomasNeural", "name": "Tomás (Argentina)"},
+            {"id": "es-US-AlonsoNeural", "name": "Alonso (US Latino)"},
+            {"id": "es-US-IsabellaNeural", "name": "Isabella (US Latino)"},
+            {"id": "es-ES-ElviraNeural", "name": "Elvira (España)"},
+            {"id": "es-ES-AlvaroNeural", "name": "Álvaro (España)"},
         ],
         "gemini_voices": [
             {"id": "Fenrir", "name": "Fenrir — narrador épico"},
@@ -203,17 +209,41 @@ async def stats():
 
 
 # ─────────────────────────────── avatars (v2.1 · personajes) ──
+# Campos de menú desplegable del schema PRO + campos de texto libre
+_SCHEMA_FIELDS = set(avatar_schema.AVATAR_OPTIONS)
+_FREE_FIELDS = {"accesorios", "extras", "referencia"}
+# Compatibilidad v2.1.0: claves antiguas de texto libre
+_LEGACY_MAP = {"estilo_ropa": "ropa", "ojos": "ojos_color",
+               "cabello": "cabello_color"}
+
+
 def _clean_appearance(raw) -> dict:
-    """Normaliza la apariencia del avatar a un dict limpio de strings."""
+    """Normaliza la apariencia: valida dropdowns del schema y conserva
+    campos de texto libre (accesorios/extras/referencia). Mantiene las
+    claves antiguas (piel, ojos, cabello…) por compatibilidad."""
     if not isinstance(raw, dict):
         return {}
     out = {}
     for k, v in raw.items():
         key = str(k).strip().lower().replace(" ", "_")[:30]
-        val = str(v).strip()[:60]
-        if key and val:
+        key = _LEGACY_MAP.get(key, key)
+        val = str(v).strip()
+        if not key or not val or val == "Ninguno" and key == "maquillaje":
+            continue
+        val = val[:80]
+        if key in _SCHEMA_FIELDS:
             out[key] = val
+        elif key in _FREE_FIELDS:
+            out[key] = val
+        else:
+            out[key] = val  # claves desconocidas: preservar (no romper datos)
     return out
+
+
+@app.get("/api/avatars/schema")
+async def avatars_schema():
+    """Opciones de todos los menús desplegables del formulario de avatares."""
+    return avatar_schema.schema()
 
 
 @app.get("/api/avatars")
@@ -285,11 +315,7 @@ async def avatars_image(aid: str):
         raise HTTPException(404, "avatar no existe")
     AVATARS_DIR.mkdir(parents=True, exist_ok=True)
     out = AVATARS_DIR / f"{aid}.png"
-    ap = av.get("appearance") or {}
-    look_en = ", ".join(str(v) for v in ap.values() if v)
-    prompt = (f"cinematic portrait of a character named {av['name']}, "
-              f"{av.get('description', 'charismatic narrator')}, {look_en}, "
-              "front facing, studio lighting, ultra detailed, 4k")
+    prompt = avatar_schema.portrait_prompt(av)
     method = "placeholder"
     if gemini_client.available():
         try:
@@ -337,6 +363,21 @@ def _avatar_placeholder(out: Path, av: dict) -> None:
               fill=(255, 255, 255), font=font)
     out.parent.mkdir(parents=True, exist_ok=True)
     img.save(out)
+
+
+@app.get("/api/avatars/{aid}/prompt")
+async def avatars_prompt(aid: str):
+    """Prompts derivados del avatar (transparencia total, como Vórtice
+    pero con prompts RICOS que sí usan las características)."""
+    av = db.get_avatar(aid)
+    if not av:
+        raise HTTPException(404, "avatar no existe")
+    return {
+        "name": av["name"],
+        "portrait": avatar_schema.portrait_prompt(av),
+        "scene": avatar_schema.scene_suffix(av),
+        "persona": avatar_schema.persona_text(av).strip(),
+    }
 
 
 @app.get("/api/avatars/{aid}/image")

@@ -7,6 +7,7 @@ Genera JSON estructurado: título, hook, escenas con narration + image_prompt, c
 import logging
 
 from services import gemini_client
+from services import avatar_schema
 from services.themes import get_style
 
 log = logging.getLogger("script")
@@ -119,22 +120,10 @@ def _base_instructions(style_prompt: str, n_scenes: int, fmt: str,
                        avatar: dict | None = None) -> str:
     dur = "30-50 segundos" if fmt == "short" else "2-4 minutos"
     style_line = (f"Estilo visual de las imágenes: {custom_prompt or style_prompt}.")
-    avatar_line = ""
-    if avatar:
-        ap = avatar.get("appearance") or {}
-        look = ", ".join(f"{k.replace('_', ' ')}: {v}" for k, v in ap.items() if v)
-        avatar_line = (
-            f"\nPERSONAJE RECURRENTE (consistencia obligatoria en TODAS las escenas): "
-            f"se llama {avatar['name']}. "
-            f"Personalidad/rol: {avatar.get('description') or 'narrador carismático'}. "
-            + (f"Apariencia física: {look}. " if look else "")
-            + "La locución y el tono reflejan su personalidad. Si aparece o se menciona "
-              "visualmente, conserva EXACTAMENTE esta apariencia en cada image_prompt "
-              "(mismas palabras clave del personaje en inglés)."
-        )
+    avatar_line = avatar_schema.persona_text(avatar) if avatar else ""
     return (
         f"Genera un guion de video de {dur} dividido en EXACTAMENTE {n_scenes} escenas. "
-        f"{style_line} {avatar_line}"
+        f"{style_line} {avatar_line} "
         "Cada escena: título corto (3-5 palabras), narration (1-3 frases potentes "
         "para locución, máximo 40 palabras) e image_prompt EN INGLÉS describiendo la "
         "imagen cinematográfica de esa escena (sin texto/letras en la imagen). "
