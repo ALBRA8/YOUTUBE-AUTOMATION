@@ -1,2 +1,0 @@
-file '/home/z/my-project/yt_automation_v2/backend/data/output/da666878bf08/clips/clip_00.mp4'
-file '/home/z/my-project/yt_automation_v2/backend/data/output/da666878bf08/clips/clip_01.mp4'
