@@ -1,0 +1,21 @@
+# ── YOUTUBE AUTOMATION v2.0 — dependencias ──────────────────
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+python-dotenv>=1.0
+
+# IA
+google-genai>=1.0          # Gemini: guion + imágenes 2.5 Flash + TTS
+edge-tts>=6.1              # locución gratuita ilimitada (fallback)
+yt-dlp>=2024.8.6           # modo "Desde URL" (TikTok/YouTube)
+
+# video / audio / imágenes
+Pillow>=10.0               # placeholders elegantes
+
+# modo fábrica
+APScheduler>=3.10
+
+# ── opcionales (recomendados) ───────────────────────────────
+# faster-whisper>=1.0       # subtítulos palabra a palabra exactos
+# google-api-python-client>=2.100   # autopublish YouTube
+# google-auth-oauthlib>=1.2         # OAuth YouTube

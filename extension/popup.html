@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flow Script Processor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header class="head">
+      <div class="logo">🎬</div>
+      <div class="brand-txt">
+        <h1>FLOW <em>SCRIPT</em> PROCESSOR</h1>
+        <small>V2 · GOOGLE LABS · $0 POR VIDEO</small>
+      </div>
+      <button id="theme-btn" class="icon-btn" title="Modo claro / oscuro">☀️</button>
+    </header>
+
+    <section class="card">
+      <div class="row-actions">
+        <button id="btn-link" class="btn primary">📁 Vincular Proyecto</button>
+        <button id="btn-upload" class="btn ghost">Subir JSON</button>
+        <input type="file" id="file-json" accept=".json,application/json" hidden />
+      </div>
+
+      <label class="lbl" for="folder-name">CARPETA EN DESCARGAS:</label>
+      <input id="folder-name" class="input" type="text" spellcheck="false" placeholder="NOMBRE_DEL_PROYECTO" />
+
+      <label class="lbl" for="content-type">TIPO DE CONTENIDO:</label>
+      <select id="content-type" class="input select">
+        <option value="images">Imágenes (PNG)</option>
+        <option value="videos" selected>Videos (MP4/WebM)</option>
+      </select>
+
+      <label class="lbl" for="provider">PROVEEDOR DE GENERACIÓN:</label>
+      <select id="provider" class="input select">
+        <option value="flow" selected>Google Flow (labs.google)</option>
+        <option value="meta">Meta AI (meta.ai) — 2º proveedor</option>
+      </select>
+
+      <label class="lbl" for="imgs-per-scene">IMÁGENES POR ESCENA:</label>
+      <select id="imgs-per-scene" class="input select">
+        <option value="1">1</option>
+        <option value="2" selected>2</option>
+        <option value="4">4</option>
+        <option value="6">6</option>
+      </select>
+
+      <div class="badge-area" id="badge-area" hidden>
+        <div id="badge-disk" class="badge green">⚡ Guardando directo en: <b id="badge-name"></b></div>
+        <div id="badge-json" class="badge json">✓ script.json <span id="badge-json-src">(Autodetectado)</span> <span id="badge-scenes"></span></div>
+      </div>
+
+      <div class="row-actions start-row">
+        <button id="btn-start" class="btn primary start" disabled>Iniciar Generación</button>
+        <button id="btn-clear" class="btn danger">Limpiar</button>
+      </div>
+    </section>
+
+    <section class="progress-area panel" id="progress-area" hidden>
+      <div class="progress-head">
+        <span id="progress-label">Progreso</span>
+        <span id="progress-pct">0%</span>
+      </div>
+      <div class="bar"><div id="bar-fill" class="bar-fill"></div></div>
+    </section>
+
+    <section class="scenes panel">
+      <h2>Detalle de Escenas</h2>
+      <div id="scenes-list" class="scenes-list">
+        <p class="empty" id="empty-msg">No hay escenas en procesamiento.</p>
+      </div>
+    </section>
+
+    <footer class="foot" id="foot-hint">
+      Vincula la carpeta del proyecto (la que contiene <code>out/</code>) para
+      guardar directo en disco. Plan B: Subir JSON.
+    </footer>
+  </div>
+
+  <script src="parser.js"></script>
+  <script src="scanner.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

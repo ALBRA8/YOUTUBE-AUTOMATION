@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YT Automation v2.0 — Fábrica de videos IA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bangers&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">🎬</div>
+      <h1>YT <em>AUTOMATION</em><small>V2.0 · $0 POR VIDEO</small></h1>
+    </div>
+    <div class="nav-item" data-view="home"><span class="ico">🏠</span> Inicio</div>
+    <div class="nav-item" data-view="create"><span class="ico">✨</span> Crear</div>
+    <div class="nav-item" data-view="projects"><span class="ico">🗂️</span> Proyectos</div>
+    <div class="nav-item" data-view="factory"><span class="ico">🏭</span> Fábrica</div>
+    <div class="nav-item" data-view="publish"><span class="ico">📺</span> Publicar</div>
+    <div class="nav-item" data-view="settings"><span class="ico">⚙️</span> Ajustes</div>
+    <div class="spacer"></div>
+    <div class="cost-pill">💚 $0.00<small>COSTE ACUMULADO · SIN CRÉDITOS</small></div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="greet" id="greet">Hola 👋<small id="greet-sub">Tu fábrica de videos con IA</small></div>
+      <span class="pill" id="pill-gemini"><span class="dot"></span> Gemini</span>
+      <span class="pill" id="pill-whisper"><span class="dot"></span> Whisper</span>
+      <span class="pill" id="pill-yt"><span class="dot"></span> YouTube</span>
+      <button class="icon-btn" id="theme-btn" title="Tema claro/oscuro">🌙</button>
+    </div>
+    <div id="view"></div>
+  </main>
+</div>
+<div id="overlay-root"></div>
+<div id="modal-root"></div>
+<div id="toasts"></div>
+<script src="static/app.js"></script>
+</body>
+</html>
