@@ -1,0 +1,462 @@
+[
+ {
+  "word": "¿Crees",
+  "start": 0.0,
+  "end": 0.36
+ },
+ {
+  "word": "que",
+  "start": 0.36,
+  "end": 0.5
+ },
+ {
+  "word": "ya",
+  "start": 0.5,
+  "end": 0.64
+ },
+ {
+  "word": "lo",
+  "start": 0.64,
+  "end": 0.74
+ },
+ {
+  "word": "sabes",
+  "start": 0.74,
+  "end": 0.92
+ },
+ {
+  "word": "todo",
+  "start": 0.92,
+  "end": 1.18
+ },
+ {
+  "word": "sobre",
+  "start": 1.18,
+  "end": 1.44
+ },
+ {
+  "word": "perros?",
+  "start": 1.44,
+  "end": 1.92
+ },
+ {
+  "word": "Espera",
+  "start": 2.74,
+  "end": 3.22
+ },
+ {
+  "word": "a",
+  "start": 3.22,
+  "end": 3.28
+ },
+ {
+  "word": "escuchar",
+  "start": 3.28,
+  "end": 3.68
+ },
+ {
+  "word": "esto.",
+  "start": 3.68,
+  "end": 3.9
+ },
+ {
+  "word": "Empecemos",
+  "start": 5.174,
+  "end": 5.794
+ },
+ {
+  "word": "por",
+  "start": 5.794,
+  "end": 6.094
+ },
+ {
+  "word": "lo",
+  "start": 6.094,
+  "end": 6.194
+ },
+ {
+  "word": "básico,",
+  "start": 6.194,
+  "end": 6.714
+ },
+ {
+  "word": "perros",
+  "start": 6.994,
+  "end": 7.274
+ },
+ {
+  "word": "guarda",
+  "start": 7.274,
+  "end": 7.654
+ },
+ {
+  "word": "detalles",
+  "start": 7.654,
+  "end": 7.994
+ },
+ {
+  "word": "que",
+  "start": 7.994,
+  "end": 8.194
+ },
+ {
+  "word": "la",
+  "start": 8.194,
+  "end": 8.334
+ },
+ {
+  "word": "ciencia",
+  "start": 8.334,
+  "end": 8.674
+ },
+ {
+  "word": "apenas",
+  "start": 8.674,
+  "end": 8.954
+ },
+ {
+  "word": "empieza",
+  "start": 8.954,
+  "end": 9.294
+ },
+ {
+  "word": "a",
+  "start": 9.294,
+  "end": 9.554
+ },
+ {
+  "word": "entender.",
+  "start": 9.554,
+  "end": 9.814
+ },
+ {
+  "word": "Los",
+  "start": 11.14,
+  "end": 11.44
+ },
+ {
+  "word": "expertos",
+  "start": 11.44,
+  "end": 12.04
+ },
+ {
+  "word": "llevan",
+  "start": 12.04,
+  "end": 12.28
+ },
+ {
+  "word": "años",
+  "start": 12.28,
+  "end": 12.5
+ },
+ {
+  "word": "estudiando",
+  "start": 12.5,
+  "end": 13.1
+ },
+ {
+  "word": "perros",
+  "start": 13.1,
+  "end": 13.6
+ },
+ {
+  "word": "y",
+  "start": 13.6,
+  "end": 14.06
+ },
+ {
+  "word": "cada",
+  "start": 14.06,
+  "end": 14.28
+ },
+ {
+  "word": "descubrimiento",
+  "start": 14.28,
+  "end": 14.96
+ },
+ {
+  "word": "contradice",
+  "start": 14.96,
+  "end": 15.52
+ },
+ {
+  "word": "al",
+  "start": 15.52,
+  "end": 15.64
+ },
+ {
+  "word": "anterior.",
+  "start": 15.64,
+  "end": 15.92
+ },
+ {
+  "word": "Aquí",
+  "start": 17.274,
+  "end": 17.674
+ },
+ {
+  "word": "viene",
+  "start": 17.674,
+  "end": 17.954
+ },
+ {
+  "word": "lo",
+  "start": 17.954,
+  "end": 18.074
+ },
+ {
+  "word": "increíble,",
+  "start": 18.074,
+  "end": 18.634
+ },
+ {
+  "word": "detrás",
+  "start": 18.934,
+  "end": 19.294
+ },
+ {
+  "word": "de",
+  "start": 19.294,
+  "end": 19.414
+ },
+ {
+  "word": "perros",
+  "start": 19.414,
+  "end": 19.734
+ },
+ {
+  "word": "hay",
+  "start": 19.734,
+  "end": 19.894
+ },
+ {
+  "word": "historias",
+  "start": 19.894,
+  "end": 20.334
+ },
+ {
+  "word": "que",
+  "start": 20.334,
+  "end": 20.434
+ },
+ {
+  "word": "parecen",
+  "start": 20.434,
+  "end": 20.794
+ },
+ {
+  "word": "inventadas.",
+  "start": 20.794,
+  "end": 21.414
+ },
+ {
+  "word": "Y",
+  "start": 22.712,
+  "end": 22.972
+ },
+ {
+  "word": "no,",
+  "start": 22.972,
+  "end": 23.152
+ },
+ {
+  "word": "no",
+  "start": 23.432,
+  "end": 23.612
+ },
+ {
+  "word": "es",
+  "start": 23.612,
+  "end": 23.732
+ },
+ {
+  "word": "ciencia",
+  "start": 23.732,
+  "end": 23.992
+ },
+ {
+  "word": "ficción,",
+  "start": 23.992,
+  "end": 24.512
+ },
+ {
+  "word": "todo",
+  "start": 24.812,
+  "end": 24.952
+ },
+ {
+  "word": "esto",
+  "start": 24.952,
+  "end": 25.192
+ },
+ {
+  "word": "está",
+  "start": 25.192,
+  "end": 25.432
+ },
+ {
+  "word": "documentado",
+  "start": 25.432,
+  "end": 25.992
+ },
+ {
+  "word": "sobre",
+  "start": 25.992,
+  "end": 26.212
+ },
+ {
+  "word": "perros.",
+  "start": 26.212,
+  "end": 26.652
+ },
+ {
+  "word": "Y",
+  "start": 27.91,
+  "end": 28.21
+ },
+ {
+  "word": "ahora,",
+  "start": 28.21,
+  "end": 28.49
+ },
+ {
+  "word": "el",
+  "start": 28.83,
+  "end": 28.97
+ },
+ {
+  "word": "dato",
+  "start": 28.97,
+  "end": 29.17
+ },
+ {
+  "word": "que",
+  "start": 29.17,
+  "end": 29.33
+ },
+ {
+  "word": "lo",
+  "start": 29.33,
+  "end": 29.45
+ },
+ {
+  "word": "cambia",
+  "start": 29.45,
+  "end": 29.79
+ },
+ {
+  "word": "todo,",
+  "start": 29.79,
+  "end": 30.09
+ },
+ {
+  "word": "lo",
+  "start": 30.47,
+  "end": 30.61
+ },
+ {
+  "word": "que",
+  "start": 30.61,
+  "end": 30.75
+ },
+ {
+  "word": "descubrieron",
+  "start": 30.75,
+  "end": 31.23
+ },
+ {
+  "word": "sobre",
+  "start": 31.23,
+  "end": 31.43
+ },
+ {
+  "word": "perro",
+  "start": 31.43,
+  "end": 31.81
+ },
+ {
+  "word": "sobre",
+  "start": 31.81,
+  "end": 32.01
+ },
+ {
+  "word": "perro",
+  "start": 32.01,
+  "end": 32.37
+ },
+ {
+  "word": "supera",
+  "start": 32.37,
+  "end": 32.75
+ },
+ {
+  "word": "cualquier",
+  "start": 32.75,
+  "end": 32.97
+ },
+ {
+  "word": "predicción.",
+  "start": 32.97,
+  "end": 33.57
+ },
+ {
+  "word": "Si",
+  "start": 34.812,
+  "end": 35.112
+ },
+ {
+  "word": "quieres",
+  "start": 35.112,
+  "end": 35.332
+ },
+ {
+  "word": "más",
+  "start": 35.332,
+  "end": 35.572
+ },
+ {
+  "word": "secretos",
+  "start": 35.572,
+  "end": 36.072
+ },
+ {
+  "word": "sobre",
+  "start": 36.072,
+  "end": 36.252
+ },
+ {
+  "word": "perros,",
+  "start": 36.252,
+  "end": 36.752
+ },
+ {
+  "word": "sígueme,",
+  "start": 37.052,
+  "end": 37.532
+ },
+ {
+  "word": "cada",
+  "start": 37.892,
+  "end": 38.092
+ },
+ {
+  "word": "día",
+  "start": 38.092,
+  "end": 38.292
+ },
+ {
+  "word": "desvelamos",
+  "start": 38.292,
+  "end": 38.832
+ },
+ {
+  "word": "algo",
+  "start": 38.832,
+  "end": 39.072
+ },
+ {
+  "word": "nuevo.",
+  "start": 39.072,
+  "end": 39.332
+ }
+]
