@@ -13,6 +13,7 @@ from pathlib import Path
 
 from config import TMP_DIR
 from services import whisper_service
+from services.trend_research import _translate_ytdlp_error
 
 log = logging.getLogger("url_mode")
 
@@ -26,49 +27,71 @@ def _run(cmd: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
 
 
 def clean_url(url: str) -> str:
-    """Quita parámetros de tracking para evitar contenido privado/roto."""
+    """Quita parámetros de tracking para evitar contenido privado/roto.
+    YouTube: normaliza a watch?v=ID. TikTok: conserva /@user/video/ID y
+    los enlaces cortos vm.tiktok.com (siguen redirección con yt-dlp)."""
     url = url.strip()
     if "youtube.com" in url or "youtu.be" in url:
         m = re.search(r"(?:v=|youtu\.be/|shorts/)([\w-]{6,})", url)
         if m:
             return f"https://www.youtube.com/watch?v={m.group(1)}"
+    if "tiktok.com" in url:
+        m = re.search(r"(tiktok\.com/@[\w.\-]+/video/\d+)", url)
+        if m:
+            return f"https://www.{m.group(1)}"
+        return url.split("?")[0] or url  # vm.tiktok.com/xxxx (corto)
     return url.split("?")[0] or url
 
 
-async def fetch_metadata(url: str) -> dict:
-    def _run():
-        p = _run(["yt-dlp", "-j", "--no-warnings", "--skip-download", url], timeout=60)
+def _cookies_args(cookies: str | None) -> list[str]:
+    """[--cookies-from-browser X] — la solución $0 al anti-bot de
+    YouTube/TikTok desde IP residencial (misma receta de trend_research)."""
+    return ["--cookies-from-browser", cookies] if cookies else []
+
+
+async def fetch_metadata(url: str, cookies: str | None = None) -> dict:
+    def _job():
+        p = _run(["yt-dlp", "-j", "--no-warnings", "--skip-download",
+                  *_cookies_args(cookies), url], timeout=60)
         if p.returncode != 0:
-            raise UrlModeError(f"yt-dlp no pudo leer el video: {p.stderr[:300]}")
+            raise UrlModeError(
+                "yt-dlp no pudo leer el video: "
+                + _translate_ytdlp_error(p.stderr or ""))
         return json.loads(p.stdout)
-    return await asyncio.to_thread(_run)
+    return await asyncio.to_thread(_job)
 
 
-async def download_audio(url: str, out_base: str) -> Path:
+async def download_audio(url: str, out_base: str,
+                         cookies: str | None = None) -> Path:
     """Descarga solo el audio (mp3) del video origen."""
     dest = TMP_DIR / f"{out_base}.%(ext)s"
 
-    def _run():
+    def _job():
         p = _run([
             "yt-dlp", "-x", "--audio-format", "mp3", "--audio-quality", "5",
-            "--no-playlist", "--no-warnings", "-o", str(dest), url,
+            "--no-playlist", "--no-warnings", *_cookies_args(cookies),
+            "-o", str(dest), url,
         ], timeout=300)
         if p.returncode != 0:
-            raise UrlModeError(f"Descarga fallida: {p.stderr[-300:]}")
+            raise UrlModeError("Descarga fallida: "
+                               + _translate_ytdlp_error(p.stderr or ""))
         hits = sorted(TMP_DIR.glob(f"{out_base}.*"),
                       key=lambda f: f.stat().st_size, reverse=True)
         if not hits:
             raise UrlModeError("No se encontró el archivo de audio descargado")
         return hits[0]
 
-    return await asyncio.to_thread(_run)
+    return await asyncio.to_thread(_job)
 
 
-async def transcript_from_url(url: str, job_base: str) -> dict:
-    """Devuelve {metadata, transcript} del video viral."""
+async def transcript_from_url(url: str, job_base: str,
+                              cookies: str | None = None) -> dict:
+    """Devuelve {metadata, transcript} del video viral.
+    cookies: nombre del navegador ('chrome', 'firefox', 'edge', 'brave')
+    para reutilizar su sesión — desbloquea el anti-bot sin coste."""
     url = clean_url(url)
-    meta = await fetch_metadata(url)
-    audio = await download_audio(url, job_base)
+    meta = await fetch_metadata(url, cookies)
+    audio = await download_audio(url, job_base, cookies)
     words = await whisper_service.transcribe_words(str(audio))
     if words:
         transcript = " ".join(w["word"] for w in words)
@@ -77,6 +100,7 @@ async def transcript_from_url(url: str, job_base: str) -> dict:
         def _subs():
             p = _run(["yt-dlp", "--skip-download", "--write-auto-subs",
                       "--sub-langs", "es,en", "--sub-format", "vtt",
+                      *_cookies_args(cookies),
                       "-o", str(TMP_DIR / job_base), url], timeout=120)
             vtts = list(TMP_DIR.glob(f"{job_base}*.vtt"))
             if not vtts:

@@ -300,7 +300,9 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
             await _emit(job_id, project_id, "importing", 3,
                         "Descargando audio del video viral…")
             base = f"url_{project_id}"
-            viral_ctx = await url_mode.transcript_from_url(meta["source_url"], base)
+            viral_ctx = await url_mode.transcript_from_url(
+                meta["source_url"], base,
+                cookies=meta.get("cookies_from_browser"))
             await _emit(job_id, project_id, "importing", 8,
                         f"Viral detectado: {viral_ctx['metadata'].get('title', '')[:50]}")
 
@@ -340,6 +342,18 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
         result = script_gen.build_result(raw)
         if not result["scenes"]:
             raise RuntimeError("Gemini devolvió un guion vacío")
+        # originalidad verificable del modo URL: el informe del guion
+        # (overlap de 5-gramas contra la transcripción) queda en meta
+        if result.get("originality"):
+            meta = {**(db.get_project(project_id).get("meta") or {}),
+                    "originality": result["originality"]}
+            db.update_project(project_id, meta=meta)
+            rep = result["originality"]
+            await _emit(job_id, project_id, "scripting", 17,
+                        f"Originalidad {100 - rep['overlap'] * 100:.0f}% "
+                        f"(solape {rep['overlap'] * 100:.0f}%"
+                        + (", relanzado anti-copia" if rep.get("retried") else "")
+                        + ")")
         db.replace_scenes(project_id, result["scenes"])
         db.update_project(project_id, title=result["title"])
         scenes = db.get_scenes(project_id)

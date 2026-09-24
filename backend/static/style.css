@@ -340,3 +340,20 @@ code.mini { background: var(--bg2); border: 1px solid var(--border); border-radi
 .ab-txt { flex: 1; display: flex; flex-direction: column; gap: 3px; }
 .ab-txt b { font-size: 14.5px; }
 .ab-txt small { color: var(--muted); font-size: 12.5px; }
+
+/* ── v2.4 · terminal SSE de logs en vivo ─────────────────── */
+.term { margin-top: 12px; max-height: 180px; overflow-y: auto; text-align: left;
+  background: rgba(8, 10, 24, .92); border: 1px solid var(--border); border-radius: 12px;
+  padding: 10px 12px; font-family: ui-monospace, 'Sarasa Mono SC', monospace; font-size: 11.2px;
+  line-height: 1.55; color: #b9c4ff; }
+.term-line { white-space: pre-wrap; word-break: break-word; }
+.term-line.warn { color: #ffd479; }
+.term-line.err { color: #ff6b81; }
+
+/* ── v2.4 · doctor: estados por sonda ────────────────────── */
+.doctor-item { font-size: 12.5px; }
+.doctor-item b { font-weight: 600; font-size: 12px; max-width: 62%; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.doc-ok { color: var(--ok); }
+.doc-warn { color: #ffd479; }
+.doc-err { color: var(--err); }

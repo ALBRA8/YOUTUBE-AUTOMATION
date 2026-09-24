@@ -8,6 +8,7 @@ import logging
 
 from services import gemini_client
 from services import avatar_schema
+from services import originality
 from services.themes import get_style
 
 log = logging.getLogger("script")
@@ -56,21 +57,29 @@ def _split_sentences(text: str) -> list[str]:
 
 
 def _local_fallback(kind: str, seed: str, style_id: str, fmt: str,
-                    custom_prompt: str | None = None) -> dict:
-    """Guion estructurado sin IA externa: hook → cuerpo → giro → CTA."""
+                    custom_prompt: str | None = None,
+                    source_text: str = "") -> dict:
+    """Guion estructurado sin IA externa: hook → cuerpo → giro → CTA.
+    En modo url/script/audio extrae keywords REALES de la transcripción
+    para que el guion tenga sustancia y no solo frases plantilla."""
     style = get_style(style_id)
     style_prompt = custom_prompt or style["prompt"]
     tema = _tema(seed)
     body_src = _split_sentences(seed) if kind in ("script", "audio") else []
     n_body = 4 if fmt == "short" else 10
 
+    # keywords del material de origen (transcripción viral) para dar contexto
+    kws = originality.keywords(source_text or seed, k=6)
+    ctx = (" sobre " + ", ".join(kws[:3])) if kws else ""
+
     narrations: list[str] = [_HOOKS[0].format(tema=tema)]
     for i in range(n_body):
         if i < len(body_src):
             narrations.append(body_src[i])
         else:
-            narrations.append(_CUERPO[i % len(_CUERPO)].format(tema=tema))
-    narrations.append(_GIRO.format(tema=tema))
+            base = _CUERPO[i % len(_CUERPO)].format(tema=tema)
+            narrations.append(base)
+    narrations.append(_GIRO.format(tema=tema + ctx))
     narrations.append(_CTA.format(tema=tema))
 
     titles = ["El Hook"] + [f"Pista {i}" for i in range(1, len(narrations) - 2)] + [
@@ -78,10 +87,11 @@ def _local_fallback(kind: str, seed: str, style_id: str, fmt: str,
     scenes = []
     for i, nar in enumerate(narrations):
         shot = _SHOTS[i % len(_SHOTS)]
+        kw_shot = f", {kws[i % len(kws)]} concept" if kws else ""
         scenes.append({
             "title": titles[i] if i < len(titles) else f"Escena {i + 1}",
             "narration": nar,
-            "image_prompt": f"{shot}, visual concept about {tema}, {style_prompt}, no text",
+            "image_prompt": f"{shot}{kw_shot}, visual concept about {tema}, {style_prompt}, no text",
         })
     return {
         "title": _smart_title(tema),
@@ -170,30 +180,75 @@ async def from_idea(idea: str, style_id: str, fmt: str,
         return _local_fallback("idea", idea, style_id, fmt, custom_prompt)
 
 
+def _narration_text(result: dict) -> str:
+    """Todo el texto hablado del guion generado (para medir originalidad)."""
+    parts = [result.get("title", ""), result.get("hook", ""),
+             result.get("cta", "")]
+    parts += [sc.get("narration", "") for sc in result.get("scenes", [])]
+    return " ".join(p for p in parts if p)
+
+
 async def from_url_transcript(viral_meta: dict, transcript: str, style_id: str,
                               fmt: str, custom_prompt: str | None = None,
                               avatar: dict | None = None) -> dict:
-    """Killer feature: recrear la ESTRUCTURA ganadora del viral con contenido original."""
+    """Killer feature: recrear la ESTRUCTURA ganadora del viral con contenido
+    original — "similar pero NO igual", y AHORA VERIFICABLE: se mide el
+    solape de 5-gramas del guion contra la transcripción y, si supera el
+    umbral (18%), se relanza UNA vez con instrucción anti-copia dura."""
     seed = viral_meta.get("title") or transcript[:120]
     if not gemini_client.available():
-        return _local_fallback("url", seed, style_id, fmt, custom_prompt)
-    try:
-        style = get_style(style_id)
-        n = 6 if fmt == "short" else 12
-        prompt = (
+        return _local_fallback("url", seed, style_id, fmt, custom_prompt,
+                               source_text=transcript)
+
+    def _prompt(hard: bool) -> str:
+        anti = (
+            "\nPROHIBIDO COPIAR: no uses NINGUNA secuencia de 4+ palabras "
+            "consecutivas del original. Cambia el áNGULO, no solo las palabras: "
+            "otro protagonista o perspectiva, otro orden de los datos, otra "
+            "anécdota o ejemplo distinto, tu propio giro. Puedes conservar el "
+            "TEMA y el esquema hook→tensión→giro→CTA, nada más."
+            if hard else
+            "No reutilices frases del original."
+        )
+        return (
             "El siguiente texto es la transcripción de un video viral. Analiza su "
             "estructura ganadora (hook, desarrollo, giro, CTA) y crea un guion 100% ORIGINAL "
-            "sobre el mismo tema con nuevo ángulo y nuevas frases. No reutilices frases del "
-            "original. Título del video viral: "
-            f"«{viral_meta.get('title', '')}» (canal {viral_meta.get('channel', '')}). "
-            + _base_instructions(style["prompt"], n, fmt, custom_prompt, avatar)
+            "sobre el mismo tema con nuevo ángulo y nuevas frases. " + anti +
+            f" Título del video viral: «{viral_meta.get('title', '')}» "
+            f"(canal {viral_meta.get('channel', '')}). "
+            + _base_instructions(get_style(style_id)["prompt"], n, fmt,
+                                 custom_prompt, avatar)
             + f"\n\nTRANSCRIPCIÓN (solo referencia de estructura):\n{transcript[:9000]}"
         )
-        return await gemini_client.generate_json(prompt, gemini_client.schema_scenes(),
-                                                 system=SYSTEM)
+
+    style = get_style(style_id)
+    n = 6 if fmt == "short" else 12
+    try:
+        raw = await gemini_client.generate_json(_prompt(False),
+                                                gemini_client.schema_scenes(),
+                                                system=SYSTEM)
+        result = build_result(raw)
+        report = originality.originality_report(transcript, _narration_text(result))
+        if report["too_similar"]:
+            log.warning("guion demasiado similar (overlap=%.0f%%, run=%d) — "
+                        "relanzando con anti-copia dura",
+                        report["overlap"] * 100, report["longest_run"])
+            raw2 = await gemini_client.generate_json(_prompt(True),
+                                                     gemini_client.schema_scenes(),
+                                                     system=SYSTEM)
+            result2 = build_result(raw2)
+            report2 = originality.originality_report(
+                transcript, _narration_text(result2))
+            if report2["overlap"] <= report["overlap"]:
+                result, report = result2, {**report2, "retried": True}
+            else:
+                report["retried"] = True  # el 2º intento no mejoró: se conserva el 1º
+        result["originality"] = report
+        return result
     except Exception as e:  # noqa: BLE001
         log.warning("Gemini falló (%s) — uso generador local", str(e)[:120])
-        return _local_fallback("url", seed, style_id, fmt, custom_prompt)
+        return _local_fallback("url", seed, style_id, fmt, custom_prompt,
+                               source_text=transcript)
 
 
 async def from_audio_transcript(transcript: str, style_id: str, fmt: str,

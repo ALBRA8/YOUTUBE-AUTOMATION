@@ -455,6 +455,15 @@ async def create_project(body: dict):
         meta["audio_text"] = body["audio_text"]
     if body.get("custom_style_prompt"):
         meta["custom_style_prompt"] = body["custom_style_prompt"].strip()
+    # v2.4 — toggles de producción expuestos en el dashboard
+    meta["transitions"] = bool(body.get("transitions", True))
+    meta["style_reference"] = bool(body.get("style_reference", True))
+    sub_style = (body.get("subtitle_style") or "hormozi").lower()
+    if sub_style in ("hormozi", "tiktok", "karaoke"):
+        meta["subtitle_style"] = sub_style
+    cookies = (body.get("cookies_from_browser") or "").strip().lower()
+    if cookies in ("chrome", "firefox", "edge", "brave", "safari", "vivaldi"):
+        meta["cookies_from_browser"] = cookies
 
     # v2.1 — avatar + plataformas multi-red
     avatar_id = (body.get("avatar_id") or "").strip() or None

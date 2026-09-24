@@ -58,7 +58,8 @@ function nav(view) {
   $$('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === view));
   const views = { home: renderHome, create: renderCreate, projects: renderProjects,
                   factory: renderFactory, publish: renderPublish, settings: renderSettings,
-                  project: renderProject, agent: renderAgent, avatars: renderAvatars };
+                  project: renderProject, agent: renderAgent, avatars: renderAvatars,
+                  trends: renderTrends };
   (views[view] || renderHome)();
 }
 
@@ -126,7 +127,9 @@ function renderProjectCards(list) {
 /* ── vista: WIZARD CREAR (4 pasos como Labsia) ───────────── */
 const W = { step: 1, mode: 'idea', format: 'short', style: 'graphic-novel',
             title: '', idea: '', script: '', url: '', custom: '', voice: '', tts: '',
-            avatar: '', platforms: ['youtube', 'tiktok'] };
+            avatar: '', platforms: ['youtube', 'tiktok'],
+            transitions: true, styleReference: true, subtitles: 'hormozi',
+            cookies: '' };
 
 function renderCreate() {
   const modes = [
@@ -197,6 +200,28 @@ function renderCreate() {
           </label>`).join('')}</div>
         <small style="color:var(--muted);display:block;margin-top:4px">YouTube se publica directo con tu canal (OAuth). Para TikTok/IG/FB descarga el MP4 9:16 y súbelo — te preparamos el kit en 📺 Publicar.</small>
       </div>
+      <div class="field"><label>🎬 Producción</label>
+        <div class="plats">
+          <label class="plat-check ${W.transitions ? 'on' : ''}"><input type="checkbox" ${W.transitions ? 'checked' : ''}
+            onchange="W.transitions = this.checked; this.closest('.plat-check').classList.toggle('on', this.checked)">🎞️ Transiciones suaves (xfade)</label>
+          <label class="plat-check ${W.styleReference ? 'on' : ''}"><input type="checkbox" ${W.styleReference ? 'checked' : ''}
+            onchange="W.styleReference = this.checked; this.closest('.plat-check').classList.toggle('on', this.checked)">🎨 Estilo consistente entre escenas</label>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:180px"><label style="font-size:12px;color:var(--muted)">Estilo de subtítulos</label>
+            <select onchange="W.subtitles=this.value">
+              <option value="hormozi" ${W.subtitles === 'hormozi' ? 'selected' : ''}>Hormozi · amarillo gigante</option>
+              <option value="tiktok" ${W.subtitles === 'tiktok' ? 'selected' : ''}>TikTok · blanco clásico</option>
+              <option value="karaoke" ${W.subtitles === 'karaoke' ? 'selected' : ''}>Karaoke · verde lima</option>
+            </select></div>
+          ${W.mode === 'url' ? `<div style="flex:1;min-width:180px"><label style="font-size:12px;color:var(--muted)">Cookies del navegador (anti-bloqueo viral)</label>
+            <select onchange="W.cookies=this.value">
+              <option value="" ${!W.cookies ? 'selected' : ''}>— sin cookies —</option>
+              ${['chrome','firefox','edge','brave'].map(c => `<option value="${c}" ${W.cookies === c ? 'selected' : ''}>${c}</option>`).join('')}
+            </select></div>` : ''}
+        </div>
+        <small style="color:var(--muted);display:block;margin-top:6px">El modo URL mide la originalidad del guion (solape de 5-gramas contra el viral) y reescribe solo si copia.</small>
+      </div>
       <div class="field"><label>Título interno (máx 60)</label>
         <input type="text" maxlength="60" value="${esc(W.title)}" oninput="W.title=this.value" placeholder="solo referencia, lo genera la IA si lo dejas vacío"></div>`;
   }
@@ -239,7 +264,10 @@ async function createProject() {
                    title: W.title || null, voice: W.voice || null,
                    tts_provider: W.tts || null,
                    avatar_id: W.avatar || null,
-                   platforms: W.platforms.length ? W.platforms : ['youtube'] };
+                   platforms: W.platforms.length ? W.platforms : ['youtube'],
+                   transitions: W.transitions, style_reference: W.styleReference,
+                   subtitle_style: W.subtitles,
+                   cookies_from_browser: W.cookies || null };
     if (W.mode === 'idea') body.idea = W.idea;
     if (W.mode === 'script') { body.script = W.script; body.title = W.title || W.script.slice(0, 50); }
     if (W.mode === 'url') body.url = W.url;
@@ -267,6 +295,7 @@ function showProgress(jobId, projectId) {
     <div class="progress-track"><div class="progress-fill" id="pfill"></div></div>
     <div id="pstep" style="font-weight:700">Preparando…</div>
     <div class="log-line" id="plog"></div>
+    <div class="term" id="pterm" hidden></div>
     <div style="margin-top:18px;display:flex;gap:10px;justify-content:center">
       <button class="btn danger small" onclick="cancelJob('${jobId}')">✕ Cancelar</button>
       <button class="btn ghost small" onclick="hideProgress()">Ocultar</button>
@@ -276,6 +305,7 @@ function showProgress(jobId, projectId) {
   S.es = new EventSource(`/api/jobs/${jobId}/events`);
   S.es.onmessage = ev => {
     const d = JSON.parse(ev.data);
+    if (d.type === 'log') { termLine(d); return; }
     $('#pfill').style.width = (d.pct ?? 0) + '%';
     $('#pstep').textContent = STEP_LABEL[d.step] || d.step;
     $('#plog').textContent = d.message || '';
@@ -291,6 +321,19 @@ function showProgress(jobId, projectId) {
 }
 
 function hideProgress() { $('#overlay-root').innerHTML = ''; if (S.es) { S.es.close(); S.es = null; } }
+
+function termLine(d) {
+  const t = $('#pterm');
+  if (!t) return;
+  t.hidden = false;
+  const lvl = d.level === 'error' ? 'err' : d.level === 'warning' ? 'warn' : '';
+  const line = document.createElement('div');
+  line.className = 'term-line ' + lvl;
+  line.textContent = `[${d.ts || ''}] ${d.logger || ''}: ${d.message || ''}`;
+  t.appendChild(line);
+  while (t.children.length > 120) t.removeChild(t.firstChild);
+  t.scrollTop = t.scrollHeight;
+}
 
 async function cancelJob(jobId) {
   try { await api(`/jobs/${jobId}/cancel`, { method: 'POST' }); } catch {}
@@ -372,6 +415,7 @@ function renderProject() {
         <p style="color:var(--muted);font-size:13px;margin-bottom:8px">
           ${esc(p.format === 'short' ? '9:16 Short' : '16:9')} · ${esc(getStyleName(p.style))} · modo ${esc(p.mode)} · ${scenes.length} escenas
           ${av ? ` · 🎭 ${esc(av.name)}` : ''} · ${platformIcons(plats)}
+          ${p.meta && p.meta.originality ? `<span class="badge ready" title="Solape de 5-gramas del guion contra la transcripción viral — bajo = original">🛡️ ${100 - Math.round((p.meta.originality.overlap || 0) * 100)}% original${p.meta.originality.retried ? ' · reescrito' : ''}</span>` : ''}
           ${p.youtube_id ? ` · <a href="https://youtube.com/watch?v=${p.youtube_id}" target="_blank">ver en YouTube ↗</a>` : ''}</p>
         <div style="display:flex;gap:9px;flex-wrap:wrap">
           ${['draft','failed'].includes(p.status) ? `<button class="btn primary" onclick="startJob('${p.id}')">▶️ Generar video</button>` : ''}
@@ -766,18 +810,85 @@ async function renderSettings() {
         <p style="color:var(--muted);font-size:12.5px;margin:8px 0;line-height:1.6"><b>1.</b> Descarga y descomprime el ZIP · <b>2.</b> En Chrome entra a <code class="mini">chrome://extensions</code> → activa <b>modo desarrollador</b> → <b>Cargar descomprimida</b> → carpeta <code class="mini">extension/</code> · <b>3.</b> Genera imágenes en <a href="https://labs.google/fx" target="_blank" rel="noopener" style="color:var(--accent)">Google ImageFX</a> y pulsa ➤ Enviar. Llegarán aquí como respaldo automático cuando Gemini llegue a su cuota diaria.</p>
       </div>
 
-      <div class="card">
-        <b>🩺 Estado del sistema</b>
-        <div class="idea-item" style="margin-top:12px"><span>Gemini (guion + imágenes + TTS)</span><b>${S.health.gemini ? '✅ activo' : '❌ sin clave'}</b></div>
-        <div class="idea-item"><span>Locución edge-tts</span><b>✅ siempre activa</b></div>
-        <div class="idea-item"><span>Whisper (subtítulos)</span><b>${c.whisper_available ? '✅' : '⚠️ estimado'}</b></div>
-        <div class="idea-item"><span>YouTube API</span><b>${c.youtube_configured ? '✅' : '❌ sin client_secret'}</b></div>
-        <div class="idea-item"><span>Proveedor TTS por defecto</span><b>${esc(c.tts_provider || 'edge')}</b></div>
-        <div class="idea-item"><span>Coste por video</span><b style="color:var(--ok)">$0.00</b></div>
-        <div class="hintline">Todo se guarda en <code class="mini">.env</code> (claves) y la base de datos local (proyectos). Nada sale de tu PC salvo las llamadas a las APIs que tú actives.</div>
+      <div class="card" id="doctor-card">
+        <b>🩺 Doctor del sistema</b> <span style="float:right"><button class="btn ghost small" onclick="loadDoctor()">↻ Revisar ahora</button></span>
+        <div style="color:var(--muted);font-size:13px;margin-top:12px">Ejecutando 11 sondas reales (ffmpeg, disco, TTS, yt-dlp…)</div>
       </div>
 
     </div>`;
+}
+
+async function loadDoctor() {
+  const card = document.getElementById('doctor-card');
+  if (!card) return;
+  try {
+    const d = await api('/doctor');
+    const chip = c => {
+      const cls = c.ok ? 'ok' : (c.warn ? 'warn' : 'err');
+      const ico = c.ok ? '✅' : (c.warn ? '⚠️' : '❌');
+      return `<div class="idea-item doctor-item"><span>${ico} ${esc(c.id)}</span><b class="doc-${cls}" title="${esc(c.detail || '')}">${esc(c.detail || '').slice(0, 46)}</b></div>`;
+    };
+    card.innerHTML = `
+      <b>🩺 Doctor del sistema</b>
+      <span style="float:right;color:var(--muted);font-size:12.5px">
+        ${d.summary.ok} OK · ${d.summary.warn} aviso · ${d.summary.fail} fallo</span>
+      <div style="margin-top:12px">${d.checks.map(chip).join('')}</div>
+      <div class="hintline">Fallo = crítico (el pipeline no puede correr). Aviso = degradación graceful $0. Cada check ejecuta un comando real ahora mismo.</div>`;
+  } catch (e) {
+    card.innerHTML = `<b>🩺 Doctor del sistema</b><p style="color:var(--err);margin-top:10px">❌ ${esc(e.message)}</p>`;
+  }
+}
+
+/* ── vista: TENDENCIAS (research $0 pre-guion) ───────────── */
+async function renderTrends() {
+  $('#view').innerHTML = `
+    <h2 class="sec">🔥 Tendencias <span class="hint">research real de YouTube sin API key (yt-dlp) — antes de escribir el guion</span></h2>
+    <div class="card">
+      <div class="keyrow">
+        <input type="text" id="trend-q" placeholder="Nicho o tema: p. ej. historia del imperio romano, IA herramientas, misterios del océano…"
+               onkeydown="if(event.key==='Enter')doTrends()">
+        <button class="btn primary" onclick="doTrends()">🔍 Investigar</button>
+      </div>
+      <small style="color:var(--muted);display:block;margin-top:8px">Analiza los videos más vistos del tema: duración dulce, títulos que enganchan, keywords reales e ideas listas para producir. Si YouTube bloquea la IP, usa el selector de cookies del wizard (modo URL) o investiga desde tu IP residencial.</small>
+    </div>
+    <div id="trends-out" style="margin-top:16px"><div class="card empty">Pulsa Investigar para ver qué está funcionando AHORA en tu nicho</div></div>`;
+}
+
+async function doTrends() {
+  const q = ($('#trend-q')?.value || '').trim();
+  if (!q) return toast('Escribe un tema para investigar', 'err');
+  const out = $('#trends-out');
+  out.innerHTML = '<div class="card empty">🔎 Analizando el nicho con yt-dlp (tarda 10-60s)…</div>';
+  try {
+    const d = await api('/trends/research', { method: 'POST', body: { query: q, max_videos: 8 } });
+    const r = d.research || {};
+    const ins = r.insights || {};
+    const fmt = n => n >= 1000 ? (n / 1000).toFixed(1).replace('.0', '') + 'K' : String(n ?? 0);
+    const ideas = (d.ideas || []);
+    out.innerHTML = `
+      <div class="grid-kpis">
+        <div class="card kpi"><div class="num">${r.count || 0}</div><div class="lbl">Videos analizados</div></div>
+        <div class="card kpi"><div class="num">${fmt(ins.avg_views)}</div><div class="lbl">Vistas promedio</div></div>
+        <div class="card kpi"><div class="num">${ins.median_duration_s ? Math.round(ins.median_duration_s) + 's' : '—'}</div><div class="lbl">Duración dulce (mediana)</div></div>
+        <div class="card kpi"><div class="num">${(ins.keywords || []).length}</div><div class="lbl">Keywords reales</div></div>
+      </div>
+      <div class="card" style="margin-top:14px"><b>🏷️ Keywords del nicho</b>
+        <div class="plats" style="margin-top:8px">${(ins.keywords || []).slice(0, 10).map(k => `<span class="plat-check on">${esc(k)}</span>`).join('') || '<span style="color:var(--muted)">—</span>'}</div>
+        <b style="display:block;margin-top:12px">🪝 Hooks de los títulos ganadores</b>
+        <div style="margin-top:6px">${(ins.hook_patterns || []).slice(0, 4).map(t => `<div class="idea-item"><span>${esc(t)}</span></div>`).join('')}</div>
+      </div>
+      <div class="card" style="margin-top:14px"><b>💡 Ideas listas para producir</b>
+        <small style="color:var(--muted);display:block;margin:4px 0 8px">Clic en una idea para crear el video con ella</small>
+        ${ideas.map(i => {
+          const js = JSON.stringify(i.title || '').replace(/"/g, '&quot;');
+          return `<div class="idea-item" style="cursor:pointer" onclick="W.mode='idea';W.idea=${js};nav('create')">
+            <span><b>${esc(i.title || '')}</b><br><span style="color:var(--muted);font-size:12px">${esc(i.angle || '')} — ${esc(i.why || '')}</span></span>
+            <b style="color:var(--accent)">→ crear</b></div>`;
+        }).join('')}
+      </div>`;
+  } catch (e) {
+    out.innerHTML = `<div class="card empty" style="color:var(--err)">❌ ${esc(e.message)}</div>`;
+  }
 }
 
 /* ── vista: AGENTE (chat v2.1) ───────────────────────────── */

@@ -283,7 +283,12 @@ async def burn_subtitles(project: dict, video_raw: Path, words_path: Path) -> Pa
 
     ass_path = proj_dir / "subs.ass"
     w, h = (SHORT_W, SHORT_H) if project["format"] == "short" else (LONG_W, LONG_H)
-    ass_path.write_text(subs_mod.build_ass(words, w, h), encoding="utf8")
+    # estilo de subtítulo elegible desde el dashboard (meta.subtitle_style):
+    # hormozi (amarillo gigante, default) / tiktok (blanco) / karaoke (lima)
+    sub_style = ((project.get("meta") or {}).get("subtitle_style")
+                 or "hormozi")
+    ass_path.write_text(subs_mod.build_ass(words, w, h, style=sub_style),
+                        encoding="utf8")
 
     final = proj_dir / f"{project['id']}_final.mp4"
     sub_filter = f"ass={ass_path.as_posix().replace(':', '\\\\:')}"
