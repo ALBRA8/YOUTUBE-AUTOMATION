@@ -1,20 +1,40 @@
 {
   "manifest_version": 3,
-  "name": "YT Automation v2.0 — Bridge ImageFX",
+  "name": "Flow Script Processor",
   "version": "2.0.0",
-  "description": "Plan B de imágenes: captura los resultados de Google ImageFX (Labs) y los envía al backend de YT Automation como respaldo cuando se agota la cuota de Gemini.",
-  "permissions": ["storage", "activeTab"],
-  "host_permissions": [
-    "http://127.0.0.1:8000/*",
-    "https://labs.google/*"
-  ],
+  "description": "Automatiza Google Labs (Flow / ImageFX): inyecta prompts escena por escena con mecanografia humana, intercepta los resultados tRPC y guarda las imagenes/videos directo en la carpeta del proyecto. Sin API keys, 100% incluido en tu plan de Flow.",
+  "minimum_chrome_version": "111",
+  "permissions": ["scripting", "activeTab", "downloads", "storage", "alarms"],
+  "host_permissions": ["https://labs.google/*"],
   "background": { "service_worker": "background.js" },
-  "action": { "default_popup": "popup.html", "default_title": "YT Automation Bridge" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Flow Script Processor",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "content_scripts": [
     {
-      "matches": ["https://labs.google/*", "https://labs.google/fx/*"],
+      "matches": ["https://labs.google/*"],
+      "js": ["injector.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://labs.google/*"],
       "js": ["content.js"],
-      "run_at": "document_idle"
+      "run_at": "document_start",
+      "world": "ISOLATED"
     }
   ]
 }

@@ -119,14 +119,18 @@ Si elegiste TikTok/Instagram/Facebook en el wizard, el editor muestra el **kit m
 ## 🎙️ Modo "Desde Audio" — tu voz
 Sube tu grabación (mp3/wav/m4a): se transcribe con Whisper, Gemini la divide en escenas respetando TUS frases, y se produce el video con tu voz real grabada en la pista.
 
-## 🧩 Extensión Chrome — Plan B de imágenes (híbrido)
-Cuando Gemini agote su cuota diaria (~500 imágenes gratis), el pipeline usa automáticamente las imágenes de la cola de la extensión:
-1. `chrome://extensions` → modo desarrollador → "Cargar descomprimida" → carpeta `extension/`
-2. Genera imágenes en **Google ImageFX** (labs.google/fx)
-3. Pulsa **➤ Enviar** sobre cada resultado (o activa **Modo AUTO** en el popup)
-4. Opcional: pega el Project ID en el popup para asociarlas a un proyecto
+## 🧩 Extensión Chrome — "Flow Script Processor" (IMAGENES FLOW_EXT)
+Réplica 1:1 de tu extensión real (manual EXTENSION TOUTUBE), reescrita en JS puro: **sin npm ni build**. Automatiza Flow/ImageFX con la arquitectura de 4 mundos:
 
-Prioridad de imágenes: **Gemini → cola extensión → placeholder**. Nunca se bloquea el render.
+1. `chrome://extensions` → modo desarrollador → "Cargar descomprimida" → carpeta `extension/`
+2. Abre **Flow (labs.google/fx)** y el icono de la extensión
+3. **Vincular Proyecto** → carpeta del proyecto (autodetecta `out/ideas/idea_NNNNNN/script.json` con el número MÁS ALTO) o plan B **Subir JSON**
+4. Elige Tipo de Contenido (Imágenes PNG / Videos MP4-WebM) e imágenes por escena (1/2/4/6)
+5. **Iniciar Generación**: mecanografía humana en el editor Slate, intercepta tRPC/NDJSON (fetch+XHR en MAIN world), sondeo DOM cada 3s (`[data-tile-id]`), cooldown 90s ante "too quickly", salta escenas bloqueadas por políticas con botón **Reintentar**
+6. Escribe DIRECTO en disco: `Escena_01/imagen_1.png`, `Escena_01/video_1.mp4` (FileSystemDirectoryHandle en IndexedDB; fallback a `Descargas/<PROYECTO>/Escena_XX/`)
+7. Resiliencia MV3: cola persistida en `chrome.storage.session` + keepalive por alarmas — sobrevive a la suspensión del Service Worker
+
+El **botón "Exportar a Flow"** del dashboard genera un ZIP con `script.json` bajo `out/ideas/idea_NNNNNN/` justo en el formato que esta extensión autodetecta. Detalles de operación y fallos: `extension/README.txt`.
 
 ---
 

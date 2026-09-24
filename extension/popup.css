@@ -1,0 +1,204 @@
+/* =============================================================================
+ * popup.css — Interfaz del panel "Flow Script Processor"
+ * Réplica fiel de la captura del usuario: tema oscuro azul-marino, título con
+ * degradado morado, botón primario azul, Limpiar rojo, tarjetas de escena.
+ * Incluye variante clara (toggle ☀️/🌙 guardado en localStorage).
+ * ========================================================================== */
+
+:root, html[data-theme="dark"] {
+  --bg: #0a0f1e;
+  --panel: #101830;
+  --panel-2: #0d1428;
+  --border: #1f2c4f;
+  --border-soft: #182340;
+  --text: #e8ecf8;
+  --muted: #8d9ab8;
+  --primary-a: #2563eb;
+  --primary-b: #3b82f6;
+  --danger: #ef4444;
+  --grad-a: #a855f7;
+  --grad-b: #6366f1;
+  --ok: #34a853;
+  --warn: #fbbc04;
+  --rate: #fa7b17;
+  --info: #8ab4f8;
+  --input-bg: #0b1228;
+}
+
+html[data-theme="light"] {
+  --bg: #f2f5fc;
+  --panel: #ffffff;
+  --panel-2: #f7f9ff;
+  --border: #d9e0f2;
+  --border-soft: #e5eaf7;
+  --text: #1c2440;
+  --muted: #5a6a8f;
+  --danger: #dc2626;
+  --ok: #1e8e3e;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  width: 400px;
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.wrap { padding: 14px 14px 10px; }
+
+/* ------------------------------ Cabecera --------------------------------- */
+.head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 12px;
+}
+.brand {
+  font-size: 20px; font-weight: 800; letter-spacing: .2px;
+  background: linear-gradient(90deg, var(--grad-a), var(--grad-b));
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+}
+.theme-btn {
+  background: none; border: none; cursor: pointer; font-size: 18px;
+  line-height: 1; padding: 4px; border-radius: 8px;
+}
+.theme-btn:hover { background: var(--panel); }
+
+/* -------------------------------- Card ----------------------------------- */
+.card {
+  background: linear-gradient(180deg, var(--panel), var(--panel-2));
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .35);
+}
+
+.row-actions { display: flex; gap: 8px; align-items: center; }
+.start-row { margin-top: 14px; }
+
+.btn {
+  flex: 1;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 13px; font-weight: 600;
+  cursor: pointer;
+  transition: filter .15s ease, background .15s ease, transform .05s ease;
+  color: #fff;
+}
+.btn:active { transform: translateY(1px); }
+.btn.primary {
+  flex: 1.6;
+  background: linear-gradient(90deg, var(--primary-a), var(--primary-b));
+  box-shadow: 0 4px 14px rgba(37, 99, 235, .35);
+}
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.ghost {
+  background: transparent; color: var(--text);
+  border-color: var(--border);
+}
+.btn.ghost:hover { background: var(--panel); }
+.btn.start {
+  background: var(--primary-b);
+}
+.btn.start:disabled {
+  background: #24304f; color: #67748f; cursor: not-allowed; box-shadow: none;
+}
+html[data-theme="light"] .btn.start:disabled { background: #dfe5f3; color: #9aa6c2; }
+.btn.danger {
+  flex: .7;
+  background: transparent; color: var(--danger);
+  border: 1.5px solid var(--danger);
+}
+.btn.danger:hover { background: rgba(239, 68, 68, .1); }
+
+/* ------------------------------ Campos ----------------------------------- */
+.lbl {
+  display: block;
+  margin: 12px 2px 6px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .6px;
+  color: var(--muted);
+}
+.input {
+  width: 100%;
+  background: var(--input-bg, var(--panel-2));
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 9px 11px;
+  font-size: 13px;
+  outline: none;
+}
+.input:focus { border-color: var(--primary-b); }
+.select { appearance: auto; }
+
+/* ------------------------------ Badges ----------------------------------- */
+.badge-area { margin-top: 12px; display: grid; gap: 6px; }
+.badge {
+  font-size: 11.5px; padding: 7px 10px; border-radius: 10px;
+  border: 1px solid transparent; text-align: left;
+}
+.badge.green { background: rgba(52, 168, 83, .12); border-color: rgba(52, 168, 83, .45); color: #7ee2a0; }
+html[data-theme="light"] .badge.green { color: #1e8e3e; }
+.badge.json { background: rgba(138, 180, 248, .1); border-color: rgba(138, 180, 248, .4); color: var(--info); }
+
+/* ----------------------------- Progreso ---------------------------------- */
+.progress-area { margin-top: 12px; }
+.progress-head {
+  display: flex; justify-content: space-between;
+  font-size: 11px; color: var(--muted); margin-bottom: 5px;
+}
+.bar {
+  height: 8px; border-radius: 999px; background: var(--panel);
+  border: 1px solid var(--border); overflow: hidden;
+}
+.bar-fill {
+  height: 100%; width: 0%;
+  background: linear-gradient(90deg, var(--grad-b), var(--grad-a));
+  transition: width .3s ease;
+}
+
+/* ----------------------------- Escenas ----------------------------------- */
+.scenes { margin-top: 14px; }
+.scenes h2 { font-size: 14px; font-weight: 700; margin-bottom: 8px; }
+.scenes-list { display: grid; gap: 6px; max-height: 240px; overflow-y: auto; }
+.empty {
+  text-align: center; color: var(--muted); font-style: italic;
+  padding: 14px 6px; font-size: 12px;
+}
+
+.scene-card {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.scene-card.PENDING     { border-left-color: var(--warn); }
+.scene-card.IN_PROGRESS { border-left-color: var(--info); }
+.scene-card.DOWNLOADED  { border-left-color: var(--ok); }
+.scene-card.RATE_LIMITED{ border-left-color: var(--rate); }
+.scene-card.ERROR       { border-left-color: var(--danger); }
+
+.scene-num { font-weight: 700; white-space: nowrap; }
+.scene-status { color: var(--muted); flex: 1; }
+.scene-error { color: var(--danger); font-size: 11px; }
+.scene-retry {
+  background: none; border: 1px solid var(--border); color: var(--text);
+  font-size: 11px; border-radius: 8px; padding: 3px 8px; cursor: pointer;
+}
+.scene-retry:hover { border-color: var(--primary-b); color: var(--primary-b); }
+
+/* ------------------------------ Pie --------------------------------------- */
+.foot {
+  margin-top: 10px; font-size: 10.5px; color: var(--muted); line-height: 1.5;
+}
+.foot code { background: var(--panel); padding: 1px 5px; border-radius: 6px; }
+
+/* Scrollbar sutil */
+.scenes-list::-webkit-scrollbar { width: 8px; }
+.scenes-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
