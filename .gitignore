@@ -1,0 +1,73 @@
+# ════════════════════════════════════════════════════════════════════
+#  YOUTUBE AUTOMATION v2 — .gitignore (La Regla de Oro 🛡️)
+#  NUNCA subir: claves, sesiones, bases de datos, videos generados
+# ════════════════════════════════════════════════════════════════════
+
+# ── 🔑 SECRETOS (Regla de Oro #1) ────────────────────────────────────
+.env
+.env.*
+!.env.example
+backend/.env
+*.key
+*_secret.json
+client_secret.json
+token.json
+credentials.json
+auth.json
+
+# ── 📱 SESIONES ACTIVAS (Regla de Oro #2) ────────────────────────────
+.wa-auth/
+.wa-auth*
+baileys*/
+session*/
+*.session
+
+# ── 🗄️ BASES DE DATOS REALES (Regla de Oro #3) ───────────────────────
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+backend/data/yt_automation.db*
+
+# ── 📦 DEPENDENCIAS (Regla de Oro #4) ────────────────────────────────
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+.python-version
+
+# ── 🎬 DATOS GENERADOS EN EJECUCIÓN (videos, tmp, avatares) ─────────
+backend/data/output/
+backend/data/tmp/
+backend/data/avatars/
+backend/data/whisper/
+*.mp4
+*.mp3
+*.wav
+*.m4a
+*.webm
+*.mkv
+!backend/data/music/.gitkeep
+
+# ── 📝 LOGS Y BASURA DEL SISTEMA ─────────────────────────────────────
+*.log
+server.log
+nohup.out
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── 🧪 ENTORNOS Y EDITORES ───────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── 📦 EMPAQUETADOS (el ZIP es entregable local, no va al repo) ─────
+*.zip
+*.tar.gz
+*.rar
