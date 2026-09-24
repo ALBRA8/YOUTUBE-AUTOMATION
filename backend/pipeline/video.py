@@ -68,6 +68,19 @@ def retime_clip_cmd(src: Path, target_dur: float, out: Path, w: int, h: int,
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", str(out)]
 
 
+def _clip_cache_ok(out: Path, src: Path, target_dur: float) -> bool:
+    """Reutilización EXACTA de clips (FolderStore): el clip existe, pesa lo
+    suficiente, proviene del mismo asset fuente y su duración objetivo no ha
+    cambiado (sidecar JSON). Un re-run del pipeline no re-renderiza lo válido."""
+    try:
+        d = json.loads(out.with_suffix(".json").read_text())
+        return (out.exists() and out.stat().st_size > 4096
+                and d.get("src") == str(src)
+                and abs(float(d.get("dur", 0)) - target_dur) < 0.05)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 async def render_scenes(project: dict, scenes: list[dict], durations: list[float],
                         on_progress=None, is_cancelled=None,
                         flow_videos: dict | None = None,
@@ -78,7 +91,9 @@ async def render_scenes(project: dict, scenes: list[dict], durations: list[float
       setpts a la duración de la narración; si no, Ken Burns sobre la imagen.
     - transition_pad añade margen a los clips NO finales para que, tras el
       solape xfade, la duración total coincida EXACTAMENTE con sum(durations)
-      y la voz quede sincronizada."""
+      y la voz quede sincronizada.
+    - Reutilización idempotente: clip válido con mismo source y misma
+      duración objetivo se salta (ver _clip_cache_ok)."""
     proj_dir = OUTPUT_DIR / project["id"]
     clips_dir = proj_dir / "clips"
     clips_dir.mkdir(parents=True, exist_ok=True)
@@ -93,15 +108,27 @@ async def render_scenes(project: dict, scenes: list[dict], durations: list[float
         dur = max(durations[i], 1.0)
         pad = transition_pad if i < n_scenes - 1 else 0.0
         fv = (flow_videos or {}).get(i)
-        if fv and Path(str(fv)).exists():
-            cmd = retime_clip_cmd(Path(str(fv)), dur + pad, out, w, h)
+        has_fv = bool(fv) and Path(str(fv)).exists()
+        src = Path(str(fv)) if has_fv else Path(img)
+        target = dur + pad if has_fv else dur + 0.05 + pad
+        if _clip_cache_ok(out, src, target):
+            if on_progress:
+                await on_progress(i + 1, n_scenes, None)
+            return out
+        if has_fv:
+            cmd = retime_clip_cmd(src, target, out, w, h)
         else:
-            cmd = scene_clip_cmd(Path(img), dur + 0.05 + pad, out, w, h,
+            cmd = scene_clip_cmd(src, target, out, w, h,
                                  zoom_dir=1 if i % 2 == 0 else -1)
         p = await asyncio.to_thread(lambda: _run_ffmpeg(cmd))
         if p.returncode != 0:
             log.error("clip %d: %s", i, p.stderr[-300:])
             raise RuntimeError(f"Error renderizando escena {i + 1}")
+        try:  # sidecar para reutilización exacta en re-runs
+            out.with_suffix(".json").write_text(json.dumps(
+                {"src": str(src), "dur": round(target, 3)}))
+        except Exception:  # noqa: BLE001
+            pass
         if on_progress:
             await on_progress(i + 1, n_scenes, None)
         return out

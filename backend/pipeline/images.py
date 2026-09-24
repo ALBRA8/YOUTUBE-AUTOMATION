@@ -133,6 +133,19 @@ async def generate_all(project: dict, scenes: list[dict], on_progress=None,
     async def one(i, sc):
         if is_cancelled and is_cancelled():
             return
+        # IDEMPOTENCIA (skip-if-exists): si ya hay una imagen válida en disco
+        # para esta escena, reutilizarla. Un pipeline re-lanzado tras un fallo
+        # NO vuelve a gastar cuota de generación en lo ya completado.
+        existing = str(sc.get("image_path") or "")
+        try:
+            if existing and Path(existing).exists() and Path(existing).stat().st_size > 512:
+                paths[i] = existing
+                db.update_scene(sc["id"], image_path=existing, status="image")
+                if on_progress:
+                    await on_progress(i + 1, len(scenes), "cache")
+                return
+        except OSError:
+            pass
         async with sem:
             path, method = await generate_scene_image(sc, project, i)
             paths[i] = str(path)

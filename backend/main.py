@@ -19,8 +19,9 @@ from fastapi.staticfiles import StaticFiles
 from pipeline import images as imgs_pipeline
 from pipeline import orchestrator
 from pipeline.subtitles import words_to_srt
-from services import (agent as agent_svc, gemini_client, scheduler, tts_service,
-                      url_mode, whisper_service, youtube_publish)
+from services import (agent as agent_svc, doctor as doctor_svc,
+                      gemini_client, scheduler, trend_research as trends_svc,
+                      tts_service, url_mode, whisper_service, youtube_publish)
 from services import avatar_schema
 from services.themes import STYLES, get_style
 
@@ -863,6 +864,41 @@ async def import_audio(file: UploadFile = File(...)):
     with open(dest, "wb") as f:
         shutil.copyfileobj(file.file, f)
     return {"path": str(dest)}
+
+
+# ───────────────────────────────────── doctor de salud (Fase 3) ──
+@app.get("/api/doctor")
+async def doctor():
+    """Sondas REALES del stack $0 (ffmpeg, TTS, whisper, claves, disco).
+    Patrón probe_command: cada check ejecuta un comando, no supone nada."""
+    return await doctor_svc.run_doctor()
+
+
+# ──────────────────────────────── tendencias $0 sin API key (Fase 3) ──
+@app.get("/api/trends/probe")
+async def trends_probe():
+    return trends_svc.probe_ytdlp()
+
+
+@app.post("/api/trends/research")
+async def trends_research(body: dict):
+    """Investiga un nicho en YouTube con yt-dlp (metadata real, sin API key)
+    y devuelve insights + ideas de shorts (Gemini o heurístico)."""
+    query = (body.get("query") or "").strip()
+    if not query:
+        raise HTTPException(400, "falta query")
+    try:
+        research = await trends_svc.research_topic(
+            query, int(body.get("max_videos") or 8),
+            bool(body.get("with_comments")),
+            body.get("cookies_from_browser") or None)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e)[:200])
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"investigación falló: {str(e)[:150]}")
+    ideas = await trends_svc.ideas_from_research(
+        research, int(body.get("n_ideas") or 5))
+    return {"ok": True, "research": research, "ideas": ideas}
 
 
 # ─────────────────────────────────────────────────────── dashboard ──
