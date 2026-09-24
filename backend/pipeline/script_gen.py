@@ -10,8 +10,22 @@ from services import gemini_client
 from services import avatar_schema
 from services import originality
 from services.themes import get_style, NEUTRAL_STYLE_PROMPT
+from pipeline.sanitizer import sanitize_script_scenes
 
 log = logging.getLogger("script")
+
+# Reglas de retención psicológica (Inyección 5): 3 fases obligatorias que
+# el LLM debe respetar en TODO guion. Maximizan retención y compartidos.
+VIRAL_RETENTION_RULES = (
+    "REGLAS OBLIGATORIAS DE RETENCIÓN DE AUDIENCIA:\n"
+    "1. HOOK VISUAL & NARRATIVO (0-3s): Rompe el patrón con una pregunta provocativa, "
+    "un dato contraintuitivo o una imagen de impacto extremo. Prohibido saludar o presentarse.\n"
+    "2. ESCALADA DE CURIOSIDAD (4-45s): Cada escena debe revelar un nuevo micro-dato que "
+    "aumente la intriga. Usa conectores de tensión: 'Pero lo peor no fue eso...', "
+    "'Lo que nadie vio venir...', 'Aquí es donde todo cambió...'.\n"
+    "3. GIRO & CTA INVISIBLE (Final): Revela el clímax en los últimos 5 segundos y enlaza "
+    "inmediatamente con un CTA natural que incite al debate o a seguir para parte 2."
+)
 
 # ─────────────────────────── generador local (fallback $0) ────────────────
 # Sin API key (o si Gemini falla) producimos un guion estructurado local:
@@ -94,6 +108,7 @@ def _local_fallback(kind: str, seed: str, style_id: str, fmt: str,
             "narration": nar,
             "image_prompt": f"{shot}{kw_shot}, visual concept about {tema}, {style_prompt}, no text",
         })
+    sanitize_script_scenes(scenes)
     return {
         "title": _smart_title(tema),
         "hook": narrations[0],
@@ -148,7 +163,7 @@ def _base_instructions(style_prompt: str, n_scenes: int, fmt: str,
         "Cada escena: título corto (3-5 palabras), narration (1-3 frases potentes "
         "para locución, máximo 40 palabras) e image_prompt EN INGLÉS describiendo la "
         "imagen cinematográfica de esa escena (sin texto/letras en la imagen). "
-        "Mantén coherencia visual entre escenas."
+        "Mantén coherencia visual entre escenas.\n\n" + VIRAL_RETENTION_RULES
     )
 
 
@@ -278,15 +293,22 @@ async def from_audio_transcript(transcript: str, style_id: str, fmt: str,
             + _base_instructions(style["prompt"], n, fmt, custom_prompt, avatar)
             + f"\n\nTRANSCRIPCIÓN:\n{transcript[:8000]}"
         )
-        return await gemini_client.generate_json(prompt, gemini_client.schema_scenes(),
-                                                 system=SYSTEM)
+        result = await gemini_client.generate_json(prompt, gemini_client.schema_scenes(),
+                                                   system=SYSTEM)
+        # el modo audio no pasa por build_result: sanitización directa
+        if isinstance(result.get("scenes"), list):
+            sanitize_script_scenes(result["scenes"])
+        return result
     except Exception as e:  # noqa: BLE001
         log.warning("Gemini falló (%s) — uso generador local", str(e)[:120])
         return _local_fallback("audio", transcript, style_id, fmt, custom_prompt)
 
 
 def build_result(raw: dict) -> dict:
-    """Normaliza la salida del LLM a nuestro modelo de escenas."""
+    """Normaliza la salida del LLM a nuestro modelo de escenas.
+    Punto único de sanitización: TODOS los modos (script/idea/url/audio)
+    pasan por aquí — ningún image_prompt llega sucio al generador de imágenes
+    ni al export Flow (blindaje anti Safety Policy Violation)."""
     scenes = []
     for i, sc in enumerate(raw.get("scenes", [])):
         scenes.append({
@@ -294,6 +316,7 @@ def build_result(raw: dict) -> dict:
             "narration": (sc.get("narration") or "").strip(),
             "image_prompt": (sc.get("image_prompt") or "").strip(),
         })
+    sanitize_script_scenes(scenes)
     return {
         "title": (raw.get("title") or "Sin título").strip()[:60],
         "hook": (raw.get("hook") or "").strip(),

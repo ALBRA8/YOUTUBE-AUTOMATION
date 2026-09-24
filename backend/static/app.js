@@ -381,6 +381,66 @@ async function copyFlowJson(pid) {
   } catch (e) { toast('No se pudo copiar: ' + e.message, 'err'); }
 }
 
+/* ── Guardar Guión en .txt con elección de carpeta local (Inyección 3) ── */
+function _slugifyTxt(s) {
+  return String(s || 'proyecto').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || 'proyecto';
+}
+
+async function downloadProjectScriptTxt(pid) {
+  const p = (S.project && S.project.id === pid) ? S.project : S.projects.find(x => x.id === pid);
+  if (!p) return toast('Proyecto no encontrado', 'err');
+  let scenes = p.scenes || [];
+  if (!scenes.length) {
+    try { const d = await api(`/projects/${pid}`); scenes = d.scenes || []; } catch (_) {}
+  }
+  if (!scenes.length) return toast('Este proyecto aún no tiene guion — genera el video primero', 'err');
+
+  const line = '='.repeat(70);
+  const thin = '-'.repeat(70);
+  let txt = `${line}\nPROYECTO: ${p.title || 'Sin Título'}\n`;
+  txt += `FORMATO:  ${p.format === 'short' ? 'Short 9:16' : 'Largo 16:9'} | ESTILO: ${p.style || 'auto'} | MODO: ${p.mode || '-'}\n`;
+  if (p.hook) txt += `HOOK:     ${p.hook}\n`;
+  if (p.cta)  txt += `CTA:      ${p.cta}\n`;
+  txt += `${line}\n\n`;
+
+  scenes.forEach((sc, i) => {
+    txt += `${thin}\nESCENA ${i + 1}: ${sc.title || ''}\n`;
+    txt += `NARRACIÓN (Voz): ${sc.narration || ''}\n`;
+    txt += `PROMPT IMAGEN:   ${sc.image_prompt || ''}\n\n`;
+  });
+
+  const fileName = `${_slugifyTxt(p.title)}_guion.txt`;
+
+  // File System Access API: el usuario elige la carpeta exacta de su disco
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: fileName,
+        types: [{ description: 'Archivo de texto (Bloc de Notas)', accept: { 'text/plain': ['.txt'] } }]
+      });
+      const writable = await handle.createWritable();
+      await writable.write(txt);
+      await writable.close();
+      toast('¡Guión guardado en tu carpeta! 📁', 'ok');
+      return;
+    } catch (err) {
+      if (err && err.name === 'AbortError') return; // canceló la ventana
+      console.error(err);
+    }
+  }
+
+  // Fallback universal: descarga clásica a la carpeta de Descargas
+  const blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = fileName;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('¡Guión descargado! 📄', 'ok');
+}
+
 /* ── vista: PROYECTOS ────────────────────────────────────── */
 function renderProjects() {
   $('#view').innerHTML = `<h2 class="sec">🗂️ Todos los proyectos (${S.projects.length})</h2>
@@ -426,6 +486,7 @@ function renderProject() {
           <button class="btn" onclick="importFlow('${p.id}')" title="Importa el ZIP de carpetas Escena_XX que deja tu extensión en el disco">📥 Importar Escena_XX</button>
           ${scenes.length && scenes.every(sc => sc.image_path) ? `<button class="btn primary" onclick="renderFlow('${p.id}')" title="Ensambla el MP4 final con las imágenes reales de Flow (voz + subtítulos incluidos)">🎞️ Renderizar con Flow</button>` : ''}
           <a class="btn ghost" href="/api/projects/${p.id}/subtitles.srt" download>💬 Subtítulos SRT</a>
+          <button class="btn ghost" onclick="downloadProjectScriptTxt('${p.id}')" title="Guarda el guion completo (narración + prompts de imagen) en un .txt en la carpeta que elijas de tu PC">💾 Guardar Guión (.txt)</button>
           <button class="btn danger" onclick="delProject('${p.id}')">🗑️</button>
         </div>
         ${p.error ? `<p style="color:var(--err);font-size:12.5px;margin-top:10px">⚠️ ${esc(p.error)}</p>` : ''}
