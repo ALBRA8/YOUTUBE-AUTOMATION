@@ -119,21 +119,31 @@ def import_flow_zip(project_id: str, data: bytes, output_dir: Path,
             "total_files": sum(len(v) for v in buckets.values())}
 
 
-def find_flow_videos(output_dir: Path, scene_numbers: list[int]) -> dict[int, Path]:
+def find_flow_videos(output_dir: Path, scene_indexes: list[int]) -> dict[int, Path]:
     """Localiza los videos REALES de Flow por escena (flow/Escena_XX_*.mp4|webm).
 
-    El render con retime setpts usa el clip de Veo cuando existe; si una escena
-    no tiene video, cae a Ken Burns sobre su imagen. Devuelve {idx0: Path}.
+    scene_indexes son índices 0-based de las escenas del proyecto y el resultado
+    se devuelve como {idx0: Path} — consumido directo por render_scenes().
+    Las carpetas de la extensión son 1-based (Escena_01…), así que el glob usa
+    idx+1: así el video de la Escena_02 JAMÁS se asigna a la escena 3 (bug
+    off-by-one histórico detectado por test_flow_import_e2e).
+    Cada candidato se valida con ffprobe: un video truncado/corrupto (descarga
+    interrumpida de la extensión) se descarta y esa escena cae a Ken Burns
+    sobre su imagen en vez de tumbar el render completo.
     """
     flow_dir = Path(output_dir) / "flow"
     out: dict[int, Path] = {}
     if not flow_dir.exists():
         return out
-    for no in scene_numbers:
+    from pipeline.video import probe_duration  # diferido: evita ciclos de import
+    for idx in scene_indexes:
+        no = idx + 1
         cands = sorted(flow_dir.glob(f"Escena_{no:02d}_*.mp4")) \
             + sorted(flow_dir.glob(f"Escena_{no:02d}_*.webm"))
-        if cands:
-            out[no] = cands[0]
+        for cand in cands:
+            if probe_duration(cand) > 0.3:
+                out[idx] = cand
+                break
     return out
 
 
