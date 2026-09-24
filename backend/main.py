@@ -559,6 +559,10 @@ async def job_events(job_id: str):
 
     async def gen():
         try:
+            # REPLAY: el cliente que conecta tarde recibe primero lo emitido
+            # (logs + progreso) — terminal SSE sin huecos ni websockets
+            for ev in orchestrator.broker.replay(job_id):
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
             while True:
                 try:
                     ev = await asyncio.wait_for(q.get(), timeout=15)

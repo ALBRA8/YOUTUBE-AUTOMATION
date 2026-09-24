@@ -5,6 +5,7 @@ YOUTUBE AUTOMATION v2.0 — Paso 2: Imágenes HÍBRIDAS
 3. Plan C:   placeholder degradado con PIL para no bloquear el render
 """
 import asyncio
+import json
 import logging
 from pathlib import Path
 
@@ -20,6 +21,48 @@ try:
     from PIL import Image, ImageDraw
 except ImportError:  # pragma: no cover
     PIL_OK = False
+
+# Consistencia visual entre escenas (patrón AI-Content-Automation-Engine):
+# la primera imagen resuelta del proyecto se adjunta como referencia de
+# estilo (img2img) a las siguientes. Mismo coste: sigue siendo 1 llamada
+# generate_content por escena, solo multimodal.
+STYLE_REF_SUFFIX = (", match the visual style of the attached reference image: "
+                    "same color palette, same lighting, same illustration "
+                    "technique, keep character appearance consistent")
+STYLE_REF_META = "style_reference"  # flag en meta del proyecto (default True)
+
+
+def _style_sidecar(image_path: str) -> Path:
+    return Path(image_path).with_suffix(".style.json")
+
+
+def _save_style_method(image_path: str, method: str) -> None:
+    try:
+        _style_sidecar(image_path).write_text(json.dumps({"method": method}))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _load_style_method(image_path: str) -> str | None:
+    try:
+        return json.loads(_style_sidecar(image_path).read_text()).get("method")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _reference_bytes(anchor_path: str) -> bytes | None:
+    """Bytes de la imagen ancla SOLO si es de un proveedor real (sidecar
+    method != placeholder). Un placeholder degradado como referencia
+    contagiaría un estilo “gradiente plano” a todo el proyecto."""
+    try:
+        p = Path(anchor_path)
+        if not p.exists() or p.stat().st_size < 512:
+            return None
+        if _load_style_method(anchor_path) == "placeholder":
+            return None
+        return p.read_bytes()
+    except OSError:
+        return None
 
 
 def scene_dir(project_id: str) -> Path:
@@ -42,16 +85,22 @@ def full_prompt(scene: dict, project: dict) -> str:
     return f"{scene['image_prompt']}, {style_desc}{extra}"
 
 
-async def generate_scene_image(scene: dict, project: dict, idx: int) -> tuple[Path, str]:
-    """Devuelve (ruta_imagen, método_usado)."""
+async def generate_scene_image(scene: dict, project: dict, idx: int,
+                               ref_image: bytes | None = None) -> tuple[Path, str]:
+    """Devuelve (ruta_imagen, método_usado).
+    ref_image: bytes de la imagen ancla del proyecto para img2img (solo
+    afecta a la llamada Gemini; planes B/C siguen igual)."""
     out = scene_dir(project["id"]) / f"scene_{idx:02d}.png"
     prompt = full_prompt(scene, project)
+    if ref_image:
+        prompt += STYLE_REF_SUFFIX
 
     # 1) Gemini 2.5 Flash Image
     if gemini_client.available():
         try:
-            data = await gemini_client.generate_image(prompt)
+            data = await gemini_client.generate_image(prompt, ref_image=ref_image)
             out.write_bytes(data)
+            _save_style_method(str(out), "gemini")
             return out, "gemini"
         except Exception as e:  # noqa: BLE001
             log.warning("Gemini image falló escena %d: %s", idx, e)
@@ -65,12 +114,14 @@ async def generate_scene_image(scene: dict, project: dict, idx: int) -> tuple[Pa
                                          headers={"User-Agent": "Mozilla/5.0"})
             data = await asyncio.to_thread(lambda: urllib.request.urlopen(req, timeout=30).read())
             out.write_bytes(data)
+            _save_style_method(str(out), "extension")
             return out, "extension"
         except Exception as e:  # noqa: BLE001
             log.warning("Imagen de extensión falló: %s", e)
 
     # 3) Plan C: placeholder elegante
     _placeholder(out, scene, project, idx)
+    _save_style_method(str(out), "placeholder")
     return out, "placeholder"
 
 
@@ -126,11 +177,16 @@ def _placeholder(out: Path, scene: dict, project: dict, idx: int) -> None:
 
 async def generate_all(project: dict, scenes: list[dict], on_progress=None,
                        is_cancelled=None) -> list[str]:
-    """Genera las imágenes de todas las escenas (2 en paralelo)."""
+    """Genera las imágenes de todas las escenas (2 en paralelo).
+
+    CONSISTENCIA VISUAL (style reference): la escena 0 se resuelve PRIMERO
+    (cache o generación) y su imagen se adjunta como referencia de estilo a
+    las demás (img2img). Desactivable con meta.style_reference=false."""
     paths: list[str] = ["" for _ in scenes]
     sem = asyncio.Semaphore(2)
+    use_ref = bool((project.get("meta") or {}).get(STYLE_REF_META, True))
 
-    async def one(i, sc):
+    async def one(i, sc, ref_image=None):
         if is_cancelled and is_cancelled():
             return
         # IDEMPOTENCIA (skip-if-exists): si ya hay una imagen válida en disco
@@ -147,11 +203,22 @@ async def generate_all(project: dict, scenes: list[dict], on_progress=None,
         except OSError:
             pass
         async with sem:
-            path, method = await generate_scene_image(sc, project, i)
+            path, method = await generate_scene_image(sc, project, i,
+                                                      ref_image=ref_image)
             paths[i] = str(path)
             db.update_scene(sc["id"], image_path=str(path), status="image")
             if on_progress:
                 await on_progress(i + 1, len(scenes), method)
 
-    await asyncio.gather(*(one(i, sc) for i, sc in enumerate(scenes)))
+    if not scenes:
+        return paths
+
+    # Ancla primero (secuencial): decide la identidad visual del proyecto.
+    await one(0, scenes[0])
+    ref = _reference_bytes(paths[0]) if use_ref else None
+    if ref:
+        log.info("style reference activa (ancla: %s) para %d escenas",
+                 paths[0], len(scenes) - 1)
+    await asyncio.gather(*(one(i, sc, ref_image=ref)
+                           for i, sc in enumerate(scenes) if i > 0))
     return paths

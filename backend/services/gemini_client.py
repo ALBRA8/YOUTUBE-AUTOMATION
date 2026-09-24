@@ -98,17 +98,27 @@ async def generate_text(prompt: str, system: str | None = None,
 
 
 # ────────────────────────────────────────────────────────────── IMAGEN ──
-async def generate_image(prompt: str) -> bytes:
+async def generate_image(prompt: str, ref_image: bytes | None = None) -> bytes:
     """Genera una imagen con Gemini 2.5 Flash Image (nano-banana).
-    Devuelve los bytes PNG/JPG de la imagen."""
+    Devuelve los bytes PNG/JPG de la imagen.
+    Con `ref_image` (bytes PNG/JPG) hace img2img: el modelo recibe la imagen
+    de referencia + el prompt → hereda paleta, iluminación y técnica
+    (consistencia visual entre escenas, patrón AI-Content-Automation-Engine)."""
     if not available():
         raise RuntimeError("GEMINI_API_KEY no configurada")
 
     def _call():
         from google.genai import types
+        if ref_image:
+            contents: Any = [
+                types.Part.from_bytes(data=ref_image, mime_type="image/png"),
+                prompt,
+            ]
+        else:
+            contents = prompt
         return client().models.generate_content(
             model=config.GEMINI_IMAGE_MODEL,
-            contents=prompt,
+            contents=contents,
             config=types.GenerateContentConfig(response_modalities=["IMAGE"]),
         )
 

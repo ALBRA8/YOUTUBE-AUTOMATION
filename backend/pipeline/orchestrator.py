@@ -4,8 +4,11 @@ Ejecuta los 5 pasos en background, publica progreso por SSE y soporta
 cancelación. Es el "engine" que consume el dashboard y la fábrica.
 """
 import asyncio
+import contextvars
 import logging
+import time
 import traceback
+from collections import deque
 from pathlib import Path
 
 import database as db
@@ -21,9 +24,13 @@ log = logging.getLogger("orchestrator")
 class JobBroker:
     def __init__(self) -> None:
         self._subs: dict[str, list[asyncio.Queue]] = {}
+        # historial por job para REPLAY: un cliente que conecta tarde (o se
+        # reconecta a mitad del pipeline) recibe primero lo ya emitido
+        # (patrón JobWriter de AI-Content-Automation-Engine, sin websockets)
+        self.history: dict[str, deque] = {}
 
     def subscribe(self, job_id: str) -> asyncio.Queue:
-        q: asyncio.Queue = asyncio.Queue(maxsize=200)
+        q: asyncio.Queue = asyncio.Queue(maxsize=400)
         self._subs.setdefault(job_id, []).append(q)
         return q
 
@@ -32,15 +39,78 @@ class JobBroker:
         if q in lst:
             lst.remove(q)
 
-    async def publish(self, job_id: str, event: dict) -> None:
+    def replay(self, job_id: str) -> list[dict]:
+        return list(self.history.get(job_id, ()))
+
+    def detach_history(self, job_id: str) -> None:
+        self.history.pop(job_id, None)
+
+    def _deliver(self, job_id: str, event: dict) -> None:
+        if event.get("type") in ("log", "progress"):
+            self.history.setdefault(job_id, deque(maxlen=400)).append(event)
         for q in list(self._subs.get(job_id, [])):
             try:
                 q.put_nowait(event)
             except asyncio.QueueFull:
                 pass
 
+    async def publish(self, job_id: str, event: dict) -> None:
+        self._deliver(job_id, event)
+
+    def publish_now(self, job_id: str, event: dict) -> None:
+        """Versión síncrona para logging.Handler.emit (mismo hilo del loop;
+        put_nowait no bloquea y QueueFull se descarta)."""
+        self._deliver(job_id, event)
+
 
 broker = JobBroker()
+
+# contexto del job activo (async-safe: cada tarea establece su job_id y
+# asyncio.to_thread hereda el contexto — los logs de hilos worker también
+# llegan al job correcto)
+current_job: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "current_job", default="")
+
+
+class JobLogHandler(logging.Handler):
+    """JobWriter (patrón AI-Content-Automation-Engine): captura los logs de
+    pipeline.* y services.* y los emite por SSE como eventos type="log" →
+    el dashboard muestra un terminal en vivo del pipeline sin websockets."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            job_id = current_job.get()
+            if not job_id:
+                return
+            broker.publish_now(job_id, {
+                "type": "log", "job_id": job_id,
+                "level": record.levelname.lower(),
+                "logger": record.name,
+                "message": record.getMessage(),
+                "ts": time.strftime("%H:%M:%S")})
+        except Exception:  # noqa: BLE001  (un handler de log NUNCA falla)
+            pass
+
+
+_job_log_handler = JobLogHandler(level=logging.INFO)
+_log_handler_installed = False
+
+
+def install_log_handler() -> None:
+    """Idempotente: conecta el JobLogHandler a los loggers pipeline/services
+    y garantiza nivel INFO para que el terminal SSE vea detalle."""
+    global _log_handler_installed
+    if _log_handler_installed:
+        return
+    _log_handler_installed = True
+    for name in ("pipeline", "services"):
+        lg = logging.getLogger(name)
+        lg.addHandler(_job_log_handler)
+        if lg.level == logging.NOTSET or lg.level > logging.INFO:
+            lg.setLevel(logging.INFO)
+
+
+install_log_handler()
 
 # Registro en memoria: job_id → {"task": Task, "cancelled": bool}
 JOBS: dict[str, dict] = {}
@@ -86,7 +156,7 @@ async def start_pipeline(project_id: str, autopublish: bool = False) -> str:
     JOBS[job_id] = {"task": None, "cancelled": False}
     task = asyncio.create_task(_run(job_id, project_id, autopublish))
     JOBS[job_id]["task"] = task
-    task.add_done_callback(lambda t: JOBS.pop(job_id, None) if not JOBS.get(job_id, {}).get("task") else None)
+    task.add_done_callback(lambda t: _job_done(job_id, t))
     return job_id
 
 
@@ -107,12 +177,21 @@ async def start_flow_render(project_id: str) -> str:
     JOBS[job_id] = {"task": None, "cancelled": False}
     task = asyncio.create_task(_run_flow_render(job_id, project_id))
     JOBS[job_id]["task"] = task
-    task.add_done_callback(lambda t: JOBS.pop(job_id, None) if not JOBS.get(job_id, {}).get("task") else None)
+    task.add_done_callback(lambda t: _job_done(job_id, t))
     return job_id
 
 
+def _job_done(job_id: str, task: asyncio.Task) -> None:
+    """Limpieza al terminar el job: registro en memoria e historial SSE
+    (los datos finales viven en BD; el historial solo sirve en vivo)."""
+    JOBS.pop(job_id, None)
+    broker.detach_history(job_id)
+
+
 async def _run_flow_render(job_id: str, project_id: str) -> None:
+    token = current_job.set(job_id)
     try:
+        log.info("flow_render iniciado (proyecto %s)", project_id)
         scenes = db.get_scenes(project_id)
         if not scenes:
             raise RuntimeError("El proyecto no tiene escenas")
@@ -191,12 +270,17 @@ async def _run_flow_render(job_id: str, project_id: str) -> None:
         await broker.publish(job_id, {"type": "error", "job_id": job_id,
                                       "project_id": project_id,
                                       "message": str(e)[:200]})
+    finally:
+        current_job.reset(token)
 
 
 # ── pipeline completo ─────────────────────────────────────────────────────
 async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
+    token = current_job.set(job_id)
     project = db.get_project(project_id)
     try:
+        log.info("pipeline iniciado (proyecto %s, modo %s)",
+                 project_id, project.get("mode", "?"))
         # PASO 0 — material de origen según modo
         meta = project.get("meta") or {}
         viral_ctx = None
@@ -360,6 +444,8 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
         await broker.publish(job_id, {"type": "error", "job_id": job_id,
                                       "project_id": project_id,
                                       "message": str(e)[:200]})
+    finally:
+        current_job.reset(token)
 
 
 def _description(result: dict, project: dict) -> str:

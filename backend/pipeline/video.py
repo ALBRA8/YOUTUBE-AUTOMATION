@@ -16,6 +16,34 @@ log = logging.getLogger("video")
 
 TRANSITION_DUR = 0.5  # segundos de crossfade entre escenas (compensado en el pad)
 
+# Ken Burns 3 fases (patrón hans-n8n "videos-without-ai"):
+# zoom-in durante los primeros ZOOM_IN_FRAC de la escena, meseta al peak,
+# zoom-out en el último ZOOM_OUT_FRAC. Rotación sinusoidal sutil de
+# ROTATE_DEG grados con periodo ROTATE_SPEED s para dar vida sin marear.
+ZOOM_IN_FRAC = 0.2
+ZOOM_OUT_FRAC = 0.2
+ZOOM_PEAK = 1.2
+ROTATE_DEG = 0.8
+ROTATE_SPEED = 4.0
+
+
+def kenburns_3phase_expr(frames: int, zoom_in_frac: float = ZOOM_IN_FRAC,
+                          zoom_out_frac: float = ZOOM_OUT_FRAC,
+                          peak: float = ZOOM_PEAK) -> str:
+    """Expresión zoompan EXACTA de hans-n8n:
+    if(lt(on,F_IN),1+amp*(on/F_IN), if(lt(on,F_OUT),peak,
+       peak-amp*((on-F_OUT)/(TOTAL-F_OUT))))
+    F_IN/F_OUT derivan de TOTAL_FRAMES × fracción. Con d=frames, `on`
+    recorre 0..frames-1 sobre la única imagen de entrada."""
+    frames = max(int(frames), 1)
+    amp = peak - 1.0
+    f_in = max(int(frames * zoom_in_frac), 1)
+    f_out = max(frames - max(int(frames * zoom_out_frac), 1), f_in + 1)
+    tail = max(frames - f_out, 1)
+    return (f"if(lt(on,{f_in}),1+{amp:.3f}*(on/{f_in}),"
+            f"if(lt(on,{f_out}),{peak:.3f},"
+            f"{peak:.3f}-{amp:.3f}*((on-{f_out})/{tail})))")
+
 
 def _run_ffmpeg(cmd: list[str], timeout: int = 900) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
@@ -34,18 +62,29 @@ def probe_duration(path: Path) -> float:
 
 
 def scene_clip_cmd(img: Path, duration: float, out: Path, w: int, h: int,
-                   fps: int = FPS, zoom_dir: int = 1) -> list[str]:
-    """Ken Burns: zoom in/out suave con zoompan."""
+                   fps: int = FPS, zoom_dir: int = 1,
+                   rotate_deg: float = ROTATE_DEG,
+                   rotate_speed: float = ROTATE_SPEED) -> list[str]:
+    """Ken Burns 3 FASES + rotación sinusoidal (patrón hans-n8n):
+    zoom-in 0→peak en el primer 20% de la escena, meseta al peak,
+    zoom-out peak→1.0 en el último 20%; la cámara oscila ±rotate_deg grados
+    con periodo rotate_speed s. zoom_dir alterna el peak por paridad de
+    escena para variedad (escenas contiguas no respiran igual)."""
     frames = max(int(duration * fps), 1)
-    zexpr = (f"min(1+0.12*on/{frames},1.12)" if zoom_dir > 0
-             else f"max(1.12-0.12*on/{frames},1.0)")
-    vf = (
-        f"scale={w * 2}:{h * 2}:force_original_aspect_ratio=increase,"
-        f"crop={w * 2}:{h * 2},"
+    peak = ZOOM_PEAK if zoom_dir > 0 else 1.12
+    zexpr = kenburns_3phase_expr(frames, peak=peak)
+    parts = [
+        f"scale={w * 2}:{h * 2}:force_original_aspect_ratio=increase",
+        f"crop={w * 2}:{h * 2}",
         f"zoompan=z='{zexpr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
-        f":d={frames}:s={w}x{h}:fps={fps},"
-        f"format=yuv420p"
-    )
+        f":d={frames}:s={w}x{h}:fps={fps}",
+    ]
+    if rotate_deg and rotate_deg > 0:
+        parts.append(
+            f"rotate='{rotate_deg}*PI/180*sin(2*PI*t/{rotate_speed})'"
+            ":fillcolor=black")
+    parts.append("format=yuv420p")
+    vf = ",".join(parts)
     return ["ffmpeg", "-y", "-loop", "1", "-i", str(img), "-t", f"{duration:.3f}",
             "-vf", vf, "-r", str(fps), "-an",
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", str(out)]

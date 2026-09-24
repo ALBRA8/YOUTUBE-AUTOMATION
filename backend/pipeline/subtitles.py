@@ -32,6 +32,11 @@ SUB_STYLES = {
 }
 
 
+# Pausa (s) entre palabras que rompe el bloque de subtítulo (patrón
+# AI-Content-Automation-Engine: "bloques ≤3 palabras / pausa >0.4s")
+MAX_GAP_S = 0.4
+
+
 def _ts(seconds: float) -> str:
     s = max(seconds, 0)
     h = int(s // 3600)
@@ -45,6 +50,28 @@ def group_words(words: list[dict], chunk: int) -> list[list[dict]]:
     return [words[i:i + chunk] for i in range(0, len(words), chunk)] if words else []
 
 
+def group_words_smart(words: list[dict], chunk: int = 3,
+                      max_gap: float = MAX_GAP_S) -> list[list[dict]]:
+    """Agrupación INTELIGENTE (patrón AI-Content-Automation-Engine):
+    corta el bloque al llegar a `chunk` palabras PERO también cuando hay una
+    pausa natural > `max_gap` s entre dos palabras consecutivas. Así un
+    bloque nunca atraviesa una pausa de respiración y el subtítulo “habla”
+    al ritmo real de la locución (mejor retención en shorts)."""
+    if not words:
+        return []
+    groups: list[list[dict]] = []
+    cur: list[dict] = [words[0]]
+    for prev, nxt in zip(words, words[1:]):
+        gap = float(nxt.get("start", 0)) - float(prev.get("end", 0))
+        if len(cur) >= chunk or gap > max_gap:
+            groups.append(cur)
+            cur = [nxt]
+        else:
+            cur.append(nxt)
+    groups.append(cur)
+    return groups
+
+
 def build_ass(words: list[dict], w: int, h: int, style: str = "hormozi") -> str:
     cfg = SUB_STYLES.get(style, SUB_STYLES["hormozi"])
     font_size = max(int(h * cfg["size_ratio"]), 28)
@@ -56,7 +83,7 @@ def build_ass(words: list[dict], w: int, h: int, style: str = "hormozi") -> str:
 
     events: list[str] = []
     usable = max(w - 120, 300)  # ancho útil (margins L/R de 60px)
-    for group in group_words(words, cfg["chunks"]):
+    for group in group_words_smart(words, cfg["chunks"]):
         start = group[0]["start"]
         end = group[-1]["end"]
         text = " ".join(x["word"] for x in group)
@@ -73,10 +100,11 @@ def build_ass(words: list[dict], w: int, h: int, style: str = "hormozi") -> str:
     return header + "\n".join(events) + "\n"
 
 
-def words_to_srt(words: list[dict], chunk: int = 6) -> str:
-    """SRT alternativo (por si el usuario quiere editar fuera)."""
+def words_to_srt(words: list[dict], chunk: int = 3) -> str:
+    """SRT alternativo (por si el usuario quiere editar fuera). Usa la
+    misma agrupación inteligente con corte por pausas que el ASS."""
     lines: list[str] = []
-    for n, group in enumerate(group_words(words, chunk), 1):
+    for n, group in enumerate(group_words_smart(words, chunk), 1):
         start, end = group[0]["start"], group[-1]["end"]
         text = " ".join(x["word"] for x in group)
         lines += [str(n), f"{_ts(start).replace('.', ',')} --> "
