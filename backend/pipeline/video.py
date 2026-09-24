@@ -14,9 +14,23 @@ from pipeline import subtitles as subs_mod
 
 log = logging.getLogger("video")
 
+TRANSITION_DUR = 0.5  # segundos de crossfade entre escenas (compensado en el pad)
+
 
 def _run_ffmpeg(cmd: list[str], timeout: int = 900) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+
+def probe_duration(path: Path) -> float:
+    """Duración REAL de un medio con ffprobe (nunca estimar: sincronía exacta)."""
+    try:
+        p = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True, timeout=30)
+        return float(p.stdout.strip().splitlines()[0])
+    except Exception:  # noqa: BLE001
+        return 0.0
 
 
 def scene_clip_cmd(img: Path, duration: float, out: Path, w: int, h: int,
@@ -37,13 +51,39 @@ def scene_clip_cmd(img: Path, duration: float, out: Path, w: int, h: int,
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", str(out)]
 
 
+def retime_clip_cmd(src: Path, target_dur: float, out: Path, w: int, h: int,
+                    fps: int = FPS) -> list[str]:
+    """Video REAL de Flow (Veo ~8s fijos) re-temporalizado a la duración de la
+    narración con setpts (patrón hans-n8n / AI-Content-Automation-Engine).
+    duration_out = duration_src * factor ⇒ factor = target/src:
+    factor>1 ralentiza (slow-mo cinemático), factor<1 acelera. Se limita a
+    [0.5, 2.5] y se recorta con -t. Audio original eliminado (la voz es nuestra)."""
+    src_dur = probe_duration(src)
+    factor = (target_dur / src_dur) if (src_dur > 0.3 and target_dur > 0.3) else 1.0
+    factor = max(0.5, min(2.5, factor))
+    vf = (f"scale={w * 2}:{h * 2}:force_original_aspect_ratio=increase,"
+          f"crop={w * 2}:{h * 2},setpts=PTS*{factor:.6f},fps={fps},format=yuv420p")
+    return ["ffmpeg", "-y", "-i", str(src), "-vf", vf, "-an",
+            "-t", f"{target_dur:.3f}", "-r", str(fps),
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", str(out)]
+
+
 async def render_scenes(project: dict, scenes: list[dict], durations: list[float],
-                        on_progress=None, is_cancelled=None) -> list[Path]:
-    """Renderiza el clip de cada escena (Ken Burns), 2 en paralelo."""
+                        on_progress=None, is_cancelled=None,
+                        flow_videos: dict | None = None,
+                        transition_pad: float = 0.0) -> list[Path]:
+    """Renderiza el clip de cada escena, 2 en paralelo.
+
+    - Si la escena tiene video REAL de Flow (flow_videos[i]) se usa con retime
+      setpts a la duración de la narración; si no, Ken Burns sobre la imagen.
+    - transition_pad añade margen a los clips NO finales para que, tras el
+      solape xfade, la duración total coincida EXACTAMENTE con sum(durations)
+      y la voz quede sincronizada."""
     proj_dir = OUTPUT_DIR / project["id"]
     clips_dir = proj_dir / "clips"
     clips_dir.mkdir(parents=True, exist_ok=True)
     w, h = (SHORT_W, SHORT_H) if project["format"] == "short" else (LONG_W, LONG_H)
+    n_scenes = len(scenes)
 
     async def one(i: int) -> Path:
         if is_cancelled and is_cancelled():
@@ -51,14 +91,19 @@ async def render_scenes(project: dict, scenes: list[dict], durations: list[float
         img = scenes[i].get("image_path") or ""
         out = clips_dir / f"clip_{i:02d}.mp4"
         dur = max(durations[i], 1.0)
-        cmd = scene_clip_cmd(Path(img), dur + 0.05, out, w, h,
-                             zoom_dir=1 if i % 2 == 0 else -1)
+        pad = transition_pad if i < n_scenes - 1 else 0.0
+        fv = (flow_videos or {}).get(i)
+        if fv and Path(str(fv)).exists():
+            cmd = retime_clip_cmd(Path(str(fv)), dur + pad, out, w, h)
+        else:
+            cmd = scene_clip_cmd(Path(img), dur + 0.05 + pad, out, w, h,
+                                 zoom_dir=1 if i % 2 == 0 else -1)
         p = await asyncio.to_thread(lambda: _run_ffmpeg(cmd))
         if p.returncode != 0:
             log.error("clip %d: %s", i, p.stderr[-300:])
             raise RuntimeError(f"Error renderizando escena {i + 1}")
         if on_progress:
-            await on_progress(i + 1, len(scenes), None)
+            await on_progress(i + 1, n_scenes, None)
         return out
 
     sem = asyncio.Semaphore(2)
@@ -67,20 +112,64 @@ async def render_scenes(project: dict, scenes: list[dict], durations: list[float
         async with sem:
             return await one(i)
 
-    return await asyncio.gather(*(guarded(i) for i in range(len(scenes))))
+    return await asyncio.gather(*(guarded(i) for i in range(n_scenes)))
 
 
-async def concat_clips(project: dict, clips: list[Path]) -> Path:
+async def concat_clips(project: dict, clips: list[Path],
+                       transition: str | None = None) -> Path:
+    """Une los clips. Con transition (ej. 'fade', 'smoothleft', 'circleopen')
+    usa xfade encadenado con offsets incrementales (offset += dur_prev - tdur;
+    el detalle que casi todos hacen mal). Si algo falla, cae al concat demuxer
+    -c copy sin re-encode."""
     proj_dir = OUTPUT_DIR / project["id"]
+    out = proj_dir / "video_silent.mp4"
+
+    if transition and len(clips) >= 2:
+        try:
+            return await _concat_xfade(project, clips, out, transition)
+        except Exception as e:  # noqa: BLE001
+            log.warning("xfade falló (%s) → concat -c copy", str(e)[:160])
+
     concat_file = proj_dir / "concat.txt"
     concat_file.write_text(
         "\n".join(f"file '{c.as_posix()}'" for c in clips), encoding="utf8")
-    out = proj_dir / "video_silent.mp4"
     cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file),
            "-c", "copy", str(out)]
     p = await asyncio.to_thread(lambda: _run_ffmpeg(cmd, timeout=300))
     if p.returncode != 0:
         raise RuntimeError("No se pudo unir los clips")
+    return out
+
+
+async def _concat_xfade(project: dict, clips: list[Path], out: Path,
+                        transition: str) -> Path:
+    """filter_complex xfade encadenado con offsets incrementales sobre las
+    duraciones REALES (ffprobe) de cada clip. Sin audio (clips -an):
+    la voz se mezcla después en mux_audio_music."""
+    tdur = TRANSITION_DUR
+    durs = [probe_duration(c) for c in clips]
+    if any(d <= tdur + 0.1 for d in durs):
+        raise RuntimeError("clip demasiado corto para xfade")
+    inputs: list[str] = []
+    for c in clips:
+        inputs += ["-i", str(c)]
+    chains: list[str] = []
+    prev = "[0:v]"
+    offset = 0.0
+    for k in range(1, len(clips)):
+        offset += durs[k - 1] - tdur
+        label = f"[v{k}]"
+        chains.append(
+            f"{prev}[{k}:v]xfade=transition={transition}:duration={tdur:.3f}"
+            f":offset={offset:.3f}{label}")
+        prev = label
+    cmd = ["ffmpeg", "-y", *inputs, "-filter_complex", ";".join(chains),
+           "-map", prev, "-c:v", "libx264", "-profile:v", "main", "-level", "4.0",
+           "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "18",
+           "-r", str(FPS), str(out)]
+    p = await asyncio.to_thread(lambda: _run_ffmpeg(cmd, timeout=1800))
+    if p.returncode != 0:
+        raise RuntimeError(p.stderr[-300:])
     return out
 
 

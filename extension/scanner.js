@@ -20,6 +20,40 @@
 const IDEA_DIR_RE = /^idea_(\d+)$/i;
 const SCRIPT_NAME = 'script.json';
 const MAX_WALK_DEPTH = 4;
+const SCENE_DIR_RE = /^Escena_(\d+)$/i;
+
+/**
+ * scanCompletedScenes(dirHandle): Promise<Object>
+ * --------------------------------------------------------------
+ * Resume idempotente (patron meta-video-generator / vibes):
+ * escanea la carpeta vinculada en busca de Escena_XX con archivos ya
+ * descargados y devuelve { [sceneNumber]: { images: n, videos: m } }.
+ * El popup lo envia como preCompleted en START_QUEUE para que el
+ * background SIEMBRE esas escenas como DOWNLOADED y no las regenere.
+ */
+async function scanCompletedScenes(dirHandle) {
+  const out = {};
+  if (!dirHandle) return out;
+  try {
+    for await (const entry of dirHandle.values()) {
+      if (entry.kind !== 'directory') continue;
+      const m = SCENE_DIR_RE.exec(entry.name);
+      if (!m) continue;
+      const num = parseInt(m[1], 10) || 0;
+      let images = 0;
+      let videos = 0;
+      try {
+        for await (const f of entry.values()) {
+          if (f.kind !== 'file') continue;
+          if (/\.(png|jpe?g|webp|gif)$/i.test(f.name)) images++;
+          else if (/\.(mp4|webm|mov)$/i.test(f.name)) videos++;
+        }
+      } catch (_) { /* subcarpeta ilegible: cuenta 0 */ }
+      out[num] = { images, videos };
+    }
+  } catch (_) { /* sin permiso o carpeta no iterable */ }
+  return out;
+}
 
 /**
  * findScriptJson(dirHandle: FileSystemDirectoryHandle): Promise<File|null>
@@ -94,5 +128,5 @@ async function findScriptJson(dirHandle) {
 
 /* UMD-lite para tests en Node. */
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { findScriptJson, IDEA_DIR_RE };
+  module.exports = { findScriptJson, scanCompletedScenes, IDEA_DIR_RE, SCENE_DIR_RE };
 }

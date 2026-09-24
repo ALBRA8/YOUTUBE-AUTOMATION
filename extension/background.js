@@ -28,6 +28,15 @@ const KEEPALIVE_ALARM = 'flow-keepalive';
 const SESSION_KEY = 'flow_ext_state_v2';
 const MAX_PROMPT_MATCH_LEN = 80;
 
+/* --- Fase 1 (hardening): watchdog + reintentos + worker tab (patrones
+       probados en meta-video-generator / vibes-content-generator) --- */
+const SCENE_WATCHDOG_ALARM = 'flow-scene-watchdog';
+const SCENE_WATCHDOG_MS_IMAGES = 5 * 60000;   // 5 min por escena de imagenes
+const SCENE_WATCHDOG_MS_VIDEOS = 10 * 60000;  // 10 min por escena de video (Veo es lento)
+const FETCH_TIMEOUT_MS = 60000;               // timeout por intento de descarga
+const FETCH_BACKOFF_MS = [1000, 2000, 4000];  // reintentos con backoff
+const FS_WORKER_KEY = 'fsWorkerTabId';        // pestaña oculta para escrituras FS
+
 const STATUS = {
   PENDING: 'PENDING',
   IN_PROGRESS: 'IN_PROGRESS',
@@ -51,6 +60,7 @@ let pollTimer = null;
 let resumeTimer = null;
 let fallbackRoot = 'FLOW_EXPORT';        // carpeta raiz en Descargas (fallback)
 let lastStateSummary = '';
+let fsWorkerTabId = null;                // pestaña oculta con popup.html?fsworker=1
 
 /* ------------------------- Persistencia (manual 4.1) ---------------------- */
 function serializeState() {
@@ -63,6 +73,7 @@ function serializeState() {
     rateLimitCooldownUntil,
     lastInjectAt,
     fallbackRoot,
+    fsWorkerTabId,
     downloadedTileIds: Array.from(downloadedTileIds),
     mediaIdToScene: Array.from(mediaIdToScene.entries()),
     sceneMediaCounts: Array.from(sceneMediaCounts.entries()),
@@ -85,6 +96,7 @@ function hydrateState(o) {
   rateLimitCooldownUntil = Number(o.rateLimitCooldownUntil) || 0;
   lastInjectAt = Number(o.lastInjectAt) || 0;
   fallbackRoot = o.fallbackRoot || 'FLOW_EXPORT';
+  fsWorkerTabId = Number.isInteger(o.fsWorkerTabId) ? o.fsWorkerTabId : null;
   downloadedTileIds = new Set(Array.isArray(o.downloadedTileIds) ? o.downloadedTileIds : []);
   mediaIdToScene = new Map(Array.isArray(o.mediaIdToScene) ? o.mediaIdToScene : []);
   sceneMediaCounts = new Map(Array.isArray(o.sceneMediaCounts) ? o.sceneMediaCounts : []);
@@ -174,6 +186,30 @@ async function loadProjectHandle() {
 }
 
 /* ------------------- Escritura a disco (manual 3.7 / 4.2) ----------------- */
+/* Descarga con timeout + reintentos backoff (URLs firmadas de CDN expiran;
+   un fallo silencioso rompe el concat de FFmpeg en el backend). */
+async function fetchBlobWithRetry(url) {
+  let lastErr = null;
+  for (let attempt = 0; attempt <= FETCH_BACKOFF_MS.length; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => { try { ctrl.abort(); } catch (_) {} }, FETCH_TIMEOUT_MS);
+    try {
+      const resp = await fetch(url, { signal: ctrl.signal });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const blob = await resp.blob();
+      clearTimeout(timer);
+      return blob;
+    } catch (e) {
+      clearTimeout(timer);
+      lastErr = e;
+      if (attempt < FETCH_BACKOFF_MS.length) {
+        await new Promise((r) => setTimeout(r, FETCH_BACKOFF_MS[attempt]));
+      }
+    }
+  }
+  throw lastErr || new Error('descarga fallida');
+}
+
 function detectExtension(url, isVideoMode) {
   const u = String(url || '').toLowerCase();
   if (/format=gif|\.gif/.test(u)) return 'gif';
@@ -186,7 +222,9 @@ async function saveUrlToDisk(imgUrl, sceneNumber, imageIndex, ext, prefix) {
   const slug = 'Escena_' + String(sceneNumber).padStart(2, '0');
   const filename = prefix + '_' + imageIndex + '.' + ext;
 
-  // 1) Escritura directa via FileSystemDirectoryHandle (IndexedDB)
+  // 1) Escritura directa via FileSystemDirectoryHandle (IndexedDB) — SOLO si el
+  //    SW la soporta (createWritable no existe en service workers de muchas
+  //    versiones: silenciosamente caeria siempre al fallback).
   try {
     const handle = await loadProjectHandle();
     if (handle) {
@@ -194,18 +232,25 @@ async function saveUrlToDisk(imgUrl, sceneNumber, imageIndex, ext, prefix) {
       if (perm === 'granted') {
         const dir = await handle.getDirectoryHandle(slug, { create: true });
         const fh = await dir.getFileHandle(filename, { create: true });
-        const resp = await fetch(imgUrl);
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        const blob = await resp.blob();
+        const blob = await fetchBlobWithRetry(imgUrl);
         const w = await fh.createWritable();
         await w.write(blob);
         await w.close();
         return { ok: true, where: 'directo', path: slug + '/' + filename };
       }
     }
+  } catch (_) { /* prueba la pestaña oculta */ }
+
+  // 2) Pestaña oculta con popup.html?fsworker=1 (patron meta-video-generator /
+  //    vibes-content-generator): contexto de pagina con File System Access real.
+  try {
+    const viaWorker = await writeViaWorkerTab(imgUrl, slug, filename);
+    if (viaWorker && viaWorker.ok) {
+      return { ok: true, where: 'worker', path: slug + '/' + filename };
+    }
   } catch (_) { /* cae al fallback */ }
 
-  // 2) Fallback: carpeta de Descargas con estructura del proyecto
+  // 3) Fallback: carpeta de Descargas con estructura del proyecto
   try {
     const path = fallbackRoot + '/' + slug + '/' + filename;
     const id = await chrome.downloads.download({
@@ -218,6 +263,62 @@ async function saveUrlToDisk(imgUrl, sceneNumber, imageIndex, ext, prefix) {
   } catch (e) {
     return { ok: false, where: 'ninguno', error: String(e && e.message || e) };
   }
+}
+
+/* -------- Pestaña oculta FS worker (patron de los repos hermanos) --------- */
+function workerTabUrl() {
+  return chrome.runtime.getURL('popup.html') + '?fsworker=1';
+}
+
+async function ensureWorkerTab() {
+  // Reutilizar la worker tab persistida si sigue viva
+  if (Number.isInteger(fsWorkerTabId)) {
+    try {
+      await chrome.tabs.get(fsWorkerTabId);
+      return fsWorkerTabId;
+    } catch (_) { fsWorkerTabId = null; persistState(); }
+  }
+  const tab = await chrome.tabs.create({
+    url: workerTabUrl(),
+    active: false, // sigue visible en la barra, pero sin robar foco
+  });
+  fsWorkerTabId = tab && typeof tab.id === 'number' ? tab.id : null;
+  persistState();
+  return fsWorkerTabId;
+}
+
+function closeWorkerTab() {
+  if (Number.isInteger(fsWorkerTabId)) {
+    try { chrome.tabs.remove(fsWorkerTabId).catch(() => {}); } catch (_) {}
+    fsWorkerTabId = null;
+    persistState();
+  }
+}
+
+function writeViaWorkerTab(imgUrl, slug, filename) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (payload) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { chrome.runtime.onMessage.removeListener(listener); } catch (_) {}
+      resolve(payload);
+    };
+    const timer = setTimeout(() => finish({ ok: false, error: 'fsworker timeout' }), 120000);
+    const listener = (msg) => {
+      if (msg && msg.type === 'FS_WRITE_RESULT' && msg.slug === slug && msg.filename === filename) {
+        finish({ ok: !!msg.ok, where: msg.where, error: msg.error });
+      }
+      return false;
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    ensureWorkerTab().then((tabId) => {
+      if (tabId == null) return finish({ ok: false, error: 'sin worker tab' });
+      chrome.tabs.sendMessage(tabId, { type: 'FS_WRITE', url: imgUrl, slug, filename })
+        .catch(() => finish({ ok: false, error: 'worker tab no responde' }));
+    }).catch(() => finish({ ok: false, error: 'no se pudo abrir worker tab' }));
+  });
 }
 
 /* ---------------- Mecanografia humana en Slate (manual 4.3) --------------- */
@@ -294,7 +395,10 @@ function slateInjectFn(promptText) {
 }
 
 /* --------------------- Sondeo del DOM (manual 3.7.5) ---------------------- */
-/* Funcion auto-contenida: se serializa y ejecuta DENTRO de la pestana. */
+/* Funcion auto-contenida: se serializa y ejecuta DENTRO de la pestana.
+   Ademas del scan clasico [data-tile-id], incluye PLAN B semantico
+   (flow-pending-tile / flow-error-tile / img[data-media-id]) que NO depende
+   de la interceptacion tRPC y sobrevive a redeploys de Flow. */
 function domScanFn() {
   try {
     const tiles = Array.from(document.querySelectorAll('[data-tile-id]')).map((t) => {
@@ -318,9 +422,32 @@ function domScanFn() {
       };
     });
     const bodyText = (document.body && document.body.innerText) || '';
+
+    // PLAN B: selectores semanticos de la UI Angular de Flow
+    let semantic = null;
+    try {
+      const pending = document.querySelectorAll('flow-pending-tile, [data-testid="pending-tile"]').length;
+      const errorTiles = [];
+      document.querySelectorAll('flow-error-tile, [data-testid="error-tile"]').forEach((t) => {
+        errorTiles.push((t.innerText || '').slice(0, 200));
+      });
+      const media = [];
+      document.querySelectorAll('img[data-media-id]').forEach((img) => {
+        const src = img.currentSrc || img.src;
+        if (src) media.push({ id: img.getAttribute('data-media-id'), src });
+      });
+      const videos = [];
+      document.querySelectorAll('video[src], video > source[src]').forEach((v) => {
+        const s = v.tagName === 'VIDEO' ? v.src : v.getAttribute('src');
+        if (s) videos.push(s);
+      });
+      semantic = { pending, errorTiles, media, videos };
+    } catch (_) { /* plan B best-effort */ }
+
     return {
       tiles,
       tooQuick: /too quickly|demasiado r[aá]pid/i.test(bodyText.slice(0, 4000)),
+      semantic,
       url: location.href,
     };
   } catch (e) {
@@ -404,6 +531,53 @@ async function processDomSnapshot(data) {
       item.error = saved.error || 'fallo al guardar';
     }
   }
+
+  /* PLAN B semantico: si tRPC no entrego mapeo y Flow esta en UI Angular,
+     img[data-media-id] / flow-error-tile dan cobertura sin interceptacion. */
+  const sem = data && data.semantic;
+  if (sem && Array.isArray(sem.errorTiles) && sem.errorTiles.length) {
+    const errScene = resolveSemanticScene(null);
+    if (errScene != null) markSceneError(errScene, 'flow-error-tile: ' + (sem.errorTiles[0] || '').slice(0, 120));
+  }
+  if (sem && Array.isArray(sem.media) && sem.media.length) {
+    for (const m of sem.media) {
+      if (!m || !m.id || !m.src) continue;
+      if (downloadedTileIds.has(m.id)) continue;
+      const scene = resolveSemanticScene(m.id);
+      if (scene == null) continue;
+      const isVideoMode = mode === 'videos';
+      const idx = (sceneMediaCounts.get(scene) || 0) + 1;
+      const ext = detectExtension(m.src, isVideoMode);
+      const prefix = isVideoMode ? 'video' : 'imagen';
+      downloadedTileIds.add(m.id);
+      if (!mediaIdToScene.has(m.id)) {
+        mediaIdToScene.set(m.id, { sceneNumber: scene, imageIndex: idx });
+      }
+      const saved = await saveUrlToDisk(m.src, scene, idx, ext, prefix);
+      sceneMediaCounts.set(scene, idx);
+      persistState();
+      const item = queue.find((i) => i.scene_number === scene);
+      const need = isVideoMode ? 1 : imagesPerScene;
+      if (saved && saved.ok && item && (sceneMediaCounts.get(scene) || 0) >= need) {
+        item.status = STATUS.DOWNLOADED;
+        rearmWatchdog();
+        broadcastState();
+        tickSoon(800);
+      }
+    }
+  }
+}
+
+/* Resolucion de escena para el PLAN B semantico: 1) mapeo tRPC existente,
+   2) unica escena en curso (asociacion 1-a-1 segura). */
+function resolveSemanticScene(mediaId) {
+  if (mediaId) {
+    const mapped = mediaIdToScene.get(mediaId);
+    if (mapped) return mapped.sceneNumber;
+  }
+  const inProgress = queue.filter((i) => i.status === STATUS.IN_PROGRESS);
+  if (inProgress.length === 1) return inProgress[0].scene_number;
+  return null;
 }
 
 function resolveSceneForTile(tile) {
@@ -433,7 +607,54 @@ function markSceneError(sceneNumber, reason) {
       changed = true;
     }
   }
-  if (changed) { persistState(); broadcastState(); tickSoon(1500); }
+  if (changed) { persistState(); rearmWatchdog(); broadcastState(); tickSoon(1500); }
+}
+
+/* ---------------- Watchdog por escena (chrome.alarms) --------------------- */
+/* Si una generacion se atasca (Flow colgado, tile sin resolver), la escena
+   queda IN_PROGRESS para siempre y el lote nocturno muere. El alarm es la
+   unica forma fiable de despertar el SW MV3: al dispararse, marca ERROR las
+   escenas que excedan su presupuesto y avanza a la siguiente. */
+function watchdogBudgetMs() {
+  return mode === 'videos' ? SCENE_WATCHDOG_MS_VIDEOS : SCENE_WATCHDOG_MS_IMAGES;
+}
+
+function rearmWatchdog() {
+  try { chrome.alarms.clear(SCENE_WATCHDOG_ALARM).catch(() => {}); } catch (_) {}
+  if (!running) return;
+  const budget = watchdogBudgetMs();
+  const now = Date.now();
+  let earliest = Infinity;
+  for (const item of queue) {
+    if (item.status === STATUS.IN_PROGRESS && item.startedAt) {
+      earliest = Math.min(earliest, item.startedAt);
+    }
+  }
+  if (!isFinite(earliest)) return;
+  const remainingMs = Math.max(5000, earliest + budget - now);
+  try {
+    chrome.alarms.create(SCENE_WATCHDOG_ALARM, { delayInMinutes: remainingMs / 60000 });
+  } catch (_) {}
+}
+
+function watchdogCheck() {
+  if (!running) return;
+  const budget = watchdogBudgetMs();
+  const now = Date.now();
+  let expired = false;
+  for (const item of queue) {
+    if (item.status === STATUS.IN_PROGRESS && item.startedAt && (now - item.startedAt) > budget) {
+      item.status = STATUS.ERROR;
+      item.error = 'watchdog: generación atascada >' + Math.round(budget / 60000) + ' min';
+      expired = true;
+    }
+  }
+  if (expired) {
+    persistState();
+    broadcastState();
+    tickSoon(1000); // avanza a la siguiente escena
+  }
+  rearmWatchdog();
 }
 
 /* ------------- Rate limit + cooldown (manual 3.7 / 4.5) ------------------- */
@@ -464,13 +685,29 @@ function triggerRateLimit() {
 function onMessageStartQueue(msg) {
   const scenes = Array.isArray(msg.scenes) ? msg.scenes : [];
   if (!scenes.length) return { ok: false, error: 'sin escenas' };
-  queue = scenes.map((s, i) => ({
-    id: 'sc_' + Date.now() + '_' + i + '_' + Math.random().toString(36).slice(2, 7),
-    scene_number: Number(s.scene_number) || i + 1,
-    prompt: String(s.prompt || ''),
-    status: STATUS.PENDING,
-    error: null,
-  }));
+  /* Resume idempotente: escenas ya descargadas en disco (Escena_XX detectadas
+     por scanner.scanCompletedScenes) se siembran como DOWNLOADED y se omiten. */
+  const pre = msg.preCompleted && typeof msg.preCompleted === 'object' ? msg.preCompleted : null;
+  const need = msg.mode === 'videos' ? 1 : (Number(msg.imagesPerScene) > 0 ? Number(msg.imagesPerScene) : IMAGES_PER_SCENE_DEFAULT);
+  queue = scenes.map((s, i) => {
+    const sceneNumber = Number(s.scene_number) || i + 1;
+    let status = STATUS.PENDING;
+    if (pre) {
+      const info = pre[String(sceneNumber)] || pre[sceneNumber];
+      const haveImages = info && Number(info.images) || 0;
+      const haveVideos = info && Number(info.videos) || 0;
+      if (msg.mode === 'videos' ? haveVideos >= 1 : haveImages >= need) {
+        status = STATUS.DOWNLOADED;
+      }
+    }
+    return {
+      id: 'sc_' + Date.now() + '_' + i + '_' + Math.random().toString(36).slice(2, 7),
+      scene_number: sceneNumber,
+      prompt: String(s.prompt || ''),
+      status,
+      error: null,
+    };
+  });
   mode = msg.mode === 'videos' ? 'videos' : 'images';
   imagesPerScene = Number(msg.imagesPerScene) > 0 ? Number(msg.imagesPerScene) : IMAGES_PER_SCENE_DEFAULT;
   labTabId = typeof msg.tabId === 'number' ? msg.tabId : null;
@@ -523,8 +760,10 @@ function tick(initial) {
 
 async function injectScene(item) {
   item.status = STATUS.IN_PROGRESS;
+  item.startedAt = Date.now();
   lastInjectAt = Date.now();
   persistState();
+  rearmWatchdog();
   broadcastState();
   try {
     if (labTabId == null) throw new Error('pestaña de Flow no vinculada');
@@ -637,12 +876,14 @@ function handleBatchResponse(raw) {
   }
 }
 
-/* ------------------------- Control de la cola ----------------------------- */
+/* ----------------------- Control de la cola ----------------------------- */
 function stopQueue(reason) {
   running = false;
   if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = null; }
   stopPolling();
   try { chrome.alarms.clear(KEEPALIVE_ALARM).catch(() => {}); } catch (_) {}
+  try { chrome.alarms.clear(SCENE_WATCHDOG_ALARM).catch(() => {}); } catch (_) {}
+  closeWorkerTab();
   persistState();
   broadcastState();
   return { ok: true, reason: reason || 'detenida' };
@@ -659,6 +900,8 @@ function resetAll() {
   if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = null; }
   stopPolling();
   try { chrome.alarms.clear(KEEPALIVE_ALARM).catch(() => {}); } catch (_) {}
+  try { chrome.alarms.clear(SCENE_WATCHDOG_ALARM).catch(() => {}); } catch (_) {}
+  closeWorkerTab();
   try { chrome.storage.session.remove(SESSION_KEY).catch(() => {}); } catch (_) {}
   broadcastState();
   return { ok: true };
@@ -688,15 +931,19 @@ function ensureKeepalive() {
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm && alarm.name === KEEPALIVE_ALARM && running) {
+  if (!alarm) return;
+  if (alarm.name === KEEPALIVE_ALARM && running) {
     loadState().then(() => {
       if (running) { startPollingIfNeeded(); tickSoon(300); }
     });
+  } else if (alarm.name === SCENE_WATCHDOG_ALARM) {
+    watchdogCheck();
   }
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (running && tabId === labTabId) stopQueue('pestaña cerrada');
+  if (tabId === fsWorkerTabId) { fsWorkerTabId = null; persistState(); }
 });
 
 /* --------------------------- Router de mensajes --------------------------- */

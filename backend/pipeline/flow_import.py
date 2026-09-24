@@ -119,6 +119,24 @@ def import_flow_zip(project_id: str, data: bytes, output_dir: Path,
             "total_files": sum(len(v) for v in buckets.values())}
 
 
+def find_flow_videos(output_dir: Path, scene_numbers: list[int]) -> dict[int, Path]:
+    """Localiza los videos REALES de Flow por escena (flow/Escena_XX_*.mp4|webm).
+
+    El render con retime setpts usa el clip de Veo cuando existe; si una escena
+    no tiene video, cae a Ken Burns sobre su imagen. Devuelve {idx0: Path}.
+    """
+    flow_dir = Path(output_dir) / "flow"
+    out: dict[int, Path] = {}
+    if not flow_dir.exists():
+        return out
+    for no in scene_numbers:
+        cands = sorted(flow_dir.glob(f"Escena_{no:02d}_*.mp4")) \
+            + sorted(flow_dir.glob(f"Escena_{no:02d}_*.webm"))
+        if cands:
+            out[no] = cands[0]
+    return out
+
+
 def apply_to_scenes(scenes: list[dict], result: dict) -> int:
     """Asigna los archivos importados a las escenas (por número de escena, 1-based)."""
     by_no = {m["scene_number"]: m for m in result["mapped"]}

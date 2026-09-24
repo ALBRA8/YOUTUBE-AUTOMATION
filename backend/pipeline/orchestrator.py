@@ -10,7 +10,7 @@ from pathlib import Path
 
 import database as db
 from config import OUTPUT_DIR
-from pipeline import images as imgs
+from pipeline import flow_import, images as imgs
 from pipeline import script_gen, tts_step, video
 from services import gemini_client, url_mode, whisper_service, youtube_publish
 
@@ -138,11 +138,24 @@ async def _run_flow_render(job_id: str, project_id: str) -> None:
         meta = {**(db.get_project(project_id).get("meta") or {}), "durations": durations}
         db.update_project(project_id, meta=meta)
 
-        await _emit(job_id, project_id, "render", 76, "Renderizando escenas Flow (Ken Burns)…")
-        clips = await video.render_scenes(db.get_project(project_id), scenes, durations,
-                                          None, is_cancelled(job_id))
+        await _emit(job_id, project_id, "render", 76,
+                    "Renderizando escenas Flow (video real + Ken Burns)…")
+        # Videos REALES de Flow (Veo) con retime setpts a la narración;
+        # fallback automático a Ken Burns por escena sin video.
+        flow_videos = flow_import.find_flow_videos(
+            OUTPUT_DIR / project_id, list(range(len(scenes))))
+        if flow_videos:
+            await _emit(job_id, project_id, "render", 77,
+                        f"Usando {len(flow_videos)} clip(s) reales de Flow (retime)…")
+        transitions = bool((db.get_project(project_id).get("meta") or {}).get("transitions", True))
+        clips = await video.render_scenes(
+            db.get_project(project_id), scenes, durations,
+            None, is_cancelled(job_id),
+            flow_videos=flow_videos or None,
+            transition_pad=video.TRANSITION_DUR if transitions else 0.0)
         await _emit(job_id, project_id, "render", 82, "Uniendo clips…")
-        silent = await video.concat_clips(db.get_project(project_id), clips)
+        silent = await video.concat_clips(db.get_project(project_id), clips,
+                                          transition="fade" if transitions else None)
         await _emit(job_id, project_id, "render", 86, "Mezclando voz y música…")
         raw_video = await video.mux_audio_music(db.get_project(project_id),
                                                 silent, voice_full)
@@ -280,12 +293,17 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
         meta = {**(db.get_project(project_id).get("meta") or {}), "durations": durations}
         db.update_project(project_id, meta=meta)
 
-        # PASO 4 — render
-        await _emit(job_id, project_id, "render", 76, "Renderizando escenas (Ken Burns)…")
-        clips = await video.render_scenes(db.get_project(project_id), scenes, durations,
-                                          None, is_cancelled(job_id))
+        # PASO 4 — render (con transiciones xfade y pad compensado para
+        # mantener la sincronía exacta con la pista de voz)
+        await _emit(job_id, project_id, "render", 76, "Renderizando escenas (Ken Burns + transiciones)…")
+        transitions = bool((db.get_project(project_id).get("meta") or {}).get("transitions", True))
+        clips = await video.render_scenes(
+            db.get_project(project_id), scenes, durations,
+            None, is_cancelled(job_id),
+            transition_pad=video.TRANSITION_DUR if transitions else 0.0)
         await _emit(job_id, project_id, "render", 82, "Uniendo clips…")
-        silent = await video.concat_clips(db.get_project(project_id), clips)
+        silent = await video.concat_clips(db.get_project(project_id), clips,
+                                          transition="fade" if transitions else None)
         await _emit(job_id, project_id, "render", 86, "Mezclando voz y música…")
         raw_video = await video.mux_audio_music(db.get_project(project_id),
                                                 silent, voice_full)

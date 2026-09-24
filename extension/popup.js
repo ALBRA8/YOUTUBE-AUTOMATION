@@ -77,6 +77,75 @@ let linkedFolder = null;   // nombre de la carpeta vinculada (handle)
 let scriptSource = null;   // 'autodetectado' | 'manual'
 let scenes = [];           // escenas crudas del script.json
 let pollTimer = null;
+let completedScenes = {};  // resume: { [sceneNumber]: { images, videos } } (en disco)
+
+/* ---------------- Modo FS worker (pestaña oculta) ------------------------- */
+/* El background abre popup.html?fsworker=1 como pestaña inactiva porque el
+   Service Worker MV3 NO soporta createWritable() (patrón probado en
+   meta-video-generator / vibes-content-generator). Esta pestaña recibe
+   FS_WRITE y escribe a disco con el handle ya persistido en IndexedDB. */
+function initFsWorkerMode() {
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (!msg || msg.type !== 'FS_WRITE') return false;
+    fsWorkerWrite(msg)
+      .then((r) => sendResponse({
+        type: 'FS_WRITE_RESULT',
+        slug: msg.slug,
+        filename: msg.filename,
+        ok: !!r.ok,
+        where: r.where,
+        error: r.error,
+      }))
+      .catch((e) => sendResponse({
+        type: 'FS_WRITE_RESULT',
+        slug: msg.slug,
+        filename: msg.filename,
+        ok: false,
+        error: String((e && e.message) || e),
+      }));
+    return true; // respuesta asíncrona
+  });
+  toast('🛠 Worker de disco activo (pestaña oculta). No cerrar hasta terminar el lote.');
+}
+
+async function fsWorkerWrite(msg) {
+  try {
+    const handle = await loadProjectHandle();
+    if (!handle) return { ok: false, error: 'sin handle vinculado' };
+    const perm = await handle.queryPermission({ mode: 'readwrite' });
+    if (perm !== 'granted') return { ok: false, error: 'sin permiso readwrite' };
+    const dir = await handle.getDirectoryHandle(String(msg.slug), { create: true });
+    const fh = await dir.getFileHandle(String(msg.filename), { create: true });
+    const resp = await fetch(msg.url);
+    if (!resp.ok) return { ok: false, error: 'HTTP ' + resp.status };
+    const blob = await resp.blob();
+    const w = await fh.createWritable();
+    await w.write(blob);
+    await w.close();
+    return { ok: true, where: 'worker' };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
+if (location.search.indexOf('fsworker=1') !== -1) {
+  initFsWorkerMode();
+}
+
+/* -------------------- Resume: escenas ya en disco ------------------------- */
+async function refreshCompletedScenes(handle) {
+  try {
+    completedScenes = typeof scanCompletedScenes === 'function'
+      ? await scanCompletedScenes(handle) : {};
+    const nums = Object.keys(completedScenes).map(Number).sort((a, b) => a - b);
+    if (nums.length) {
+      const detail = nums.map((n) => 'Escena ' + String(n).padStart(2, '0')).join(', ');
+      toast('♻ Reanudable: ya en disco → ' + detail + '. Se omitirán al iniciar.');
+    }
+  } catch (_) {
+    completedScenes = {};
+  }
+}
 
 /* -------------------------------- Tema ------------------------------------ */
 function applyTheme(theme) {
@@ -161,6 +230,7 @@ async function vincularProyecto() {
     linkedFolder = handle.name;
     els.folderName.value = handle.name;
     setDiskBadge(handle.name, true);
+    await refreshCompletedScenes(handle);
 
     const file = await findScriptJson(handle); // scanner.js
     if (file) {
@@ -228,6 +298,7 @@ els.btnStart.addEventListener('click', async () => {
     imagesPerScene: parseInt(els.imgsPerScene.value, 10) || 2,
     tabId: tab.id,
     folderName: (els.folderName.value.trim() || 'FLOW_EXPORT').toUpperCase(),
+    preCompleted: completedScenes || {},
   }, (res) => {
     if (res && res.ok) {
       toast('🚀 Generación iniciada (' + res.count + ' escenas). Mantén la pestaña de Flow abierta.');
@@ -331,12 +402,13 @@ chrome.runtime.onMessage.addListener((msg) => {
   chrome.runtime.sendMessage({ type: 'SW_PING' }, (res) => {
     if (res && res.ok) refreshFromBackground();
   });
-  // ¿Hay handle vinculado en IndexedDB? restaurar insignia
+  // ¿Hay handle vinculado en IndexedDB? restaurar insignia + resume en disco
   const handle = await loadProjectHandle();
   if (handle) {
     linkedFolder = handle.name;
     if (!els.folderName.value.trim()) els.folderName.value = handle.name;
     setDiskBadge(handle.name, true);
+    await refreshCompletedScenes(handle);
     if (!scenes.length) {
       try {
         const file = await findScriptJson(handle);
