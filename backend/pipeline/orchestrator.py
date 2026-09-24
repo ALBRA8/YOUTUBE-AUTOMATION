@@ -144,11 +144,29 @@ async def _emit(job_id: str, project_id: str, step: str, pct: int, msg: str,
 
 
 # ── inicio ────────────────────────────────────────────────────────────────
+def _zombie_job(active: dict | None) -> bool:
+    """True si el job 'running' de la BD no tiene tarea viva en ESTE proceso.
+
+    Los jobs no sobreviven a un crash/reinicio del servidor, pero su fila queda
+    status='running' en SQLite: start_pipeline devolvería ese job fantasma para
+    siempre y el proyecto quedaría atascado (bug detectado tras un SIGKILL del
+    servidor con un render a medias)."""
+    if not active:
+        return False
+    reg = JOBS.get(active.get("id", ""))
+    return not (reg and reg.get("task"))
+
+
 async def start_pipeline(project_id: str, autopublish: bool = False) -> str:
     project = db.get_project(project_id)
     if not project:
         raise ValueError("proyecto no existe")
     active = db.active_job_for_project(project_id)
+    if _zombie_job(active):
+        # job huérfano de un proceso muerto → fallarlo y relanzar limpio
+        db.update_job(active["id"], status="failed",
+                      error="interrumpido por reinicio del servidor")
+        active = None
     if active:
         return active["id"]  # ya hay un pipeline corriendo
 
@@ -170,6 +188,10 @@ async def start_flow_render(project_id: str) -> str:
     if not project:
         raise ValueError("proyecto no existe")
     active = db.active_job_for_project(project_id)
+    if _zombie_job(active):
+        db.update_job(active["id"], status="failed",
+                      error="interrumpido por reinicio del servidor")
+        active = None
     if active:
         return active["id"]
 
