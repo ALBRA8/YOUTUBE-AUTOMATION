@@ -41,6 +41,7 @@ import zipfile
 from datetime import datetime, timezone
 
 from services.themes import get_style
+from pipeline.sanitizer import sanitize_text, enrich_realistic_prompt
 
 # --------------------------------------------------------------------------------------
 # Utilidades
@@ -677,7 +678,7 @@ def _build_script_json_artesano(project: dict, scenes: list[dict], ai: dict | No
             }
             entry["video_prompt"] = video_prompt
             entry["videoPrompt"] = video_prompt
-        scenes_out.append(entry)
+        scenes_out.append(_sanitize_flow_entry(entry, brand))
 
     return {
         "project_name": slugify(project.get("title") or "PROYECTO"),
@@ -693,6 +694,36 @@ def _build_script_json_artesano(project: dict, scenes: list[dict], ai: dict | No
                   "prompt": "hyper-realistic documentary photography, myth-meets-reality"},
         "scenes": scenes_out,
     }
+
+
+def _sanitize_flow_entry(entry: dict, brand: str) -> dict:
+    """Blindaje anti-filtros del script.json exportado (Inyección 2).
+
+    Limpia términos bloqueables (armas/violencia/copyright) en todos los
+    campos de prompt y añade física óptica real si el estilo es fotorrealista.
+    La marca del letrero/ropa se preserva intacta (allow_brand_text).
+    Garantiza que Meta AI / Midjourney / Flow NUNCA rechacen el export."""
+    ip = entry.get("image_prompt")
+    if isinstance(ip, dict):
+        for fld in ("environment", "lighting", "composition", "style"):
+            if isinstance(ip.get(fld), str):
+                ip[fld] = sanitize_text(ip[fld], brand_name=brand,
+                                        allow_brand_text=True)
+        subj = ip.get("subjects")
+        if isinstance(subj, list):
+            ip["subjects"] = [sanitize_text(s, brand_name=brand,
+                                             allow_brand_text=True)
+                              if isinstance(s, str) else s for s in subj]
+        vp = entry.get("video_prompt")
+        if isinstance(vp, dict):
+            for fld in ("motion", "camera_movement"):
+                if isinstance(vp.get(fld), str):
+                    vp[fld] = sanitize_text(vp[fld], brand_name=brand,
+                                            allow_brand_text=True)
+            enrich_realistic_prompt(ip, vp)
+        else:
+            enrich_realistic_prompt(ip)
+    return entry
 
 
 def build_script_json(project: dict, scenes: list[dict], ai: dict | None = None,
@@ -732,7 +763,7 @@ def build_script_json(project: dict, scenes: list[dict], ai: dict | None = None,
             }
             entry["video_prompt"] = video_prompt
             entry["videoPrompt"] = video_prompt
-        scenes_out.append(entry)
+        scenes_out.append(_sanitize_flow_entry(entry, brand))
 
     return {
         "project_name": slugify(project.get("title") or "PROYECTO"),
