@@ -1,204 +1,265 @@
 /* =============================================================================
- * popup.css — Interfaz del panel "Flow Script Processor"
- * Réplica fiel de la captura del usuario: tema oscuro azul-marino, título con
- * degradado morado, botón primario azul, Limpiar rojo, tarjetas de escena.
- * Incluye variante clara (toggle ☀️/🌙 guardado en localStorage).
+ * popup.css — "Flow Script Processor" · identidad visual del proyecto v2
+ * Glassmorphism "Labsia mejorado": mismos tokens que el dashboard
+ * (style.css del backend): #7c5cff violeta, #00e0c6 turquesa, #ff5c87 rosa,
+ * Bangers para display, Plus Jakarta Sans para UI, blur + bordes translúcidos.
  * ========================================================================== */
 
 :root, html[data-theme="dark"] {
-  --bg: #0a0f1e;
-  --panel: #101830;
-  --panel-2: #0d1428;
-  --border: #1f2c4f;
-  --border-soft: #182340;
-  --text: #e8ecf8;
-  --muted: #8d9ab8;
-  --primary-a: #2563eb;
-  --primary-b: #3b82f6;
-  --danger: #ef4444;
-  --grad-a: #a855f7;
-  --grad-b: #6366f1;
-  --ok: #34a853;
-  --warn: #fbbc04;
-  --rate: #fa7b17;
-  --info: #8ab4f8;
-  --input-bg: #0b1228;
+  --bg: #0b0d17;
+  --bg2: #12152a;
+  --card: rgba(255, 255, 255, .045);
+  --card-solid: #161a30;
+  --border: rgba(255, 255, 255, .09);
+  --text: #eef1ff;
+  --muted: #9aa2c8;
+  --accent: #7c5cff;
+  --accent2: #00e0c6;
+  --accent3: #ff5c87;
+  --gold: #ffd400;
+  --ok: #2bd976;
+  --warn: #ffb020;
+  --err: #ff5470;
+  --shadow: 0 18px 50px rgba(0, 0, 0, .45);
+  --radius: 18px;
+  --font-display: 'Bangers', 'Impact', system-ui;
+  --font-body: 'Plus Jakarta Sans', 'Segoe UI', system-ui, sans-serif;
 }
-
 html[data-theme="light"] {
-  --bg: #f2f5fc;
-  --panel: #ffffff;
-  --panel-2: #f7f9ff;
-  --border: #d9e0f2;
-  --border-soft: #e5eaf7;
-  --text: #1c2440;
-  --muted: #5a6a8f;
-  --danger: #dc2626;
-  --ok: #1e8e3e;
+  --bg: #f2f4fb;
+  --bg2: #ffffff;
+  --card: rgba(20, 25, 60, .05);
+  --card-solid: #ffffff;
+  --border: rgba(20, 25, 60, .1);
+  --text: #171c33;
+  --muted: #5b6280;
+  --shadow: 0 14px 40px rgba(30, 40, 90, .12);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
+[hidden] { display: none !important; }
 
 body {
   width: 400px;
-  font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
-  background: var(--bg);
+  font-family: var(--font-body);
   color: var(--text);
   font-size: 13px;
+  background:
+    radial-gradient(700px 320px at 88% -12%, rgba(124, 92, 255, .22), transparent 60%),
+    radial-gradient(560px 300px at -12% 112%, rgba(0, 224, 198, .14), transparent 55%),
+    var(--bg);
+  min-height: 540px;
 }
 
-.wrap { padding: 14px 14px 10px; }
+.wrap { padding: 14px 14px 12px; }
 
-/* ------------------------------ Cabecera --------------------------------- */
+/* ── Cabecera: logo + brand (igual que el sidebar del dashboard) ─────────── */
 .head {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 12px;
+  display: flex; align-items: center; gap: 11px;
+  padding: 2px 4px 14px;
 }
-.brand {
-  font-size: 20px; font-weight: 800; letter-spacing: .2px;
-  background: linear-gradient(90deg, var(--grad-a), var(--grad-b));
-  -webkit-background-clip: text; background-clip: text;
-  -webkit-text-fill-color: transparent; color: transparent;
+.head .logo {
+  width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center;
+  font-size: 21px; flex: none;
+  background: linear-gradient(135deg, var(--accent), var(--accent3));
+  box-shadow: 0 8px 22px rgba(124, 92, 255, .45);
 }
-.theme-btn {
-  background: none; border: none; cursor: pointer; font-size: 18px;
-  line-height: 1; padding: 4px; border-radius: 8px;
+.brand-txt { flex: 1; min-width: 0; }
+.brand-txt h1 {
+  font-family: var(--font-display); font-weight: 400; font-size: 21px;
+  letter-spacing: 1px; line-height: 1; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.theme-btn:hover { background: var(--panel); }
+.brand-txt h1 em { font-style: normal; color: var(--accent2); }
+.brand-txt small {
+  display: block; color: var(--muted); font-size: 9.5px;
+  letter-spacing: 2.2px; font-weight: 700; margin-top: 3px;
+}
+.icon-btn {
+  width: 38px; height: 38px; flex: none; border-radius: 12px;
+  display: grid; place-items: center; font-size: 16px;
+  background: var(--card); border: 1px solid var(--border);
+  cursor: pointer; transition: .18s; backdrop-filter: blur(10px);
+}
+.icon-btn:hover { border-color: var(--accent); transform: translateY(-1px); }
 
-/* -------------------------------- Card ----------------------------------- */
+/* ── Card de cristal ─────────────────────────────────────────────────────── */
 .card {
-  background: linear-gradient(180deg, var(--panel), var(--panel-2));
+  background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 14px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, .35);
+  border-radius: var(--radius);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--shadow);
+  padding: 16px;
 }
 
-.row-actions { display: flex; gap: 8px; align-items: center; }
-.start-row { margin-top: 14px; }
+.row-actions { display: flex; gap: 9px; align-items: stretch; }
+.start-row { margin-top: 15px; }
 
+/* ── Botones (mismos que .btn del dashboard) ────────────────────────────── */
 .btn {
   flex: 1;
-  border: 1px solid transparent;
-  border-radius: 12px;
-  padding: 10px 12px;
-  font-size: 13px; font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  padding: 11px 14px;
+  font-family: inherit;
+  font-size: 13px; font-weight: 700;
   cursor: pointer;
-  transition: filter .15s ease, background .15s ease, transform .05s ease;
-  color: #fff;
+  background: var(--card-solid);
+  color: var(--text);
+  transition: .18s;
 }
-.btn:active { transform: translateY(1px); }
+.btn:hover { transform: translateY(-1px); border-color: var(--accent); }
 .btn.primary {
   flex: 1.6;
-  background: linear-gradient(90deg, var(--primary-a), var(--primary-b));
-  box-shadow: 0 4px 14px rgba(37, 99, 235, .35);
+  background: linear-gradient(120deg, var(--accent), #9d7bff);
+  border: none; color: #fff;
+  box-shadow: 0 10px 26px rgba(124, 92, 255, .4);
 }
-.btn.primary:hover { filter: brightness(1.08); }
-.btn.ghost {
-  background: transparent; color: var(--text);
-  border-color: var(--border);
-}
-.btn.ghost:hover { background: var(--panel); }
-.btn.start {
-  background: var(--primary-b);
-}
+.btn.primary:hover { border-color: transparent; filter: brightness(1.06); }
+.btn.ghost { background: transparent; }
 .btn.start:disabled {
-  background: #24304f; color: #67748f; cursor: not-allowed; box-shadow: none;
+  opacity: .45; cursor: not-allowed; transform: none;
+  background: var(--card-solid); box-shadow: none; border: 1px solid var(--border);
+  color: var(--muted);
 }
-html[data-theme="light"] .btn.start:disabled { background: #dfe5f3; color: #9aa6c2; }
 .btn.danger {
   flex: .7;
-  background: transparent; color: var(--danger);
-  border: 1.5px solid var(--danger);
+  background: transparent;
+  color: var(--err);
+  border: 1px solid rgba(255, 84, 112, .4);
 }
-.btn.danger:hover { background: rgba(239, 68, 68, .1); }
+.btn.danger:hover { border-color: var(--err); background: rgba(255, 84, 112, .08); }
 
-/* ------------------------------ Campos ----------------------------------- */
+/* ── Campos (mismos que input/select del dashboard) ─────────────────────── */
 .lbl {
   display: block;
-  margin: 12px 2px 6px;
-  font-size: 10.5px; font-weight: 700; letter-spacing: .6px;
+  margin: 13px 2px 7px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .8px;
   color: var(--muted);
 }
 .input {
   width: 100%;
-  background: var(--input-bg, var(--panel-2));
+  padding: 11px 13px;
+  border-radius: 12px;
+  font-size: 13px; font-family: inherit;
+  background: var(--bg2);
   border: 1px solid var(--border);
   color: var(--text);
-  border-radius: 10px;
-  padding: 9px 11px;
-  font-size: 13px;
   outline: none;
+  transition: .15s;
 }
-.input:focus { border-color: var(--primary-b); }
-.select { appearance: auto; }
+.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(124, 92, 255, .18); }
+.input::placeholder { color: var(--muted); opacity: .7; }
 
-/* ------------------------------ Badges ----------------------------------- */
-.badge-area { margin-top: 12px; display: grid; gap: 6px; }
+/* ── Badges (mismos que .badge del dashboard) ───────────────────────────── */
+.badge-area { margin-top: 13px; display: grid; gap: 7px; }
 .badge {
-  font-size: 11.5px; padding: 7px 10px; border-radius: 10px;
-  border: 1px solid transparent; text-align: left;
+  font-size: 11.5px; font-weight: 600;
+  padding: 9px 12px; border-radius: 12px;
+  border: 1px solid transparent; text-align: left; line-height: 1.45;
 }
-.badge.green { background: rgba(52, 168, 83, .12); border-color: rgba(52, 168, 83, .45); color: #7ee2a0; }
-html[data-theme="light"] .badge.green { color: #1e8e3e; }
-.badge.json { background: rgba(138, 180, 248, .1); border-color: rgba(138, 180, 248, .4); color: var(--info); }
+.badge.green {
+  background: rgba(43, 217, 118, .14);
+  border-color: rgba(43, 217, 118, .35);
+  color: var(--ok);
+}
+.badge.green b { color: var(--text); font-weight: 800; }
+html[data-theme="light"] .badge.green b { color: #148a48; }
+.badge.json {
+  background: rgba(124, 92, 255, .14);
+  border-color: rgba(124, 92, 255, .35);
+  color: #b9a7ff;
+}
+html[data-theme="light"] .badge.json { color: #5f3fd6; }
 
-/* ----------------------------- Progreso ---------------------------------- */
-.progress-area { margin-top: 12px; }
+/* ── Progreso ────────────────────────────────────────────────────────────── */
+.progress-area { margin-top: 13px; }
 .progress-head {
   display: flex; justify-content: space-between;
-  font-size: 11px; color: var(--muted); margin-bottom: 5px;
+  font-size: 11px; font-weight: 700; color: var(--muted);
+  margin-bottom: 6px; letter-spacing: .3px;
+}
+.progress-head #progress-pct {
+  font-family: var(--font-display); font-size: 14px; letter-spacing: 1px;
+  color: var(--accent2);
 }
 .bar {
-  height: 8px; border-radius: 999px; background: var(--panel);
-  border: 1px solid var(--border); overflow: hidden;
+  height: 9px; border-radius: 999px;
+  background: var(--card-solid); border: 1px solid var(--border);
+  overflow: hidden;
 }
 .bar-fill {
   height: 100%; width: 0%;
-  background: linear-gradient(90deg, var(--grad-b), var(--grad-a));
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  box-shadow: 0 0 12px rgba(0, 224, 198, .45);
   transition: width .3s ease;
 }
 
-/* ----------------------------- Escenas ----------------------------------- */
-.scenes { margin-top: 14px; }
-.scenes h2 { font-size: 14px; font-weight: 700; margin-bottom: 8px; }
-.scenes-list { display: grid; gap: 6px; max-height: 240px; overflow-y: auto; }
+/* ── Escenas ─────────────────────────────────────────────────────────────── */
+.scenes { margin-top: 15px; }
+.scenes h2 {
+  font-size: 15px; font-weight: 800; margin-bottom: 9px;
+  display: flex; align-items: center; gap: 8px;
+}
+.scenes h2::before {
+  content: ''; width: 4px; height: 15px; border-radius: 999px;
+  background: linear-gradient(180deg, var(--accent), var(--accent2));
+}
+.scenes-list { display: grid; gap: 7px; max-height: 248px; overflow-y: auto; padding-right: 2px; }
 .empty {
   text-align: center; color: var(--muted); font-style: italic;
-  padding: 14px 6px; font-size: 12px;
+  padding: 16px 6px; font-size: 12.5px;
+  border: 1px dashed var(--border); border-radius: 14px;
+  background: var(--card);
 }
 
 .scene-card {
-  display: flex; align-items: center; gap: 8px;
-  background: var(--panel);
+  display: flex; align-items: center; gap: 9px;
+  background: var(--card);
   border: 1px solid var(--border);
   border-left-width: 4px;
-  border-radius: 10px;
-  padding: 8px 10px;
+  border-radius: 12px;
+  padding: 9px 11px;
   font-size: 12px;
+  backdrop-filter: blur(8px);
+  transition: .18s;
 }
-.scene-card.PENDING     { border-left-color: var(--warn); }
-.scene-card.IN_PROGRESS { border-left-color: var(--info); }
+.scene-card:hover { transform: translateX(2px); border-color: var(--accent); }
+.scene-card.PENDING     { border-left-color: var(--gold); }
+.scene-card.IN_PROGRESS { border-left-color: var(--accent); box-shadow: 0 0 14px rgba(124, 92, 255, .18); }
 .scene-card.DOWNLOADED  { border-left-color: var(--ok); }
-.scene-card.RATE_LIMITED{ border-left-color: var(--rate); }
-.scene-card.ERROR       { border-left-color: var(--danger); }
+.scene-card.RATE_LIMITED{ border-left-color: var(--warn); }
+.scene-card.ERROR       { border-left-color: var(--err); }
 
-.scene-num { font-weight: 700; white-space: nowrap; }
-.scene-status { color: var(--muted); flex: 1; }
-.scene-error { color: var(--danger); font-size: 11px; }
+.scene-num {
+  font-weight: 800; white-space: nowrap; font-size: 12px;
+}
+.scene-card.IN_PROGRESS .scene-num { color: var(--accent2); }
+.scene-status { color: var(--muted); flex: 1; line-height: 1.4; }
+.scene-card.DOWNLOADED .scene-status { color: var(--ok); }
+.scene-error { color: var(--err); font-size: 12px; }
 .scene-retry {
-  background: none; border: 1px solid var(--border); color: var(--text);
-  font-size: 11px; border-radius: 8px; padding: 3px 8px; cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--border); color: var(--text);
+  font-family: inherit; font-size: 11px; font-weight: 700;
+  border-radius: 9px; padding: 4px 9px; cursor: pointer; transition: .15s;
 }
-.scene-retry:hover { border-color: var(--primary-b); color: var(--primary-b); }
+.scene-retry:hover { border-color: var(--accent2); color: var(--accent2); transform: translateY(-1px); }
 
-/* ------------------------------ Pie --------------------------------------- */
+/* ── Pie ─────────────────────────────────────────────────────────────────── */
 .foot {
-  margin-top: 10px; font-size: 10.5px; color: var(--muted); line-height: 1.5;
+  margin-top: 12px; font-size: 10.5px; color: var(--muted); line-height: 1.55;
 }
-.foot code { background: var(--panel); padding: 1px 5px; border-radius: 6px; }
+.foot code {
+  background: var(--card-solid); border: 1px solid var(--border);
+  padding: 1px 5px; border-radius: 6px; font-size: 10px;
+}
 
-/* Scrollbar sutil */
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
 .scenes-list::-webkit-scrollbar { width: 8px; }
-.scenes-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+.scenes-list::-webkit-scrollbar-thumb {
+  background: rgba(124, 92, 255, .35); border-radius: 999px;
+}
+.scenes-list::-webkit-scrollbar-track { background: transparent; }
