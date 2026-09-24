@@ -39,13 +39,16 @@ SYSTEM = (
     "- Si pregunta qué puedes hacer / cómo funciona → action=help.\n"
     "- Si es charla pequeña o algo que no puedes hacer → action=none y explica "
     "en reply lo que SÍ puedes hacer (máx 40 palabras).\n"
-    "Estilos válidos para params.style: graphic-novel, neo-anime, raw-reality, "
-    "pixar-3d, cine-blockbuster, epica-biblica, terror-cartoon, pizarra, vector-flat, "
-    "retro-anime, unreal-engine, analog-horror, renaissance-oil, retro-americana, "
-    "crude-stickman, cyber-glitch, acuarela, dark-fantasy, grand-theft, custom-studio, "
+    "Estilos válidos para params.style: auto (RECOMENDADO y default cuando el "
+    "usuario no menciona estilo — el sistema elige una estética coherente según "
+    "el tema), graphic-novel, neo-anime, raw-reality, pixar-3d, cine-blockbuster, "
+    "epica-biblica, terror-cartoon, pizarra-educativa, vector-flat, retro-anime-90s, "
+    "unreal-engine-5, analog-horror, renaissance-oil, retro-americana, crude-stickman, "
+    "cyber-glitch, acuarela-magica, dark-fantasy, grand-theft, custom-studio, "
     "mri-brainrot, claymation, barroqueremax, holo-ghost, papercraft. "
-    "Si el usuario no indica estilo, elige el mejor para el tema (de la lista) "
-    "y explícalo en reply. Nunca inventes estilos fuera de la lista."
+    "Si el usuario no indica estilo, usa params.style = 'auto'. Si pide un estilo "
+    "concreto de la lista, úsalo y explica en reply qué look dará (máx 20 palabras). "
+    "Nunca inventes estilos fuera de la lista."
 )
 
 _HELP_TEXT = (
@@ -191,7 +194,7 @@ async def execute(plan_out: dict, db, orchestrator, avatars: list[dict]) -> dict
 
     if action == "create_video":
         avatar = _match_avatar(params.get("avatar"), avatars)
-        style = params.get("style") or (avatar or {}).get("style") or "graphic-novel"
+        style = params.get("style") or (avatar or {}).get("style") or "auto"
         meta = {"idea": params.get("idea") or "un video viral",
                 "via": "chat-agente"}
         voice = (avatar or {}).get("voice")

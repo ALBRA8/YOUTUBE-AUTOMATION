@@ -1,11 +1,25 @@
 """
 YOUTUBE AUTOMATION v2.0 — Catálogo de estilos visuales
-Los 20 estilos de Labsia + 5 exclusivos v2.0. Cada estilo inyecta un
-descriptor profesional al prompt de imagen para resultados consistentes.
+"Auto" (default) + los 20 estilos de Labsia + 5 exclusivos v2.0.
+
+El estilo SOLO afecta a los prompts de imagen (nunca a la narración,
+subtítulos ni TTS). Con "auto" no se fija ningún preset: script_gen
+instruye a la IA para que elija UNA estética coherente apropiada al tema,
+y el fallback local $0 usa NEUTRAL_STYLE_PROMPT.
 """
 
+# Descriptor neutro para el modo auto cuando no hay IA externa disponible:
+# da coherencia cinematográfica sin imponer una estética específica.
+NEUTRAL_STYLE_PROMPT = (
+    "cinematic photography, dramatic lighting, rich color grading, "
+    "consistent visual identity across the series, high detail")
+
 # (id, nombre, emoji, descripción, sufijo de prompt de imagen, gradiente preview)
-STYLES: list[dict] = [
+_AUTO: dict = {"id": "auto", "name": "Auto", "emoji": "✨",
+               "desc": "La IA elige la estética según el tema (recomendado)",
+               "prompt": "", "grad": "linear-gradient(135deg,#8e2de2,#4a00e0)"}
+
+STYLES: list[dict] = [_AUTO, 
     {"id": "graphic-novel", "name": "Graphic Novel", "emoji": "🖋️",
      "desc": "Cómic negro con tinta dramática",
      "prompt": "graphic novel illustration, bold ink lines, dramatic chiaroscuro shading, halftone textures, cinematic comic book panel, high contrast black and white with selective color accents",

@@ -9,7 +9,7 @@ import logging
 from services import gemini_client
 from services import avatar_schema
 from services import originality
-from services.themes import get_style
+from services.themes import get_style, NEUTRAL_STYLE_PROMPT
 
 log = logging.getLogger("script")
 
@@ -63,7 +63,8 @@ def _local_fallback(kind: str, seed: str, style_id: str, fmt: str,
     En modo url/script/audio extrae keywords REALES de la transcripción
     para que el guion tenga sustancia y no solo frases plantilla."""
     style = get_style(style_id)
-    style_prompt = custom_prompt or style["prompt"]
+    # "auto" (prompt vacío) → descriptor neutro: coherencia sin estética impuesta
+    style_prompt = custom_prompt or style["prompt"] or NEUTRAL_STYLE_PROMPT
     tema = _tema(seed)
     body_src = _split_sentences(seed) if kind in ("script", "audio") else []
     n_body = 4 if fmt == "short" else 10
@@ -129,7 +130,17 @@ def _base_instructions(style_prompt: str, n_scenes: int, fmt: str,
                        custom_prompt: str | None = None,
                        avatar: dict | None = None) -> str:
     dur = "30-50 segundos" if fmt == "short" else "2-4 minutos"
-    style_line = (f"Estilo visual de las imágenes: {custom_prompt or style_prompt}.")
+    effective = (custom_prompt or style_prompt or "").strip()
+    if effective:
+        style_line = (f"Estilo visual de las imágenes: {effective}. "
+                      "Aplica esta MISMA estética en todos los image_prompt.")
+    else:
+        # estilo "auto": el usuario no elige nada — la IA decide UNA estética
+        # coherente apropiada al tema y la mantiene en TODAS las escenas.
+        style_line = ("Estética visual: elige tú UNA estética coherente y apropiada "
+                      "para el tema del video, y aplícala de forma CONSISTENTE en TODOS "
+                      "los image_prompt (misma técnica, paleta de color e iluminación "
+                      "en todas las escenas).")
     avatar_line = avatar_schema.persona_text(avatar) if avatar else ""
     return (
         f"Genera un guion de video de {dur} dividido en EXACTAMENTE {n_scenes} escenas. "

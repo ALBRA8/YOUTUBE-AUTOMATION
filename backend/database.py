@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS projects (
     status        TEXT NOT NULL DEFAULT 'draft',
     -- draft|queued|scripting|images|tts|align|render|subtitles|ready|failed|published
     mode          TEXT NOT NULL DEFAULT 'idea',          -- script|idea|url|audio
-    style         TEXT NOT NULL DEFAULT 'graphic-novel',
+    style         TEXT NOT NULL DEFAULT 'auto',
     format        TEXT NOT NULL DEFAULT 'short',         -- short|long
     voice         TEXT,
     tts_provider  TEXT,

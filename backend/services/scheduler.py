@@ -25,7 +25,7 @@ def default_config() -> dict:
         "times": FACTORY_TIMES,
         "timezone": FACTORY_TIMEZONE,
         "niche": FACTORY_NICHE,
-        "style": "graphic-novel",
+        "style": "auto",
         "format": "short",
         "autopublish": FACTORY_AUTOPUBLISH,
         "voice": None,

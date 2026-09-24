@@ -125,7 +125,7 @@ function renderProjectCards(list) {
 }
 
 /* ── vista: WIZARD CREAR (4 pasos como Labsia) ───────────── */
-const W = { step: 1, mode: 'idea', format: 'short', style: 'graphic-novel',
+const W = { step: 1, mode: 'idea', format: 'short', style: 'auto',
             title: '', idea: '', script: '', url: '', custom: '', voice: '', tts: '',
             avatar: '', platforms: ['youtube', 'tiktok'],
             transitions: true, styleReference: true, subtitles: 'hormozi',
@@ -158,13 +158,11 @@ function renderCreate() {
   }
 
   if (W.step === 3) {
-    body = `<div class="style-grid">${S.styles.map(s => {
-      const isV2 = ['mri-brainrot','claymation','bhangra-boo','holo-ghost','papercraft'].includes(s.id);
-      return `<div class="style-card ${W.style === s.id ? 'sel' : ''}" style="--grad:${s.grad}"
-        onclick="W.style='${s.id}';renderCreate()">
-        ${isV2 ? '<span class="v2">V2 ★</span>' : ''}
-        <div class="emoji">${s.emoji}</div><b>${esc(s.name)}</b><small>${esc(s.desc)}</small></div>`;
-    }).join('')}</div>
+    body = `<div class="field" style="max-width:480px"><label>🎨 Estilo visual de las imágenes</label>
+      <select onchange="W.style=this.value;renderCreate()">
+        ${S.styles.map(s => `<option value="${s.id}" ${W.style === s.id ? 'selected' : ''}>${s.emoji} ${esc(s.name)} — ${esc(s.desc)}</option>`).join('')}
+      </select>
+      <small style="color:var(--muted);display:block;margin-top:8px">Auto deja que la IA elija una estética coherente según el tema — es lo recomendado. Los presets solo afinan el look de las imágenes: nunca tocan tu narración ni los subtítulos.</small></div>
     ${W.style === 'custom-studio' ? `<div class="field" style="margin-top:16px"><label>Describe tu estilo (en inglés, estilo de imagen)</label>
       <input type="text" value="${esc(W.custom)}" oninput="W.custom=this.value" placeholder="dark cinematic photography, moody fog..."></div>` : ''}`;
   }

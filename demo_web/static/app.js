@@ -102,7 +102,7 @@ function renderProjectCards(list) {
 }
 
 /* ── vista: WIZARD CREAR (4 pasos como Labsia) ───────────── */
-const W = { step: 1, mode: 'idea', format: 'short', style: 'graphic-novel',
+const W = { step: 1, mode: 'idea', format: 'short', style: 'auto',
             title: '', idea: '', script: '', url: '', custom: '', voice: '', tts: '' };
 
 function renderCreate() {
@@ -132,13 +132,11 @@ function renderCreate() {
   }
 
   if (W.step === 3) {
-    body = `<div class="style-grid">${S.styles.map(s => {
-      const isV2 = ['mri-brainrot','claymation','bhangra-boo','holo-ghost','papercraft'].includes(s.id);
-      return `<div class="style-card ${W.style === s.id ? 'sel' : ''}" style="--grad:${s.grad}"
-        onclick="W.style='${s.id}';renderCreate()">
-        ${isV2 ? '<span class="v2">V2 ★</span>' : ''}
-        <div class="emoji">${s.emoji}</div><b>${esc(s.name)}</b><small>${esc(s.desc)}</small></div>`;
-    }).join('')}</div>
+    body = `<div class="field" style="max-width:480px"><label>🎨 Estilo visual de las imágenes</label>
+      <select onchange="W.style=this.value;renderCreate()">
+        ${S.styles.map(s => `<option value="${s.id}" ${W.style === s.id ? 'selected' : ''}>${s.emoji} ${esc(s.name)} — ${esc(s.desc)}</option>`).join('')}
+      </select>
+      <small style="color:var(--muted);display:block;margin-top:8px">Auto deja que la IA elija una estética coherente según el tema — es lo recomendado. Los presets solo afinan el look de las imágenes: nunca tocan tu narración ni los subtítulos.</small></div>
     ${W.style === 'custom-studio' ? `<div class="field" style="margin-top:16px"><label>Describe tu estilo (en inglés, estilo de imagen)</label>
       <input type="text" value="${esc(W.custom)}" oninput="W.custom=this.value" placeholder="dark cinematic photography, moody fog..."></div>` : ''}`;
   }
@@ -555,6 +553,7 @@ function renderSettings() {
 
 /* ── datos de muestra para la DEMO web sin backend ───────── */
 const DEMO_STYLES = [
+  {id:'auto',name:'Auto',emoji:'✨',desc:'La IA elige la estética según el tema (recomendado)',grad:'linear-gradient(135deg,#8e2de2,#4a00e0)'},
   {id:'graphic-novel',name:'Graphic Novel',emoji:'🖋️',desc:'Cómic negro con tinta dramática',grad:'linear-gradient(135deg,#1a1a2e,#e94560)'},
   {id:'neo-anime',name:'Neo-Anime',emoji:'🌸',desc:'Anime moderno de alta calidad',grad:'linear-gradient(135deg,#ff9a9e,#fad0c4)'},
   {id:'raw-reality',name:'Raw Reality',emoji:'📷',desc:'Fotorealismo crudo documental',grad:'linear-gradient(135deg,#485563,#29323c)'},
@@ -617,7 +616,7 @@ async function refreshAll() {
     S.stats = { today: 3, total: 27, ready: 22, published: 9, failed: 1, minutes: 84.5 };
     S.projects = DEMO_PROJECTS;
     S.factory = { enabled: true, times: ['07:00','12:30','19:00'], timezone: 'America/Bogota',
-                  niche: 'historias reales impactantes', style: 'graphic-novel',
+                  niche: 'historias reales impactantes', style: 'auto',
                   format: 'short', autopublish: false, pending_ideas: 2,
                   next_runs: [], running: false };
     S.ideas = ['La bailout del Titanic: lo que nadie cuenta', 'El mapa que cambió la Segunda Guerra'];

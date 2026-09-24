@@ -469,12 +469,12 @@ async def create_project(body: dict):
     avatar_id = (body.get("avatar_id") or "").strip() or None
     voice = body.get("voice") or None
     tts_provider = body.get("tts_provider") or None
-    style = body.get("style", "graphic-novel")
+    style = body.get("style", "auto")
     # Validar style contra la lista real de estilos disponibles.
-    # Si viene un style inválido (por API o auditoría), usar el primero.
+    # Si viene un style inválido (por API o auditoría), usar "auto" (el primero).
     valid_style_ids = {s["id"] for s in STYLES}
     if style not in valid_style_ids:
-        style = "graphic-novel"
+        style = "auto"
     if avatar_id and not db.get_avatar(avatar_id):
         avatar_id = None
     if avatar_id:

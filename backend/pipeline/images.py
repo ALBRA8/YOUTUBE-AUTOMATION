@@ -74,7 +74,9 @@ def scene_dir(project_id: str) -> Path:
 def full_prompt(scene: dict, project: dict) -> str:
     style = get_style(project["style"])
     custom = (project.get("meta") or {}).get("custom_style_prompt")
-    style_desc = custom or style["prompt"]
+    # "auto" → prompt vacío: no se añade ningún preset (el guion ya trae la
+    # estética integrada en el image_prompt o se usa el neutro en fallback).
+    style_desc = (custom or style["prompt"] or "").strip()
     extra = ", no text, no letters, no watermark"
     # Consistencia de personaje: si el proyecto tiene avatar, fijamos su
     # apariencia (traducida a inglés por el schema PRO) en TODOS los prompts
@@ -82,7 +84,8 @@ def full_prompt(scene: dict, project: dict) -> str:
     avatar = (project.get("meta") or {}).get("avatar") or None
     if avatar:
         extra += (", " + avatar_schema.scene_suffix(avatar))
-    return f"{scene['image_prompt']}, {style_desc}{extra}"
+    style_part = f", {style_desc}" if style_desc else ""
+    return f"{scene['image_prompt']}{style_part}{extra}"
 
 
 async def generate_scene_image(scene: dict, project: dict, idx: int,
