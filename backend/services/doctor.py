@@ -111,7 +111,8 @@ def _run_checks() -> list[dict]:
     # ── Investigación de tendencias ($0, sin API key) ─────────────────────
     ytdlp_ok = _import_ok("yt_dlp")
     if not ytdlp_ok:
-        v = _probe_version(["yt-dlp", "--version"])
+        from services.url_mode import ytdlp_cmd  # resolvedor robusto (venv/PATH)
+        v = _probe_version([*ytdlp_cmd(), "--version"])
         ytdlp_ok = bool(v)
     add("yt_dlp", ytdlp_ok,
         "disponible" if ytdlp_ok else "no instalado",

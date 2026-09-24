@@ -8,7 +8,9 @@ import asyncio
 import json
 import logging
 import re
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from config import TMP_DIR
@@ -20,6 +22,34 @@ log = logging.getLogger("url_mode")
 
 class UrlModeError(Exception):
     pass
+
+
+_YTDLP: list[str] | None = None
+
+
+def ytdlp_cmd() -> list[str]:
+    """Comando yt-dlp robusto (fix real del E2E): el servidor suele arrancar
+    con un PATH reducido que no incluye el bin/ del venv, así que el binario
+    suelto no siempre se resuelve. Orden de resolución:
+    1) binario junto al propio intérprete (venv clásico),
+    2) binario en PATH (instalación global / pipx),
+    3) módulo python del MISMO intérprete (`python -m yt_dlp`, funciona si
+       se instaló con pip en el venv aunque PATH no lo exponga)."""
+    global _YTDLP
+    if _YTDLP is None:
+        exe_dir = Path(sys.executable).parent
+        local_bin = exe_dir / ("yt-dlp.exe" if sys.platform == "win32" else "yt-dlp")
+        if local_bin.exists():
+            _YTDLP = [str(local_bin)]
+        elif shutil.which("yt-dlp"):
+            _YTDLP = ["yt-dlp"]
+        else:
+            try:
+                import yt_dlp  # noqa: F401
+                _YTDLP = [sys.executable, "-m", "yt_dlp"]
+            except ImportError:
+                _YTDLP = ["yt-dlp"]  # fallará con mensaje claro en stderr
+    return _YTDLP
 
 
 def _run(cmd: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
@@ -51,7 +81,7 @@ def _cookies_args(cookies: str | None) -> list[str]:
 
 async def fetch_metadata(url: str, cookies: str | None = None) -> dict:
     def _job():
-        p = _run(["yt-dlp", "-j", "--no-warnings", "--skip-download",
+        p = _run([*ytdlp_cmd(), "-j", "--no-warnings", "--skip-download",
                   *_cookies_args(cookies), url], timeout=60)
         if p.returncode != 0:
             raise UrlModeError(
@@ -68,7 +98,7 @@ async def download_audio(url: str, out_base: str,
 
     def _job():
         p = _run([
-            "yt-dlp", "-x", "--audio-format", "mp3", "--audio-quality", "5",
+            *ytdlp_cmd(), "-x", "--audio-format", "mp3", "--audio-quality", "5",
             "--no-playlist", "--no-warnings", *_cookies_args(cookies),
             "-o", str(dest), url,
         ], timeout=300)
@@ -98,7 +128,7 @@ async def transcript_from_url(url: str, job_base: str,
     else:
         # sin Whisper: intentar subtítulos automáticos de la plataforma
         def _subs():
-            p = _run(["yt-dlp", "--skip-download", "--write-auto-subs",
+            p = _run([*ytdlp_cmd(), "--skip-download", "--write-auto-subs",
                       "--sub-langs", "es,en", "--sub-format", "vtt",
                       *_cookies_args(cookies),
                       "-o", str(TMP_DIR / job_base), url], timeout=120)

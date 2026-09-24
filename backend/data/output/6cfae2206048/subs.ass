@@ -1,0 +1,61 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Hormozi,Impact,119,&H0033FFFF,&H00FFFFFF,&H00000000,&H7F000000,-1,0,0,0,100,100,1,0,1,9,4,5,60,60,576,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:00.60,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}¿Crees que ya
+Dialogue: 0,0:00:00.60,0:00:01.06,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}lo sabes todo
+Dialogue: 0,0:00:01.06,0:00:02.10,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}sobre secretos ocultos
+Dialogue: 0,0:00:02.10,0:00:02.46,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}de la ciudad
+Dialogue: 0,0:00:02.46,0:00:03.56,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}muralla de Cartagena?
+Dialogue: 0,0:00:04.40,0:00:05.36,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}Espera escuchar esto.
+Dialogue: 0,0:00:06.61,0:00:07.49,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}Empecemos por lo
+Dialogue: 0,0:00:07.49,0:00:09.07,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}básico, secretos ocultos
+Dialogue: 0,0:00:09.07,0:00:09.43,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}de la ciudad
+Dialogue: 0,0:00:09.43,0:00:10.43,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}murallada de Cartagena
+Dialogue: 0,0:00:10.43,0:00:11.27,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}guarda detalles que
+Dialogue: 0,0:00:11.27,0:00:11.91,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}la ciencia apenas
+Dialogue: 0,0:00:11.91,0:00:12.69,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}empieza a entender.
+Dialogue: 0,0:00:14.02,0:00:14.98,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}Los expertos llevan
+Dialogue: 0,0:00:14.98,0:00:16.10,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}años estudiando secretos
+Dialogue: 0,0:00:16.10,0:00:16.70,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}ocultos de la
+Dialogue: 0,0:00:16.70,0:00:17.54,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}ciudad murallada de
+Dialogue: 0,0:00:17.54,0:00:18.54,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}Cartagena, y cada
+Dialogue: 0,0:00:18.54,0:00:19.72,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}escurrimiento contradice al
+Dialogue: 0,0:00:19.72,0:00:19.98,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}anterior.
+Dialogue: 0,0:00:21.31,0:00:22.09,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}Aquí viene lo
+Dialogue: 0,0:00:22.09,0:00:23.27,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}increíble, detrás de
+Dialogue: 0,0:00:23.27,0:00:24.21,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}secretos ocultos de
+Dialogue: 0,0:00:24.21,0:00:25.03,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}la ciudad murallada
+Dialogue: 0,0:00:25.03,0:00:26.13,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}cartagena historias que
+Dialogue: 0,0:00:26.13,0:00:27.05,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}parecen inventadas.
+Dialogue: 0,0:00:28.33,0:00:29.27,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}Y no, no
+Dialogue: 0,0:00:29.27,0:00:30.01,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}es ciencia ficción,
+Dialogue: 0,0:00:30.37,0:00:30.87,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}todo esto está
+Dialogue: 0,0:00:30.87,0:00:32.05,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}documentado sobre secretos
+Dialogue: 0,0:00:32.05,0:00:32.65,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}ocultos de la
+Dialogue: 0,0:00:32.65,0:00:33.93,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}ciudad murallada Cartagena.
+Dialogue: 0,0:00:35.13,0:00:36.07,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}Y ahora, el
+Dialogue: 0,0:00:36.07,0:00:36.49,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}dato que lo
+Dialogue: 0,0:00:36.49,0:00:37.45,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}cambia todo, lo
+Dialogue: 0,0:00:37.45,0:00:38.19,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}que descubrieron sobre
+Dialogue: 0,0:00:38.19,0:00:39.21,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}secretos ocultos de
+Dialogue: 0,0:00:39.21,0:00:39.99,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}la ciudad murallada
+Dialogue: 0,0:00:39.99,0:00:40.73,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}de Cartagena sobre
+Dialogue: 0,0:00:40.73,0:00:42.51,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}Murallada, Cartagena, ciudad
+Dialogue: 0,0:00:42.51,0:00:43.71,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}supera cualquier predicción.
+Dialogue: 0,0:00:44.94,0:00:45.68,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}Si quieres más
+Dialogue: 0,0:00:45.68,0:00:46.74,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}secretos sobre secretos
+Dialogue: 0,0:00:46.74,0:00:47.34,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}ocultos de la
+Dialogue: 0,0:00:47.34,0:00:48.16,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}ciudad murallada de
+Dialogue: 0,0:00:48.16,0:00:49.78,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}Cartagena, sígueme, cada
+Dialogue: 0,0:00:49.78,0:00:50.56,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}día desvelamos algo
+Dialogue: 0,0:00:50.56,0:00:50.80,Hormozi,,0,0,0,,{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}nuevo.

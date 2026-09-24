@@ -1,0 +1,567 @@
+[
+ {
+  "word": "¿Crees",
+  "start": 0.0,
+  "end": 0.38
+ },
+ {
+  "word": "que",
+  "start": 0.38,
+  "end": 0.52
+ },
+ {
+  "word": "ya",
+  "start": 0.52,
+  "end": 0.66
+ },
+ {
+  "word": "lo",
+  "start": 0.66,
+  "end": 0.76
+ },
+ {
+  "word": "sabes",
+  "start": 0.76,
+  "end": 0.94
+ },
+ {
+  "word": "todo",
+  "start": 0.94,
+  "end": 1.2
+ },
+ {
+  "word": "sobre",
+  "start": 1.2,
+  "end": 1.46
+ },
+ {
+  "word": "viralgion",
+  "start": 1.46,
+  "end": 1.96
+ },
+ {
+  "word": "bajo",
+  "start": 1.96,
+  "end": 2.12
+ },
+ {
+  "word": "test?",
+  "start": 2.12,
+  "end": 2.5
+ },
+ {
+  "word": "Espera",
+  "start": 3.32,
+  "end": 3.84
+ },
+ {
+  "word": "a",
+  "start": 3.84,
+  "end": 3.84
+ },
+ {
+  "word": "escuchar",
+  "start": 3.84,
+  "end": 4.28
+ },
+ {
+  "word": "esto.",
+  "start": 4.28,
+  "end": 4.5
+ },
+ {
+  "word": "Empecemos",
+  "start": 5.774,
+  "end": 6.394
+ },
+ {
+  "word": "por",
+  "start": 6.394,
+  "end": 6.694
+ },
+ {
+  "word": "lo",
+  "start": 6.694,
+  "end": 6.834
+ },
+ {
+  "word": "básico,",
+  "start": 6.834,
+  "end": 7.334
+ },
+ {
+  "word": "Viral",
+  "start": 7.634,
+  "end": 7.954
+ },
+ {
+  "word": "John",
+  "start": 7.954,
+  "end": 8.134
+ },
+ {
+  "word": "Bajo",
+  "start": 8.134,
+  "end": 8.394
+ },
+ {
+  "word": "Test",
+  "start": 8.394,
+  "end": 8.654
+ },
+ {
+  "word": "guarda",
+  "start": 8.654,
+  "end": 9.094
+ },
+ {
+  "word": "detalles",
+  "start": 9.094,
+  "end": 9.434
+ },
+ {
+  "word": "que",
+  "start": 9.434,
+  "end": 9.634
+ },
+ {
+  "word": "la",
+  "start": 9.634,
+  "end": 9.774
+ },
+ {
+  "word": "ciencia",
+  "start": 9.774,
+  "end": 10.114
+ },
+ {
+  "word": "apenas",
+  "start": 10.114,
+  "end": 10.394
+ },
+ {
+  "word": "empieza",
+  "start": 10.394,
+  "end": 10.754
+ },
+ {
+  "word": "a",
+  "start": 10.754,
+  "end": 10.994
+ },
+ {
+  "word": "entender.",
+  "start": 10.994,
+  "end": 11.274
+ },
+ {
+  "word": "Los",
+  "start": 12.604,
+  "end": 12.904
+ },
+ {
+  "word": "expertos",
+  "start": 12.904,
+  "end": 13.504
+ },
+ {
+  "word": "llevan",
+  "start": 13.504,
+  "end": 13.764
+ },
+ {
+  "word": "años",
+  "start": 13.764,
+  "end": 13.964
+ },
+ {
+  "word": "estudiando",
+  "start": 13.964,
+  "end": 14.544
+ },
+ {
+  "word": "viral",
+  "start": 14.544,
+  "end": 14.744
+ },
+ {
+  "word": "guión",
+  "start": 14.744,
+  "end": 15.084
+ },
+ {
+  "word": "bajo",
+  "start": 15.084,
+  "end": 15.224
+ },
+ {
+  "word": "test",
+  "start": 15.224,
+  "end": 15.644
+ },
+ {
+  "word": "y",
+  "start": 15.644,
+  "end": 16.164
+ },
+ {
+  "word": "cada",
+  "start": 16.164,
+  "end": 16.384
+ },
+ {
+  "word": "descubrimiento",
+  "start": 16.384,
+  "end": 17.044
+ },
+ {
+  "word": "contradice",
+  "start": 17.044,
+  "end": 17.624
+ },
+ {
+  "word": "al",
+  "start": 17.624,
+  "end": 17.724
+ },
+ {
+  "word": "anterior.",
+  "start": 17.724,
+  "end": 18.004
+ },
+ {
+  "word": "Aquí",
+  "start": 19.362,
+  "end": 19.762
+ },
+ {
+  "word": "viene",
+  "start": 19.762,
+  "end": 20.022
+ },
+ {
+  "word": "lo",
+  "start": 20.022,
+  "end": 20.162
+ },
+ {
+  "word": "increíble,",
+  "start": 20.162,
+  "end": 20.742
+ },
+ {
+  "word": "detrás",
+  "start": 21.002,
+  "end": 21.342
+ },
+ {
+  "word": "de",
+  "start": 21.342,
+  "end": 21.462
+ },
+ {
+  "word": "Viral",
+  "start": 21.462,
+  "end": 21.742
+ },
+ {
+  "word": "Gion",
+  "start": 21.742,
+  "end": 21.942
+ },
+ {
+  "word": "bajo",
+  "start": 21.942,
+  "end": 22.122
+ },
+ {
+  "word": "testa",
+  "start": 22.122,
+  "end": 22.602
+ },
+ {
+  "word": "historias",
+  "start": 22.602,
+  "end": 23.082
+ },
+ {
+  "word": "que",
+  "start": 23.082,
+  "end": 23.182
+ },
+ {
+  "word": "parecen",
+  "start": 23.182,
+  "end": 23.542
+ },
+ {
+  "word": "inventadas.",
+  "start": 23.542,
+  "end": 24.122
+ },
+ {
+  "word": "Y",
+  "start": 25.424,
+  "end": 25.684
+ },
+ {
+  "word": "no,",
+  "start": 25.684,
+  "end": 25.864
+ },
+ {
+  "word": "no",
+  "start": 26.164,
+  "end": 26.324
+ },
+ {
+  "word": "es",
+  "start": 26.324,
+  "end": 26.444
+ },
+ {
+  "word": "ciencia",
+  "start": 26.444,
+  "end": 26.744
+ },
+ {
+  "word": "ficción,",
+  "start": 26.744,
+  "end": 27.244
+ },
+ {
+  "word": "todo",
+  "start": 27.544,
+  "end": 27.704
+ },
+ {
+  "word": "esto",
+  "start": 27.704,
+  "end": 27.944
+ },
+ {
+  "word": "está",
+  "start": 27.944,
+  "end": 28.164
+ },
+ {
+  "word": "documentado",
+  "start": 28.164,
+  "end": 28.744
+ },
+ {
+  "word": "sobre",
+  "start": 28.744,
+  "end": 28.944
+ },
+ {
+  "word": "viral",
+  "start": 28.944,
+  "end": 29.224
+ },
+ {
+  "word": "guion",
+  "start": 29.224,
+  "end": 29.504
+ },
+ {
+  "word": "bajo",
+  "start": 29.504,
+  "end": 29.644
+ },
+ {
+  "word": "test.",
+  "start": 29.644,
+  "end": 29.964
+ },
+ {
+  "word": "Y",
+  "start": 31.294,
+  "end": 31.594
+ },
+ {
+  "word": "ahora,",
+  "start": 31.594,
+  "end": 31.874
+ },
+ {
+  "word": "el",
+  "start": 32.234,
+  "end": 32.354
+ },
+ {
+  "word": "dato",
+  "start": 32.354,
+  "end": 32.554
+ },
+ {
+  "word": "que",
+  "start": 32.554,
+  "end": 32.754
+ },
+ {
+  "word": "lo",
+  "start": 32.754,
+  "end": 32.874
+ },
+ {
+  "word": "cambia",
+  "start": 32.874,
+  "end": 33.214
+ },
+ {
+  "word": "todo,",
+  "start": 33.214,
+  "end": 33.494
+ },
+ {
+  "word": "lo",
+  "start": 33.834,
+  "end": 33.994
+ },
+ {
+  "word": "que",
+  "start": 33.994,
+  "end": 34.114
+ },
+ {
+  "word": "descubrieron",
+  "start": 34.114,
+  "end": 34.634
+ },
+ {
+  "word": "sobrevivir",
+  "start": 34.634,
+  "end": 35.094
+ },
+ {
+  "word": "algún",
+  "start": 35.094,
+  "end": 35.314
+ },
+ {
+  "word": "bajo",
+  "start": 35.314,
+  "end": 35.534
+ },
+ {
+  "word": "test",
+  "start": 35.534,
+  "end": 35.874
+ },
+ {
+  "word": "sobre",
+  "start": 35.874,
+  "end": 36.154
+ },
+ {
+  "word": "cada",
+  "start": 36.154,
+  "end": 36.414
+ },
+ {
+  "word": "cliente,",
+  "start": 36.414,
+  "end": 37.714
+ },
+ {
+  "word": "está",
+  "start": 37.714,
+  "end": 37.994
+ },
+ {
+  "word": "súper",
+  "start": 37.994,
+  "end": 38.274
+ },
+ {
+  "word": "a",
+  "start": 38.274,
+  "end": 38.414
+ },
+ {
+  "word": "cualquier",
+  "start": 38.414,
+  "end": 38.654
+ },
+ {
+  "word": "predicción.",
+  "start": 38.654,
+  "end": 39.294
+ },
+ {
+  "word": "Si",
+  "start": 40.524,
+  "end": 40.844
+ },
+ {
+  "word": "quieres",
+  "start": 40.844,
+  "end": 41.044
+ },
+ {
+  "word": "más",
+  "start": 41.044,
+  "end": 41.284
+ },
+ {
+  "word": "secreto",
+  "start": 41.284,
+  "end": 41.724
+ },
+ {
+  "word": "sobrevivir",
+  "start": 41.724,
+  "end": 42.204
+ },
+ {
+  "word": "al",
+  "start": 42.204,
+  "end": 42.344
+ },
+ {
+  "word": "Guion",
+  "start": 42.344,
+  "end": 42.504
+ },
+ {
+  "word": "Bajo",
+  "start": 42.504,
+  "end": 42.684
+ },
+ {
+  "word": "Test,",
+  "start": 42.684,
+  "end": 43.064
+ },
+ {
+  "word": "sígueme,",
+  "start": 43.384,
+  "end": 43.924
+ },
+ {
+  "word": "cada",
+  "start": 44.304,
+  "end": 44.484
+ },
+ {
+  "word": "día",
+  "start": 44.484,
+  "end": 44.684
+ },
+ {
+  "word": "desvelamos",
+  "start": 44.684,
+  "end": 45.224
+ },
+ {
+  "word": "algo",
+  "start": 45.224,
+  "end": 45.464
+ },
+ {
+  "word": "nuevo.",
+  "start": 45.464,
+  "end": 45.724
+ }
+]
