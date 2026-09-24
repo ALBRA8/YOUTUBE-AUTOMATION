@@ -28,7 +28,7 @@
 html[data-theme="light"] {
   --bg: #f2f4fb;
   --bg2: #ffffff;
-  --card: rgba(20, 25, 60, .05);
+  --card: rgba(255, 255, 255, .75);
   --card-solid: #ffffff;
   --border: rgba(20, 25, 60, .1);
   --text: #171c33;
@@ -91,6 +91,18 @@ body {
   backdrop-filter: blur(14px);
   box-shadow: var(--shadow);
   padding: 16px;
+}
+
+/* Paneles de segundo nivel (progreso + escenas): mismo cristal que .card,
+   para que TODO el popup viva en tarjetas como el dashboard */
+.panel {
+  margin-top: 13px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--shadow);
+  padding: 13px 14px;
 }
 
 .row-actions { display: flex; gap: 9px; align-items: stretch; }
@@ -174,7 +186,6 @@ html[data-theme="light"] .badge.green b { color: #148a48; }
 html[data-theme="light"] .badge.json { color: #5f3fd6; }
 
 /* ── Progreso ────────────────────────────────────────────────────────────── */
-.progress-area { margin-top: 13px; }
 .progress-head {
   display: flex; justify-content: space-between;
   font-size: 11px; font-weight: 700; color: var(--muted);
@@ -195,10 +206,17 @@ html[data-theme="light"] .badge.json { color: #5f3fd6; }
   background: linear-gradient(90deg, var(--accent), var(--accent2));
   box-shadow: 0 0 12px rgba(0, 224, 198, .45);
   transition: width .3s ease;
+  position: relative; overflow: hidden;
 }
+/* brillo que recorre la barra mientras genera (como el overlay del dashboard) */
+.bar-fill::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 45%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .4), transparent);
+  animation: shimmer 1.8s infinite;
+}
+@keyframes shimmer { from { transform: translateX(-110%); } to { transform: translateX(330%); } }
 
 /* ── Escenas ─────────────────────────────────────────────────────────────── */
-.scenes { margin-top: 15px; }
 .scenes h2 {
   font-size: 15px; font-weight: 800; margin-bottom: 9px;
   display: flex; align-items: center; gap: 8px;
@@ -210,28 +228,32 @@ html[data-theme="light"] .badge.json { color: #5f3fd6; }
 .scenes-list { display: grid; gap: 7px; max-height: 248px; overflow-y: auto; padding-right: 2px; }
 .empty {
   text-align: center; color: var(--muted); font-style: italic;
-  padding: 16px 6px; font-size: 12.5px;
+  padding: 18px 6px; font-size: 12.5px;
   border: 1px dashed var(--border); border-radius: 14px;
-  background: var(--card);
 }
 
+/* Tarjetas de escena: mismo lenguaje que .idea-item del dashboard
+   (bg2 sólido + borde translúcido) con borde de estado a la izquierda */
 .scene-card {
   display: flex; align-items: center; gap: 9px;
-  background: var(--card);
+  background: var(--bg2);
   border: 1px solid var(--border);
-  border-left-width: 4px;
-  border-radius: 12px;
-  padding: 9px 11px;
+  border-left-width: 3px;
+  border-radius: 11px;
+  padding: 10px 12px;
   font-size: 12px;
-  backdrop-filter: blur(8px);
   transition: .18s;
 }
 .scene-card:hover { transform: translateX(2px); border-color: var(--accent); }
 .scene-card.PENDING     { border-left-color: var(--gold); }
-.scene-card.IN_PROGRESS { border-left-color: var(--accent); box-shadow: 0 0 14px rgba(124, 92, 255, .18); }
+.scene-card.IN_PROGRESS { border-left-color: var(--accent); animation: scenePulse 2.2s ease-in-out infinite; }
 .scene-card.DOWNLOADED  { border-left-color: var(--ok); }
 .scene-card.RATE_LIMITED{ border-left-color: var(--warn); }
 .scene-card.ERROR       { border-left-color: var(--err); }
+@keyframes scenePulse {
+  0%, 100% { box-shadow: 0 0 0 rgba(124, 92, 255, 0); }
+  50%      { box-shadow: 0 0 16px rgba(124, 92, 255, .38); }
+}
 
 .scene-num {
   font-weight: 800; white-space: nowrap; font-size: 12px;
@@ -251,6 +273,9 @@ html[data-theme="light"] .badge.json { color: #5f3fd6; }
 /* ── Pie ─────────────────────────────────────────────────────────────────── */
 .foot {
   margin-top: 12px; font-size: 10.5px; color: var(--muted); line-height: 1.55;
+  padding: 9px 12px;
+  border: 1px dashed var(--border); border-radius: 12px;
+  background: var(--card);
 }
 .foot code {
   background: var(--card-solid); border: 1px solid var(--border);
