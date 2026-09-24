@@ -54,6 +54,7 @@ const els = {
   fileJson: $('file-json'),
   folderName: $('folder-name'),
   contentType: $('content-type'),
+  provider: $('provider'),
   imgsPerScene: $('imgs-per-scene'),
   badgeArea: $('badge-area'),
   badgeDisk: $('badge-disk'),
@@ -83,27 +84,48 @@ let completedScenes = {};  // resume: { [sceneNumber]: { images, videos } } (en 
 /* El background abre popup.html?fsworker=1 como pestaña inactiva porque el
    Service Worker MV3 NO soporta createWritable() (patrón probado en
    meta-video-generator / vibes-content-generator). Esta pestaña recibe
-   FS_WRITE y escribe a disco con el handle ya persistido en IndexedDB. */
+   FS_WRITE (escrituras) y FS_READ (lecturas: start frames para el modo
+   image-to-video de Meta AI, Fase 3-e) con el handle ya persistido. */
 function initFsWorkerMode() {
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (!msg || msg.type !== 'FS_WRITE') return false;
-    fsWorkerWrite(msg)
-      .then((r) => sendResponse({
-        type: 'FS_WRITE_RESULT',
-        slug: msg.slug,
-        filename: msg.filename,
-        ok: !!r.ok,
-        where: r.where,
-        error: r.error,
-      }))
-      .catch((e) => sendResponse({
-        type: 'FS_WRITE_RESULT',
-        slug: msg.slug,
-        filename: msg.filename,
-        ok: false,
-        error: String((e && e.message) || e),
-      }));
-    return true; // respuesta asíncrona
+    if (!msg) return false;
+    if (msg.type === 'FS_WRITE') {
+      fsWorkerWrite(msg)
+        .then((r) => sendResponse({
+          type: 'FS_WRITE_RESULT',
+          slug: msg.slug,
+          filename: msg.filename,
+          ok: !!r.ok,
+          where: r.where,
+          error: r.error,
+        }))
+        .catch((e) => sendResponse({
+          type: 'FS_WRITE_RESULT',
+          slug: msg.slug,
+          filename: msg.filename,
+          ok: false,
+          error: String((e && e.message) || e),
+        }));
+      return true; // respuesta asíncrona
+    }
+    if (msg.type === 'FS_READ') {
+      fsWorkerRead(msg)
+        .then((r) => sendResponse({
+          type: 'FS_READ_RESULT',
+          slug: msg.slug,
+          ok: !!r.ok,
+          dataUrl: r.dataUrl || null,
+          error: r.error,
+        }))
+        .catch((e) => sendResponse({
+          type: 'FS_READ_RESULT',
+          slug: msg.slug,
+          ok: false,
+          error: String((e && e.message) || e),
+        }));
+      return true;
+    }
+    return false;
   });
   toast('🛠 Worker de disco activo (pestaña oculta). No cerrar hasta terminar el lote.');
 }
@@ -130,6 +152,36 @@ async function fsWorkerWrite(msg) {
 
 if (location.search.indexOf('fsworker=1') !== -1) {
   initFsWorkerMode();
+}
+
+/* FS_READ: lee un archivo de la carpeta vinculada (p.ej. imagen_1.png de una
+   escena) y lo devuelve como dataURL — start frame para Meta AI (Fase 3-e). */
+async function fsWorkerRead(msg) {
+  try {
+    const handle = await loadProjectHandle();
+    if (!handle) return { ok: false, error: 'sin handle vinculado' };
+    const perm = await handle.queryPermission({ mode: 'readwrite' });
+    if (perm !== 'granted') return { ok: false, error: 'sin permiso readwrite' };
+    const dir = await handle.getDirectoryHandle(String(msg.slug), { create: false });
+    const candidates = Array.isArray(msg.filenames) && msg.filenames.length
+      ? msg.filenames : [msg.filename];
+    for (const name of candidates) {
+      try {
+        const fh = await dir.getFileHandle(String(name));
+        const file = await fh.getFile();
+        const dataUrl = await new Promise((res, rej) => {
+          const fr = new FileReader();
+          fr.onload = () => res(fr.result);
+          fr.onerror = () => rej(fr.error);
+          fr.readAsDataURL(file);
+        });
+        return { ok: true, dataUrl };
+      } catch (_) { /* siguiente candidato */ }
+    }
+    return { ok: false, error: 'archivo no encontrado en ' + msg.slug };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
 }
 
 /* -------------------- Resume: escenas ya en disco ------------------------- */
@@ -261,9 +313,10 @@ els.fileJson.addEventListener('change', async () => {
 });
 
 /* --------------------- Persistencia de preferencias ----------------------- */
-chrome.storage.local.get(['folder_name', 'content_type', 'imgs_per_scene'], (o) => {
+chrome.storage.local.get(['folder_name', 'content_type', 'provider', 'imgs_per_scene'], (o) => {
   if (o.folder_name) els.folderName.value = o.folder_name;
   if (o.content_type) els.contentType.value = o.content_type;
+  if (o.provider) els.provider.value = o.provider;
   if (o.imgs_per_scene) els.imgsPerScene.value = o.imgs_per_scene;
 });
 els.folderName.addEventListener('change', () => {
@@ -272,6 +325,12 @@ els.folderName.addEventListener('change', () => {
 els.contentType.addEventListener('change', () => {
   chrome.storage.local.set({ content_type: els.contentType.value });
 });
+els.provider.addEventListener('change', () => {
+  chrome.storage.local.set({ provider: els.provider.value });
+  toast(els.provider.value === 'meta'
+    ? '🔵 Proveedor: Meta AI. Abre meta.ai (sesión iniciada) en la pestaña activa.'
+    : '🟣 Proveedor: Google Flow. Abre labs.google en la pestaña activa.');
+});
 els.imgsPerScene.addEventListener('change', () => {
   chrome.storage.local.set({ imgs_per_scene: els.imgsPerScene.value });
 });
@@ -279,10 +338,16 @@ els.imgsPerScene.addEventListener('change', () => {
 /* --------------------------- Iniciar Generación --------------------------- */
 els.btnStart.addEventListener('click', async () => {
   if (!scenes.length) { toast('⚠️ Vincula el proyecto o sube el script.json primero.'); return; }
+  const provider = els.provider.value === 'meta' ? 'meta' : 'flow';
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const isLabs = tab && tab.url && tab.url.indexOf('https://labs.google/') === 0;
-  if (!isLabs) {
-    toast('⚠️ Abre Google Labs (Flow / ImageFX) en la pestaña activa y vuelve a intentar.');
+  const tabUrl = (tab && tab.url) || '';
+  const okTab = provider === 'meta'
+    ? /^https?:\/\/([\w-]+\.)?meta\.ai\//.test(tabUrl)
+    : tabUrl.indexOf('https://labs.google/') === 0;
+  if (!okTab) {
+    toast('⚠️ Abre ' + (provider === 'meta'
+      ? 'meta.ai (sesión iniciada)'
+      : 'Google Labs (Flow / ImageFX)') + ' en la pestaña activa y vuelve a intentar.');
     return;
   }
   const mode = els.contentType.value === 'videos' ? 'videos' : 'images';
@@ -295,13 +360,14 @@ els.btnStart.addEventListener('click', async () => {
     type: 'START_QUEUE',
     scenes: payload,
     mode,
+    provider,
     imagesPerScene: parseInt(els.imgsPerScene.value, 10) || 2,
     tabId: tab.id,
     folderName: (els.folderName.value.trim() || 'FLOW_EXPORT').toUpperCase(),
     preCompleted: completedScenes || {},
   }, (res) => {
     if (res && res.ok) {
-      toast('🚀 Generación iniciada (' + res.count + ' escenas). Mantén la pestaña de Flow abierta.');
+      toast('🚀 Generación iniciada (' + res.count + ' escenas) en ' + (provider === 'meta' ? 'Meta AI' : 'Flow') + '. Mantén la pestaña abierta.');
       refreshFromBackground();
     } else {
       toast('⚠️ No se pudo iniciar: ' + ((res && res.error) || 'error desconocido'));
@@ -332,6 +398,14 @@ const STATUS_TEXT = {
   RATE_LIMITED: 'Pausa por límite (90s)',
   ERROR: 'Error',
 };
+let lastProvider = 'flow'; // texto de estado dinámico por proveedor (Fase 3-e)
+
+function statusTextOf(item) {
+  if (item.status === 'IN_PROGRESS') {
+    return lastProvider === 'meta' ? 'Generando en Meta AI' : 'Generando en Flow';
+  }
+  return STATUS_TEXT[item.status] || item.status;
+}
 
 function renderScenes(items) {
   els.scenesList.querySelectorAll('.scene-card').forEach((n) => n.remove());
@@ -350,7 +424,7 @@ function renderScenes(items) {
       ? '' : (it.downloaded ? ` · ${it.downloaded} archivo(s)` : '');
     card.innerHTML =
       '<span class="scene-num">Escena ' + String(it.scene_number).padStart(2, '0') + '</span>' +
-      '<span class="scene-status">' + emoji + ' ' + STATUS_TEXT[it.status] + downloaded + '</span>' +
+      '<span class="scene-status">' + emoji + ' ' + statusTextOf(it) + downloaded + '</span>' +
       (it.error ? '<span class="scene-error" title="' + it.error.replace(/"/g, '&quot;') + '">⚠</span>' : '') +
       ((it.status === 'ERROR' || it.status === 'RATE_LIMITED') ? '<button class="scene-retry" data-id="' + it.id + '">Reintentar</button>' : '');
     frag.appendChild(card);
@@ -374,6 +448,7 @@ function renderScenes(items) {
 function refreshFromBackground() {
   chrome.runtime.sendMessage({ type: 'GET_STATE' }, (res) => {
     if (res && res.ok && res.state) {
+      lastProvider = res.state.provider === 'meta' ? 'meta' : 'flow';
       renderScenes(res.state.queue || []);
       if (res.state.running && !pollTimer) startPolling();
       if (!res.state.running && pollTimer) stopPolling();

@@ -37,6 +37,12 @@ const FETCH_TIMEOUT_MS = 60000;               // timeout por intento de descarga
 const FETCH_BACKOFF_MS = [1000, 2000, 4000];  // reintentos con backoff
 const FS_WORKER_KEY = 'fsWorkerTabId';        // pestaña oculta para escrituras FS
 
+/* --- Fase 3-e: Meta AI como 2º proveedor (patrón meta-video-generator) --- */
+const META_INJECT_DELAY_MS = 30000;   // meta.ai tolera un ritmo algo mayor que Flow
+const META_VIDEO_PREFIX = 'Animate this image.';
+const META_MAX_IMAGES_PER_GEN = 4;    // meta.ai genera 4 imágenes por prompt
+const META_START_FRAME_CANDIDATES = ['imagen_1.png', 'imagen_1.jpeg', 'imagen_1.jpg', 'imagen_1.webp'];
+
 const STATUS = {
   PENDING: 'PENDING',
   IN_PROGRESS: 'IN_PROGRESS',
@@ -61,6 +67,7 @@ let resumeTimer = null;
 let fallbackRoot = 'FLOW_EXPORT';        // carpeta raiz en Descargas (fallback)
 let lastStateSummary = '';
 let fsWorkerTabId = null;                // pestaña oculta con popup.html?fsworker=1
+let provider = 'flow';                   // 'flow' | 'meta' (Fase 3-e: 2º proveedor)
 
 /* ------------------------- Persistencia (manual 4.1) ---------------------- */
 function serializeState() {
@@ -74,6 +81,7 @@ function serializeState() {
     lastInjectAt,
     fallbackRoot,
     fsWorkerTabId,
+    provider,
     downloadedTileIds: Array.from(downloadedTileIds),
     mediaIdToScene: Array.from(mediaIdToScene.entries()),
     sceneMediaCounts: Array.from(sceneMediaCounts.entries()),
@@ -97,6 +105,7 @@ function hydrateState(o) {
   lastInjectAt = Number(o.lastInjectAt) || 0;
   fallbackRoot = o.fallbackRoot || 'FLOW_EXPORT';
   fsWorkerTabId = Number.isInteger(o.fsWorkerTabId) ? o.fsWorkerTabId : null;
+  provider = o.provider === 'meta' ? 'meta' : 'flow';
   downloadedTileIds = new Set(Array.isArray(o.downloadedTileIds) ? o.downloadedTileIds : []);
   mediaIdToScene = new Map(Array.isArray(o.mediaIdToScene) ? o.mediaIdToScene : []);
   sceneMediaCounts = new Map(Array.isArray(o.sceneMediaCounts) ? o.sceneMediaCounts : []);
@@ -126,6 +135,7 @@ function snapshot() {
     running,
     mode,
     imagesPerScene,
+    provider,
     tabId: labTabId,
     cooldownUntil: rateLimitCooldownUntil,
     fallbackRoot,
@@ -467,6 +477,7 @@ function stopPolling() {
 
 async function pollTick() {
   if (!running || !labTabId) return;
+  if (provider === 'meta') return; // meta.ai: el content script sondea (META_MEDIA_FOUND)
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId: labTabId },
@@ -682,6 +693,10 @@ function triggerRateLimit() {
 }
 
 /* ------------------- Cola: inicio / tick / inyeccion ---------------------- */
+function injectDelayMs() {
+  return provider === 'meta' ? META_INJECT_DELAY_MS : INJECT_DELAY_MS;
+}
+
 function onMessageStartQueue(msg) {
   const scenes = Array.isArray(msg.scenes) ? msg.scenes : [];
   if (!scenes.length) return { ok: false, error: 'sin escenas' };
@@ -709,6 +724,7 @@ function onMessageStartQueue(msg) {
     };
   });
   mode = msg.mode === 'videos' ? 'videos' : 'images';
+  provider = msg.provider === 'meta' ? 'meta' : 'flow'; // Fase 3-e
   imagesPerScene = Number(msg.imagesPerScene) > 0 ? Number(msg.imagesPerScene) : IMAGES_PER_SCENE_DEFAULT;
   labTabId = typeof msg.tabId === 'number' ? msg.tabId : null;
   fallbackRoot = String(msg.folderName || 'FLOW_EXPORT').replace(/[^\w\- ]+/g, '_').slice(0, 48) || 'FLOW_EXPORT';
@@ -740,7 +756,7 @@ function tick(initial) {
     tickSoon(rateLimitCooldownUntil - now + 250);
     return;
   }
-  const cap = mode === 'videos' ? MAX_CONCURRENT_VIDEOS : MAX_CONCURRENT_IMAGES;
+  const cap = provider === 'meta' ? 1 : (mode === 'videos' ? MAX_CONCURRENT_VIDEOS : MAX_CONCURRENT_IMAGES);
   const inProgress = queue.filter((i) => i.status === STATUS.IN_PROGRESS);
   if (inProgress.length >= cap) return; // el sondeo del DOM avanzara la cola
 
@@ -751,8 +767,8 @@ function tick(initial) {
     }
     return;
   }
-  if (!initial && now - lastInjectAt < INJECT_DELAY_MS) {
-    tickSoon(INJECT_DELAY_MS - (now - lastInjectAt) + 200);
+  if (!initial && now - lastInjectAt < injectDelayMs()) {
+    tickSoon(injectDelayMs() - (now - lastInjectAt) + 200);
     return;
   }
   injectScene(next);
@@ -766,15 +782,19 @@ async function injectScene(item) {
   rearmWatchdog();
   broadcastState();
   try {
-    if (labTabId == null) throw new Error('pestaña de Flow no vinculada');
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: labTabId },
-      func: slateInjectFn,
-      args: [item.prompt],
-    });
-    const res = results && results[0] && results[0].result;
-    if (!res || res.ok !== true) {
-      throw new Error((res && res.error) || 'no se pudo inyectar el prompt');
+    if (provider === 'meta') {
+      await injectMetaScene(item); // Fase 3-e: 2º proveedor (meta.ai)
+    } else {
+      if (labTabId == null) throw new Error('pestaña de Flow no vinculada');
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: labTabId },
+        func: slateInjectFn,
+        args: [item.prompt],
+      });
+      const res = results && results[0] && results[0].result;
+      if (!res || res.ok !== true) {
+        throw new Error((res && res.error) || 'no se pudo inyectar el prompt');
+      }
     }
   } catch (e) {
     item.status = STATUS.ERROR;
@@ -782,7 +802,116 @@ async function injectScene(item) {
     persistState();
     broadcastState();
   }
-  tickSoon(INJECT_DELAY_MS + 500);
+  tickSoon(injectDelayMs() + 500);
+}
+
+/* ------------- Fase 3-e: inyección y recolección en meta.ai --------------- */
+/* Start frame: lee imagen_1 de la escena (generada antes por nosotros) vía la
+   pestaña worker (FS_READ) para image-to-video con consistencia visual. */
+function readStartFrame(sceneNumber) {
+  return new Promise((resolve) => {
+    const slug = 'Escena_' + String(sceneNumber).padStart(2, '0');
+    let settled = false;
+    const finish = (payload) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { chrome.runtime.onMessage.removeListener(listener); } catch (_) {}
+      resolve(payload);
+    };
+    const timer = setTimeout(() => finish({ ok: false, error: 'timeout leyendo start frame' }), 30000);
+    const listener = (msg) => {
+      if (msg && msg.type === 'FS_READ_RESULT' && msg.slug === slug) {
+        finish({ ok: !!msg.ok, dataUrl: msg.dataUrl || null, error: msg.error });
+      }
+      return false;
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    ensureWorkerTab().then((tabId) => {
+      if (tabId == null) return finish({ ok: false, error: 'sin worker tab' });
+      chrome.tabs.sendMessage(tabId, {
+        type: 'FS_READ',
+        slug,
+        filenames: META_START_FRAME_CANDIDATES,
+      }).catch(() => finish({ ok: false, error: 'worker tab no responde' }));
+    }).catch(() => finish({ ok: false, error: 'no se pudo abrir worker tab' }));
+  });
+}
+
+async function injectMetaScene(item) {
+  if (labTabId == null) throw new Error('pestaña de Meta AI no vinculada');
+  let imageData = null;
+  let fileName = null;
+  if (mode === 'videos') {
+    // image-to-video con nuestro start frame; si no existe, meta.ai genera solo con texto
+    const frame = await readStartFrame(item.scene_number);
+    if (frame && frame.ok && frame.dataUrl) {
+      imageData = frame.dataUrl;
+      fileName = 'escena_' + String(item.scene_number).padStart(2, '0') + '.png';
+    }
+  }
+  const res = await chrome.tabs.sendMessage(labTabId, {
+    type: 'META_FILL_PROMPT',
+    prompt: mode === 'videos' ? META_VIDEO_PREFIX + ' ' + item.prompt : item.prompt,
+    imageData,
+    fileName,
+    sceneNumber: item.scene_number,
+    kind: mode,
+    expected: mode === 'videos' ? 1 : Math.min(imagesPerScene, META_MAX_IMAGES_PER_GEN),
+  });
+  if (!res || res.ok !== true) {
+    throw new Error((res && res.error) || 'meta.ai no aceptó el prompt');
+  }
+}
+
+/* META_MEDIA_FOUND: el content script de meta.ai reporta URLs listas para una
+   escena concreta (mapeo exacto, sin heurísticas). Reutiliza saveUrlToDisk,
+   sceneMediaCounts y el ciclo DOWNLOADED → tick del pipeline clásico. */
+async function handleMetaMedia(msg) {
+  if (!running || provider !== 'meta') return;
+  const scene = Number(msg.sceneNumber);
+  const item = queue.find((i) => i.scene_number === scene);
+  if (!item || item.status !== STATUS.IN_PROGRESS) return;
+  const isVideoMode = mode === 'videos';
+  const need = isVideoMode ? 1 : imagesPerScene;
+  const urls = Array.isArray(msg.urls) ? msg.urls.filter((u) => /^https?:/i.test(u)) : [];
+  for (const url of urls) {
+    const got = sceneMediaCounts.get(scene) || 0;
+    if (got >= need) break;
+    if (downloadedTileIds.has(url)) continue;
+    downloadedTileIds.add(url);
+    const idx = got + 1;
+    const ext = detectExtension(url, isVideoMode);
+    const prefix = isVideoMode ? 'video' : 'imagen';
+    const saved = await saveUrlToDisk(url, scene, idx, ext, prefix);
+    if (saved && saved.ok) {
+      sceneMediaCounts.set(scene, idx);
+      persistState();
+    } else if (item) {
+      item.error = (saved && saved.error) || 'fallo al guardar (meta)';
+    }
+  }
+  if ((sceneMediaCounts.get(scene) || 0) >= need) {
+    item.status = STATUS.DOWNLOADED;
+    item.error = null;
+    rearmWatchdog();
+    persistState();
+    broadcastState();
+    tickSoon(800);
+  }
+}
+
+/* META_MEDIA_FAIL: sondeo agotado sin media → ERROR y avanza (watchdog natural) */
+function handleMetaFail(msg) {
+  const scene = Number(msg.sceneNumber);
+  const item = queue.find((i) => i.scene_number === scene && i.status === STATUS.IN_PROGRESS);
+  if (!item) return;
+  item.status = STATUS.ERROR;
+  item.error = String(msg.reason || 'fallo en meta.ai');
+  persistState();
+  rearmWatchdog();
+  broadcastState();
+  tickSoon(1500);
 }
 
 /* ---------------- Respuestas tRPC: unwrap + mapeo (4.4) ------------------- */
@@ -968,6 +1097,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         break;
       case 'RETRY_SCENE':
         sendResponse(retryScene(msg.id));
+        break;
+      case 'META_MEDIA_FOUND':
+        handleMetaMedia(msg);
+        sendResponse({ ok: true });
+        break;
+      case 'META_MEDIA_FAIL':
+        handleMetaFail(msg);
+        sendResponse({ ok: true });
+        break;
+      case 'META_RATE_LIMIT':
+        triggerRateLimit();
+        sendResponse({ ok: true });
         break;
       case 'SW_PING':
         sendResponse({ ok: true, alive: true, running });
