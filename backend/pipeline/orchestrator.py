@@ -6,6 +6,7 @@ cancelación. Es el "engine" que consume el dashboard y la fábrica.
 import asyncio
 import contextvars
 import logging
+import os
 import time
 import traceback
 from collections import deque
@@ -18,6 +19,17 @@ from pipeline import script_gen, tts_step, video
 from services import gemini_client, url_mode, whisper_service, youtube_publish
 
 log = logging.getLogger("orchestrator")
+
+# ── Control de concurrencia de renders (blindaje CPU) ──────────────────
+# FFmpeg (zoompan + xfade) usa todos los núcleos: si 2+ proyectos renderizan
+# a la vez, el servidor se queda sin CPU y el resto de peticiones sufre.
+# El semáforo serializa SOLO la fase de mezcla de video; guion/TTS/imágenes
+# de otros proyectos pueden seguir avanzando en paralelo.
+try:
+    MAX_CONCURRENT_RENDERS = max(1, int(os.getenv("MAX_CONCURRENT_RENDERS", "1")))
+except ValueError:
+    MAX_CONCURRENT_RENDERS = 1
+RENDER_SEM = asyncio.Semaphore(MAX_CONCURRENT_RENDERS)
 
 
 # ── Broker SSE ────────────────────────────────────────────────────────────
@@ -249,17 +261,18 @@ async def _run_flow_render(job_id: str, project_id: str) -> None:
             await _emit(job_id, project_id, "render", 77,
                         f"Usando {len(flow_videos)} clip(s) reales de Flow (retime)…")
         transitions = bool((db.get_project(project_id).get("meta") or {}).get("transitions", True))
-        clips = await video.render_scenes(
-            db.get_project(project_id), scenes, durations,
-            None, is_cancelled(job_id),
-            flow_videos=flow_videos or None,
-            transition_pad=video.TRANSITION_DUR if transitions else 0.0)
-        await _emit(job_id, project_id, "render", 82, "Uniendo clips…")
-        silent = await video.concat_clips(db.get_project(project_id), clips,
-                                          transition="fade" if transitions else None)
-        await _emit(job_id, project_id, "render", 86, "Mezclando voz y música…")
-        raw_video = await video.mux_audio_music(db.get_project(project_id),
-                                                silent, voice_full)
+        async with RENDER_SEM:  # 1 mezcla de video a la vez (blindaje CPU)
+            clips = await video.render_scenes(
+                db.get_project(project_id), scenes, durations,
+                None, is_cancelled(job_id),
+                flow_videos=flow_videos or None,
+                transition_pad=video.TRANSITION_DUR if transitions else 0.0)
+            await _emit(job_id, project_id, "render", 82, "Uniendo clips…")
+            silent = await video.concat_clips(db.get_project(project_id), clips,
+                                              transition="fade" if transitions else None)
+            await _emit(job_id, project_id, "render", 86, "Mezclando voz y música…")
+            raw_video = await video.mux_audio_music(db.get_project(project_id),
+                                                    silent, voice_full)
         await _emit(job_id, project_id, "subtitles", 90, "Quemando subtítulos Hormozi…")
         final = await video.burn_subtitles(db.get_project(project_id), raw_video, words_path)
         thumb = video.make_thumbnail(db.get_project(project_id), scenes[0].get("image_path"))
@@ -270,6 +283,8 @@ async def _run_flow_render(job_id: str, project_id: str) -> None:
                           thumbnail_url=str(thumb) if thumb else None)
         db.update_job(job_id, status="done", progress=100, step="done",
                       message=f"Video Flow listo · {total_dur:.0f}s")
+        if os.getenv("KEEP_INTERMEDIATES", "0") != "1":  # libera el disco
+            video.cleanup_intermediates(project_id)
         await broker.publish(job_id, {
             "type": "done", "job_id": job_id, "project_id": project_id,
             "video_url": f"/api/projects/{project_id}/video",
@@ -417,16 +432,17 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
         # mantener la sincronía exacta con la pista de voz)
         await _emit(job_id, project_id, "render", 76, "Renderizando escenas (Ken Burns + transiciones)…")
         transitions = bool((db.get_project(project_id).get("meta") or {}).get("transitions", True))
-        clips = await video.render_scenes(
-            db.get_project(project_id), scenes, durations,
-            None, is_cancelled(job_id),
-            transition_pad=video.TRANSITION_DUR if transitions else 0.0)
-        await _emit(job_id, project_id, "render", 82, "Uniendo clips…")
-        silent = await video.concat_clips(db.get_project(project_id), clips,
-                                          transition="fade" if transitions else None)
-        await _emit(job_id, project_id, "render", 86, "Mezclando voz y música…")
-        raw_video = await video.mux_audio_music(db.get_project(project_id),
-                                                silent, voice_full)
+        async with RENDER_SEM:  # 1 mezcla de video a la vez (blindaje CPU)
+            clips = await video.render_scenes(
+                db.get_project(project_id), scenes, durations,
+                None, is_cancelled(job_id),
+                transition_pad=video.TRANSITION_DUR if transitions else 0.0)
+            await _emit(job_id, project_id, "render", 82, "Uniendo clips…")
+            silent = await video.concat_clips(db.get_project(project_id), clips,
+                                              transition="fade" if transitions else None)
+            await _emit(job_id, project_id, "render", 86, "Mezclando voz y música…")
+            raw_video = await video.mux_audio_music(db.get_project(project_id),
+                                                    silent, voice_full)
 
         # PASO 5 — subtítulos + thumbnail
         await _emit(job_id, project_id, "subtitles", 90, "Quemando subtítulos Hormozi…")
@@ -439,6 +455,8 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
                           thumbnail_url=str(thumb) if thumb else None)
         db.update_job(job_id, status="done", progress=100, step="done",
                       message=f"Video listo · {total_dur:.0f}s")
+        if os.getenv("KEEP_INTERMEDIATES", "0") != "1":  # libera el disco
+            video.cleanup_intermediates(project_id)
         await broker.publish(job_id, {
             "type": "done", "job_id": job_id, "project_id": project_id,
             "video_url": f"/api/projects/{project_id}/video",

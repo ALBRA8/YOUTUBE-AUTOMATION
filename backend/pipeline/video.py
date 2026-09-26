@@ -6,6 +6,7 @@ subtítulos estilo TikTok/Hormozi quemados con ASS. 100% ffmpeg.
 import asyncio
 import json
 import logging
+import random
 import subprocess
 from pathlib import Path
 
@@ -319,6 +320,36 @@ def make_thumbnail(project: dict, first_image: str | None) -> Path | None:
 
 
 def _pick_music() -> Path | None:
+    """Pista de fondo aleatoria entre las disponibles en data/music.
+    (antes devolvía SIEMPRE tracks[0] alfabéticamente: todos los videos
+    salían con la misma canción — hallazgo de la auditoría externa)."""
     from config import MUSIC_DIR
     tracks = sorted(MUSIC_DIR.glob("*.mp3")) + sorted(MUSIC_DIR.glob("*.wav"))
-    return tracks[0] if tracks else None
+    return random.choice(tracks) if tracks else None
+
+
+def cleanup_intermediates(project_id: str) -> int:
+    """Libera el disco tras un render exitoso: borra los artefactos
+    intermedios regenerables (segmentos Ken Burns pre-concat, video sin
+    audio, video pre-subtítulos, listas concat). Conserva lo valioso:
+    el MP4 final, imágenes de escena, assets Flow, sidecars .json de clips
+    (reutilización idempotente) y audio TTS. Devuelve bytes liberados."""
+    proj_dir = OUTPUT_DIR / project_id
+    freed = 0
+    targets: list[Path] = []
+    clips_dir = proj_dir / "clips"
+    if clips_dir.is_dir():
+        targets += list(clips_dir.glob("*.mp4"))
+    targets += [proj_dir / name for name in
+                ("video_silent.mp4", "video_raw.mp4", "concat.txt")]
+    final = proj_dir / f"{project_id}_final.mp4"
+    for f in targets:
+        try:
+            if f.is_file() and final.is_file():  # solo si el final existe
+                freed += f.stat().st_size
+                f.unlink()
+        except OSError as e:  # noqa: PERF203
+            log.warning("cleanup %s: %s", f.name, e)
+    if freed:
+        log.info("cleanup %s: %.1f MB liberados", project_id, freed / 1e6)
+    return freed

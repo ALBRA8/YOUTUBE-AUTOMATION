@@ -1,17 +1,28 @@
 """
 YOUTUBE AUTOMATION v2.0 — Autopublicación en YouTube
-OAuth de escritorio (flujo installed-app) con token persistente.
+OAuth de escritorio con retorno LOOPBACK (Google retiró el flujo OOB
+"urn:ietf:wg:oauth:2.0:oob" → hoy responde Error 400 invalid_request).
+El navegador vuelve a http://127.0.0.1:<PORT>/api/publish/callback, donde
+el propio servidor intercambia el código y guarda el token.
 Opcional: se activa solo si el usuario coloca client_secret.json en backend/data/.
 """
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from config import YT_CLIENT_SECRET, YT_TOKEN_FILE
+from config import PORT, YT_CLIENT_SECRET, YT_TOKEN_FILE
 
 log = logging.getLogger("publish")
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload",
           "https://www.googleapis.com/auth/youtube.readonly"]
+
+
+def redirect_uri() -> str:
+    """URI de retorno OAuth. Debe estar registrada EXACTAMENTE igual en
+    Google Cloud Console → Credenciales → URIs de redirección autorizadas."""
+    return (os.getenv("GOOGLE_REDIRECT_URI", "").strip()
+            or f"http://127.0.0.1:{PORT}/api/publish/callback")
 
 
 def configured() -> bool:
@@ -23,15 +34,14 @@ def has_token() -> bool:
 
 
 def build_auth_url() -> str | None:
-    """Genera URL de consentimiento (para mostrarla en el dashboard)."""
+    """Genera URL de consentimiento con retorno loopback (sin OOB)."""
     if not configured():
         return None
     try:
         from google_auth_oauthlib.flow import Flow
         flow = Flow.from_client_secrets_file(
             YT_CLIENT_SECRET, scopes=SCOPES,
-            redirect_uri="urn:ietf:wg:oauth:2.0:oob")
-        flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+            redirect_uri=redirect_uri())
         auth_url, _ = flow.authorization_url(
             access_type="offline", include_granted_scopes="true", prompt="consent")
         return auth_url
@@ -45,7 +55,7 @@ def exchange_code(code: str) -> bool:
         return False
     from google_auth_oauthlib.flow import Flow
     flow = Flow.from_client_secrets_file(
-        YT_CLIENT_SECRET, scopes=SCOPES, redirect_uri="urn:ietf:wg:oauth:2.0:oob")
+        YT_CLIENT_SECRET, scopes=SCOPES, redirect_uri=redirect_uri())
     flow.fetch_token(code=code)
     creds = flow.credentials
     Path(YT_TOKEN_FILE).write_text(creds.to_json())

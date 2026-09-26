@@ -15,7 +15,8 @@ Pillow>=10.0               # placeholders elegantes
 # modo fábrica
 APScheduler>=3.10
 
-# ── opcionales (recomendados) ───────────────────────────────
-# faster-whisper>=1.0       # subtítulos palabra a palabra exactos
-# google-api-python-client>=2.100   # autopublish YouTube
-# google-auth-oauthlib>=1.2         # OAuth YouTube
+# ── recomendados (instalados por defecto; el sistema degrada con gracia
+#    si se comentan, pero pierde funciones) ────────────────────────────────
+faster-whisper>=1.0               # subtítulos palabra a palabra exactos
+google-api-python-client>=2.100   # autopublish YouTube
+google-auth-oauthlib>=1.2         # OAuth YouTube (loopback, sin OOB)

@@ -12,12 +12,15 @@ from pathlib import Path
 
 import config
 import database as db
+import security
 from config import DATA_DIR, HOST, OUTPUT_DIR, PORT, TMP_DIR
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
+                               StreamingResponse)
 from fastapi.staticfiles import StaticFiles
 from pipeline import images as imgs_pipeline
 from pipeline import orchestrator
+from pipeline import video as video_pipeline
 from pipeline.subtitles import words_to_srt
 from services import (agent as agent_svc, doctor as doctor_svc,
                       gemini_client, scheduler, trend_research as trends_svc,
@@ -45,12 +48,42 @@ async def no_cache_ui(request, call_next):
         resp.headers["Cache-Control"] = "no-cache"
     return resp
 
-# ────────────────────────────────────────────────────────── básicos ──
+
+@app.middleware("http")
+async def auth_guard(request, call_next):
+    """Blindaje opcional del panel (auditoría externa: «cero autenticación»).
+    Si MASTER_API_KEY está definida en backend/.env, TODAS las rutas /api/*
+    exigen la clave vía header X-API-Key, Bearer, cookie (SSE) o ?api_key=.
+    En modo local (sin clave definida) no bloquea nada: cero ruptura."""
+    if security.enabled() and request.url.path.startswith("/api/") \
+            and request.url.path not in security.PUBLIC_PATHS:
+        provided = request.headers.get("X-API-Key", "")
+        if not provided:
+            auth = request.headers.get("Authorization", "")
+            provided = auth[7:] if auth.startswith("Bearer ") else ""
+        if not provided:
+            provided = request.cookies.get(security.COOKIE_NAME, "")
+        if not provided:
+            provided = request.query_params.get("api_key", "")
+        if not security.verify(provided):
+            return JSONResponse(status_code=401,
+                                content={"detail": "clave maestra requerida "
+                                                   "(X-API-Key / MASTER_API_KEY)"})
+    return await call_next(request)
+
+
+# ──────────────────────────────────────────────────────── básicos ──
 @app.get("/api/health")
 async def health():
     return {"ok": True, "version": "2.1.1", "gemini": gemini_client.available(),
             "whisper": whisper_service.available(),
             "youtube": youtube_publish.configured()}
+
+
+@app.get("/api/auth/status")
+async def auth_status():
+    """El dashboard consulta esto al cargar: si hay clave maestra, pide login."""
+    return {"auth_required": security.enabled()}
 
 
 @app.get("/api/styles")
@@ -545,6 +578,17 @@ async def delete_project(pid: str):
     return {"ok": True}
 
 
+@app.post("/api/projects/{pid}/cleanup")
+async def cleanup_project(pid: str):
+    """Libera el disco: borra clips intermedios del proyecto (el MP4 final,
+    imágenes, Flow y audio TTS se conservan). Útil si KEEP_INTERMEDIATES=1."""
+    if not db.get_project(pid):
+        raise HTTPException(404, "no existe")
+    freed = video_pipeline.cleanup_intermediates(pid)
+    return {"ok": True, "freed_bytes": freed,
+            "freed_mb": round(freed / 1e6, 1)}
+
+
 @app.post("/api/projects/{pid}/generate")
 async def generate(pid: str, body: dict | None = None):
     p = db.get_project(pid)
@@ -792,11 +836,12 @@ async def clear_ideas():
     return []
 
 
-# ─────────────────────────────────────────────── autopublish YouTube ──
+# ─────────────────────────────────────────── autopublish YouTube ──
 @app.get("/api/publish/status")
 async def publish_status():
     return {"configured": youtube_publish.configured(),
-            "token": youtube_publish.has_token()}
+            "token": youtube_publish.has_token(),
+            "redirect_uri": youtube_publish.redirect_uri()}
 
 
 @app.get("/api/publish/auth-url")
@@ -805,6 +850,45 @@ async def publish_auth_url():
     if not url:
         raise HTTPException(400, "Falta client_secret.json en backend/data/")
     return {"url": url}
+
+
+def _oauth_page(ok: bool, msg: str) -> str:
+    """Página mínima de confirmación del retorno OAuth (loopback)."""
+    color = "#22c55e" if ok else "#ef4444"
+    icon = "✅" if ok else "❌"
+    safe = (msg or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return (f"<!doctype html><html lang=es><meta charset=utf-8>"
+            f"<title>YouTube · {icon}</title>"
+            f"<body style='font-family:system-ui;background:#0b1020;color:#e5e7eb;"
+            f"display:grid;place-items:center;height:100vh;margin:0;text-align:center'>"
+            f"<div><div style='font-size:56px'>{icon}</div>"
+            f"<h1 style='color:{color};font-size:22px'>"
+            f"{'Canal conectado' if ok else 'No se pudo conectar'}</h1>"
+            f"<p style='opacity:.75;max-width:520px'>{safe}</p>"
+            f"<p><a href='/' style='color:#60a5fa'>← Volver al dashboard</a></p></div></body>")
+
+
+@app.get("/api/publish/callback")
+async def publish_callback(code: str = "", error: str = ""):
+    """Retorno OAuth de Google (loopback, reemplaza el flujo OOB retirado):
+    intercambia el código, guarda el token en backend/data/token.json y
+    muestra confirmación. El usuario solo autoriza en el navegador."""
+    if error:
+        return HTMLResponse(_oauth_page(False, f"Google devolvió: {error}"))
+    if not code:
+        return HTMLResponse(_oauth_page(False, "Faltó el parámetro ?code= en el retorno."),
+                            status_code=400)
+    if not youtube_publish.configured():
+        return HTMLResponse(_oauth_page(False, "Falta backend/data/client_secret.json"),
+                            status_code=400)
+    try:
+        ok = youtube_publish.exchange_code(code)
+        msg = ("Token guardado en backend/data/token.json. Ya puedes publicar "
+               "desde el dashboard.") if ok else "No se pudo intercambiar el código."
+    except Exception as e:  # noqa: BLE001
+        ok = False
+        msg = f"Error al intercambiar el código: {str(e)[:220]}"
+    return HTMLResponse(_oauth_page(ok, msg))
 
 
 @app.post("/api/publish/exchange")

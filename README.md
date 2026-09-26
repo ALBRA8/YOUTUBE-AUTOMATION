@@ -138,10 +138,24 @@ El **botón "Exportar a Flow"** del dashboard genera un ZIP con `script.json` ba
 1. En [Google Cloud Console](https://console.cloud.google.com) crea un proyecto → habilita **YouTube Data API v3**
 2. Crea credenciales **OAuth 2.0 → Aplicación de escritorio** → descarga `client_secret.json`
 3. Súbelo desde **⚙️ Configuración → YouTube** (o cópialo a `backend/data/client_secret.json`)
-4. En el dashboard: **Publicar → 1. Conectar mi canal** → autoriza → pega el código → **Guardar token**
-5. Listo: publica manual o activa autopublish en la Fábrica
+4. Añade la **URI de redirección** en tu OAuth Client (Credenciales → editar):
+   `http://127.0.0.1:8000/api/publish/callback`
+   (Google retiró el flujo OOB "copiar código" — ahora el token llega solo)
+5. En el dashboard: **Publicar → 1. Conectar mi canal** → autoriza → Google te
+   devuelve a `http://127.0.0.1:8000/api/publish/callback` y el servidor guarda
+   el token automáticamente (✅ Canal conectado)
+6. Listo: publica manual o activa autopublish en la Fábrica
 
 > Nota: apps sin "verificación" de Google solo pueden subir videos como **privados** — perfecto para revisión y programación.
+
+## 🔒 Seguridad — clave maestra (exponer el panel a internet)
+Por defecto el servidor escucha en `127.0.0.1` y funciona **abierto**, como Jupyter u OBS: así no estorba en tu propio PC. Si lo montas en un **VPS o en una red compartida**, protégelo en 30 segundos:
+
+1. Edita `backend/.env` y descomenta: `MASTER_API_KEY=una-clave-larga-y-unica`
+2. Reinicia el servidor. Desde ese momento **todas** las rutas `/api/*` exigen la clave (acepta `X-API-Key`, `Authorization: Bearer`, cookie o `?api_key=`).
+3. El dashboard te pedirá la clave una sola vez (prompt) y la recordará; la conexión SSE usa cookies same-origin.
+
+Blindajes incluidos de serie (auditoría 2026-09): claves de API enmascaradas en `/api/config`, listas blancas de columnas contra inyección SQL en SQLite, semáforo de renders (1 mezcla FFmpeg a la vez por defecto, configurable con `MAX_CONCURRENT_RENDERS`) y limpieza automática de clips intermedios tras cada render (`KEEP_INTERMEDIATES=1` para desactivarla; botón/cleanup manual vía `POST /api/projects/{pid}/cleanup`).
 
 ## 🗂️ Estructura del proyecto
 ```

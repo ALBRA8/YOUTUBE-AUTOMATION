@@ -1338,6 +1338,7 @@ async function refreshAll() {
 }
 
 (async function boot() {
+  await (window.__authReady || Promise.resolve());  // login con clave maestra (auth.js)
   setTheme(S.theme);
   $('#theme-btn').onclick = () => { setTheme(S.theme === 'dark' ? 'light' : 'dark'); if (S.view === 'settings') renderSettings(); };
   $$('.nav-item').forEach(n => n.onclick = () => nav(n.dataset.view));

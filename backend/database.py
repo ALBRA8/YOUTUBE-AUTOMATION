@@ -4,12 +4,15 @@ Modelo inspirado en Labsia (projects + scenes) y ampliado para modo fábrica,
 publicación y cola de la extensión Chrome. Todo local, sin créditos.
 """
 import json
+import logging
 import sqlite3
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
 from config import DB_PATH
+
+log = logging.getLogger("db")
 
 
 def now() -> str:
@@ -150,11 +153,44 @@ def kv_set(key: str, value: Any) -> None:
 
 
 # ── proyectos ─────────────────────────────────────────────────────────────
+# ── listas blancas de columnas (defensa en profundidad anti-inyección) ────
+# El SQL dinámico solo interpola columnas que pasan la lista blanca: cualquier
+# campo desconocido se descarta con un warning. Así, aunque un futuro endpoint
+# reenvíe input del usuario directo a kwargs, NUNCA podrá inyectar SQL por el
+# nombre de columna (hallazgo de la auditoría externa 2026-09).
+_PROJECT_COLS = {
+    "id", "title", "status", "mode", "style", "format", "voice",
+    "tts_provider", "source_url", "video_url", "thumbnail_url",
+    "youtube_id", "error", "progress", "step_label", "meta",
+    "avatar_id", "platforms", "created_at", "updated_at",
+}
+_SCENE_COLS = {
+    "id", "project_id", "idx", "title", "narration", "image_prompt",
+    "image_path", "audio_path", "duration", "status", "meta",
+}
+_JOB_COLS = {
+    "id", "project_id", "kind", "status", "progress", "step",
+    "message", "error", "created_at", "updated_at",
+}
+_AVATAR_COLS = {
+    "id", "name", "description", "appearance", "voice", "tts_provider",
+    "style", "image_path", "created_at", "updated_at",
+}
+
+
+def _whitelist(fields: dict, allowed: set[str]) -> dict:
+    dropped = [k for k in fields if k not in allowed]
+    if dropped:
+        log.warning("columnas descartadas (fuera de lista blanca): %s", dropped)
+    return {k: v for k, v in fields.items() if k in allowed}
+
+
 def create_project(**fields) -> dict:
     pid = new_id()
     fields = {"id": pid, "created_at": now(), "updated_at": now(), **fields}
     fields = {k: (json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v)
               for k, v in fields.items()}
+    fields = _whitelist(fields, _PROJECT_COLS)
     cols = ", ".join(fields)
     marks = ", ".join("?" for _ in fields)
     with connect() as con:
@@ -180,6 +216,7 @@ def update_project(pid: str, **fields) -> None:
     fields["updated_at"] = now()
     fields = {k: (json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v)
               for k, v in fields.items()}
+    fields = _whitelist(fields, _PROJECT_COLS)
     sets = ", ".join(f"{k}=?" for k in fields)
     with connect() as con:
         con.execute(f"UPDATE projects SET {sets} WHERE id=?", (*fields.values(), pid))
@@ -235,6 +272,7 @@ def get_scenes(pid: str) -> list[dict]:
 def update_scene(scene_id: str, **fields) -> None:
     fields = {k: (json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v)
               for k, v in fields.items()}
+    fields = _whitelist(fields, _SCENE_COLS)
     sets = ", ".join(f"{k}=?" for k in fields)
     with connect() as con:
         con.execute(f"UPDATE scenes SET {sets} WHERE id=?", (*fields.values(), scene_id))
@@ -259,6 +297,7 @@ def create_job(project_id: str, kind: str = "pipeline") -> str:
 
 def update_job(jid: str, **fields) -> None:
     fields["updated_at"] = now()
+    fields = _whitelist(fields, _JOB_COLS)
     sets = ", ".join(f"{k}=?" for k in fields)
     with connect() as con:
         con.execute(f"UPDATE jobs SET {sets} WHERE id=?", (*fields.values(), jid))
@@ -322,6 +361,7 @@ def create_avatar(**fields) -> dict:
     fields = {"id": aid, "created_at": now(), "updated_at": now(), **fields}
     fields = {k: (json.dumps(v, ensure_ascii=False) if isinstance(v, dict) else v)
               for k, v in fields.items()}
+    fields = _whitelist(fields, _AVATAR_COLS)
     cols = ", ".join(fields)
     marks = ", ".join("?" for _ in fields)
     with connect() as con:
@@ -345,6 +385,7 @@ def update_avatar(aid: str, **fields) -> None:
     fields["updated_at"] = now()
     fields = {k: (json.dumps(v, ensure_ascii=False) if isinstance(v, dict) else v)
               for k, v in fields.items()}
+    fields = _whitelist(fields, _AVATAR_COLS)
     sets = ", ".join(f"{k}=?" for k in fields)
     with connect() as con:
         con.execute(f"UPDATE avatars SET {sets} WHERE id=?", (*fields.values(), aid))
