@@ -8,6 +8,7 @@ const S = {            // estado global
   view: 'home', theme: localStorage.getItem('yta-theme') || 'dark',
   demo: false, health: {}, styles: [], settings: {}, stats: {},
   projects: [], project: null, factory: null, ideas: [], avatars: [],
+  niches: [], library: [],
   chat: [], chatBusy: false,
   wizard: null, es: null,
 };
@@ -56,12 +57,63 @@ function setTheme(t) {
 function nav(view) {
   S.view = view;
   $$('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === view));
+  refreshSidebar();
   const views = { home: renderHome, create: renderCreate, projects: renderProjects,
                   factory: renderFactory, publish: renderPublish, settings: renderSettings,
                   project: renderProject, agent: renderAgent, avatars: renderAvatars,
                   trends: renderTrends };
   (views[view] || renderHome)();
 }
+
+/* ── v2.7 · sidebar modular: CTA nicho + explorador con scroll ── */
+function openNicheCreator() {
+  nav('create'); W.mode = 'nicho'; W.step = 2; renderCreate();
+}
+
+function newProjectWizard() {
+  nav('create'); W.mode = 'idea'; W.step = 1; renderCreate();
+}
+
+function refreshSidebar() {
+  const ul = $('#project-list');
+  if (!ul) return;
+  const list = [...(S.projects || [])].sort((a, b) =>
+    String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')));
+  if (!list.length) {
+    ul.innerHTML = `<li class="proj-empty">Sin proyectos todavía.<br>Pulsa <b>+</b> o <b>🎯 Crear desde Nicho</b></li>`;
+    return;
+  }
+  ul.innerHTML = list.map(p => {
+    const dot = p.status === 'ready' ? 'ok' : p.status === 'published' ? 'gold'
+      : p.status === 'failed' ? 'err' : 'work';
+    const stLabel = p.status === 'ready' ? 'Listo' : p.status === 'published' ? 'Publicado'
+      : p.status === 'failed' ? 'Error' : (p.step_label || p.status || '…');
+    const active = (S.project && S.project.id === p.id) ? ' active-project' : '';
+    return `<li class="proj-item${active}" onclick="openProject('${p.id}')">
+      <div class="p-top"><span class="status-dot ${dot}"></span>
+        <span class="p-title" title="${esc(p.title)}">${esc(p.title)}</span>
+        <button class="p-menu-btn" onclick="toggleProjMenu(event,'${p.id}')" title="Opciones">⋮</button></div>
+      <div class="p-meta"><span class="p-format">${p.format === 'short' ? 'Short 9:16' : 'Largo 16:9'}</span>
+        ${p.niche ? `<span class="p-niche">📁 ${esc(p.niche)}</span>` : ''}
+        <span class="p-status" title="${esc(stLabel)}">${esc(stLabel)}</span></div></li>`;
+  }).join('');
+}
+
+function toggleProjMenu(ev, pid) {
+  ev.stopPropagation();
+  closeProjMenus();
+  const r = ev.currentTarget.getBoundingClientRect();
+  const pop = document.createElement('div');
+  pop.className = 'proj-menu-pop';
+  pop.innerHTML = `<button onclick="closeProjMenus();openProject('${pid}')">📂 Abrir proyecto</button>
+    <button class="danger" onclick="closeProjMenus();delProject('${pid}')">🗑️ Borrar proyecto</button>`;
+  document.body.appendChild(pop);
+  pop.style.left = Math.max(8, Math.min(r.left - 120, window.innerWidth - 190)) + 'px';
+  pop.style.top = Math.min(r.bottom + 6, window.innerHeight - 100) + 'px';
+}
+
+function closeProjMenus() { $$('.proj-menu-pop').forEach(m => m.remove()); }
+document.addEventListener('click', () => closeProjMenus());
 
 /* ── vista: HOME ─────────────────────────────────────────── */
 function renderHome() {
@@ -89,6 +141,7 @@ function renderHome() {
 
     <h2 class="sec">✨ Crear nuevo video</h2>
     <div class="modes">
+      <div class="card mode-card" onclick="openNicheCreator()"><span class="tag new2">NUEVO</span><div class="emoji">🗂️</div><h3>Desde Nicho</h3><p>Elige un nicho con su plantilla y el video se fabrica SOLO: guion, imágenes, animación y montaje — directo a su carpeta.</p></div>
       <div class="card mode-card" onclick="nav('create');W.mode='script';W.step=1;renderCreate()"><div class="emoji">📜</div><h3>Desde Guion</h3><p>Pega tu guion y lo convertimos en video escena por escena.</p></div>
       <div class="card mode-card" onclick="nav('create');W.mode='idea';W.step=1;renderCreate()"><div class="emoji">💡</div><h3>Desde Idea</h3><p>Una frase basta. Gemini escribe el guion viral completo.</p></div>
       <div class="card mode-card" onclick="nav('create');W.mode='url';W.step=1;renderCreate()"><span class="tag">KILLER</span><div class="emoji">🔗</div><h3>Desde URL</h3><p>Pega un link viral de TikTok/YouTube y recrea su estructura con contenido 100% original.</p></div>
@@ -129,16 +182,18 @@ const W = { step: 1, mode: 'idea', format: 'short', style: 'auto',
             title: '', idea: '', script: '', url: '', custom: '', voice: '', tts: '',
             avatar: '', platforms: ['youtube', 'tiktok'],
             transitions: true, styleReference: true, subtitles: 'hormozi',
-            cookies: '' };
+            cookies: '', nicho: '', nichoAdjust: '' };
 
 function renderCreate() {
   const modes = [
+    { id: 'nicho', emoji: '🗂️', t: 'Desde Nicho', d: 'Elige un nicho con su plantilla y el video se fabrica SOLO' },
     { id: 'idea',  emoji: '💡', t: 'Desde Idea',  d: 'Una frase → guion viral completo' },
     { id: 'script',emoji: '📜', t: 'Desde Guion', d: 'Ya tienes el guion escrito' },
     { id: 'url',   emoji: '🔗', t: 'Desde URL',   d: 'Recrea un viral de TikTok/YouTube (original)' },
     { id: 'audio', emoji: '🎙️', t: 'Desde Audio', d: 'Tu propia voz como narración' },
   ];
-  const stepName = ['Modo', 'Formato', 'Estilo', 'Detalles'];
+  const isNicho = W.mode === 'nicho';
+  const stepName = isNicho ? ['Modo', 'Nicho'] : ['Modo', 'Formato', 'Estilo', 'Detalles'];
   let body = '';
 
   if (W.step === 1) {
@@ -148,7 +203,28 @@ function renderCreate() {
         <div class="emoji">${m.emoji}</div><h3>${m.t}</h3><p>${m.d}</p></div>`).join('')}</div>`;
   }
 
-  if (W.step === 2) {
+  if (W.step === 2 && isNicho) {
+    body = `
+      <p style="color:var(--muted);font-size:13px;line-height:1.55;margin-bottom:14px">
+        Cada nicho trae su <b>plantilla predeterminada</b> (prompt, estilo, formato y voz).
+        Al pulsar <b>🚀 Generar video completo</b> el motor hace TODO solo:
+        <b>guion → imágenes → animación → video</b>, y lo guarda en
+        <b>biblioteca/tu_nicho/Nombre-del-video.mp4</b> junto a tus otros proyectos del nicho.</p>
+      <div class="modes">${(S.niches || []).map(t => `
+        <div class="card mode-card ${W.nicho === t.id ? 'sel' : ''}" onclick="W.nicho='${t.id}';renderCreate()">
+          <div class="emoji">${t.emoji || '📁'}</div><h3>${esc(t.name)}</h3>
+          <p>${esc(t.description || '')}</p>
+          <small style="color:var(--accent2);display:block;margin-top:6px">📁 biblioteca/${esc(t.folder || '—')} · ${t.projects || 0} proyectos</small>
+        </div>`).join('')}</div>
+      ${W.nicho ? `
+        <div class="field" style="margin-top:16px"><label>✏️ Ajuste opcional sobre la plantilla del nicho</label>
+          <input type="text" value="${esc(W.nichoAdjust)}" oninput="W.nichoAdjust=this.value"
+            placeholder="vacío = solo la plantilla con un ángulo aleatorio (anti-repetición)"></div>` : ''}
+      <details style="margin-top:14px">
+        <summary style="cursor:pointer;font-weight:700;font-size:13px">➕ Nuevo nicho / 🗑️ administrar plantillas</summary>
+        <div style="margin-top:12px">${renderNichesAdmin()}</div>
+      </details>`;
+  } else if (W.step === 2) {
     body = `<div class="format-row">
       <div class="format-card ${W.format === 'short' ? 'sel' : ''}" onclick="W.format='short';renderCreate()">
         <div class="shape s916"></div><b>Short / Vertical</b><small>9:16 · 1080×1920 · YouTube Shorts, TikTok, Reels</small></div>
@@ -230,19 +306,77 @@ function renderCreate() {
     <div class="card">${body}</div>
     <div class="wizard-nav">
       <button class="btn ghost" onclick="W.step--;W.step<1?nav('home'):renderCreate()">← Atrás</button>
-      <button class="btn primary" id="wiz-next">${W.step === 4 ? '🚀 Crear video' : 'Continuar →'}</button>
+      <button class="btn primary" id="wiz-next">${W.step === 4 || (W.mode === 'nicho' && W.step === 2) ? '🚀 Generar video completo' : 'Continuar →'}</button>
     </div></div>`;
 
   $('#wiz-next').onclick = () => {
     if (W.step === 1) { W.step = 2; renderCreate(); return; }
-    if (W.step === 2) { W.step = 3; renderCreate(); return; }
+    if (W.step === 2) {
+      if (isNicho) { createProject(); return; }   // un clic: plantilla → pipeline
+      W.step = 3; renderCreate(); return;
+    }
     if (W.step === 3) { W.step = 4; renderCreate(); return; }
     createProject();
   };
 }
 
+/* ── admin de plantillas de nicho ────────────────────── */
+function renderNichesAdmin() {
+  return `
+    <div class="row">
+      <div class="field"><label>Nombre del nicho</label><input type="text" id="nt-name" placeholder="Finanzas personales"></div>
+      <div class="field" style="max-width:110px"><label>Emoji</label><input type="text" id="nt-emoji" value="📁"></div>
+    </div>
+    <div class="field"><label>Descripción corta</label><input type="text" id="nt-desc" placeholder="Ahorro, deudas e inversión explicados simple"></div>
+    <div class="field"><label>Plantilla de prompt (predeterminada del nicho)</label>
+      <textarea id="nt-prompt" rows="3" placeholder="Escribe un video corto de finanzas: un hábito o error real de dinero..."></textarea></div>
+    <button class="btn small primary" onclick="saveNicheTemplate()">💾 Guardar nicho</button>
+    <div class="card" style="margin-top:10px">${(S.niches || []).map(t => `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid rgba(128,128,128,.15)">
+        <span>${t.emoji || '📁'} ${esc(t.name)} <small style="color:var(--muted)">· ${t.projects || 0} proyectos</small></span>
+        <button class="btn small danger" onclick="delNicheTemplate('${t.id}')">🗑️</button>
+      </div>`).join('')}</div>`;
+}
+
+async function saveNicheTemplate() {
+  if (guardDemo()) return;
+  try {
+    await api('/niches/templates', { method: 'POST', body: {
+      name: $('#nt-name').value, emoji: $('#nt-emoji').value,
+      description: $('#nt-desc').value, prompt: $('#nt-prompt').value }});
+    S.niches = await api('/niches');
+    toast('Nicho guardado ✅', 'ok');
+    renderCreate();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function delNicheTemplate(tid) {
+  if (guardDemo()) return;
+  try {
+    await api('/niches/templates/' + tid, { method: 'DELETE' });
+    S.niches = await api('/niches');
+    if (W.nicho === tid) W.nicho = '';
+    toast('Plantilla eliminada');
+    renderCreate();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
 async function createProject() {
   if (guardDemo()) return;
+  if (W.mode === 'nicho') {
+    if (!W.nicho) return toast('Elige un nicho primero', 'err');
+    try {
+      const p = await api('/projects', { method: 'POST', body: {
+        mode: 'nicho', niche_template: W.nicho, idea: W.nichoAdjust || null,
+        auto_start: true,
+        platforms: W.platforms.length ? W.platforms : ['youtube'],
+        transitions: W.transitions, style_reference: W.styleReference }});
+      toast('Video en fabricación desde el nicho 🚀', 'ok');
+      W.step = 1; W.nichoAdjust = '';
+      showProgress(p.job_id, p.id);
+    } catch (e) { toast(e.message, 'err'); }
+    return;
+  }
   if (W.mode === 'idea' && !W.idea.trim()) return toast('Escribe una idea primero', 'err');
   if (W.mode === 'script' && !W.script.trim()) return toast('Pega tu guion primero', 'err');
   if (W.mode === 'url' && !W.url.trim()) return toast('Pega la URL primero', 'err');
@@ -443,8 +577,18 @@ async function downloadProjectScriptTxt(pid) {
 
 /* ── vista: PROYECTOS ────────────────────────────────────── */
 function renderProjects() {
+  const lib = S.library || [];
   $('#view').innerHTML = `<h2 class="sec">🗂️ Todos los proyectos (${S.projects.length})</h2>
-    <div class="proj-grid">${renderProjectCards(S.projects)}</div>`;
+    <div class="proj-grid">${renderProjectCards(S.projects)}</div>
+    ${lib.length ? `<h2 class="sec">📚 Biblioteca en disco <span class="hint">carpeta por nicho · video por nombre</span></h2>
+      ${lib.map(g => `
+        <div class="card" style="margin-bottom:12px">
+          <b>📁 ${esc(g.niche)}</b> <small style="color:var(--muted)">· ${g.files.length} video(s)</small>
+          <div style="margin-top:8px">${g.files.map(f => `
+            <div class="idea-item"><span>🎬 ${esc(f.name.replace(/\.mp4$/, ''))}</span>
+            <small style="color:var(--muted)">${(f.size / 1e6).toFixed(1)} MB</small></div>`).join('')}
+          </div>
+        </div>`).join('')}` : ''}`;
 }
 
 /* ── vista: DETALLE / EDITOR ─────────────────────────────── */
@@ -1335,6 +1479,9 @@ async function refreshAll() {
     api('/stats'), api('/projects'), api('/factory'), api('/factory/ideas')]);
   S.stats = stats; S.projects = projects; S.factory = factory; S.ideas = ideas;
   try { S.avatars = await api('/avatars'); } catch { S.avatars = []; }
+  try { S.niches = await api('/niches'); } catch { S.niches = []; }
+  try { S.library = await api('/library'); } catch { S.library = []; }
+  refreshSidebar();
 }
 
 (async function boot() {
@@ -1379,4 +1526,9 @@ async function refreshAll() {
   renderHome();
   // refresco suave de KPIs cada 20s
   setInterval(async () => { if (!S.demo && S.view === 'home') { try { S.stats = await api('/stats'); renderHome(); } catch {} } }, 20000);
+  // refresco del explorador de proyectos del sidebar cada 15s (estados en vivo)
+  setInterval(async () => {
+    if (S.demo || document.hidden) return;
+    try { S.projects = await api('/projects'); refreshSidebar(); } catch {}
+  }, 15000);
 })();

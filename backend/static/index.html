@@ -6,26 +6,53 @@
 <title>YT Automation v2.0 — Fábrica de videos IA</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="static/style.css?v=2.4.0">
+<link rel="stylesheet" href="static/style.css?v=2.7.1">
 </head>
 <body>
 <div class="app">
   <aside class="sidebar">
-    <div class="brand">
-      <div class="logo">🎬</div>
-      <h1>YT <em>AUTOMATION</em><small>V2.0 · $0 POR VIDEO</small></h1>
+    <!-- marca -->
+    <div class="brand" onclick="nav('home')" title="Ir al inicio">
+      <div class="logo">🚀</div>
+      <h1>AI <em>AUTOMATION</em><small>FÁBRICA DE VIDEOS · $0</small></h1>
     </div>
-    <div class="nav-item" data-view="home"><span class="ico">🏠</span> Inicio</div>
-    <div class="nav-item" data-view="agent"><span class="ico">🤖</span> Agente <span class="tag new2" style="margin-left:auto">NUEVO</span></div>
-    <div class="nav-item" data-view="create"><span class="ico">✨</span> Crear</div>
-    <div class="nav-item" data-view="avatars"><span class="ico">🎭</span> Avatares <span class="tag new2" style="margin-left:auto">NUEVO</span></div>
-    <div class="nav-item" data-view="projects"><span class="ico">🗂️</span> Proyectos</div>
-    <div class="nav-item" data-view="factory"><span class="ico">🏭</span> Fábrica</div>
-    <div class="nav-item" data-view="publish"><span class="ico">📺</span> Publicar</div>
-    <div class="nav-item" data-view="trends"><span class="ico">🔥</span> Tendencias <span class="tag new2" style="margin-left:auto">NUEVO</span></div>
-    <div class="nav-item" data-view="settings"><span class="ico">⚙️</span> Configuración</div>
-    <div class="spacer"></div>
-    <div class="cost-pill">💚 $0.00<small>COSTE ACUMULADO · SIN CRÉDITOS</small></div>
+
+    <!-- acción principal: crear desde nicho -->
+    <button class="sidebar-cta" onclick="openNicheCreator()" title="Elige un nicho con su plantilla y el motor fabrica todo">
+      <span class="ico">🎯</span>
+      <span class="cta-text"><strong>Crear desde Nicho</strong><small>Plantilla → video en un clic</small></span>
+    </button>
+
+    <!-- navegación -->
+    <nav class="side-nav">
+      <div class="nav-item" data-view="home"><span class="ico">🏠</span> Inicio</div>
+      <div class="nav-item" data-view="agent"><span class="ico">🤖</span> Agente</div>
+    </nav>
+
+    <!-- explorador de proyectos (scroll propio) -->
+    <div class="projects-wrapper">
+      <div class="section-title-row">
+        <span class="section-label">PROYECTOS</span>
+        <button class="btn-icon-add" onclick="newProjectWizard()" title="Nuevo proyecto">+</button>
+      </div>
+      <ul id="project-list" class="project-list-scroll"></ul>
+    </div>
+
+    <!-- herramientas -->
+    <div class="side-tools">
+      <button class="sidebar-nav-btn" onclick="nav('create')"><span class="ico">✨</span> Crear</button>
+      <button class="sidebar-nav-btn" onclick="nav('avatars')"><span class="ico">🎭</span> Avatares</button>
+      <button class="sidebar-nav-btn" onclick="nav('projects')"><span class="ico">🗂️</span> Proyectos</button>
+      <button class="sidebar-nav-btn" onclick="nav('factory')"><span class="ico">🏭</span> Fábrica</button>
+      <button class="sidebar-nav-btn" onclick="nav('publish')"><span class="ico">📺</span> Publicar</button>
+      <button class="sidebar-nav-btn" onclick="nav('trends')"><span class="ico">🔥</span> Tendencias</button>
+    </div>
+
+    <!-- pie: ajustes + coste (una línea) -->
+    <div class="sidebar-footer">
+      <div class="nav-item" data-view="settings"><span class="ico">⚙️</span> Ajustes</div>
+      <span class="cost-chip" id="cost-chip" title="Coste acumulado — todo corre con APIs gratuitas">💚 $0.00</span>
+    </div>
   </aside>
   <main class="main">
     <div class="topbar">
@@ -42,6 +69,6 @@
 <div id="modal-root"></div>
 <div id="toasts"></div>
 <script src="static/auth.js?v=2.5.0"></script>
-<script src="static/app.js?v=2.5.0"></script>
+<script src="static/app.js?v=2.7.1"></script>
 </body>
 </html>

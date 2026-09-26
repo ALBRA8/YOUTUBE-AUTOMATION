@@ -23,7 +23,9 @@ from pipeline import orchestrator
 from pipeline import video as video_pipeline
 from pipeline.subtitles import words_to_srt
 from services import (agent as agent_svc, doctor as doctor_svc,
-                      gemini_client, scheduler, trend_research as trends_svc,
+                      gemini_client, library as library_svc,
+                      niches as niches_svc, scheduler,
+                      trend_research as trends_svc,
                       tts_service, url_mode, whisper_service, youtube_publish)
 from services import avatar_schema
 from services.themes import STYLES, get_style
@@ -462,7 +464,7 @@ async def projects():
 @app.post("/api/projects")
 async def create_project(body: dict):
     mode = body.get("mode", "idea")
-    if mode not in ("script", "idea", "url", "audio"):
+    if mode not in ("script", "idea", "url", "audio", "nicho"):
         raise HTTPException(400, "modo inválido")
     meta = {}
     title = (body.get("title") or "Nuevo proyecto")[:60]
@@ -486,6 +488,28 @@ async def create_project(body: dict):
         title = body.get("title") or "Viral recreado"
     if mode == "audio" and body.get("audio_text"):
         meta["audio_text"] = body["audio_text"]
+    # v2.6 — modo "nicho": plantilla predeterminada del nicho compone la idea
+    # (plantilla + ángulo aleatorio + ajuste opcional) y hereda estilo/formato/
+    # voz/subtítulos de la plantilla salvo que el usuario elija otros.
+    niche_label = None
+    if mode == "nicho":
+        tpl = niches_svc.get_template(body.get("niche_template") or "")
+        if not tpl:
+            raise HTTPException(400, "nicho desconocido — elige una plantilla válida")
+        niche_label = tpl.get("name")
+        meta["idea"] = niches_svc.compose_idea(tpl, body.get("idea"))
+        meta["niche_template"] = tpl.get("id")
+        title = (body.get("title") or f"{tpl.get('name')}: video nuevo")[:60]
+        # herencia de la plantilla: mutamos body para que las líneas de abajo
+        # (style/voice/sub_style) tomen el valor del nicho sin duplicar lógica
+        if not body.get("style"):
+            body["style"] = tpl.get("style") or "auto"
+        if not body.get("format"):
+            body["format"] = tpl.get("format") or "short"
+        if not body.get("voice"):
+            body["voice"] = tpl.get("voice") or None
+        if not body.get("subtitle_style"):
+            body["subtitle_style"] = tpl.get("subtitles") or "hormozi"
     if body.get("custom_style_prompt"):
         meta["custom_style_prompt"] = body["custom_style_prompt"].strip()
     # v2.4 — toggles de producción expuestos en el dashboard
@@ -524,7 +548,12 @@ async def create_project(body: dict):
         title=title, mode=mode, style=style,
         format=body.get("format", "short"), voice=voice,
         tts_provider=tts_provider, meta=meta,
-        avatar_id=avatar_id, platforms=platforms)
+        avatar_id=avatar_id, platforms=platforms,
+        niche=niche_label)
+    if mode == "nicho" and body.get("auto_start"):
+        # flujo de un clic: crea el proyecto Y lanza el pipeline completo
+        job_id = await orchestrator.start_pipeline(project["id"], autopublish=False)
+        project["job_id"] = job_id
     return project
 
 
@@ -597,6 +626,51 @@ async def generate(pid: str, body: dict | None = None):
     autopublish = bool((body or {}).get("autopublish", False))
     job_id = await orchestrator.start_pipeline(pid, autopublish=autopublish)
     return {"job_id": job_id}
+
+
+# ───────────────────────────────────────── módulo "Desde Nicho" (v2.6) ──
+@app.get("/api/niches")
+async def niches_list():
+    """Plantillas de nicho + nº de proyectos que usan cada una."""
+    templates = niches_svc.list_templates()
+    counts: dict[str, int] = {}
+    for p in db.list_projects(limit=500):
+        key = (p.get("niche") or "").strip().lower()
+        if key:
+            counts[key] = counts.get(key, 0) + 1
+    out = []
+    for t in templates:
+        t = dict(t)
+        t["projects"] = counts.get((t.get("name") or "").strip().lower(), 0)
+        t["folder"] = niches_svc.folder_name(t)
+        out.append(t)
+    return out
+
+
+@app.get("/api/niches/templates")
+async def niches_templates():
+    return niches_svc.list_templates()
+
+
+@app.post("/api/niches/templates")
+async def niches_template_save(body: dict):
+    try:
+        return niches_svc.upsert_template(body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/niches/templates/{tid}")
+async def niches_template_delete(tid: str):
+    if not niches_svc.delete_template(tid):
+        raise HTTPException(404, "plantilla no encontrada")
+    return {"ok": True}
+
+
+@app.get("/api/library")
+async def library():
+    """Biblioteca en disco: biblioteca/{nicho}/{titulo}.mp4."""
+    return library_svc.tree()
 
 
 @app.post("/api/jobs/{job_id}/cancel")

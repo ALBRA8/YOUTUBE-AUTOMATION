@@ -71,6 +71,40 @@ def scene_dir(project_id: str) -> Path:
     return d
 
 
+# ── Plan B: z-ai image (CLI local, coste $0) ──────────────────────────────
+# Si Gemini está caído (429 cuota / región no soportada), generamos la imagen
+# con el CLI z-ai del entorno. Tras 2 fallos seguidos se desactiva para el
+# resto de la corrida (no ralentizar el render con un proveedor muerto).
+_ZAI_BIN = "z-ai"
+_ZAI_FAILS = 0
+_ZAI_MAX_FAILS = 2
+
+
+async def _zai_image(prompt: str, out: Path, fmt: str) -> bool:
+    global _ZAI_FAILS
+    if _ZAI_FAILS >= _ZAI_MAX_FAILS:
+        return False
+    size = "768x1344" if fmt == "short" else "1344x768"
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            _ZAI_BIN, "image", "-p", prompt, "-o", str(out), "-s", size,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=120)
+        except asyncio.TimeoutError:
+            proc.kill()
+            raise RuntimeError("z-ai timeout 120s")
+        if proc.returncode == 0 and out.exists() and out.stat().st_size > 4096:
+            _ZAI_FAILS = 0
+            return True
+        raise RuntimeError(f"z-ai rc={proc.returncode} o archivo vacío")
+    except Exception as e:  # noqa: BLE001 — cualquier fallo pasa al plan C
+        _ZAI_FAILS += 1
+        log.warning("z-ai image falló (fallo %d/%d): %s",
+                    _ZAI_FAILS, _ZAI_MAX_FAILS, e)
+        return False
+
+
 def full_prompt(scene: dict, project: dict) -> str:
     style = get_style(project["style"])
     custom = (project.get("meta") or {}).get("custom_style_prompt")
@@ -108,7 +142,13 @@ async def generate_scene_image(scene: dict, project: dict, idx: int,
         except Exception as e:  # noqa: BLE001
             log.warning("Gemini image falló escena %d: %s", idx, e)
 
-    # 2) Plan B: imagen capturada por la extensión Chrome (ImageFX)
+    # 2) Plan B: z-ai image (CLI local $0) — anti fondo-azul cuando Gemini
+    #    está sin cuota (429) o bloqueado por región
+    if await _zai_image(prompt, out, project.get("format", "short")):
+        _save_style_method(str(out), "zai")
+        return out, "zai"
+
+    # 3) Plan C: imagen capturada por la extensión Chrome (ImageFX)
     ext = db.take_ext_image(project["id"])
     if ext:
         try:
@@ -122,7 +162,7 @@ async def generate_scene_image(scene: dict, project: dict, idx: int,
         except Exception as e:  # noqa: BLE001
             log.warning("Imagen de extensión falló: %s", e)
 
-    # 3) Plan C: placeholder elegante
+    # 4) Plan D: placeholder elegante
     _placeholder(out, scene, project, idx)
     _save_style_method(str(out), "placeholder")
     return out, "placeholder"

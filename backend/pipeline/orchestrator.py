@@ -17,8 +17,23 @@ from config import OUTPUT_DIR
 from pipeline import flow_import, images as imgs
 from pipeline import script_gen, tts_step, video
 from services import gemini_client, url_mode, whisper_service, youtube_publish
+from services import library as library_svc
 
 log = logging.getLogger("orchestrator")
+
+
+def _archive_library(project_id: str, final_video: Path) -> None:
+    """PASO 5b — biblioteca/{nicho}/{titulo}.mp4: carpeta por nicho,
+    video por nombre. Nunca tumba el pipeline si falla el archivo."""
+    try:
+        archived = library_svc.archive(db.get_project(project_id), final_video)
+        if archived:
+            p = db.get_project(project_id)
+            meta = dict(p.get("meta") or {})
+            meta["library_path"] = str(archived)
+            db.update_project(project_id, meta=meta)
+    except Exception as e:  # noqa: BLE001
+        log.warning("biblioteca: %s", e)
 
 # ── Control de concurrencia de renders (blindaje CPU) ──────────────────
 # FFmpeg (zoompan + xfade) usa todos los núcleos: si 2+ proyectos renderizan
@@ -281,6 +296,7 @@ async def _run_flow_render(job_id: str, project_id: str) -> None:
         db.update_project(project_id, status="ready", progress=100,
                           step_label="Listo (Flow)", video_url=str(final),
                           thumbnail_url=str(thumb) if thumb else None)
+        _archive_library(project_id, final)
         db.update_job(job_id, status="done", progress=100, step="done",
                       message=f"Video Flow listo · {total_dur:.0f}s")
         if os.getenv("KEEP_INTERMEDIATES", "0") != "1":  # libera el disco
@@ -453,6 +469,7 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
         db.update_project(project_id, status="ready", progress=100,
                           step_label="Listo", video_url=str(final),
                           thumbnail_url=str(thumb) if thumb else None)
+        _archive_library(project_id, final)
         db.update_job(job_id, status="done", progress=100, step="done",
                       message=f"Video listo · {total_dur:.0f}s")
         if os.getenv("KEEP_INTERMEDIATES", "0") != "1":  # libera el disco

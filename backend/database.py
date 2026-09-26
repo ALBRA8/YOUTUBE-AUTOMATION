@@ -119,6 +119,8 @@ def _migrate(con: sqlite3.Connection) -> None:
         con.execute("ALTER TABLE projects ADD COLUMN avatar_id TEXT")
     if "platforms" not in cols:
         con.execute("ALTER TABLE projects ADD COLUMN platforms TEXT NOT NULL DEFAULT '[]'")
+    if "niche" not in cols:
+        con.execute("ALTER TABLE projects ADD COLUMN niche TEXT")
 
 
 # ── helpers genéricos ─────────────────────────────────────────────────────
@@ -162,7 +164,7 @@ _PROJECT_COLS = {
     "id", "title", "status", "mode", "style", "format", "voice",
     "tts_provider", "source_url", "video_url", "thumbnail_url",
     "youtube_id", "error", "progress", "step_label", "meta",
-    "avatar_id", "platforms", "created_at", "updated_at",
+    "avatar_id", "platforms", "niche", "created_at", "updated_at",
 }
 _SCENE_COLS = {
     "id", "project_id", "idx", "title", "narration", "image_prompt",

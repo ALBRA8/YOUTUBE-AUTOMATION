@@ -357,3 +357,107 @@ code.mini { background: var(--bg2); border: 1px solid var(--border); border-radi
 .doc-ok { color: var(--ok); }
 .doc-warn { color: #ffd479; }
 .doc-err { color: var(--err); }
+
+/* ── v2.7.1 · SIDEBAR (marca · CTA nicho · nav · explorador con
+      scroll real · herramientas · pie de una línea) ─────────── */
+.sidebar { padding: 16px 12px 12px; gap: 6px; overflow: hidden; }
+.sidebar .brand { cursor: pointer; padding: 2px 6px 6px; flex-shrink: 0; }
+.sidebar .brand .logo { font-size: 19px; }
+
+.sidebar-cta {
+  display: flex; align-items: center; gap: 10px; text-align: left; width: 100%;
+  padding: 11px 13px; border-radius: 14px; border: none; flex-shrink: 0;
+  background: linear-gradient(120deg, var(--accent), #9d7bff);
+  color: #fff; cursor: pointer; box-shadow: 0 10px 24px rgba(124, 92, 255, .32);
+  transition: transform .18s, box-shadow .18s;
+}
+.sidebar-cta:hover { transform: translateY(-1px); box-shadow: 0 12px 28px rgba(124, 92, 255, .48); }
+.sidebar-cta .ico { font-size: 19px; }
+.sidebar-cta .cta-text { display: flex; flex-direction: column; line-height: 1.25; }
+.sidebar-cta .cta-text strong { font-size: 13.5px; letter-spacing: .2px; }
+.sidebar-cta .cta-text small { font-size: 10.5px; opacity: .85; font-weight: 600; }
+
+.side-nav { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; }
+
+/* explorador: la ÚNICA zona flexible — crece y hace scroll, jamás solapa */
+.projects-wrapper { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+.section-title-row { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 2px; flex-shrink: 0; }
+.section-label { font-size: 9.5px; font-weight: 800; letter-spacing: 1.6px; color: var(--muted); }
+.btn-icon-add {
+  width: 22px; height: 22px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--card-solid); color: var(--text); font-size: 14px; font-weight: 800;
+  cursor: pointer; display: grid; place-items: center; line-height: 1; transition: .15s;
+}
+.btn-icon-add:hover { border-color: var(--accent); color: var(--accent); }
+
+.project-list-scroll {
+  flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column; gap: 3px; margin: 4px 0; padding-right: 2px;
+}
+.project-list-scroll::-webkit-scrollbar { width: 5px; }
+.project-list-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .14); border-radius: 99px; }
+.proj-item {
+  list-style: none; padding: 8px 10px; border-radius: 11px; cursor: pointer;
+  border: 1px solid transparent; transition: .15s; flex-shrink: 0;
+}
+.proj-item:hover { background: var(--card); border-color: var(--border); }
+.proj-item.active-project {
+  background: linear-gradient(120deg, rgba(124, 92, 255, .22), rgba(0, 224, 198, .1));
+  border-color: rgba(124, 92, 255, .55);
+  box-shadow: 0 0 0 1px rgba(124, 92, 255, .22);
+}
+.proj-item .p-top { display: flex; align-items: center; gap: 7px; }
+.proj-item .p-title { flex: 1; font-size: 12.3px; font-weight: 700;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--accent); }
+.status-dot.ok { background: var(--ok); box-shadow: 0 0 8px rgba(43, 217, 118, .55); }
+.status-dot.err { background: var(--err); }
+.status-dot.gold { background: var(--gold); }
+.status-dot.work { background: var(--accent); animation: dotpulse 1.2s infinite; }
+@keyframes dotpulse { 50% { opacity: .3; } }
+.p-menu-btn {
+  border: none; background: transparent; color: var(--muted); cursor: pointer;
+  font-size: 15px; padding: 0 4px; border-radius: 6px; line-height: 1; font-weight: 800;
+}
+.p-menu-btn:hover { color: var(--text); background: rgba(255, 255, 255, .09); }
+.proj-item .p-meta { display: flex; align-items: center; gap: 6px; margin-top: 4px;
+  font-size: 10px; color: var(--muted); font-weight: 600; padding-left: 13px; }
+.p-format { padding: 1px 6px; border-radius: 999px; background: var(--bg2);
+  border: 1px solid var(--border); white-space: nowrap; }
+.p-niche { color: var(--accent2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.p-status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.proj-empty { list-style: none; font-size: 11.5px; color: var(--muted);
+  padding: 12px 10px; text-align: center; line-height: 1.55; }
+.proj-menu-pop {
+  position: fixed; z-index: 300; min-width: 176px; padding: 6px;
+  background: var(--card-solid); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: var(--shadow); display: flex; flex-direction: column; animation: slideIn .15s;
+}
+.proj-menu-pop button {
+  border: none; background: transparent; color: var(--text); text-align: left;
+  padding: 9px 11px; font-size: 12.8px; font-weight: 600; border-radius: 8px; cursor: pointer;
+}
+.proj-menu-pop button:hover { background: var(--card); }
+.proj-menu-pop button.danger { color: var(--err); }
+
+/* herramientas: mismas métricas que .nav-item → ritmo visual uniforme */
+.side-tools { display: flex; flex-direction: column; gap: 1px; flex-shrink: 0;
+  border-top: 1px solid var(--border); padding-top: 6px; }
+.sidebar-nav-btn {
+  display: flex; align-items: center; gap: 12px; padding: 9px 14px; width: 100%;
+  border-radius: 13px; border: 1px solid transparent; background: transparent;
+  color: var(--muted); font-weight: 600; font-size: 14px; cursor: pointer;
+  transition: .15s; text-align: left;
+}
+.sidebar-nav-btn:hover { background: var(--card); color: var(--text); }
+.sidebar-nav-btn .ico { width: 22px; text-align: center; font-size: 16px; }
+
+/* pie compacto de UNA línea: ajustes + coste (sin textos recortables) */
+.sidebar-footer { display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+  border-top: 1px solid var(--border); padding-top: 8px; }
+.sidebar-footer .nav-item { flex: 1; padding: 9px 12px; }
+.cost-chip {
+  font-size: 12px; font-weight: 800; color: var(--ok); white-space: nowrap;
+  padding: 7px 11px; border-radius: 999px; flex-shrink: 0;
+  background: rgba(43, 217, 118, .12); border: 1px solid rgba(43, 217, 118, .3);
+}
