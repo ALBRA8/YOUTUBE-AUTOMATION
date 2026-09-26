@@ -1,0 +1,90 @@
+[
+  {
+    "id": "superheroes",
+    "emoji": "🦸",
+    "name": "Superhéroes",
+    "description": "Orígenes, poderes, batallas y sacrificios de héroes (reales o de ficción).",
+    "prompt": "Escribe un video corto de superhéroes: un origen, poder, batalla o sacrificio realmente impactante. Datos concretos, ritmo ágil, gancho en los 2 primeros segundos y cierre que invita a comentar.",
+    "style": "auto",
+    "format": "short",
+    "voice": "",
+    "subtitles": "hormozi"
+  },
+  {
+    "id": "historia",
+    "emoji": "🏛️",
+    "name": "Historia",
+    "description": "Imperios, guerras, traiciones y personajes que cambiaron el mundo.",
+    "prompt": "Escribe un video corto de historia: un evento o personaje real con un giro poco conocido. Cronología clara, datos verificables, suspenso creciente y una reflexión final que conecte con el presente.",
+    "style": "auto",
+    "format": "short",
+    "voice": "",
+    "subtitles": "hormozi"
+  },
+  {
+    "id": "misterio",
+    "emoji": "🔎",
+    "name": "Misterio",
+    "description": "Enigmas, desapariciones y teorías que erizan la piel.",
+    "prompt": "Escribe un video corto de misterio: un caso real sin resolver o una teoría inquietante. Pistas escalonadas, preguntas retóricas, tono envolvente y final abierto que obligue a debatir en comentarios.",
+    "style": "auto",
+    "format": "short",
+    "voice": "",
+    "subtitles": "hormozi"
+  },
+  {
+    "id": "motivacion",
+    "emoji": "🔥",
+    "name": "Motivación",
+    "description": "Disciplina, hábitos e historias de superación que empujan a actuar.",
+    "prompt": "Escribe un video corto de motivación: una historia real de superación o un hábito que cambia vidas. Frases cortas y directas, energía alta, ejemplo concreto y llamada a la acción firme.",
+    "style": "auto",
+    "format": "short",
+    "voice": "",
+    "subtitles": "hormozi"
+  },
+  {
+    "id": "datos-curiosos",
+    "emoji": "🤯",
+    "name": "Datos Curiosos",
+    "description": "Datos que rompen el scroll: ciencia, cuerpo humano, dinero, espacio.",
+    "prompt": "Escribe un video corto de datos curiosos: 4-6 datos reales y verificables que sorprendan de inmediato. Cada dato con su explicación de una frase, sin relleno, y un dato final aún más fuerte que el primero.",
+    "style": "auto",
+    "format": "short",
+    "voice": "",
+    "subtitles": "hormozi"
+  },
+  {
+    "id": "terror",
+    "emoji": "👻",
+    "name": "Terror",
+    "description": "Relatos oscuros, leyendas y casos reales que dan escalofríos.",
+    "prompt": "Escribe un video corto de terror: una leyenda urbana o caso real escalofriante. Ambiente construido frase a frase, silencios estratégicos, descenso gradual hacia el golpe final.",
+    "style": "auto",
+    "format": "short",
+    "voice": "",
+    "subtitles": "hormozi"
+  },
+  {
+    "id": "animales",
+    "emoji": "🐾",
+    "name": "Animales",
+    "description": "El reino animal en su estado más puro: instintos, récord y rescates.",
+    "prompt": "Escribe un video corto de animales: un comportamiento, récord o rescate real que asombre. Comparaciones humanas para dar escala, datos concretos y un cierre emotivo.",
+    "style": "auto",
+    "format": "short",
+    "voice": "",
+    "subtitles": "hormozi"
+  },
+  {
+    "id": "tecnologia",
+    "emoji": "🤖",
+    "name": "Tecnología e IA",
+    "description": "IA, inventos y el futuro que ya llegó (con datos reales).",
+    "prompt": "Escribe un video corto de tecnología/IA: un avance real con implicaciones sorprendentes. Explicación simple sin tecnicismos, ejemplo cotidiano y una pregunta incómoda sobre el futuro.",
+    "style": "auto",
+    "format": "short",
+    "voice": "",
+    "subtitles": "hormozi"
+  }
+]
