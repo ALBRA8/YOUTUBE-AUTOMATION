@@ -22,7 +22,7 @@ from pipeline import images as imgs_pipeline
 from pipeline import orchestrator
 from pipeline import video as video_pipeline
 from pipeline.subtitles import words_to_srt
-from services import (agent as agent_svc, doctor as doctor_svc,
+from services import (agent as agent_svc, camera_recipes, doctor as doctor_svc,
                       gemini_client, guion_json as guion_svc,
                       library as library_svc,
                       niches as niches_svc, scheduler,
@@ -35,7 +35,7 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("main")
 
-app = FastAPI(title="YT Automation v2.0", version="2.10.2")
+app = FastAPI(title="YT Automation v2.0", version="2.11.0")
 
 AVATARS_DIR = DATA_DIR / "avatars"
 VALID_PLATFORMS = ("youtube", "tiktok", "instagram", "facebook")
@@ -78,10 +78,10 @@ async def auth_guard(request, call_next):
 # ──────────────────────────────────────────────────────── básicos ──
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "version": "2.10.2", "gemini": gemini_client.available(),
+    return {"ok": True, "version": "2.11.0", "gemini": gemini_client.available(),
             "whisper": whisper_service.available(),
             "youtube": youtube_publish.configured(),
-            "canales": False}  # puente WhatsApp/Telegram pendiente de re-cosecha (v2.10.2)
+            "canales": False}  # puente WhatsApp/Telegram pendiente de re-cosecha (v2.11.0)
 
 
 @app.get("/api/auth/status")
@@ -95,9 +95,16 @@ async def styles():
     return STYLES
 
 
+@app.get("/api/cameras")
+async def cameras():
+    """v2.11 · Catálogo de recetas de cámara (cine + UGC) para el campo
+    «camara» del contrato guion_json y para el selector de escenas."""
+    return camera_recipes.list()
+
+
 @app.get("/api/guion_json/contrato")
 async def guion_json_contrato():
-    """v2.10 · Spec machine-readable del contrato guion_json
+    """v2.11 · Spec machine-readable del contrato guion_json
     (para Actions de ChatGPT y para humanos)."""
     return guion_svc.spec([s["id"] for s in STYLES])
 
@@ -483,11 +490,13 @@ async def create_project(body: dict):
             av = g.get("avatar_id")
             if av and not db.get_avatar(av):
                 av = None
+            # v2.11 · receta de cámara por defecto del proyecto → meta
+            pmeta = {"camara": g["camara"]} if g.get("camara") else {}
             return db.create_project(
                 title=(g.get("titulo") or "Video desde guion JSON"),
                 mode="guion_json", style=g.get("estilo") or "auto",
                 format=g.get("formato") or "short", voice=g.get("voz"),
-                meta={}, avatar_id=av,
+                meta=pmeta, avatar_id=av,
                 platforms=g.get("plataformas") or ["youtube"],
                 niche=g.get("nicho"))
         try:

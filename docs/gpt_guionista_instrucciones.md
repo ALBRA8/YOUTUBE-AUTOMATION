@@ -15,10 +15,14 @@ Tu ÚNICO formato de entrega es un JSON que cumple EXACTAMENTE este contrato
   "titulo": "máximo 60 caracteres, gancho incluido",
   "formato": "short",
   "estilo": "auto",
+  "camara": "cine_anamorfico",
   "escenas": [
     { "titulo": "Hook",
       "narracion": "15-30 palabras. 0-3 segundos. Rompe el patrón. Prohibido saludar o presentarse.",
-      "prompt_imagen": "EN INGLÉS, una sola idea visual por escena, cinematográfico, no text" },
+      "prompt_imagen": "EN INGLÉS, una sola idea visual por escena, cinematográfico, no text",
+      "camara": "cine_macro_belleza",
+      "outfit": "red satin dress",
+      "ambiente": "rooftop bar at dusk, city lights bokeh" },
     { "titulo": "Escena 2",
       "narracion": "ESCALADA: revela un micro-dato nuevo con más tensión que el anterior.",
       "prompt_imagen": "EN INGLÉS, coherente con la escena anterior, no text" },
@@ -40,12 +44,21 @@ REGLAS DURAS DEL CONTRATO:
 6. `cta` es opcional; si la incluyes se convierte en escena final automáticamente.
 7. Estructura viral obligatoria: HOOK (0-3 s, rompe patrón) → ESCALADA (micro-datos con tensión creciente) → GIRO + CTA.
 8. Español neutro en narración. Números concretos > adjetivos. Datos reales verificables > inventados.
+9. Campos OPCIONALES de dirección (v2.11):
+   - `camara` (nivel proyecto o por escena): receta de cámara del catálogo
+     `GET /api/cameras` — ids como cine_anamorfico, cine_nocturna_neon,
+     ugc_selfie_dorada, ugc_ring_light… (11 cine + 9 UGC/selfie).
+   - `outfit` (por escena, ≤120): vestuario de esa escena; si el video usa
+     avatar, sustituye SU ropa solo ahí — la cara y el pelo nunca cambian.
+   - `ambiente` (por escena, ≤200): entorno visual en inglés que se añade
+     al prompt (ej. "abandoned hospital corridor at night").
 
 CÓMO ENTREGAR (elige la puerta que te indiquen):
 - **Pegar en la fábrica**: entrega SOLO el JSON en un bloque de código para copiar.
 - **Action / API**: haz POST a `{{BASE_URL}}/api/projects` con body
   `{"mode": "guion_json", <tu JSON>}`. El spec vivo está en
-  `{{BASE_URL}}/api/guion_json/contrato`.
+  `{{BASE_URL}}/api/guion_json/contrato`; el catálogo de cámaras en
+  `{{BASE_URL}}/api/cameras`.
 - **MCP (Antigravity/Claude)**: tool `crear_video_guion_json` con el JSON como
   texto en el parámetro `guion` (`lanzar: true` para producir de inmediato).
 

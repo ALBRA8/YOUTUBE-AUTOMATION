@@ -1,10 +1,12 @@
-"""v2.10.2 · Servidor MCP (Model Context Protocol) de la fábrica — reconstruido.
+"""v2.11.0 · Servidor MCP (Model Context Protocol) de la fábrica — reconstruido.
 
 Montado en /mcp desde main.py. Implementación JSON-RPC 2.0 a mano (el venv no
 tiene el paquete `mcp`): soporta initialize, tools/list y tools/call, suficiente
 para clientes MCP (Claude Desktop vía proxy, Antigravity, agentes locales).
 
-12 tools — la puerta del contrato guion_json es `crear_video_guion_json`.
+14 tools — la puerta del contrato guion_json es `crear_video_guion_json`.
+v2.11 · nuevas: crear_avatar (personajes con ADN consistente) y
+listar_recetas_camara (catálogo para el campo «camara» del contrato).
 
 NOTA: solo para uso LOCAL (sin auth). Para exponerlo a ChatGPT cloud hacen
 falta túnel + API key; ChatGPT habla mejor con Actions/OpenAPI usando el spec
@@ -20,16 +22,17 @@ from fastapi.responses import JSONResponse
 
 import database as db
 from pipeline import orchestrator
-from services import (gemini_client, guion_json as guion_svc,
+from services import (avatar_schema, camera_recipes,
+                      gemini_client, guion_json as guion_svc,
                       library as library_svc, niches as niches_svc,
                       whisper_service, youtube_publish)
 from services.themes import STYLES
 
 log = logging.getLogger("mcp")
 
-app = FastAPI(title="YT Automation MCP", version="2.10.2")
+app = FastAPI(title="YT Automation MCP", version="2.11.0")
 
-SERVER_INFO = {"name": "yt-automation-v2", "version": "2.10.2"}
+SERVER_INFO = {"name": "yt-automation-v2", "version": "2.11.0"}
 PROTOCOL_VERSION = "2024-11-05"
 
 # ───────────────────────────────────────────────────────────── tools ──
@@ -74,11 +77,12 @@ async def _t_crear_video_guion_json(guion: str, lanzar: bool = False) -> dict:
         av = g.get("avatar_id")
         if av and not db.get_avatar(av):
             av = None
+        pmeta = {"camara": g["camara"]} if g.get("camara") else {}
         return db.create_project(
             title=(g.get("titulo") or "Video desde guion JSON"),
             mode="guion_json", style=g.get("estilo") or "auto",
             format=g.get("formato") or "short", voice=g.get("voz"),
-            meta={}, avatar_id=av,
+            meta=pmeta, avatar_id=av,
             platforms=g.get("plataformas") or ["youtube"],
             niche=g.get("nicho"))
 
@@ -117,10 +121,60 @@ def _t_listar_proyectos(limite: int = 20) -> list[dict]:
     return out
 
 
+def _t_listar_avatares() -> list[dict]:
+    return db.list_avatars()
+
+
+def _t_crear_avatar(nombre: str, descripcion: str = "",
+                    apariencia=None, voz: str = "",
+                    tts_provider: str = "edge", estilo: str = "") -> dict:
+    """v2.11 · Crea un personaje con ADN biométrico consistente.
+    `apariencia` llega como dict o TEXTO JSON con campos del schema
+    (genero, edad, piel, rostro, ojos_color, ojos_forma, cabello_color,
+    cabello_largo, cabello_textura, mechas, cuerpo, ropa, maquillaje,
+    arquetipo, personalidad, acento, jerga) — claves desconocidas se
+    descartan con aviso; opcionalmente accesorios/referencia/extras."""
+    nombre = (nombre or "").strip()
+    if not nombre:
+        raise ValueError("falta el nombre del avatar")
+    if isinstance(apariencia, str):
+        try:
+            apariencia = json.loads(apariencia or "{}")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"apariencia no es JSON válido: {e}")
+    if not isinstance(apariencia, dict):
+        apariencia = {}
+    validos = set(avatar_schema.AVATAR_OPTIONS) | {"accesorios", "referencia", "extras"}
+    notas = []
+    limpio = {}
+    for k, v in apariencia.items():
+        if k in validos and str(v or "").strip():
+            limpio[k] = str(v).strip()
+        elif k not in validos:
+            notas.append(f"campo «{k}» descartado (no está en el schema)")
+    voz = (voz or "").strip()
+    if not voz and limpio.get("acento") and limpio.get("genero"):
+        voz = avatar_schema.suggest_voice(limpio["acento"], limpio["genero"])
+        if voz:
+            notas.append(f"voz sugerida por acento: {voz}")
+    av = db.create_avatar(name=nombre, description=(descripcion or "").strip(),
+                          appearance=limpio, voice=voz or None,
+                          tts_provider=(tts_provider or "edge").strip() or "edge",
+                          style=(estilo or "").strip() or None)
+    av["notas"] = notas
+    av["uso"] = "usa este id como avatar_id en crear_video_guion_json"
+    return av
+
+
+def _t_listar_recetas_camara() -> list[dict]:
+    """v2.11 · Catálogo de recetas para el campo «camara» del contrato."""
+    return camera_recipes.list()
+
+
 def _t_estado_sistema() -> dict:
     activos = [j for j in db.list_projects(limit=100) if j.get("status") not in
                ("ready", "published", "failed", "draft")]
-    return {"version": "2.10.2", "gemini": gemini_client.available(),
+    return {"version": "2.11.0", "gemini": gemini_client.available(),
             "whisper": whisper_service.available(),
             "youtube": youtube_publish.configured(),
             "canales": False,  # puente WhatsApp/Telegram pendiente de re-cosecha
@@ -141,8 +195,9 @@ TOOLS = [
          "lanzar": {"type": "boolean", "default": True}}}},
     {"name": "crear_video_guion_json", "description": "PUERTA PRINCIPAL: ingiere "
      "un guion TERMINADO en el contrato guion_json {titulo, formato, escenas:"
-     "[{narracion, prompt_imagen}], cta} y lo manda a producción SIN regenerar "
-     "nada. 'guion' va como TEXTO JSON.",
+     "[{narracion, prompt_imagen, camara?, outfit?, ambiente?}], cta} y lo manda "
+     "a producción SIN regenerar nada. 'guion' va como TEXTO JSON. "
+     "Ver también listar_recetas_camara y crear_avatar.",
      "inputSchema": {"type": "object", "required": ["guion"], "properties": {
          "guion": {"type": "string", "description": "JSON del contrato como texto"},
          "lanzar": {"type": "boolean", "default": False,
@@ -169,6 +224,26 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "listar_avatares", "description": "Personajes (avatares) con "
      "apariencia consistente disponibles.",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "crear_avatar", "description": "Crea un personaje (avatar) con "
+     "ADN biométrico consistente: piel, rostro, ojos, cabello, cuerpo, "
+     "arquetipo, acento… Devuelve su id para usarlo como avatar_id en "
+     "crear_video_guion_json. La ropa puede variar por escena (outfit); la "
+     "cara nunca.",
+     "inputSchema": {"type": "object", "required": ["nombre"], "properties": {
+         "nombre": {"type": "string"},
+         "descripcion": {"type": "string", "description": "rol/personalidad"},
+         "apariencia": {"type": "string", "description": "JSON con campos del "
+             "schema: genero, edad, piel, rostro, ojos_color, ojos_forma, "
+             "cabello_color, cabello_largo, cabello_textura, mechas, cuerpo, "
+             "ropa, maquillaje, arquetipo, personalidad, acento, jerga"},
+         "voz": {"type": "string", "description": "voz edge-tts (si se omite, "
+                 "se sugiere por acento+género)"},
+         "estilo": {"type": "string"}}}},
+    {"name": "listar_recetas_camara", "description": "Catálogo de 20 recetas "
+     "de cámara (11 cine + 9 UGC/selfie) para el campo «camara» de cada "
+     "escena del contrato guion_json. Cada una define shot, lens, lighting, "
+     "mood, angle y render.",
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "estado_sistema", "description": "Salud de la fábrica: version, "
      "proveedores disponibles (gemini/whisper/youtube), trabajos en curso.",
@@ -203,7 +278,11 @@ async def _dispatch(name: str, args: dict):
                  "descripcion": t.get("description", "")}
                 for t in niches_svc.list_templates()]
     if name == "listar_avatares":
-        return db.list_avatars()
+        return _t_listar_avatares()
+    if name == "crear_avatar":
+        return _t_crear_avatar(**args)
+    if name == "listar_recetas_camara":
+        return _t_listar_recetas_camara()
     if name == "estado_sistema":
         return _t_estado_sistema()
     if name == "cancelar_trabajo":

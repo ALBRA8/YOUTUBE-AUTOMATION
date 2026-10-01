@@ -13,6 +13,7 @@ import database as db
 from config import OUTPUT_DIR
 from services import gemini_client
 from services import avatar_schema
+from services import camera_recipes
 from services.themes import get_style
 
 log = logging.getLogger("images")
@@ -30,6 +31,12 @@ STYLE_REF_SUFFIX = (", match the visual style of the attached reference image: "
                     "same color palette, same lighting, same illustration "
                     "technique, keep character appearance consistent")
 STYLE_REF_META = "style_reference"  # flag en meta del proyecto (default True)
+
+# v2.11 · Salvaguardas finales del prompt (rescatado del plan «Avatar DNA
+# Pipeline», que las llamaba "safeguards"): la fábrica no escribe texto y la
+# anatomía del personaje debe salir coherente. Se añaden SIEMPRE, al final.
+SAFEGUARDS = ("no text, no letters, no watermark, "
+              "no distorted anatomy, coherent facial features, natural hands")
 
 
 def _style_sidecar(image_path: str) -> Path:
@@ -106,20 +113,51 @@ async def _zai_image(prompt: str, out: Path, fmt: str) -> bool:
 
 
 def full_prompt(scene: dict, project: dict) -> str:
+    """Ensamblador v2.11 del prompt final (equivalente al assemble_prompt del
+    plan «Avatar DNA», adaptado a la fábrica):
+
+      prompt de escena + ambiente + ADN del avatar (+ outfit de la escena)
+      + receta de cámara + estilo visual + salvaguardas
+
+    - receta: escena.camara (meta) o, si no, la del proyecto (meta.camara);
+      texto determinista de camera_recipes.py — cero LLM.
+    - outfit: si la escena trae vestuario, sustituye la ropa del avatar SOLO
+      en esa escena (la cara y el pelo quedan congelados).
+    - sin avatar y sin receta el resultado es idéntico al histórico:
+      retrocompatibilidad total con los proyectos existentes.
+    """
+    pmeta = project.get("meta") or {}
+    mesc = scene.get("meta") or {}
     style = get_style(project["style"])
-    custom = (project.get("meta") or {}).get("custom_style_prompt")
+    custom = pmeta.get("custom_style_prompt")
     # "auto" → prompt vacío: no se añade ningún preset (el guion ya trae la
     # estética integrada en el image_prompt o se usa el neutro en fallback).
     style_desc = (custom or style["prompt"] or "").strip()
-    extra = ", no text, no letters, no watermark"
-    # Consistencia de personaje: si el proyecto tiene avatar, fijamos su
-    # apariencia (traducida a inglés por el schema PRO) en TODOS los prompts
-    # para que el personaje sea igual en cada escena.
-    avatar = (project.get("meta") or {}).get("avatar") or None
+
+    parts = [str(scene["image_prompt"]).strip()]
+
+    # entorno visual de la escena (contrato v2.11: ambiente)
+    amb = str(mesc.get("ambiente") or "").strip()
+    if amb:
+        parts.append(amb)
+
+    # ADN del personaje: consistencia en TODAS las escenas (schema PRO)
+    avatar = pmeta.get("avatar") or None
+    outfit = str(mesc.get("outfit") or "").strip()
     if avatar:
-        extra += (", " + avatar_schema.scene_suffix(avatar))
-    style_part = f", {style_desc}" if style_desc else ""
-    return f"{scene['image_prompt']}{style_part}{extra}"
+        parts.append(avatar_schema.scene_suffix(avatar, outfit=outfit or None))
+    elif outfit:
+        parts.append(f"wearing {outfit}")
+
+    # receta de cámara (la de la escena manda sobre la del proyecto)
+    rec = camera_recipes.get(mesc.get("camara") or pmeta.get("camara"))
+    if rec:
+        parts.append(camera_recipes.block(rec))
+
+    if style_desc:
+        parts.append(style_desc)
+    parts.append(SAFEGUARDS)
+    return ", ".join(p for p in parts if p)
 
 
 async def generate_scene_image(scene: dict, project: dict, idx: int,

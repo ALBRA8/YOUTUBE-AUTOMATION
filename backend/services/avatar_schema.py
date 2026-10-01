@@ -1,4 +1,8 @@
-"""Schema PRO de avatares v2.1.1 — fuente única de verdad.
+"""Schema PRO de avatares v2.11 — fuente única de verdad.
+
+v2.11 · Rescatado del plan «Avatar DNA Pipeline»: campos rostro y mechas
+(ADN facial más fino) y scene_suffix(outfit=…) para vestuario por escena —
+la ropa cambia, la cara NUNCA.
 
 Menús desplegables con la variedad de VÓRTICE PRO (tono de piel, ojos
 color+forma, cabello color+largo+textura, cuerpo, arquetipo, acento,
@@ -22,10 +26,12 @@ AVATAR_OPTIONS: dict[str, list[str]] = {
     "piel": ["Clara", "Media", "Morena", "Oscura"],
     "ojos_color": ["Azules", "Verdes", "Marrones", "Negros", "Grises", "Avellana"],
     "ojos_forma": ["Almendrados", "Redondos", "Rasgados", "Caídos"],
+    "rostro": ["Ovalado", "Redondo", "Cuadrado", "Corazón", "Alargado"],
     "cabello_color": ["Rubio", "Castaño", "Negro", "Pelirrojo",
                       "Gris plateado", "Degradado", "Azul eléctrico", "Rosa pastel"],
     "cabello_largo": ["Corto", "Mediano", "Largo", "Extra largo"],
     "cabello_textura": ["Liso", "Ondulado", "Rizado", "Afro"],
+    "mechas": ["Balayage", "Mechas claras", "Mechas de color", "Rayos de sol"],
     "cuerpo": ["Delgado", "Atlético", "Curvilíneo", "Voluptuoso", "Robusto"],
     "ropa": ["Casual elegante", "Streetwear", "Formal", "Deportivo",
              "Bohemio", "Aventurero", "Vintage", "Urbano oscuro"],
@@ -48,9 +54,11 @@ FIELD_LABELS: dict[str, str] = {
     "piel": "Tono de piel",
     "ojos_color": "Color de ojos",
     "ojos_forma": "Forma de ojos",
+    "rostro": "Forma del rostro",
     "cabello_color": "Color de cabello",
     "cabello_largo": "Largo de cabello",
     "cabello_textura": "Textura de cabello",
+    "mechas": "Mechas / reflejos",
     "cuerpo": "Tipo de cuerpo",
     "ropa": "Estilo de ropa",
     "maquillaje": "Estilo de maquillaje",
@@ -73,6 +81,9 @@ _ES_EN: dict[str, dict[str, str]] = {
                    "Negros": "black", "Grises": "gray", "Avellana": "hazel"},
     "ojos_forma": {"Almendrados": "almond-shaped", "Redondos": "round",
                    "Rasgados": "narrow upturned", "Caídos": "downturned"},
+    "rostro": {"Ovalado": "oval face", "Redondo": "round face",
+               "Cuadrado": "square face", "Corazón": "heart-shaped face",
+               "Alargado": "oblong face"},
     "cabello_color": {"Rubio": "blonde", "Castaño": "brown", "Negro": "black",
                       "Pelirrojo": "red ginger", "Gris plateado": "silver gray",
                       "Degradado": "ombre gradient", "Azul eléctrico": "electric blue",
@@ -81,6 +92,10 @@ _ES_EN: dict[str, dict[str, str]] = {
                       "Largo": "long", "Extra largo": "very long"},
     "cabello_textura": {"Liso": "straight", "Ondulado": "wavy",
                         "Rizado": "curly", "Afro": "afro-textured"},
+    "mechas": {"Balayage": "balayage highlights",
+               "Mechas claras": "light brown highlights",
+               "Mechas de color": "colorful highlights",
+               "Rayos de sol": "sun-kissed highlights"},
     "cuerpo": {"Delgado": "slim", "Atlético": "athletic", "Curvilíneo": "curvy",
                "Voluptuoso": "voluptuous", "Robusto": "stocky"},
     "ropa": {"Casual elegante": "smart casual outfit", "Streetwear": "streetwear outfit",
@@ -101,8 +116,8 @@ _ES_EN: dict[str, dict[str, str]] = {
 }
 
 # Orden estable al componer frases de apariencia
-_LOOK_ORDER = ["piel", "ojos_color", "ojos_forma", "cabello_color",
-               "cabello_largo", "cabello_textura", "cuerpo", "ropa",
+_LOOK_ORDER = ["piel", "rostro", "ojos_color", "ojos_forma", "cabello_color",
+               "cabello_largo", "cabello_textura", "mechas", "cuerpo", "ropa",
                "maquillaje", "arquetipo"]
 
 # ── Voz edge-tts sugerida según acento + género ────────────────────────────
@@ -139,12 +154,16 @@ def _gender(ap: dict) -> str:
     return g
 
 
-def look_en(appearance: dict) -> str:
-    """Frase compacta en inglés con la apariencia (para escenas)."""
+def look_en(appearance: dict, skip_ropa: bool = False) -> str:
+    """Frase compacta en inglés con la apariencia (para escenas).
+    skip_ropa: omite el vestuario del avatar (cuando la escena trae el
+    suyo — v2.11: la ropa cambia por escena, la cara nunca)."""
     ap = appearance or {}
     bits: list[str] = []
     if ap.get("piel"):
         bits.append(_en("piel", ap["piel"]))
+    if ap.get("rostro"):
+        bits.append(_en("rostro", ap["rostro"]))
     ojos = " ".join(x for x in [_en("ojos_color", ap.get("ojos_color", "")),
                                 _en("ojos_forma", ap.get("ojos_forma", "")),
                                 "eyes"] if x.strip())
@@ -156,9 +175,11 @@ def look_en(appearance: dict) -> str:
                                    "hair"] if x.strip())
     if any(_clean(ap.get(k)) for k in ("cabello_color", "cabello_largo", "cabello_textura")):
         bits.append(cabello)
+    if ap.get("mechas"):
+        bits.append(_en("mechas", ap["mechas"]))
     if ap.get("cuerpo"):
         bits.append(_en("cuerpo", ap["cuerpo"]) + " build")
-    if ap.get("ropa") and ap.get("ropa") != "Ninguno":
+    if ap.get("ropa") and ap.get("ropa") != "Ninguno" and not skip_ropa:
         bits.append(_en("ropa", ap["ropa"]))
     if ap.get("maquillaje") and ap.get("maquillaje") not in ("", "Ninguno"):
         bits.append(_en("maquillaje", ap["maquillaje"]))
@@ -193,14 +214,23 @@ def portrait_prompt(avatar: dict) -> str:
     return ", ".join(parts)
 
 
-def scene_suffix(avatar: dict) -> str:
-    """Frase de consistencia para TODAS las escenas del video."""
+def scene_suffix(avatar: dict, outfit: str | None = None) -> str:
+    """Frase de consistencia para TODAS las escenas del video.
+
+    v2.11 · outfit (opcional): vestuario de la escena — se sustituye la
+    ropa del avatar SOLO en esta escena (la identidad facial queda intacta).
+    """
     name = avatar.get("name") or "the character"
-    look = look_en(avatar.get("appearance") or {})
+    ap = avatar.get("appearance") or {}
+    look = look_en(ap, skip_ropa=bool(outfit))
     out = f"consistent recurring character named {name}"
     if look:
         out += f" ({look})"
-    out += ", same face, hairstyle and outfit in every scene"
+    if outfit:
+        out += f", wearing {_clean(outfit)}"
+        out += ", same face and hairstyle in every scene"
+    else:
+        out += ", same face, hairstyle and outfit in every scene"
     return out
 
 

@@ -1214,9 +1214,11 @@ const AV_OPTS_FALLBACK = {
   piel: ['Clara', 'Media', 'Morena', 'Oscura'],
   ojos_color: ['Azules', 'Verdes', 'Marrones', 'Negros', 'Grises', 'Avellana'],
   ojos_forma: ['Almendrados', 'Redondos', 'Rasgados', 'Caídos'],
+  rostro: ['Ovalado', 'Redondo', 'Cuadrado', 'Corazón', 'Alargado'],
   cabello_color: ['Rubio', 'Castaño', 'Negro', 'Pelirrojo', 'Gris plateado', 'Degradado', 'Azul eléctrico', 'Rosa pastel'],
   cabello_largo: ['Corto', 'Mediano', 'Largo', 'Extra largo'],
   cabello_textura: ['Liso', 'Ondulado', 'Rizado', 'Afro'],
+  mechas: ['Balayage', 'Mechas claras', 'Mechas de color', 'Rayos de sol'],
   cuerpo: ['Delgado', 'Atlético', 'Curvilíneo', 'Voluptuoso', 'Robusto'],
   ropa: ['Casual elegante', 'Streetwear', 'Formal', 'Deportivo', 'Bohemio', 'Aventurero', 'Vintage', 'Urbano oscuro'],
   maquillaje: ['Natural', 'Glam', 'Dramático', 'Artístico', 'Ninguno'],
@@ -1228,13 +1230,15 @@ const AV_OPTS_FALLBACK = {
 const AV_LABELS = {
   genero: 'Género', edad: 'Edad aparente', piel: 'Tono de piel',
   ojos_color: 'Color de ojos', ojos_forma: 'Forma de ojos',
+  rostro: 'Forma del rostro',
   cabello_color: 'Color de cabello', cabello_largo: 'Largo de cabello',
-  cabello_textura: 'Textura de cabello', cuerpo: 'Tipo de cuerpo',
+  cabello_textura: 'Textura de cabello', mechas: 'Mechas / reflejos',
+  cuerpo: 'Tipo de cuerpo',
   ropa: 'Estilo de ropa', maquillaje: 'Estilo de maquillaje',
   arquetipo: 'Arquetipo', personalidad: 'Personalidad predominante',
   acento: 'Acento al hablar', jerga: 'Tipo de jerga regional',
 };
-const AV_FIELDS = Object.keys(AV_OPTS_FALLBACK);   // 15 desplegables
+const AV_FIELDS = Object.keys(AV_OPTS_FALLBACK);   // 17 desplegables
 const AV_FREE = ['accesorios', 'referencia', 'extras']; // texto libre
 let AV_OPTS = null; // opciones vivas del backend cuando esté disponible
 
@@ -1284,8 +1288,9 @@ function avatarChips(a) {
   if (ap.personalidad) chips.push(esc(ap.personalidad));
   if (ap.genero || ap.edad) chips.push(esc([ap.genero, ap.edad].filter(Boolean).join(' · ')));
   if (ap.piel) chips.push('piel ' + esc(ap.piel.toLowerCase()));
+  if (ap.rostro) chips.push('rostro ' + esc(ap.rostro.toLowerCase()));
   if (ap.ojos_color) chips.push('ojos ' + esc(ap.ojos_color.toLowerCase()));
-  const hair = [ap.cabello_largo, ap.cabello_textura, ap.cabello_color].filter(Boolean).join(' ').toLowerCase();
+  const hair = [ap.cabello_largo, ap.cabello_textura, ap.cabello_color, ap.mechas].filter(Boolean).join(' ').toLowerCase();
   if (hair) chips.push(' cabello ' + esc(hair));
   if (ap.cuerpo) chips.push(esc(ap.cuerpo.toLowerCase()));
   if (ap.ropa) chips.push(esc(ap.ropa.toLowerCase()));
@@ -1381,8 +1386,11 @@ function renderAvatarForm() {
           placeholder="Exploradora curiosa y enérgica que narra misterios con tono envolvente…">${esc(f.description)}</textarea></div>
       ${sec('🎨 Rostro', grid2([[AV_LABELS.piel, avSelect('piel')],
         [AV_LABELS.ojos_color, avSelect('ojos_color')], [AV_LABELS.ojos_forma, avSelect('ojos_forma')]])
-        + grid2([[AV_LABELS.cabello_color, avSelect('cabello_color')],
-        [AV_LABELS.cabello_largo, avSelect('cabello_largo')], [AV_LABELS.cabello_textura, avSelect('cabello_textura')]]))}
+        + grid2([[AV_LABELS.rostro, avSelect('rostro')],
+        [AV_LABELS.cabello_color, avSelect('cabello_color')],
+        [AV_LABELS.cabello_largo, avSelect('cabello_largo')]])
+        + grid2([[AV_LABELS.cabello_textura, avSelect('cabello_textura')],
+        [AV_LABELS.mechas, avSelect('mechas')]]))}
       ${sec('🧍 Cuerpo y estilo', grid2([[AV_LABELS.genero, avSelect('genero')],
         [AV_LABELS.edad, avSelect('edad')], [AV_LABELS.cuerpo, avSelect('cuerpo')]])
         + grid2([[AV_LABELS.ropa, avSelect('ropa')], [AV_LABELS.maquillaje, avSelect('maquillaje')],

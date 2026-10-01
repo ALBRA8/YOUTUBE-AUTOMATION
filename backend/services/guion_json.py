@@ -1,4 +1,4 @@
-"""v2.10 · Contrato guion_json — la puerta USB entre un guionista externo
+"""v2.11 · Contrato guion_json — la puerta USB entre un guionista externo
 (ChatGPT, Custom GPT, Actions) y la fábrica.
 
 UN SOLO CONTRATO de entrada:
@@ -9,13 +9,23 @@ UN SOLO CONTRATO de entrada:
       "estilo": id visual de /api/styles (default "auto"),
       "voz": voz edge-tts opcional (ej. es-ES-AlvaroNeural),
       "avatar_id": personaje opcional,
+      "camara": receta de cámara por defecto opcional (GET /api/cameras),
+      "nicho": carpeta opcional del árbol de proyectos,
       "plataformas": ["youtube"|"tiktok"|"instagram"|"facebook"],
       "escenas": [ { "titulo"?: str,
                      "narracion": str ≤2000 (OBLIGATORIA),
-                     "prompt_imagen"?: str EN INGLÉS } ]  (2 a 40),
+                     "prompt_imagen"?: str EN INGLÉS,
+                     "camara"?: receta (override de la del proyecto),
+                     "outfit"?: vestuario de la escena ≤120,
+                     "ambiente"?: entorno ≤200 } ]  (2 a 40),
       "cta": str ≤300 (opcional — se añade como escena final),
       "auto_start": bool (true = lanza el pipeline al ingerir)
     }
+
+v2.11 · Rescatado del plan «Avatar DNA Pipeline»: camara/outfit/ambiente
+por escena. La receta es texto determinista de services/camera_recipes.py
+(cero LLM); el outfit reemplaza la ropa del avatar SOLO en esa escena
+(la cara nunca cambia) y ambiente añade el entorno visual.
 
 Reglas del guionista (HOOK 0-3 s · escalada · giro+CTA · 15-30 palabras por
 escena · prompt_imagen en inglés sin texto en la imagen) viven en el spec
@@ -32,6 +42,7 @@ import re
 from datetime import datetime, timezone
 
 import database as db
+from services import camera_recipes
 from services.originality import keywords as _keywords
 from services.themes import get_style
 
@@ -40,6 +51,8 @@ MIN_ESCENAS, MAX_ESCENAS = 2, 40
 MAX_TITULO = 60
 MAX_NARRACION = 2000
 MAX_CTA = 300
+MAX_OUTFIT = 120
+MAX_AMBIENTE = 200
 FORMATOS = ("short", "long")
 PLATAFORMAS = ("youtube", "tiktok", "instagram", "facebook")
 
@@ -51,6 +64,10 @@ _ALIASES = {
     "voz": ("voz", "voice"),
     "avatar_id": ("avatar_id", "avatar", "personaje"),
     "nicho": ("nicho", "niche", "carpeta"),
+    "camara": ("camara", "cámara", "camera", "camera_recipe",
+               "camera_receta", "receta_camara", "receta"),
+    "outfit": ("outfit", "vestuario", "atuendo"),
+    "ambiente": ("ambiente", "environment", "escenario", "lugar", "setting"),
     "plataformas": ("plataformas", "platforms"),
     "escenas": ("escenas", "scenes"),
     "cta": ("cta", "call_to_action", "cierre"),
@@ -129,6 +146,15 @@ def validate(data: dict, estilos_validos: set[str]) -> tuple[dict, list[str]]:
     nicho = _limpia(_first(data, "nicho"))
     g["nicho"] = nicho[:60] or None
 
+    # v2.11 · receta de cámara por defecto del proyecto (cada escena puede
+    # sobreescribirla con su propio «camara»)
+    cam = _limpia(_first(data, "camara")).lower()
+    if cam and cam not in camera_recipes.ids():
+        av.append(f"receta de cámara «{cam}» no existe — ignorada "
+                  "(válido: GET /api/cameras)")
+        cam = ""
+    g["camara"] = cam or None
+
     plats = _first(data, "plataformas")
     if not isinstance(plats, list):
         plats = ["youtube"]
@@ -157,6 +183,30 @@ def validate(data: dict, estilos_validos: set[str]) -> tuple[dict, list[str]]:
         esc = {"title": (_limpia(_first(e, "titulo_escena")) or f"Escena {i}"),
                "narration": narr,
                "image_prompt": _limpia(_first(e, "prompt_imagen"))}
+        # v2.11 · dirección de cámara y escena por escena (opcional) —
+        # se guardan en meta de la escena y images.py las compone al vuelo
+        mesc: dict = {}
+        rec = _limpia(_first(e, "camara")).lower()
+        if rec:
+            if rec in camera_recipes.ids():
+                mesc["camara"] = rec
+            else:
+                av.append(f"escena {i}: receta de cámara «{rec}» no existe "
+                          "— ignorada (GET /api/cameras)")
+        outfit = _limpia(_first(e, "outfit"))
+        if outfit:
+            if len(outfit) > MAX_OUTFIT:
+                outfit = outfit[:MAX_OUTFIT]
+                av.append(f"escena {i}: outfit recortado a {MAX_OUTFIT} caracteres")
+            mesc["outfit"] = outfit
+        amb = _limpia(_first(e, "ambiente"))
+        if amb:
+            if len(amb) > MAX_AMBIENTE:
+                amb = amb[:MAX_AMBIENTE]
+                av.append(f"escena {i}: ambiente recortado a {MAX_AMBIENTE} caracteres")
+            mesc["ambiente"] = amb
+        if mesc:
+            esc["meta"] = mesc
         escenas.append(esc)
 
     # ── CTA → escena final ──
@@ -198,8 +248,9 @@ def validate(data: dict, estilos_validos: set[str]) -> tuple[dict, list[str]]:
 
 def spec(estilos_ids: list[str]) -> dict:
     """Spec machine-readable del contrato (para Actions de ChatGPT y humanos)."""
+    camaras = ", ".join(r["id"] for r in camera_recipes.compact())
     return {
-        "version": "2.10",
+        "version": "2.11",
         "uso": 'Devuelve este JSON a POST /api/projects con {"mode": "guion_json", '
                "...guion} o a la tool MCP crear_video_guion_json (ahí va como "
                "TEXTO JSON en 'guion').",
@@ -209,11 +260,16 @@ def spec(estilos_ids: list[str]) -> dict:
             "estilo": f"id visual (GET /api/styles) — default 'auto'. Válidos: {', '.join(estilos_ids)}",
             "voz": "voz edge-tts opcional (ej. es-ES-AlvaroNeural)",
             "avatar_id": "personaje opcional (GET /api/avatars)",
+            "camara": f"receta de cámara opcional por defecto para TODAS las escenas. "
+                      f"Ids válidos: {camaras} (detalle: GET /api/cameras)",
             "nicho": "carpeta opcional del árbol de proyectos (texto libre, ≤60; "
                      "ej. 'Primitive Viral') — sin él va a «Sin nicho»",
             "plataformas": "lista: youtube|tiktok|instagram|facebook — default [youtube]",
             "escenas": "lista OBLIGATORIA de 2 a 40 objetos: {titulo?, narracion "
-                       "(obligatoria ≤2000), prompt_imagen? (inglés)}",
+                       "(obligatoria ≤2000), prompt_imagen? (inglés), camara? "
+                       "(receta, override del proyecto), outfit? (vestuario de la "
+                       "escena ≤120 — sustituye la ropa del avatar SOLO aquí), "
+                       "ambiente? (entorno visual ≤200)}",
             "cta": "str opcional ≤300 — se añade como escena final",
             "auto_start": "bool — true lanza el pipeline completo al ingerir",
         },
@@ -224,6 +280,8 @@ def spec(estilos_ids: list[str]) -> dict:
             "narracion: 15-30 palabras por escena (se escucha, no se lee)",
             "prompt_imagen: EN INGLÉS, una sola idea visual por escena, sin texto "
             "en la imagen (la fábrica lo rechaza/sanitiza si lleva)",
+            "camara/outfit/ambiente son OPCIONALES por escena: úsalos para variar "
+            "el plano y el vestuario sin tocar la identidad del personaje",
         ],
         "ejemplo": {
             "titulo": "El faro que gritaba",
