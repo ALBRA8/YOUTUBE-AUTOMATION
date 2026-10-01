@@ -372,49 +372,61 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
             meta["audio_text"] = text
             db.update_project(project_id, meta=meta)
 
-        # PASO 1 — guion
-        if project["mode"] == "script" and meta.get("script_text"):
-            raw = await script_gen.from_script(
-                meta["script_text"], project["style"], project["format"],
-                meta.get("custom_style_prompt"), avatar)
-        elif project["mode"] == "url" and viral_ctx:
-            raw = await script_gen.from_url_transcript(
-                viral_ctx["metadata"], viral_ctx["transcript"],
-                project["style"], project["format"], meta.get("custom_style_prompt"),
-                avatar)
-        elif project["mode"] == "audio" and meta.get("audio_text"):
-            raw = await script_gen.from_audio_transcript(
-                meta["audio_text"], project["style"], project["format"],
-                meta.get("custom_style_prompt"), avatar)
+        # PASO 1 — guion (o guion ya ingerido vía contrato guion_json)
+        if project["mode"] == "guion_json":
+            # v2.10 · contrato guion_json: las escenas ya están en BD
+            # (services/guion_json.py las ingesta SIN LLM interno) — la
+            # fábrica NO regenera nada: imágenes, TTS y montaje directos.
+            scenes = db.get_scenes(project_id)
+            if not scenes:
+                raise RuntimeError("guion_json sin escenas en la base de datos")
+            await _emit(job_id, project_id, "scripting", 18,
+                        f"Guion externo listo: {len(scenes)} escenas · "
+                        f"«{project['title']}» (contrato guion_json)",
+                        {"title": project["title"]})
         else:
-            await _emit(job_id, project_id, "scripting", 10, "Generando guion viral…")
-            raw = await script_gen.from_idea(
-                meta.get("idea") or project["title"], project["style"],
-                project["format"], meta.get("custom_style_prompt"), avatar)
+            if project["mode"] == "script" and meta.get("script_text"):
+                raw = await script_gen.from_script(
+                    meta["script_text"], project["style"], project["format"],
+                    meta.get("custom_style_prompt"), avatar)
+            elif project["mode"] == "url" and viral_ctx:
+                raw = await script_gen.from_url_transcript(
+                    viral_ctx["metadata"], viral_ctx["transcript"],
+                    project["style"], project["format"], meta.get("custom_style_prompt"),
+                    avatar)
+            elif project["mode"] == "audio" and meta.get("audio_text"):
+                raw = await script_gen.from_audio_transcript(
+                    meta["audio_text"], project["style"], project["format"],
+                    meta.get("custom_style_prompt"), avatar)
+            else:
+                await _emit(job_id, project_id, "scripting", 10, "Generando guion viral…")
+                raw = await script_gen.from_idea(
+                    meta.get("idea") or project["title"], project["style"],
+                    project["format"], meta.get("custom_style_prompt"), avatar)
 
-        result = script_gen.build_result(raw)
-        if not result["scenes"]:
-            raise RuntimeError("Gemini devolvió un guion vacío")
-        # originalidad verificable del modo URL: el informe del guion
-        # (overlap de 5-gramas contra la transcripción) queda en meta
-        if result.get("originality"):
-            meta = {**(db.get_project(project_id).get("meta") or {}),
-                    "originality": result["originality"]}
-            db.update_project(project_id, meta=meta)
-            rep = result["originality"]
-            await _emit(job_id, project_id, "scripting", 17,
-                        f"Originalidad {100 - rep['overlap'] * 100:.0f}% "
-                        f"(solape {rep['overlap'] * 100:.0f}%"
-                        + (", relanzado anti-copia" if rep.get("retried") else "")
-                        + ")")
-        db.replace_scenes(project_id, result["scenes"])
-        db.update_project(project_id, title=result["title"])
-        scenes = db.get_scenes(project_id)
-        n = len(scenes)
-        await _emit(job_id, project_id, "scripting", 18,
-                    f"Guion listo: {n} escenas · «{result['title']}»"
-                    + (" · MODO DEMO $0" if result.get("engine") == "local-demo" else ""),
-                    {"title": result["title"]})
+            result = script_gen.build_result(raw)
+            if not result["scenes"]:
+                raise RuntimeError("Gemini devolvió un guion vacío")
+            # originalidad verificable del modo URL: el informe del guion
+            # (overlap de 5-gramas contra la transcripción) queda en meta
+            if result.get("originality"):
+                meta = {**(db.get_project(project_id).get("meta") or {}),
+                        "originality": result["originality"]}
+                db.update_project(project_id, meta=meta)
+                rep = result["originality"]
+                await _emit(job_id, project_id, "scripting", 17,
+                            f"Originalidad {100 - rep['overlap'] * 100:.0f}% "
+                            f"(solape {rep['overlap'] * 100:.0f}%"
+                            + (", relanzado anti-copia" if rep.get("retried") else "")
+                            + ")")
+            db.replace_scenes(project_id, result["scenes"])
+            db.update_project(project_id, title=result["title"])
+            scenes = db.get_scenes(project_id)
+            n = len(scenes)
+            await _emit(job_id, project_id, "scripting", 18,
+                        f"Guion listo: {n} escenas · «{result['title']}»"
+                        + (" · MODO DEMO $0" if result.get("engine") == "local-demo" else ""),
+                        {"title": result["title"]})
 
         # PASO 2 — imágenes (híbridas)
         async def img_prog(i, total, method):

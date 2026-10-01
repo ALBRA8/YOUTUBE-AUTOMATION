@@ -23,7 +23,8 @@ from pipeline import orchestrator
 from pipeline import video as video_pipeline
 from pipeline.subtitles import words_to_srt
 from services import (agent as agent_svc, doctor as doctor_svc,
-                      gemini_client, library as library_svc,
+                      gemini_client, guion_json as guion_svc,
+                      library as library_svc,
                       niches as niches_svc, scheduler,
                       trend_research as trends_svc,
                       tts_service, url_mode, whisper_service, youtube_publish)
@@ -34,7 +35,7 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("main")
 
-app = FastAPI(title="YT Automation v2.0", version="2.1.1")
+app = FastAPI(title="YT Automation v2.0", version="2.10.2")
 
 AVATARS_DIR = DATA_DIR / "avatars"
 VALID_PLATFORMS = ("youtube", "tiktok", "instagram", "facebook")
@@ -77,9 +78,10 @@ async def auth_guard(request, call_next):
 # ──────────────────────────────────────────────────────── básicos ──
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "version": "2.1.1", "gemini": gemini_client.available(),
+    return {"ok": True, "version": "2.10.2", "gemini": gemini_client.available(),
             "whisper": whisper_service.available(),
-            "youtube": youtube_publish.configured()}
+            "youtube": youtube_publish.configured(),
+            "canales": False}  # puente WhatsApp/Telegram pendiente de re-cosecha (v2.10.2)
 
 
 @app.get("/api/auth/status")
@@ -91,6 +93,13 @@ async def auth_status():
 @app.get("/api/styles")
 async def styles():
     return STYLES
+
+
+@app.get("/api/guion_json/contrato")
+async def guion_json_contrato():
+    """v2.10 · Spec machine-readable del contrato guion_json
+    (para Actions de ChatGPT y para humanos)."""
+    return guion_svc.spec([s["id"] for s in STYLES])
 
 
 @app.get("/api/settings")
@@ -464,8 +473,27 @@ async def projects():
 @app.post("/api/projects")
 async def create_project(body: dict):
     mode = body.get("mode", "idea")
-    if mode not in ("script", "idea", "url", "audio", "nicho"):
+    if mode not in ("script", "idea", "url", "audio", "nicho", "guion_json"):
         raise HTTPException(400, "modo inválido")
+    if mode == "guion_json":
+        # v2.10 · contrato guion_json: el guion llega HECHO desde ChatGPT —
+        # cero LLM interno. Valida, normaliza (alias/fences/fallbacks) y
+        # crea el proyecto con sus escenas; auto_start lanza el pipeline.
+        def _crear(g: dict):
+            av = g.get("avatar_id")
+            if av and not db.get_avatar(av):
+                av = None
+            return db.create_project(
+                title=(g.get("titulo") or "Video desde guion JSON"),
+                mode="guion_json", style=g.get("estilo") or "auto",
+                format=g.get("formato") or "short", voice=g.get("voz"),
+                meta={}, avatar_id=av,
+                platforms=g.get("plataformas") or ["youtube"],
+                niche=g.get("nicho"))
+        try:
+            return await guion_svc.ingest(body, {s["id"] for s in STYLES}, _crear)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
     meta = {}
     title = (body.get("title") or "Nuevo proyecto")[:60]
     if mode == "script":
@@ -1075,6 +1103,19 @@ async def trends_research(body: dict):
 # ─────────────────────────────────────────────────────── dashboard ──
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+# v2.8/v2.10.2 · servidor MCP (JSON-RPC 2.0) — puerta para agentes locales
+from fastapi import Request as _Req
+from services import mcp_server  # noqa: E402  (tras crear `app` para evitar círculos)
+app.mount("/mcp", mcp_server.app)
+
+
+@app.api_route("/mcp", methods=["GET", "POST"])
+async def mcp_sin_barra(req: _Req):
+    """Proxy de /mcp exacto → evita el 307 a /mcp/ para clientes MCP."""
+    if req.method == "GET":
+        return await mcp_server.info()
+    return await mcp_server.entry(req)
 
 
 @app.get("/")

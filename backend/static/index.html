@@ -6,7 +6,7 @@
 <title>YT Automation v2.0 — Fábrica de videos IA</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="static/style.css?v=2.7.1">
+<link rel="stylesheet" href="static/style.css?v=2.10.2">
 </head>
 <body>
 <div class="app">
@@ -17,26 +17,12 @@
       <h1>AI <em>AUTOMATION</em><small>FÁBRICA DE VIDEOS · $0</small></h1>
     </div>
 
-    <!-- acción principal: crear desde nicho -->
-    <button class="sidebar-cta" onclick="openNicheCreator()" title="Elige un nicho con su plantilla y el motor fabrica todo">
-      <span class="ico">🎯</span>
-      <span class="cta-text"><strong>Crear desde Nicho</strong><small>Plantilla → video en un clic</small></span>
-    </button>
-
-    <!-- navegación -->
+    <!-- navegación (v2.10.2: sin CTA de nicho ni explorador — los proyectos
+         viven en la vista 🗂️ Proyectos, organizados en árbol de nichos) -->
     <nav class="side-nav">
       <div class="nav-item" data-view="home"><span class="ico">🏠</span> Inicio</div>
       <div class="nav-item" data-view="agent"><span class="ico">🤖</span> Agente</div>
     </nav>
-
-    <!-- explorador de proyectos (scroll propio) -->
-    <div class="projects-wrapper">
-      <div class="section-title-row">
-        <span class="section-label">PROYECTOS</span>
-        <button class="btn-icon-add" onclick="newProjectWizard()" title="Nuevo proyecto">+</button>
-      </div>
-      <ul id="project-list" class="project-list-scroll"></ul>
-    </div>
 
     <!-- herramientas -->
     <div class="side-tools">
@@ -69,6 +55,6 @@
 <div id="modal-root"></div>
 <div id="toasts"></div>
 <script src="static/auth.js?v=2.5.0"></script>
-<script src="static/app.js?v=2.7.1"></script>
+<script src="static/app.js?v=2.10.2"></script>
 </body>
 </html>
