@@ -323,6 +323,28 @@ async function delNicheTemplate(tid) {
   } catch (e) { toast(e.message, 'err'); }
 }
 
+/* v2.12 · borrar nicho directamente desde su tarjeta en Proyectos.
+   Plantilla → DELETE; nicho libre → sus videos pasan a «Sin nicho». */
+async function delNichoCard(i) {
+  const key = _NICHO_KEYS[i];
+  const meta = (_NICHO_META || {})[key];
+  if (guardDemo() || !meta) return;
+  try {
+    if (meta.tplId) {
+      if (!confirm(`¿Borrar el nicho «${key}»?\nLa plantilla desaparece de Proyectos (tus videos no se tocan).`)) return;
+      await api('/niches/templates/' + meta.tplId, { method: 'DELETE' });
+      S.niches = await api('/niches');
+      if (W.nicho === meta.tplId) W.nicho = '';
+    } else {
+      if (!confirm(`«${key}» es un nicho libre (sin plantilla).\nSus ${meta.ids.length} video(s) quedarán «Sin nicho». ¿Continuar?`)) return;
+      for (const pid of meta.ids)
+        await api('/projects/' + pid, { method: 'PATCH', body: { niche: '' } });
+    }
+    toast('Nicho eliminado', 'ok');
+    if (S.view === 'projects') renderProjects();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
 async function createProject() {
   if (guardDemo()) return;
   if (W.mode === 'nicho') {
@@ -540,6 +562,7 @@ async function downloadProjectScriptTxt(pid) {
 /* ── vista: PROYECTOS — ventanas PROYECTOS ▸ NICHO ▸ videos (v2.11.1) ── */
 let _PROJ_NICHO = null;   // null = ventana de nichos · key = ventana de videos del nicho
 let _NICHO_KEYS = [];     // claves de carpetas en el orden renderizado (índices estables para onclick)
+let _NICHO_META = {};     // v2.12: {clave: {tplId, ids[]}} para borrar nichos desde la tarjeta
 let _NICHO_TPL_ID = '';   // id de plantilla del nicho abierto (preselección de "＋ Nuevo video")
 
 function openNichoWindow(i) {
@@ -673,7 +696,13 @@ function renderProjects() {
     return;
   }
 
-  /* ── ventana 1 · nichos ordenados A→Z ── */
+  /* ── ventana 1 · nichos ordenados A→Z, con borrado directo ── */
+  // metadatos por tarjeta para el borrado (plantilla o nicho libre)
+  _NICHO_META = {};
+  carpetas.forEach((c, i) => {
+    const t = cats.find(t => (t.name || t.id) === c.key);
+    _NICHO_META[c.key] = { i, tplId: t ? t.id : '', ids: c.proys.map(p => p.id) };
+  });
   const nichoCards = carpetas.map((c, i) => `
     <div class="nicho-card win" onclick="openNichoWindow(${i})" title="Abrir ${esc(c.name)}">
       <span class="nc-emoji">${c.emoji}</span>
@@ -683,6 +712,7 @@ function renderProjects() {
       </span>
       <span class="nc-right">
         <span class="f-count">${c.proys.length} video${c.proys.length === 1 ? '' : 's'}</span>
+        ${c.key !== '__sin_nicho__' ? `<button class="nc-del" onclick="event.stopPropagation();delNichoCard(${i})" title="Borrar nicho">🗑️</button>` : ''}
         <span class="nc-chev">▶</span>
       </span>
     </div>`).join('');
@@ -1205,9 +1235,14 @@ async function doTrends() {
   }
 }
 
-/* ── vista: AGENTE (chat v2.1) ───────────────────────────── */
+/* ── vista: AGENTE (VÓRTICE v3 · v2.12 — entiende la fábrica y ejecuta) ── */
+const engineTag = e => !e || e === 'local' ? ''
+  : e === 'confirm' ? ' · ejecutado ✓'
+  : e === 'gemini' ? ' · Gemini'
+  : ' · ' + String(e).replace(/^nvidia:/, '').split('/').pop();
+
 function renderAgent() {
-  $('#greet').innerHTML = `Agente VÓRTICE 🤖<small id="greet-sub">Habla y el motor produce — sin tocar un solo botón</small>`;
+  $('#greet').innerHTML = `Agente VÓRTICE 🤖<small id="greet-sub">Entiende tu fábrica: pregunta, crea nichos, lanza videos, limpia fallidos</small>`;
   const msgs = S.chat.map((m, i) => {
     if (m.role === 'user')
       return `<div class="chat-msg user"><div class="bubble">${mmd(m.text)}</div><div class="who">Tú</div></div>`;
@@ -1216,24 +1251,29 @@ function renderAgent() {
     if (m.projects && m.projects.length)
       extra = m.projects.map(p =>
         `<div class="chat-proj" onclick="openProject('${p.id}')">${p.status === 'ready' ? '✅' : p.status === 'failed' ? '❌' : '🎞️'} ${esc(p.title)} <small>${esc(p.status)}</small></div>`).join('');
-    return `<div class="chat-msg bot"><div class="bubble">${mmd(m.text)}${extra}</div><div class="who">VÓRTICE${m.engine === 'gemini' ? ' · Gemini' : ''}</div></div>`;
-  }).join('');
-  const chips = ['crea un video sobre el imperio romano',
-                 'muéstrame mis proyectos',
-                 S.avatars[0] ? `crea un video de mystery con ${S.avatars[0].name}` : 'crea un video de misterios del océano',
-                 '¿qué puedes hacer?'];
+    const confirmUI = m.pending && !m.confirmDone
+      ? `<div class="chat-confirm"><button class="btn small danger" onclick="resolveConfirm(${i},true)">✓ Sí, hacerlo</button>
+         <button class="btn small ghost" onclick="resolveConfirm(${i},false)">✕ Cancelar</button></div>` : '';
+    return `<div class="chat-msg bot"><div class="bubble">${mmd(m.text)}${confirmUI}${extra}</div><div class="who">VÓRTICE${engineTag(m.engine)}</div></div>`;
+  }).join('') + (S.chatBusy
+    ? `<div class="chat-msg bot"><div class="bubble typing">VÓRTICE está pensando<span class="dots">…</span></div></div>` : '');
+  const chips = ['¿Qué puedes hacer?',
+                 'Resume el estado de mis proyectos',
+                 '¿Qué nichos tengo?',
+                 'Crea un nicho de deportes extremos',
+                 'Borra los proyectos fallidos'];
   $('#view').innerHTML = `
     <div class="chat-wrap">
       <div class="chat-scroll" id="chat-scroll">${msgs}</div>
       <div class="chat-chips">${chips.map(c => `<button class="chip" onclick="sendChat(${JSON.stringify(c).replace(/"/g, '&quot;')})">${esc(c)}</button>`).join('')}</div>
       <div class="chat-input">
-        <input type="text" id="chat-text" placeholder="Pide un video, el estado, tus proyectos…"
+        <input type="text" id="chat-text" placeholder="Pregunta o pide: crear nicho, lanzar video, borrar fallidos…"
                onkeydown="if(event.key==='Enter')sendChat()">
         <button class="btn primary" id="chat-send" onclick="sendChat()">➤</button>
       </div>
     </div>`;
   const sc = $('#chat-scroll'); sc.scrollTop = sc.scrollHeight;
-  if (!S.demo) $('#chat-text').focus();
+  if (!S.demo && !S.chatBusy) $('#chat-text').focus();
 }
 
 function mmd(text) {
@@ -1244,21 +1284,30 @@ function mmd(text) {
     .replace(/\n/g, '<br>');
 }
 
-async function sendChat(preset) {
+async function sendChat(preset, confirmPayload) {
   const inp = $('#chat-text');
-  const text = (preset !== undefined && typeof preset === 'string' ? preset : inp?.value || '').trim();
-  if (!text || S.chatBusy) return;
+  const text = (typeof preset === 'string' ? preset : inp?.value || '').trim();
+  if (S.chatBusy) return;
   if (guardDemo()) return;
-  S.chat.push({ role: 'user', text });
+  if (!confirmPayload && !text) return;
+  if (!confirmPayload) {
+    S.chat.push({ role: 'user', text });
+    if (inp) inp.value = '';
+  }
   S.chatBusy = true;
-  if (inp) inp.value = '';
   renderAgent();
   try {
-    const r = await api('/chat', { method: 'POST', body: { message: text,
-      history: S.chat.slice(-8).map(m => ({ role: m.role, text: m.text })) } });
-    const entry = { role: 'bot', text: r.reply || 'Hecho ✅', engine: r.engine,
-                    project: r.project, projects: r.projects };
-    S.chat.push(entry);
+    const body = confirmPayload
+      ? { confirm: confirmPayload }
+      : { message: text, history: S.chat.slice(-8).map(m => ({ role: m.role, text: m.text })) };
+    const r = await api('/chat', { method: 'POST', body });
+    if (r.needs_confirm && r.pending) {
+      S.chat.push({ role: 'bot', text: r.reply || '¿Confirmas?', engine: r.engine,
+                    pending: r.pending });
+    } else {
+      S.chat.push({ role: 'bot', text: r.reply || 'Hecho ✅', engine: r.engine,
+                    project: r.project, projects: r.projects });
+    }
     S.chatBusy = false;
     renderAgent();
     refreshAll();
@@ -1271,6 +1320,19 @@ async function sendChat(preset) {
     S.chat.push({ role: 'bot', text: '⚠️ ' + e.message });
     renderAgent();
   }
+}
+
+/* v2.12 · confirmación de acciones destructivas del agente */
+async function resolveConfirm(i, ok) {
+  const m = S.chat[i];
+  if (!m || !m.pending || m.confirmDone) return;
+  m.confirmDone = true;
+  if (!ok) {
+    S.chat.push({ role: 'bot', text: 'Cancelado ✋ No toqué nada.' });
+    renderAgent();
+    return;
+  }
+  await sendChat(undefined, m.pending);
 }
 
 /* ── vista: AVATARES (v2.1.1 PRO con menús desplegables) ── */

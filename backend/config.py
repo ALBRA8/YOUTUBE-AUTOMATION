@@ -21,6 +21,17 @@ load_dotenv(ENV_PATH)
 # ── Claves API (todas opcionales: el sistema degrada con gracia) ──────────
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
+# ── NVIDIA NIM (agente VÓRTICE · OpenAI-compatible) ───────────────────────
+# kimi-k3: planificación del agente, entiende el proyecto y ejecuta acciones
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()
+NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "moonshotai/kimi-k3").strip()
+NVIDIA_BASE_URL = os.getenv(
+    "NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").strip().rstrip("/")
+NVIDIA_FALLBACK_MODELS = [
+    m.strip() for m in os.getenv(
+        "NVIDIA_FALLBACK_MODELS",
+        "deepseek-ai/deepseek-v4.1-flash,moonshotai/kimi-k2.6").split(",") if m.strip()]
+
 # ── Modelos Gemini ────────────────────────────────────────────────────────
 # gemini-2.5-flash: modelo REAL con generosa cuota gratuita (el default
 # anterior "gemini-3.6-flash" no existe en la API → HTTP 404 Model Not Found)
@@ -72,10 +83,10 @@ def ffmpeg() -> str:
 # Claves que el dashboard puede escribir en .env. SECRET_KEYS se enmascaran
 # al leerlas por la API (nunca se devuelven completas).
 EDITABLE_KEYS = (
-    "GEMINI_API_KEY", "TTS_PROVIDER", "EDGE_TTS_VOICE", "GEMINI_TTS_VOICE",
-    "TTS_RATE", "WHISPER_MODEL", "WHISPER_DEVICE", "FPS",
+    "GEMINI_API_KEY", "NVIDIA_API_KEY", "TTS_PROVIDER", "EDGE_TTS_VOICE",
+    "GEMINI_TTS_VOICE", "TTS_RATE", "WHISPER_MODEL", "WHISPER_DEVICE", "FPS",
 )
-SECRET_KEYS = {"GEMINI_API_KEY"}
+SECRET_KEYS = {"GEMINI_API_KEY", "NVIDIA_API_KEY"}
 
 
 def reload() -> None:
@@ -84,8 +95,17 @@ def reload() -> None:
     global GEMINI_API_KEY, GEMINI_TEXT_MODEL, GEMINI_IMAGE_MODEL
     global GEMINI_TTS_MODEL, GEMINI_TTS_VOICE, TTS_PROVIDER, EDGE_TTS_VOICE
     global TTS_RATE, WHISPER_MODEL, WHISPER_DEVICE, FPS
+    global NVIDIA_API_KEY, NVIDIA_MODEL, NVIDIA_BASE_URL
     load_dotenv(ENV_PATH, override=True)
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+    NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()
+    NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "moonshotai/kimi-k3").strip()
+    NVIDIA_BASE_URL = os.getenv(
+        "NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").strip().rstrip("/")
+    globals()["NVIDIA_FALLBACK_MODELS"] = [
+        m.strip() for m in os.getenv(
+            "NVIDIA_FALLBACK_MODELS",
+            "deepseek-ai/deepseek-v4.1-flash,moonshotai/kimi-k2.6").split(",") if m.strip()]
     GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-2.5-flash")
     GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
     GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")

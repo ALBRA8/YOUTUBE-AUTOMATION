@@ -25,7 +25,7 @@ from pipeline.subtitles import words_to_srt
 from services import (agent as agent_svc, camera_recipes, doctor as doctor_svc,
                       gemini_client, guion_json as guion_svc,
                       library as library_svc,
-                      niches as niches_svc, scheduler,
+                      niches as niches_svc, nvidia_client, scheduler,
                       trend_research as trends_svc,
                       tts_service, url_mode, whisper_service, youtube_publish)
 from services import avatar_schema
@@ -35,7 +35,7 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("main")
 
-app = FastAPI(title="YT Automation v2.0", version="2.11.3")
+app = FastAPI(title="YT Automation v2.0", version="2.12.0")
 
 AVATARS_DIR = DATA_DIR / "avatars"
 VALID_PLATFORMS = ("youtube", "tiktok", "instagram", "facebook")
@@ -78,7 +78,9 @@ async def auth_guard(request, call_next):
 # ──────────────────────────────────────────────────────── básicos ──
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "version": "2.11.3", "gemini": gemini_client.available(),
+    return {"ok": True, "version": "2.12.0", "gemini": gemini_client.available(),
+            "nvidia": nvidia_client.available(),
+            "nvidia_model": nvidia_client.last_model(),
             "whisper": whisper_service.available(),
             "youtube": youtube_publish.configured(),
             "canales": False}  # puente WhatsApp/Telegram pendiente de re-cosecha (v2.11.2)
@@ -154,6 +156,9 @@ async def get_config():
         "env_exists": config.ENV_PATH.exists(),
         "gemini_key_set": gemini_client.available(),
         "gemini_key_masked": _mask(config.GEMINI_API_KEY),
+        "nvidia_key_set": nvidia_client.available(),
+        "nvidia_key_masked": _mask(config.NVIDIA_API_KEY),
+        "nvidia_model": config.NVIDIA_MODEL,
         "tts_provider": config.TTS_PROVIDER,
         "edge_tts_voice": config.EDGE_TTS_VOICE,
         "gemini_tts_voice": config.GEMINI_TTS_VOICE,
@@ -177,7 +182,7 @@ async def save_config(body: dict):
         if key not in config.EDITABLE_KEYS:
             continue
         val = str(value).strip()
-        if key == "GEMINI_API_KEY":
+        if key in ("GEMINI_API_KEY", "NVIDIA_API_KEY"):
             # Enmascarado (el input placeholder) = NO tocar la clave guardada.
             # Vacío = borrado explícito (botón "Quitar clave").
             if val.startswith("•") or "…" in val:
@@ -452,18 +457,42 @@ async def avatars_image_get(aid: str):
     return FileResponse(av["image_path"], media_type="image/png")
 
 
-# ────────────────────────────── chat-agente (v2.1) ──
+# ────────────────────────────── chat-agente (v2.12 · VÓRTICE v3) ──
 @app.post("/api/chat")
 async def chat(body: dict):
-    """Agente conversacional: traduce lenguaje natural en acciones reales del
-    motor (crear videos, consultar proyectos/estado)."""
+    """Agente VÓRTICE: entiende la fábrica (contexto vivo) y ejecuta acciones
+    reales. Acciones destructivas exigen confirmación del usuario: la primera
+    llamada devuelve needs_confirm+pending; la ejecución real llega en la
+    segunda llamada con {confirm: {action, params}}."""
+    confirm = body.get("confirm") or None
+    if confirm:
+        action = str(confirm.get("action") or "")
+        if action not in agent_svc.DESTRUCTIVE_ACTIONS:
+            raise HTTPException(400, "acción no confirmable")
+        plan_out = {"action": action, "params": confirm.get("params") or {},
+                    "reply": "", "engine": "confirm"}
+        result = await agent_svc.execute(plan_out, db, orchestrator, db.list_avatars())
+        result["engine"] = "confirm"
+        return result
     message = (body.get("message") or "").strip()
     history = body.get("history") or []
     if not message:
         raise HTTPException(400, "mensaje vacío")
-    plan = await agent_svc.plan(message, history, db.list_avatars())
-    result = await agent_svc.execute(plan, db, orchestrator, db.list_avatars())
-    result["engine"] = plan.get("engine", "local")
+    plan_out = await agent_svc.plan(message, history, db.list_avatars(), db)
+    if plan_out.get("action") in agent_svc.DESTRUCTIVE_ACTIONS:
+        what = (plan_out.get("params", {}).get("name")
+                or plan_out.get("params", {}).get("project_name") or "").strip()
+        if plan_out["action"] == "cleanup_failed":
+            ask = "¿Confirmas que borre TODOS los proyectos fallidos?"
+        else:
+            ask = f"¿Confirmas borrar «{what}»?"
+        return {"reply": f"{plan_out.get('reply', '')}\n\n{ask}",
+                "needs_confirm": True,
+                "pending": {"action": plan_out["action"],
+                            "params": plan_out.get("params", {})},
+                "engine": plan_out.get("engine", "local")}
+    result = await agent_svc.execute(plan_out, db, orchestrator, db.list_avatars())
+    result["engine"] = plan_out.get("engine", "local")
     return result
 
 
@@ -618,7 +647,7 @@ async def patch_project(pid: str, body: dict):
     if not p:
         raise HTTPException(404, "no existe")
     fields = {k: v for k, v in body.items()
-              if k in ("title", "style", "format", "voice", "tts_provider")}
+              if k in ("title", "style", "format", "voice", "tts_provider", "niche")}
     # Validar style si viene en el PATCH
     if "style" in fields:
         valid_style_ids = {s["id"] for s in STYLES}

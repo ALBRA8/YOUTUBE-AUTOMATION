@@ -298,6 +298,12 @@ code.mini { background: var(--bg2); border: 1px solid var(--border); border-radi
 .chat-msg.bot { align-self: flex-start; }
 .chat-msg.bot .bubble { background: var(--card-solid); border-bottom-left-radius: 5px; }
 .chat-proj { margin-top: 9px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--bg2); cursor: pointer; font-size: 12.8px; font-weight: 700; display: flex; align-items: center; gap: 7px; transition: border-color .15s; }
+
+/* v2.12 · confirmación de acciones destructivas + indicador escribiendo */
+.chat-confirm { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.chat-msg .bubble.typing { color: var(--muted); font-style: italic; }
+.chat-msg .bubble.typing .dots { animation: blink 1.2s infinite; }
+@keyframes blink { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
 .chat-proj:hover { border-color: var(--accent); }
 .chat-proj small { color: var(--muted); font-weight: 600; margin-left: auto; }
 .chat-chips { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 0 6px; }
@@ -431,6 +437,13 @@ code.mini { background: var(--bg2); border: 1px solid var(--border); border-radi
   padding: 2px 9px; border-radius: 999px; flex-shrink: 0; }
 .nicho-card .nc-chev { font-size: 10px; color: var(--muted); transition: .16s; }
 .nicho-card:hover .nc-chev { color: var(--accent2); transform: translateX(3px); }
+
+/* v2.12 · borrado directo del nicho desde su tarjeta */
+.nc-del { border: 1px solid transparent; background: transparent; cursor: pointer;
+  font-size: 12px; line-height: 1; padding: 5px 6px; border-radius: 8px;
+  opacity: .35; transition: .16s; flex-shrink: 0; }
+.nicho-card:hover .nc-del { opacity: 1; }
+.nc-del:hover { background: rgba(255, 84, 112, .14); border-color: rgba(255, 84, 112, .45); }
 
 /* ventana 2 · videos del nicho como tarjetas (portada + badges + acciones) */
 .nicho-window-head { display: flex; align-items: center; gap: 12px;

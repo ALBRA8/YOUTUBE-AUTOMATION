@@ -1,85 +1,168 @@
 """
-YOUTUBE AUTOMATION v2.0 — Agente conversacional (módulo nuevo en v2.1)
-Convierte lenguaje natural en acciones reales del motor: crear videos,
-consultar proyectos, estado, ayuda. Diseño híbrido como todo el sistema:
+YOUTUBE AUTOMATION v2.0 — Agente VÓRTICE v3 (v2.12.0)
+Un agente que ENTIENDE el proyecto: recibe una descripción profunda de la
+fábrica + un contexto vivo (proyectos, nichos, avatares, estados) y puede
+responder preguntas técnicas Y ejecutar tareas repetitivas contra el motor.
 
-- Con GEMINI_API_KEY: Gemini decide la intención (JSON estructurado) y
-  redacta la respuesta con personalidad de productor.
-- Sin clave: fallback local $0 con detección de intención por regex en
-  español. El chat NUNCA se rompe sin claves (misma filosofía del motor).
+Cadena de inteligencia (siempre degrada con gracia, nunca rompe el chat):
+1. NVIDIA NIM (kimi-k3 → deepseek-v4.1-flash → kimi-k2.6) con failover
+2. Gemini 2.5-flash (si hay GEMINI_API_KEY)
+3. Regex local $0 (última línea de defensa)
+
+Acciones destructivas (delete_niche, delete_project, cleanup_failed) NO se
+ejecutan directo: plan() las devuelve y el dashboard pide confirmación al
+usuario antes de reenviar {confirm: {...}}.
 """
 import json
 import logging
 import re
 
-from services import gemini_client
+from services import gemini_client, niches as niches_svc, nvidia_client
 
 log = logging.getLogger("agent")
 
-VALID_ACTIONS = ("create_video", "list_projects", "project_status", "help", "none")
+VALID_ACTIONS = ("create_video", "create_niche", "delete_niche", "delete_project",
+                 "cleanup_failed", "list_projects", "list_niches",
+                 "project_status", "help", "none")
+DESTRUCTIVE_ACTIONS = ("delete_niche", "delete_project", "cleanup_failed")
 VALID_PLATFORMS = {"youtube", "tiktok", "instagram", "facebook"}
 
-SYSTEM = (
-    "Eres VÓRTICE, el agente de producción de YT AUTOMATION v2.0 — una fábrica "
-    "real de videos para YouTube/TikTok que funciona con coste $0. "
-    "Tu trabajo: entender qué quiere el usuario y DEVOLVER UN JSON VÁLIDO "
-    "(sin markdown, sin texto fuera del JSON) con este esquema exacto:\n"
-    '{"reply": "texto breve y útil para el usuario (máx 60 palabras, español, '
-    'cercano, 1-2 emojis como máximo)", '
-    '"action": "create_video|list_projects|project_status|help|none", '
-    '"params": {"idea": "...", "style": "id-de-estilo", "format": "short|long", '
-    '"avatar": "nombre de avatar si el usuario lo menciona", '
-    '"platforms": ["youtube","tiktok"], "project_name": "..."}}\n'
-    "Reglas de decisión:\n"
-    "- Si el usuario pide un video / narrar / hablar de un tema → action=create_video "
-    "con params.idea = el tema condensado en una frase viral.\n"
-    "- Si pregunta por sus proyectos / qué ha hecho → action=list_projects.\n"
-    "- Si pregunta por el estado/avance de un video concreto → action=project_status "
-    "con params.project_name (palabras clave del título).\n"
-    "- Si pregunta qué puedes hacer / cómo funciona → action=help.\n"
-    "- Si es charla pequeña o algo que no puedes hacer → action=none y explica "
-    "en reply lo que SÍ puedes hacer (máx 40 palabras).\n"
-    "Estilos válidos para params.style: auto (RECOMENDADO y default cuando el "
-    "usuario no menciona estilo — el sistema elige una estética coherente según "
-    "el tema), graphic-novel, neo-anime, raw-reality, pixar-3d, cine-blockbuster, "
-    "epica-biblica, terror-cartoon, pizarra-educativa, vector-flat, retro-anime-90s, "
-    "unreal-engine-5, analog-horror, renaissance-oil, retro-americana, crude-stickman, "
-    "cyber-glitch, acuarela-magica, dark-fantasy, grand-theft, custom-studio, "
-    "mri-brainrot, claymation, barroqueremax, holo-ghost, papercraft. "
-    "Si el usuario no indica estilo, usa params.style = 'auto'. Si pide un estilo "
-    "concreto de la lista, úsalo y explica en reply qué look dará (máx 20 palabras). "
-    "Nunca inventes estilos fuera de la lista."
+# ─────────────────────────── el cerebro: qué ES esta fábrica ──────────────
+SYSTEM_BRAIN = (
+    "Eres VÓRTICE, el agente de YT AUTOMATION v2 — una fábrica REAL de videos "
+    "para YouTube/TikTok que corre en la máquina del usuario con coste $0.\n"
+    "Cómo funciona la fábrica (estäla siempre presente al responder):\n"
+    "• Proyectos: cada video es un proyecto con estados draft → processing "
+    "(guion → imágenes → locución TTS → subtítulos → montaje MP4) → ready → "
+    "published. `failed` = paso roto; `step_label` dice el paso exacto.\n"
+    "• Nichos: carpetas temáticas. Un nicho-plantilla trae emoji, descripción "
+    "y prompt predeterminado (el motor compone idea = plantilla + ángulo "
+    "anti-repetición). También existen nichos libres (solo el texto del campo "
+    "niche de proyectos creados sin plantilla). «Sin nicho» = sin carpeta.\n"
+    "• Formatos: short (9:16) y long (16:9). Estilos visuales: auto + catálogo "
+    "(graphic-novel, neo-anime, pixar-3d, terror-cartoon, etc.). Avatares: "
+    "personajes DNA con look + voz propios.\n"
+    "• TTS: edge (gratuito ilimitado) o gemini (premium). Subtítulos estilo "
+    "hormozi. Publicación a YouTube opcional (token aparte).\n"
+    "• La UI tiene: Proyectos (carpetas por nicho → tarjetas de video), Crear "
+    "(asistente), Biblioteca, Avatares, Ajustes (claves en .env) y este chat.\n"
+    "Tu trabajo: entender al usuario y DEVOLVER SOLO UN JSON VÁLIDO (sin "
+    "markdown, sin texto fuera del JSON) con este esquema exacto:\n"
+    '{"reply": "respuesta breve y útil (español, cercano, máx 80 palabras, '
+    "1-2 emojis), SIEMPRE responde algo concreto usando el contexto si lo hay\", "
+    '"action": "create_video|create_niche|delete_niche|delete_project|'
+    'cleanup_failed|list_projects|list_niches|project_status|help|none", '
+    '"params": {…}}\n'
+    "Acciones (params):\n"
+    '- create_video: {"idea": "tema condensado", "format": "short|long", '
+    '"style": "auto|id-de-estilo", "nicho": "nombre exacto de nicho si aplica", '
+    '"platforms": ["youtube","tiktok"]}\n'
+    '- create_niche: {"name": "nombre", "emoji": "📁", "description": "corta", '
+    '"prompt": "plantilla de prompt para el motor"}\n'
+    "- delete_niche: {\"name\": \"nombre EXACTO del nicho a borrar\"}  [destructiva]\n"
+    '- delete_project: {"project_name": "palabras del título"}  [destructiva]\n'
+    "- cleanup_failed: {} — borra TODOS los proyectos failed  [destructiva]\n"
+    "- list_projects / list_niches / project_status: {}\n"
+    "- help / none: {} — none para charla o peticiones fuera de tu alcance "
+    "(explica en reply qué SÍ puedes hacer)\n"
+    "Reglas:\n"
+    "- Si piden borrar/limpiar usa la acción destructiva exacta; NUNCA digas "
+    "que ya lo hiciste — el sistema pedirá confirmación al usuario.\n"
+    "- Nombres de nicho: cópialos TAL CUAL del contexto (respetando tildes).\n"
+    "- Si no hay datos en el contexto, dilo con honestidad; no inventes "
+    "proyectos ni nichos.\n"
+    "- Nunca inventes estilos fuera del catálogo; si el usuario no pide "
+    "estilo usa 'auto'.\n"
 )
 
 _HELP_TEXT = (
-    "Soy VÓRTICE 🤖 — tu agente de producción. Puedo:\n"
-    "🎬 **Crear un video**: «crea un video sobre el imperio romano»\n"
-    "🗂️ **Ver tus proyectos**: «muéstrame mis proyectos»\n"
-    "📊 **Estado**: «¿cómo va el video del imperio?»\n"
-    "🎭 Todo se produce en tu motor real: guion → imágenes → locución → "
-    "subtítulos → MP4. Coste $0. Prueba: «crea un video de 45s sobre misterios "
-    "del océano con estilo terror cartoon»"
+    "Soy VÓRTICE 🤖 — entiendo toda la fábrica y ejecuto por ti:\n"
+    "🎬 **Crear video**: «crea un video sobre el imperio romano»\n"
+    "🗂️ **Nichos**: «crea un nicho de finanzas», «¿qué nichos tengo?», "
+    "«borra el nicho Tecnología»\n"
+    "📊 **Estado**: «¿cómo van mis proyectos?», «resume el estado»\n"
+    "🧹 **Limpieza**: «borra los proyectos fallidos» (siempre pido confirmación "
+    "antes de destruir algo)\n"
+    "❓ **Técnico**: «¿por qué falló X?», «¿cómo funciona la fábrica?»"
 )
+
+
+# ─────────────────────────── contexto vivo del sistema ────────────────────
+def build_context(db) -> str:
+    """Snapshot real de la fábrica para inyectar en el system prompt."""
+    try:
+        projects = db.list_projects(limit=40)
+    except Exception:  # noqa: BLE001
+        projects = []
+    try:
+        tpl = niches_svc.list_templates()
+    except Exception:  # noqa: BLE001
+        tpl = []
+    by_niche: dict[str, int] = {}
+    rows = []
+    for p in projects[:40]:
+        n = (p.get("niche") or "").strip() or "Sin nicho"
+        by_niche[n] = by_niche.get(n, 0) + 1
+        rows.append(f"  - [{p.get('status', '?')}] «{p.get('title', '?')[:60]}» "
+                    f"nicho={n} fmt={p.get('format', '?')} "
+                    f"paso={p.get('step_label') or '-'} ({p.get('progress', 0)}%)")
+    niches_lines = []
+    for t in tpl:
+        cnt = by_niche.get(t.get("name", ""), 0)
+        d = (t.get("description") or "").strip()
+        niches_lines.append(f"  - {t.get('emoji', '📁')} {t.get('name')} "
+                            f"({cnt} videos){' — ' + d[:70] if d else ''}")
+    free = [n for n in by_niche if n != "Sin nicho"
+            and not any(t.get("name") == n for t in tpl)]
+    for n in free:
+        niches_lines.append(f"  - 📁 {n} ({by_niche[n]} videos) [nicho libre, sin plantilla]")
+    if by_niche.get("Sin nicho"):
+        niches_lines.append(f"  - 🗃️ Sin nicho ({by_niche['Sin nicho']} videos)")
+    counts: dict[str, int] = {}
+    for p in projects:
+        counts[p.get("status", "?")] = counts.get(p.get("status", "?"), 0) + 1
+    try:
+        avs = db.list_avatars()
+        av_line = ", ".join(a["name"] for a in avs[:8]) or "ninguno"
+    except Exception:  # noqa: BLE001
+        av_line = "ninguno"
+    ctx = ["# ESTADO ACTUAL DE LA FÁBRICA (datos reales, ahora mismo)",
+           f"Proyectos: {len(projects)} totales — "
+           + (", ".join(f"{k}={v}" for k, v in sorted(counts.items())) or "vacío")]
+    if rows:
+        ctx.append("Últimos proyectos:\n" + "\n".join(rows))
+    else:
+        ctx.append("No hay proyectos todavía (DB limpia).")
+    ctx.append("Nichos:\n" + ("\n".join(niches_lines) or "  (ninguno)"))
+    ctx.append(f"Avatares: {av_line}")
+    return "\n".join(ctx)
 
 
 # ─────────────────────────── planificación de intención ───────────────────
 async def plan(message: str, history: list[dict] | None = None,
-               avatars: list[dict] | None = None) -> dict:
-    """Devuelve {reply, action, params}. Nunca lanza excepción."""
+               avatars: list[dict] | None = None, db=None) -> dict:
+    """Devuelve {reply, action, params, engine}. Nunca lanza excepción."""
     message = (message or "").strip()[:2000]
     if not message:
-        return {"reply": _HELP_TEXT, "action": "help", "params": {}}
+        return {"reply": _HELP_TEXT, "action": "help", "params": {}, "engine": "local"}
 
+    context = build_context(db) if db is not None else ""
+    system = SYSTEM_BRAIN + ("\n\n" + context if context else "")
+
+    if nvidia_client.available():
+        try:
+            return await _plan_nvidia(message, history or [], system)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Agente NVIDIA falló (%s) — pruebo Gemini/local", str(e)[:120])
     if gemini_client.available():
         try:
-            out = await _plan_gemini(message, history or [])
+            out = await _plan_gemini(message, history or [], system)
         except Exception as e:  # noqa: BLE001
             log.warning("Agent Gemini falló (%s) — uso fallback local", str(e)[:120])
             out = _plan_local(message)
     else:
         out = _plan_local(message)
-    # Detección de avatar por nombre (funciona con y sin Gemini): si el usuario
-    # menciona un personaje existente, se vincula al video que se va a crear.
+    # Detección de avatar por nombre (funciona en cualquier motor)
     if out.get("action") == "create_video" and not out["params"].get("avatar"):
         low = message.lower()
         for a in (avatars or []):
@@ -89,12 +172,28 @@ async def plan(message: str, history: list[dict] | None = None,
     return out
 
 
-async def _plan_gemini(message: str, history: list[dict]) -> dict:
+async def _plan_nvidia(message: str, history: list[dict], system: str) -> dict:
+    msgs = [{"role": "system", "content": system}]
+    for h in history[-6:]:
+        if h.get("text"):
+            msgs.append({"role": "user" if h.get("role") == "user" else "assistant",
+                         "content": str(h["text"])[:400]})
+    msgs.append({"role": "user", "content": message})
+    raw = await nvidia_client.complete(msgs, temperature=0.2, max_tokens=4096)
+    out = _parse_plan(raw, message, model=nvidia_client.last_model())
+    return out
+
+
+async def _plan_gemini(message: str, history: list[dict], system: str) -> dict:
     convo = "\n".join(f"{'Usuario' if h.get('role') == 'user' else 'VÓRTICE'}: "
                       f"{h.get('text', '')[:300]}" for h in history[-6:])
     prompt = (f"Conversación previa:\n{convo}\n\n" if convo else "") + \
              f"Mensaje nuevo del usuario: «{message}»\n\nDevuelve SOLO el JSON."
-    raw = await gemini_client.generate_text(prompt, system=SYSTEM)
+    raw = await gemini_client.generate_text(prompt, system=system)
+    return _parse_plan(raw, message, model="gemini")
+
+
+def _parse_plan(raw: str, message: str, model: str) -> dict:
     data = json.loads(_extract_json(raw))
     reply = str(data.get("reply") or "").strip() or "Hecho ✅"
     action = data.get("action") if data.get("action") in VALID_ACTIONS else "none"
@@ -102,7 +201,7 @@ async def _plan_gemini(message: str, history: list[dict]) -> dict:
     params = _sanitize_params(params)
     if action == "create_video" and not params.get("idea"):
         params["idea"] = message  # el propio mensaje sirve de semilla
-    return {"reply": reply, "action": action, "params": params, "engine": "gemini"}
+    return {"reply": reply, "action": action, "params": params, "engine": model}
 
 
 def _extract_json(text: str) -> str:
@@ -168,11 +267,21 @@ def _sanitize_params(params: dict) -> dict:
         p["style"] = str(params["style"])[:40]
     if params.get("avatar"):
         p["avatar"] = str(params["avatar"])[:60]
+    if params.get("nicho"):
+        p["nicho"] = str(params["nicho"])[:60]
+    if params.get("name"):
+        p["name"] = str(params["name"])[:60]
+    if params.get("emoji"):
+        p["emoji"] = str(params["emoji"])[:8]
+    if params.get("description"):
+        p["description"] = str(params["description"])[:200]
+    if params.get("prompt"):
+        p["prompt"] = str(params["prompt"])[:800]
+    if params.get("project_name"):
+        p["project_name"] = str(params["project_name"])[:80]
     plats = params.get("platforms")
     if isinstance(plats, list):
         p["platforms"] = [x for x in plats if x in VALID_PLATFORMS][:4]
-    if params.get("project_name"):
-        p["project_name"] = str(params["project_name"])[:80]
     return p
 
 
@@ -194,25 +303,120 @@ async def execute(plan_out: dict, db, orchestrator, avatars: list[dict]) -> dict
 
     if action == "create_video":
         avatar = _match_avatar(params.get("avatar"), avatars)
-        style = params.get("style") or (avatar or {}).get("style") or "auto"
-        meta = {"idea": params.get("idea") or "un video viral",
-                "via": "chat-agente"}
-        voice = (avatar or {}).get("voice")
-        tts_provider = (avatar or {}).get("tts_provider")
-        platforms = params.get("platforms") or ["youtube", "tiktok"]
-        project = db.create_project(
-            title=(params.get("idea") or "Video del chat")[:60],
-            mode="idea", style=style, format=params.get("format", "short"),
-            voice=voice, tts_provider=tts_provider, meta=meta,
-            avatar_id=(avatar or {}).get("id"),
-            platforms=[p for p in platforms if p in VALID_PLATFORMS] or ["youtube"])
+        nicho = (params.get("nicho") or "").strip()
+        tpl = niches_svc.get_template(nicho) if nicho else None
+        if tpl:  # nicho predefinido → replica la herencia del endpoint POST
+            project = db.create_project(
+                title=(params.get("idea") or f"{tpl['name']}: video nuevo")[:60],
+                mode="nicho", niche=tpl.get("name"),
+                style=tpl.get("style") or "auto",
+                format=tpl.get("format") or "short",
+                voice=tpl.get("voice") or None,
+                tts_provider=(avatar or {}).get("tts_provider"),
+                avatar_id=(avatar or {}).get("id"),
+                meta={"idea": niches_svc.compose_idea(tpl, params.get("idea")),
+                      "niche_template": tpl["id"], "via": "chat-agente",
+                      "transitions": True, "style_reference": True,
+                      "subtitle_style": tpl.get("subtitles") or "hormozi"},
+                platforms=params.get("platforms") or ["youtube"])
+        else:
+            style = params.get("style") or (avatar or {}).get("style") or "auto"
+            project = db.create_project(
+                title=(params.get("idea") or "Video del chat")[:60],
+                mode="idea", style=style, format=params.get("format", "short"),
+                meta={"idea": params.get("idea") or "un video viral", "via": "chat-agente",
+                      "transitions": True, "style_reference": True},
+                voice=(avatar or {}).get("voice"),
+                tts_provider=(avatar or {}).get("tts_provider"),
+                avatar_id=(avatar or {}).get("id"),
+                platforms=params.get("platforms") or ["youtube", "tiktok"])
         job_id = await orchestrator.start_pipeline(project["id"])
-        sname = _style_name(style)
-        extra = f" Estilo: {sname}." if sname else ""
+        extra = f" Nicho: {tpl['name']}." if tpl else ""
+        if not tpl:
+            sname = _style_name(params.get("style") or "auto")
+            extra += f" Estilo: {sname}." if sname else ""
         if avatar:
             extra += f" Personaje: {avatar['name']}."
         return {"reply": (reply or f"Producción lanzada 🚀{extra}"),
                 "action": "create_video", "project": project, "job_id": job_id}
+
+    if action == "create_niche":
+        name = (params.get("name") or "").strip()
+        if not name:
+            return {"reply": "Dime el nombre del nicho y lo creo 🗂️", "action": "none"}
+        existing = niches_svc.get_template(name)
+        entry = niches_svc.upsert_template({
+            "name": name, "emoji": params.get("emoji") or "📁",
+            "description": params.get("description") or "",
+            "prompt": params.get("prompt") or "",
+            "style": params.get("style") or "auto",
+            "format": params.get("format") or "short"})
+        verb = "actualizado" if existing else "creado"
+        return {"reply": reply or f"Nicho «{entry['name']}» {verb} {entry['emoji']} — "
+                                  f"ya aparece en Proyectos. ¿Creamos el primer video?",
+                "action": "create_niche", "niche": entry}
+
+    if action == "delete_niche":
+        name = (params.get("name") or "").strip()
+        if not name:
+            return {"reply": "¿Qué nicho borro? Dime su nombre.", "action": "none"}
+        tpl = niches_svc.get_template(name)
+        if tpl:
+            niches_svc.delete_template(tpl["id"])
+            return {"reply": reply or f"Plantilla «{tpl['name']}» {tpl.get('emoji', '')} "
+                                      f"eliminada. Los videos siguen en «Sin nicho» "
+                                      f"si ya no tienen plantilla.",
+                    "action": "delete_niche", "deleted": tpl["name"]}
+        # nicho libre: quitar el campo niche a sus proyectos
+        proys = [p for p in db.list_projects(limit=100)
+                 if (p.get("niche") or "").strip().lower() == name.lower()]
+        for p in proys:
+            db.update_project(p["id"], niche="")
+        if not proys:
+            return {"reply": f"No encontré ningún nicho «{name}».", "action": "none"}
+        return {"reply": reply or f"Nicho libre «{name}» eliminado: "
+                                  f"{len(proys)} video(s) pasaron a «Sin nicho».",
+                "action": "delete_niche", "deleted": name}
+
+    if action == "delete_project":
+        name = (params.get("project_name") or "").lower().strip()
+        projects = db.list_projects(limit=100)
+        target = None
+        if name:
+            words = [w for w in re.split(r"\W+", name) if len(w) > 3][:3]
+            for p in projects:
+                if all(w in p["title"].lower() for w in words) and words:
+                    target = p
+                    break
+            target = target or next(
+                (p for p in projects
+                 if any(w in p["title"].lower() for w in words)), None)
+        if not target:
+            return {"reply": f"No encontré ningún proyecto «{name or '?'}».",
+                    "action": "none"}
+        db.delete_project(target["id"])
+        return {"reply": reply or f"Proyecto «{target['title']}» eliminado 🗑️",
+                "action": "delete_project", "deleted": target["title"]}
+
+    if action == "cleanup_failed":
+        failed = [p for p in db.list_projects(limit=100) if p.get("status") == "failed"]
+        for p in failed:
+            db.delete_project(p["id"])
+        if not failed:
+            return {"reply": "No había proyectos fallidos — todo limpio ✨",
+                    "action": "cleanup_failed", "deleted_count": 0}
+        return {"reply": reply or f"Listo 🧹 eliminé {len(failed)} proyecto(s) "
+                                  f"fallido(s). La fábrica queda limpia.",
+                "action": "cleanup_failed", "deleted_count": len(failed)}
+
+    if action == "list_niches":
+        tpl = niches_svc.list_templates()
+        if not tpl:
+            return {"reply": "No hay nichos todavía — créame uno: «crea un nicho "
+                             "de deportes extremos» 🗂️", "action": "list_niches"}
+        lines = [f"{t.get('emoji', '📁')} **{t.get('name')}**" for t in tpl]
+        return {"reply": reply or "Tus nichos 🗂️:\n" + "\n".join(lines),
+                "action": "list_niches", "niches": tpl}
 
     if action == "list_projects":
         projects = db.list_projects(limit=6)
