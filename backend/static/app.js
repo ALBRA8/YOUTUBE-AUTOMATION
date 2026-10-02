@@ -9,7 +9,8 @@ const S = {            // estado global
   demo: false, health: {}, styles: [], settings: {}, stats: {},
   projects: [], project: null, factory: null, ideas: [], avatars: [],
   niches: [], library: [],
-  chat: [], chatBusy: false,
+  chat: [], chatBusy: false, chatImage: null,
+  cerebros: [], cerebroActivo: null,
   wizard: null, es: null,
 };
 
@@ -1245,7 +1246,7 @@ function renderAgent() {
   $('#greet').innerHTML = `Agente VÓRTICE 🤖<small id="greet-sub">Entiende tu fábrica: pregunta, crea nichos, lanza videos, limpia fallidos</small>`;
   const msgs = S.chat.map((m, i) => {
     if (m.role === 'user')
-      return `<div class="chat-msg user"><div class="bubble">${mmd(m.text)}</div><div class="who">Tú</div></div>`;
+      return `<div class="chat-msg user"><div class="bubble">${m.img ? `<img class="chat-img" src="${m.img}" alt="adjunto">` : ''}${mmd(m.text)}</div><div class="who">Tú</div></div>`;
     let extra = '';
     if (m.project) extra += `<div class="chat-proj" onclick="openProject('${m.project.id}')">🎬 ${esc(m.project.title)} <small>ver proyecto →</small></div>`;
     if (m.projects && m.projects.length)
@@ -1262,19 +1263,61 @@ function renderAgent() {
                  '¿Qué nichos tengo?',
                  'Crea un nicho de deportes extremos',
                  'Borra los proyectos fallidos'];
+  // v2.12.1 · barra de CEREBROS (multi-modelo NVIDIA con estado vivo)
+  const act = S.cerebros.find(c => c.alias === S.cerebroActivo);
+  const cerebroBar = S.cerebros.length ? `
+    <div class="cerebro-bar">
+      <span class="cb-label">🧠 Cerebro:</span>
+      ${S.cerebros.map(c => `
+        <button class="cb-chip ${c.active ? 'active' : ''}" onclick="pickCerebro('${c.alias}')"
+                title="${esc(c.desc)}${c.error ? ' — ' + esc(c.error) : ''}">
+          ${c.emoji} ${esc(c.name)}<i class="cb-dot ${c.status}"></i>${c.status === 'ok' ? `<small>${c.latency}s</small>` : ''}${c.vision ? '<small>👁️</small>' : ''}
+        </button>`).join('')}
+    </div>` : '';
+  const imgPreview = S.chatImage
+    ? `<div class="chat-imgprev"><img src="${S.chatImage}" alt="preview">
+       <button class="modal-x" onclick="quitChatImg()" title="Quitar imagen">✕</button>
+       <small class="cb-label">imagen adjunta — pídeme que la analice</small></div>` : '';
   $('#view').innerHTML = `
     <div class="chat-wrap">
       <div class="chat-scroll" id="chat-scroll">${msgs}</div>
       <div class="chat-chips">${chips.map(c => `<button class="chip" onclick="sendChat(${JSON.stringify(c).replace(/"/g, '&quot;')})">${esc(c)}</button>`).join('')}</div>
+      ${cerebroBar}
+      ${imgPreview}
       <div class="chat-input">
+        ${act && act.vision ? `<button class="cb-clip" onclick="$('#chat-file').click()" title="Adjuntar imagen (este cerebro ve 👁️)">📎</button>` : ''}
         <input type="text" id="chat-text" placeholder="Pregunta o pide: crear nicho, lanzar video, borrar fallidos…"
                onkeydown="if(event.key==='Enter')sendChat()">
         <button class="btn primary" id="chat-send" onclick="sendChat()">➤</button>
       </div>
+      <input type="file" id="chat-file" accept="image/png,image/jpeg,image/webp" style="display:none" onchange="onChatFile(this)">
     </div>`;
   const sc = $('#chat-scroll'); sc.scrollTop = sc.scrollHeight;
   if (!S.demo && !S.chatBusy) $('#chat-text').focus();
 }
+
+/* v2.12.1 · cambiar de cerebro (persistente en el backend) */
+async function pickCerebro(alias) {
+  try {
+    const r = await api('/cerebros', { method: 'POST', body: { alias } });
+    toast(r.message || 'Cerebro cambiado', 'ok');
+    const cb = await api('/cerebros');
+    S.cerebros = cb.cerebros || []; S.cerebroActivo = cb.activo;
+    renderAgent();
+  } catch (e) { toast('⚠️ ' + e.message); }
+}
+
+/* v2.12.1 · adjuntar imagen para cerebros con visión */
+function onChatFile(input) {
+  const f = input.files && input.files[0];
+  input.value = '';
+  if (!f) return;
+  if (f.size > 4 * 1024 * 1024) { toast('⚠️ Imagen demasiado grande (máx 4MB)'); return; }
+  const rd = new FileReader();
+  rd.onload = () => { S.chatImage = String(rd.result); renderAgent(); };
+  rd.readAsDataURL(f);
+}
+function quitChatImg() { S.chatImage = null; renderAgent(); }
 
 function mmd(text) {
   // mini-markdown: **negrita**, saltos y listas simples → HTML seguro
@@ -1291,7 +1334,7 @@ async function sendChat(preset, confirmPayload) {
   if (guardDemo()) return;
   if (!confirmPayload && !text) return;
   if (!confirmPayload) {
-    S.chat.push({ role: 'user', text });
+    S.chat.push({ role: 'user', text, img: S.chatImage || undefined });
     if (inp) inp.value = '';
   }
   S.chatBusy = true;
@@ -1299,7 +1342,8 @@ async function sendChat(preset, confirmPayload) {
   try {
     const body = confirmPayload
       ? { confirm: confirmPayload }
-      : { message: text, history: S.chat.slice(-8).map(m => ({ role: m.role, text: m.text })) };
+      : { message: text, history: S.chat.slice(-8).map(m => ({ role: m.role, text: m.text })),
+          cerebro: S.cerebroActivo || undefined, image: S.chatImage || undefined };
     const r = await api('/chat', { method: 'POST', body });
     if (r.needs_confirm && r.pending) {
       S.chat.push({ role: 'bot', text: r.reply || '¿Confirmas?', engine: r.engine,
@@ -1308,6 +1352,7 @@ async function sendChat(preset, confirmPayload) {
       S.chat.push({ role: 'bot', text: r.reply || 'Hecho ✅', engine: r.engine,
                     project: r.project, projects: r.projects });
     }
+    S.chatImage = null;
     S.chatBusy = false;
     renderAgent();
     refreshAll();
@@ -1662,6 +1707,7 @@ async function refreshAll() {
   try { S.avatars = await api('/avatars'); } catch { S.avatars = []; }
   try { S.niches = await api('/niches'); } catch { S.niches = []; }
   try { S.library = await api('/library'); } catch { S.library = []; }
+  try { const cb = await api('/cerebros'); S.cerebros = cb.cerebros || []; S.cerebroActivo = cb.activo; } catch { /* sin clave NVIDIA */ }
   refreshSidebar();
 }
 

@@ -477,3 +477,31 @@ code.mini { background: var(--bg2); border: 1px solid var(--border); border-radi
 .vc-actions { margin-top: auto; display: flex; align-items: center; gap: 7px; }
 .vc-actions .btn { flex: 1; display: flex; justify-content: center; }
 .vc-actions .vc-del { flex: 0 0 auto; }
+
+/* ── v2.12.1 · CEREBROS (selector de modelo NVIDIA en el chat) ── */
+.cerebro-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  margin-bottom: 8px; }
+.cb-label { font-size: 11.5px; color: var(--muted); margin-right: 2px; }
+.cb-chip { display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--bg2); color: var(--muted); font-size: 11.5px;
+  cursor: pointer; transition: border-color .15s, color .15s; }
+.cb-chip small { font-size: 9.8px; opacity: .75; }
+.cb-chip:hover { color: var(--text); border-color: var(--accent); }
+.cb-chip.active { color: var(--text); border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.cb-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block;
+  flex: 0 0 auto; }
+.cb-dot.ok { background: #34d399; }
+.cb-dot.fail { background: #f87171; }
+.cb-dot.untested { background: #9ca3af; opacity: .45; }
+.cb-clip { flex: 0 0 auto; width: 36px; height: 38px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--bg2); cursor: pointer;
+  font-size: 15px; color: var(--muted); }
+.cb-clip:hover { color: var(--text); border-color: var(--accent); }
+.chat-imgprev { display: flex; align-items: center; gap: 9px;
+  margin-bottom: 8px; }
+.chat-imgprev img { width: 52px; height: 52px; object-fit: cover;
+  border-radius: 10px; border: 1px solid var(--border); }
+.chat-img { max-width: 190px; max-height: 140px; border-radius: 10px;
+  border: 1px solid var(--border); display: block; margin-bottom: 6px; }

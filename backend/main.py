@@ -6,6 +6,7 @@ import asyncio
 import io
 import json
 import logging
+import re
 import shutil
 import zipfile
 from pathlib import Path
@@ -35,7 +36,7 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("main")
 
-app = FastAPI(title="YT Automation v2.0", version="2.12.0")
+app = FastAPI(title="YT Automation v2.0", version="2.12.1")
 
 AVATARS_DIR = DATA_DIR / "avatars"
 VALID_PLATFORMS = ("youtube", "tiktok", "instagram", "facebook")
@@ -78,7 +79,7 @@ async def auth_guard(request, call_next):
 # ──────────────────────────────────────────────────────── básicos ──
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "version": "2.12.0", "gemini": gemini_client.available(),
+    return {"ok": True, "version": "2.12.1", "gemini": gemini_client.available(),
             "nvidia": nvidia_client.available(),
             "nvidia_model": nvidia_client.last_model(),
             "whisper": whisper_service.available(),
@@ -458,6 +459,35 @@ async def avatars_image_get(aid: str):
 
 
 # ────────────────────────────── chat-agente (v2.12 · VÓRTICE v3) ──
+@app.get("/api/cerebros")
+async def cerebros_list():
+    """v2.12.1 · CEREBROS: catálogo de modelos NVIDIA con estado vivo
+    (ok/fail/untested + latencia del último uso) y el activo."""
+    if not nvidia_client.available():
+        return {"activo": None, "cerebros": [], "aviso": "sin NVIDIA_API_KEY"}
+    act = nvidia_client.active_cerebro()
+    return {"activo": act["alias"], "modelo": act["model"],
+            "cerebros": nvidia_client.list_cerebros()}
+
+
+_IMAGE_RE = re.compile(
+    r"^data:image/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$|^https?://\S+$")
+
+
+@app.post("/api/cerebros")
+async def cerebros_pick(body: dict):
+    """Elige el cerebro de VÓRTICE (persistente en .env, aplica al instante)."""
+    alias = str((body or {}).get("alias") or "").strip()
+    c = nvidia_client.find_cerebro(alias)
+    if not c:
+        raise HTTPException(400, "cerebro desconocido: " + alias)
+    nvidia_client.set_preferred(alias)
+    config.save_env({"NVIDIA_MODEL": c["model"]})
+    return {"ok": True, "activo": c["alias"], "model": c["model"],
+            "name": c["name"], "vision": c["vision"],
+            "message": f"Cerebro cambiado a {c['emoji']} {c['name']}"}
+
+
 @app.post("/api/chat")
 async def chat(body: dict):
     """Agente VÓRTICE: entiende la fábrica (contexto vivo) y ejecuta acciones
@@ -478,7 +508,19 @@ async def chat(body: dict):
     history = body.get("history") or []
     if not message:
         raise HTTPException(400, "mensaje vacío")
-    plan_out = await agent_svc.plan(message, history, db.list_avatars(), db)
+    # v2.12.1 · CEREBROS: cerebro elegido (alias) + imagen adjunta (solo visión)
+    prefer = str(body.get("cerebro") or "").strip() or None
+    image = str(body.get("image") or "").strip() or None
+    if image and not _IMAGE_RE.match(image):
+        raise HTTPException(400, "imagen inválida (usa data URL o http(s))")
+    if image and len(image) > 5_500_000:
+        raise HTTPException(413, "imagen demasiado grande (máx ~4MB)")
+    cinfo = nvidia_client.find_cerebro(prefer) if prefer else None
+    if image and cinfo and not cinfo["vision"]:
+        raise HTTPException(400, f"el cerebro {cinfo['name']} no ve imágenes — "
+                                 "cambia a uno con visión (👁️)")
+    plan_out = await agent_svc.plan(message, history, db.list_avatars(), db,
+                                    prefer=prefer, image=image)
     if plan_out.get("action") in agent_svc.DESTRUCTIVE_ACTIONS:
         what = (plan_out.get("params", {}).get("name")
                 or plan_out.get("params", {}).get("project_name") or "").strip()

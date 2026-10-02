@@ -140,8 +140,11 @@ def build_context(db) -> str:
 
 # ─────────────────────────── planificación de intención ───────────────────
 async def plan(message: str, history: list[dict] | None = None,
-               avatars: list[dict] | None = None, db=None) -> dict:
-    """Devuelve {reply, action, params, engine}. Nunca lanza excepción."""
+               avatars: list[dict] | None = None, db=None,
+               prefer: str | None = None, image: str | None = None) -> dict:
+    """Devuelve {reply, action, params, engine}. Nunca lanza excepción.
+    v2.12.1: `prefer` = cerebro pedido por el usuario; `image` = data/URL
+    adjunta (solo cerebros con visión — la valida /api/chat)."""
     message = (message or "").strip()[:2000]
     if not message:
         return {"reply": _HELP_TEXT, "action": "help", "params": {}, "engine": "local"}
@@ -151,7 +154,8 @@ async def plan(message: str, history: list[dict] | None = None,
 
     if nvidia_client.available():
         try:
-            return await _plan_nvidia(message, history or [], system)
+            return await _plan_nvidia(message, history or [], system,
+                                      prefer=prefer, image=image)
         except Exception as e:  # noqa: BLE001
             log.warning("Agente NVIDIA falló (%s) — pruebo Gemini/local", str(e)[:120])
     if gemini_client.available():
@@ -172,16 +176,29 @@ async def plan(message: str, history: list[dict] | None = None,
     return out
 
 
-async def _plan_nvidia(message: str, history: list[dict], system: str) -> dict:
+async def _plan_nvidia(message: str, history: list[dict], system: str,
+                       prefer: str | None = None,
+                       image: str | None = None) -> dict:
     msgs = [{"role": "system", "content": system}]
     for h in history[-6:]:
         if h.get("text"):
             msgs.append({"role": "user" if h.get("role") == "user" else "assistant",
                          "content": str(h["text"])[:400]})
-    msgs.append({"role": "user", "content": message})
-    raw = await nvidia_client.complete(msgs, temperature=0.2, max_tokens=4096)
-    out = _parse_plan(raw, message, model=nvidia_client.last_model())
-    return out
+    # v2.12.1 · multimodal: [{type:text},{type:image_url}] (formato NIM/OpenAI)
+    if image:
+        text = (message + "\n\n[Analiza la imagen adjunta y responde SOLO con el "
+                "JSON del esquema; describe lo que ves dentro de 'reply'. "
+                "Sin texto fuera del JSON.]")
+        content = [{"type": "text", "text": text},
+                   {"type": "image_url", "image_url": {"url": image}}]
+        msgs.append({"role": "user", "content": content})
+    else:
+        msgs.append({"role": "user", "content": message})
+    raw = await nvidia_client.complete(msgs, temperature=0.2, max_tokens=4096,
+                                       prefer=prefer)
+    # con imagen, si el modelo responde texto plano útil se acepta como reply
+    return _parse_plan(raw, message, model=nvidia_client.last_model(),
+                       lenient=bool(image))
 
 
 async def _plan_gemini(message: str, history: list[dict], system: str) -> dict:
@@ -193,8 +210,15 @@ async def _plan_gemini(message: str, history: list[dict], system: str) -> dict:
     return _parse_plan(raw, message, model="gemini")
 
 
-def _parse_plan(raw: str, message: str, model: str) -> dict:
-    data = json.loads(_extract_json(raw))
+def _parse_plan(raw: str, message: str, model: str, lenient: bool = False) -> dict:
+    try:
+        data = json.loads(_extract_json(raw))
+    except ValueError:
+        if lenient and raw and raw.strip():
+            # modo visión: el modelo describió la imagen sin JSON — útil igual
+            return {"reply": raw.strip()[:600], "action": "none",
+                    "params": {}, "engine": model}
+        raise
     reply = str(data.get("reply") or "").strip() or "Hecho ✅"
     action = data.get("action") if data.get("action") in VALID_ACTIONS else "none"
     params = data.get("params") if isinstance(data.get("params"), dict) else {}

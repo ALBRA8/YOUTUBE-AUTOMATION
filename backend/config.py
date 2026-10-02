@@ -83,8 +83,9 @@ def ffmpeg() -> str:
 # Claves que el dashboard puede escribir en .env. SECRET_KEYS se enmascaran
 # al leerlas por la API (nunca se devuelven completas).
 EDITABLE_KEYS = (
-    "GEMINI_API_KEY", "NVIDIA_API_KEY", "TTS_PROVIDER", "EDGE_TTS_VOICE",
-    "GEMINI_TTS_VOICE", "TTS_RATE", "WHISPER_MODEL", "WHISPER_DEVICE", "FPS",
+    "GEMINI_API_KEY", "NVIDIA_API_KEY", "NVIDIA_MODEL", "TTS_PROVIDER",
+    "EDGE_TTS_VOICE", "GEMINI_TTS_VOICE", "TTS_RATE", "WHISPER_MODEL",
+    "WHISPER_DEVICE", "FPS",
 )
 SECRET_KEYS = {"GEMINI_API_KEY", "NVIDIA_API_KEY"}
 
