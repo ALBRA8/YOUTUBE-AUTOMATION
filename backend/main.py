@@ -35,7 +35,7 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("main")
 
-app = FastAPI(title="YT Automation v2.0", version="2.11.1")
+app = FastAPI(title="YT Automation v2.0", version="2.11.2")
 
 AVATARS_DIR = DATA_DIR / "avatars"
 VALID_PLATFORMS = ("youtube", "tiktok", "instagram", "facebook")
@@ -78,10 +78,10 @@ async def auth_guard(request, call_next):
 # ──────────────────────────────────────────────────────── básicos ──
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "version": "2.11.1", "gemini": gemini_client.available(),
+    return {"ok": True, "version": "2.11.2", "gemini": gemini_client.available(),
             "whisper": whisper_service.available(),
             "youtube": youtube_publish.configured(),
-            "canales": False}  # puente WhatsApp/Telegram pendiente de re-cosecha (v2.11.1)
+            "canales": False}  # puente WhatsApp/Telegram pendiente de re-cosecha (v2.11.2)
 
 
 @app.get("/api/auth/status")

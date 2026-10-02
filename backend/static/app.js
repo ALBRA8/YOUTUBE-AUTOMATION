@@ -308,7 +308,7 @@ async function saveNicheTemplate() {
       description: $('#nt-desc').value, prompt: $('#nt-prompt').value }});
     S.niches = await api('/niches');
     toast('Nicho guardado ✅', 'ok');
-    renderCreate();
+    refreshNichesUI();
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -319,7 +319,7 @@ async function delNicheTemplate(tid) {
     S.niches = await api('/niches');
     if (W.nicho === tid) W.nicho = '';
     toast('Plantilla eliminada');
-    renderCreate();
+    refreshNichesUI();
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -540,6 +540,7 @@ async function downloadProjectScriptTxt(pid) {
 /* ── vista: PROYECTOS — ventanas PROYECTOS ▸ NICHO ▸ videos (v2.11.1) ── */
 let _PROJ_NICHO = null;   // null = ventana de nichos · key = ventana de videos del nicho
 let _NICHO_KEYS = [];     // claves de carpetas en el orden renderizado (índices estables para onclick)
+let _NICHO_TPL_ID = '';   // id de plantilla del nicho abierto (preselección de "＋ Nuevo video")
 
 function openNichoWindow(i) {
   const key = _NICHO_KEYS[i];
@@ -553,6 +554,33 @@ function closeNichoWindow() {
   _PROJ_NICHO = null;
   renderProjects();
   window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+/* v2.11.2 · "＋ Nuevo video" desde la ventana de un nicho →
+   asistente Crear en modo nicho con ESTE nicho ya elegido */
+function newVideoInNicho() {
+  nav('create'); W.mode = 'nicho'; W.step = 2;
+  W.nicho = _NICHO_TPL_ID || '';
+  renderCreate();
+}
+
+/* v2.11.2 · modal de nichos: crear/administrar plantillas desde Proyectos */
+function openNichesAdmin() {
+  $('#overlay-root').innerHTML = `<div class="overlay"><div class="box card">
+    <h3 style="margin:0 0 12px">🗂️ Nuevo nicho</h3>
+    ${renderNichesAdmin()}
+    <div style="margin-top:12px;text-align:right">
+      <button class="btn ghost small" onclick="closeOverlay()">Cerrar</button>
+    </div></div></div>`;
+}
+
+function closeOverlay() { $('#overlay-root').innerHTML = ''; }
+
+/* refresca lo que esté visible tras guardar/borrar un nicho */
+function refreshNichesUI() {
+  if (document.getElementById('nt-name')) openNichesAdmin(); // modal abierto → repíntalo
+  if (S.view === 'projects') renderProjects();
+  else if (S.view === 'create') renderCreate();
 }
 
 function renderProjects() {
@@ -591,10 +619,10 @@ function renderProjects() {
   const stCls = p => p.status === 'ready' ? 'ok' : p.status === 'published' ? 'gold'
     : p.status === 'failed' ? 'err' : 'work';
 
-  const head = `
+  const head = btn => `
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <h2 class="sec" style="margin:0">🗂️ Proyectos</h2>
-      <button class="btn primary small" onclick="nav('create')">＋ Nuevo video</button>
+      ${btn}
     </div>`;
 
   /* ── ventana 2 · videos del nicho, ordenados por nombre, en tarjetas ── */
@@ -603,6 +631,9 @@ function renderProjects() {
     if (!c) { _PROJ_NICHO = null; return renderProjects(); }
     const vids = [...c.proys].sort((a, b) =>
       String(a.title || '').localeCompare(String(b.title || ''), 'es', { sensitivity: 'base' }));
+    // "＋ Nuevo video" dentro del nicho → asistente Crear con este nicho preseleccionado
+    const tpl = (cats.find(t => (t.name || t.id) === c.key));
+    _NICHO_TPL_ID = tpl ? tpl.id : '';
     const cards = vids.map(p => `
       <div class="vid-card win" onclick="openProject('${p.id}')" title="${esc(p.title)}">
         <div class="vc-cover">
@@ -621,7 +652,7 @@ function renderProjects() {
         </div>
       </div>`).join('');
     $('#view').innerHTML = `
-      ${head}
+      ${head('<button class="btn primary small" onclick="newVideoInNicho()">＋ Nuevo video</button>')}
       <div class="crumb"><a href="#" onclick="closeNichoWindow();return false">PROYECTOS</a> <b>▸</b> NICHO <b>▸</b> <span class="crumb-here">${esc(c.name)}</span></div>
       <div class="win">
         <div class="nicho-window-head">
@@ -650,9 +681,9 @@ function renderProjects() {
     </div>`).join('');
 
   $('#view').innerHTML = `
-    ${head}
+    ${head('<button class="btn primary small" onclick="openNichesAdmin()">＋ Nuevo nicho</button>')}
     <div class="crumb">PROYECTOS <b>▸</b> NICHO</div>
-    <div class="nicho-grid">${nichoCards || `<div class="card empty"><div class="big">🎬</div>Aún no hay proyectos. Crea tu primer video en 2 minutos.</div>`}</div>
+    <div class="nicho-grid">${nichoCards || `<div class="card empty"><div class="big">🎬</div>Aún no hay nichos ni proyectos. Crea tu primer nicho con el botón <b>＋ Nuevo nicho</b>.</div>`}</div>
     ${lib.length ? `<h2 class="sec">📚 Biblioteca en disco <span class="hint">PROYECTOS\\NICHO\\nicho\\video.mp4</span></h2>
       ${lib.map(g => `
         <div class="card" style="margin-bottom:12px">
