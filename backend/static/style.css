@@ -234,6 +234,18 @@ textarea { resize: vertical; min-height: 90px; }
 /* progreso overlay */
 .overlay { position: fixed; inset: 0; background: rgba(5, 7, 16, .8); backdrop-filter: blur(8px); z-index: 90; display: grid; place-items: center; }
 .overlay .box { width: min(520px, 92vw); text-align: center; }
+
+/* v2.11.3 · modal de nichos: compacto + cierre (✕ / clic fuera / Esc) */
+.nicho-overlay .box { width: min(400px, 92vw); max-height: 86vh; overflow: auto; text-align: left; padding: 16px 18px; }
+.nicho-overlay .field { margin-bottom: 10px; }
+.nicho-overlay .field label { margin-bottom: 5px; }
+.nicho-overlay .field input, .nicho-overlay .field textarea { padding: 9px 12px; font-size: 13px; }
+.nicho-overlay .nicho-box .card { padding: 8px 12px; }
+.nicho-overlay .nicho-box .card > div { padding: 5px 0; }
+.nicho-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.nicho-modal-head h3 { margin: 0; font-size: 15.5px; }
+.modal-x { width: 28px; height: 28px; border-radius: 9px; border: 1px solid var(--border); background: var(--bg2); color: var(--muted); cursor: pointer; font-size: 12.5px; line-height: 1; flex: none; }
+.modal-x:hover { color: var(--text); border-color: var(--accent); }
 .progress-track { height: 12px; border-radius: 999px; background: var(--bg2); border: 1px solid var(--border); overflow: hidden; margin: 20px 0 10px; }
 .progress-fill { height: 100%; width: 0%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .5s; }
 .robot { font-size: 52px; animation: bounce 1.4s infinite; }

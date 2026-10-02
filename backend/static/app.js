@@ -564,17 +564,24 @@ function newVideoInNicho() {
   renderCreate();
 }
 
-/* v2.11.2 · modal de nichos: crear/administrar plantillas desde Proyectos */
+/* v2.11.3 · modal de nichos: compacto y con cierre (✕, clic fuera, Esc) */
 function openNichesAdmin() {
-  $('#overlay-root').innerHTML = `<div class="overlay"><div class="box card">
-    <h3 style="margin:0 0 12px">🗂️ Nuevo nicho</h3>
+  $('#overlay-root').innerHTML = `<div class="overlay nicho-overlay" onclick="if(event.target===this)closeOverlay()"><div class="box card nicho-box">
+    <div class="nicho-modal-head">
+      <h3>🗂️ Nuevo nicho</h3>
+      <button class="modal-x" onclick="closeOverlay()" title="Cerrar">✕</button>
+    </div>
     ${renderNichesAdmin()}
-    <div style="margin-top:12px;text-align:right">
-      <button class="btn ghost small" onclick="closeOverlay()">Cerrar</button>
-    </div></div></div>`;
+  </div></div>`;
+  document.addEventListener('keydown', nichoEscClose);
 }
 
-function closeOverlay() { $('#overlay-root').innerHTML = ''; }
+function nichoEscClose(e) { if (e.key === 'Escape') closeOverlay(); }
+
+function closeOverlay() {
+  $('#overlay-root').innerHTML = '';
+  document.removeEventListener('keydown', nichoEscClose);
+}
 
 /* refresca lo que esté visible tras guardar/borrar un nicho */
 function refreshNichesUI() {
