@@ -55,28 +55,6 @@
     "subtitles": "hormozi"
   },
   {
-    "id": "terror",
-    "emoji": "👻",
-    "name": "Terror",
-    "description": "Relatos oscuros, leyendas y casos reales que dan escalofríos.",
-    "prompt": "Escribe un video corto de terror: una leyenda urbana o caso real escalofriante. Ambiente construido frase a frase, silencios estratégicos, descenso gradual hacia el golpe final.",
-    "style": "auto",
-    "format": "short",
-    "voice": "",
-    "subtitles": "hormozi"
-  },
-  {
-    "id": "animales",
-    "emoji": "🐾",
-    "name": "Animales",
-    "description": "El reino animal en su estado más puro: instintos, récord y rescates.",
-    "prompt": "Escribe un video corto de animales: un comportamiento, récord o rescate real que asombre. Comparaciones humanas para dar escala, datos concretos y un cierre emotivo.",
-    "style": "auto",
-    "format": "short",
-    "voice": "",
-    "subtitles": "hormozi"
-  },
-  {
     "id": "tecnologia",
     "emoji": "🤖",
     "name": "Tecnología e IA",

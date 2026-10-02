@@ -55,6 +55,8 @@ function setTheme(t) {
 }
 
 function nav(view) {
+  // v2.11.1 · entrar a Proyectos desde cualquier vista (excepto volver del detalle) = ventana de nichos
+  if (view === 'projects' && S.view !== 'project') _PROJ_NICHO = null;
   S.view = view;
   $$('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === view));
   refreshSidebar();
@@ -535,29 +537,29 @@ async function downloadProjectScriptTxt(pid) {
   toast('¡Guión descargado! 📄', 'ok');
 }
 
-/* ── vista: PROYECTOS — árbol PROYECTOS ▸ NICHOS ▸ video (v2.10.2) ── */
-let _TREE_KEYS = [];
+/* ── vista: PROYECTOS — ventanas PROYECTOS ▸ NICHO ▸ videos (v2.11.1) ── */
+let _PROJ_NICHO = null;   // null = ventana de nichos · key = ventana de videos del nicho
+let _NICHO_KEYS = [];     // claves de carpetas en el orden renderizado (índices estables para onclick)
 
-function _treeOpenMap() {
-  try { return JSON.parse(localStorage.getItem('yt_tree_open') || '{}'); }
-  catch (e) { return {}; }
+function openNichoWindow(i) {
+  const key = _NICHO_KEYS[i];
+  if (key == null) return;
+  _PROJ_NICHO = key;
+  renderProjects();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function toggleNicheFolder(i) {
-  const key = _TREE_KEYS[i];
-  if (key == null) return;
-  const open = _treeOpenMap();
-  open[key] = !open[key];
-  localStorage.setItem('yt_tree_open', JSON.stringify(open));
+function closeNichoWindow() {
+  _PROJ_NICHO = null;
   renderProjects();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function renderProjects() {
   const lib = S.library || [];
   const cats = S.niches || [];
-  const openMap = _treeOpenMap();
 
-  // agrupar por nicho (label de plantilla o texto libre); sin nicho → carpeta propia
+  // agrupar por nicho (label de plantilla o texto libre); sin nicho → grupo propio
   const grupos = new Map();
   for (const p of S.projects) {
     const k = (p.niche || '').trim() || '__sin_nicho__';
@@ -565,8 +567,7 @@ function renderProjects() {
     grupos.get(k).push(p);
   }
 
-  // carpetas: catálogo de nichos SIEMPRE visible (estructura estable), luego
-  // nichos libres que traigan los proyectos, y al final «Sin nicho»
+  // carpetas: catálogo de nichos SIEMPRE visible + nichos libres + «Sin nicho» al final
   const carpetas = [];
   for (const t of cats)
     carpetas.push({ key: t.name || t.id, emoji: t.emoji || '📁', name: t.name || t.id,
@@ -575,53 +576,84 @@ function renderProjects() {
     if (k === '__sin_nicho__' || carpetas.some(c => c.key === k)) continue;
     carpetas.push({ key: k, emoji: '📁', name: k, proys });
   }
+  carpetas.sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })); // nicho a → z
   if (grupos.has('__sin_nicho__'))
     carpetas.push({ key: '__sin_nicho__', emoji: '🗃️', name: 'Sin nicho',
                     proys: grupos.get('__sin_nicho__') });
-  carpetas.sort((a, b) => (b.proys.length - a.proys.length) || a.name.localeCompare(b.name));
-  _TREE_KEYS = carpetas.map(c => c.key);
+  _NICHO_KEYS = carpetas.map(c => c.key);
 
   const fmtDate = s => { try {
     return new Date(s).toLocaleDateString('es', { day: '2-digit', month: 'short' });
   } catch (e) { return ''; } };
-  const vdot = p => p.status === 'ready' ? 'ok' : p.status === 'published' ? 'gold'
-    : p.status === 'failed' ? 'err' : 'work';
   const stLabel = p => p.status === 'ready' ? 'Listo' : p.status === 'published' ? 'Publicado'
-    : p.status === 'failed' ? 'Error' : (p.step_label || p.status || '…');
+    : p.status === 'failed' ? 'Error' : p.status === 'draft' ? 'Borrador'
+    : (p.step_label || p.status || '…');
+  const stCls = p => p.status === 'ready' ? 'ok' : p.status === 'published' ? 'gold'
+    : p.status === 'failed' ? 'err' : 'work';
 
-  const treeHTML = carpetas.map((c, i) => {
-    const isOpen = !!openMap[c.key];
-    const vids = [...c.proys].sort((a, b) =>
-      String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')));
-    const body = !c.proys.length
-      ? `<div class="tree-empty">Carpeta vacía — crea un video de este nicho desde ✨ Crear</div>`
-      : vids.map(p => `
-        <div class="tree-video" onclick="openProject('${p.id}')">
-          <span class="v-dot ${vdot(p)}"></span>
-          <span class="v-name" title="${esc(p.title)}">${esc(p.title)}</span>
-          <span class="v-meta">${p.format === 'short' ? '9:16' : '16:9'} · ${esc(stLabel(p))}${p.updated_at ? ' · ' + fmtDate(p.updated_at) : ''}</span>
-          <button class="v-del" onclick="event.stopPropagation();delProject('${p.id}')" title="Borrar video">🗑️</button>
-        </div>`).join('');
-    return `
-      <div class="tree-folder${isOpen ? ' open' : ''}">
-        <button class="tree-folder-head" onclick="toggleNicheFolder(${i})">
-          <span class="f-emoji">${c.emoji}</span>
-          <span class="f-name">NICHOS \\ ${esc(c.name)}</span>
-          <span class="f-count">${c.proys.length} video${c.proys.length === 1 ? '' : 's'}</span>
-          <span class="f-chevron">▶</span>
-        </button>
-        <div class="tree-videos">${body}</div>
-      </div>`;
-  }).join('');
-
-  $('#view').innerHTML = `
+  const head = `
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <h2 class="sec" style="margin:0">🗂️ Proyectos</h2>
       <button class="btn primary small" onclick="nav('create')">＋ Nuevo video</button>
-    </div>
-    <div class="crumb">PROYECTOS <b>▸</b> NICHOS <b>▸</b> carpeta del nicho <b>▸</b> video</div>
-    <div class="tree">${treeHTML || `<div class="card empty"><div class="big">🎬</div>Aún no hay proyectos. Crea tu primer video en 2 minutos.</div>`}</div>
-    ${lib.length ? `<h2 class="sec">📚 Biblioteca en disco <span class="hint">PROYECTOS\\NICHOS\\nicho\\video.mp4</span></h2>
+    </div>`;
+
+  /* ── ventana 2 · videos del nicho, ordenados por nombre, en tarjetas ── */
+  if (_PROJ_NICHO) {
+    const c = carpetas.find(x => x.key === _PROJ_NICHO);
+    if (!c) { _PROJ_NICHO = null; return renderProjects(); }
+    const vids = [...c.proys].sort((a, b) =>
+      String(a.title || '').localeCompare(String(b.title || ''), 'es', { sensitivity: 'base' }));
+    const cards = vids.map(p => `
+      <div class="vid-card win" onclick="openProject('${p.id}')" title="${esc(p.title)}">
+        <div class="vc-cover">
+          <span class="vc-ph">🎬</span>
+          ${p.cover_url ? `<img src="${p.cover_url}" alt="" loading="lazy" onerror="this.remove()">` : ''}
+          <span class="vc-fmt">${p.format === 'short' ? '9:16' : '16:9'}</span>
+          <span class="vc-st ${stCls(p)}">${esc(stLabel(p))}</span>
+        </div>
+        <div class="vc-body">
+          <div class="vc-name">${esc(p.title)}</div>
+          <div class="vc-chips"><span>🎬 ${p.scenes_count ?? 0} escena${p.scenes_count === 1 ? '' : 's'}</span>${p.updated_at ? `<span>·</span><span>${fmtDate(p.updated_at)}</span>` : ''}</div>
+          <div class="vc-actions">
+            <button class="btn small primary" onclick="event.stopPropagation();openProject('${p.id}')">▶ Abrir</button>
+            <button class="btn small ghost vc-del" onclick="event.stopPropagation();delProject('${p.id}')" title="Borrar video">🗑️</button>
+          </div>
+        </div>
+      </div>`).join('');
+    $('#view').innerHTML = `
+      ${head}
+      <div class="crumb"><a href="#" onclick="closeNichoWindow();return false">PROYECTOS</a> <b>▸</b> NICHO <b>▸</b> <span class="crumb-here">${esc(c.name)}</span></div>
+      <div class="win">
+        <div class="nicho-window-head">
+          <button class="btn ghost small" onclick="closeNichoWindow()">← Todos los nichos</button>
+          <span class="nicho-win-title">${c.emoji} ${esc(c.name)}</span>
+          <span class="f-count">${c.proys.length} video${c.proys.length === 1 ? '' : 's'}</span>
+        </div>
+        ${vids.length ? `<div class="vid-grid">${cards}</div>`
+          : `<div class="card empty"><div class="big">${c.emoji}</div>Carpeta vacía — crea un video de este nicho desde <b>✨ Crear</b>.</div>`}
+      </div>`;
+    return;
+  }
+
+  /* ── ventana 1 · nichos ordenados A→Z ── */
+  const nichoCards = carpetas.map((c, i) => `
+    <div class="nicho-card win" onclick="openNichoWindow(${i})" title="Abrir ${esc(c.name)}">
+      <span class="nc-emoji">${c.emoji}</span>
+      <span class="nc-info">
+        <span class="nc-name">${esc(c.name)}</span>
+        <span class="nc-sub">NICHO \\ ${esc(c.name)}</span>
+      </span>
+      <span class="nc-right">
+        <span class="f-count">${c.proys.length} video${c.proys.length === 1 ? '' : 's'}</span>
+        <span class="nc-chev">▶</span>
+      </span>
+    </div>`).join('');
+
+  $('#view').innerHTML = `
+    ${head}
+    <div class="crumb">PROYECTOS <b>▸</b> NICHO</div>
+    <div class="nicho-grid">${nichoCards || `<div class="card empty"><div class="big">🎬</div>Aún no hay proyectos. Crea tu primer video en 2 minutos.</div>`}</div>
+    ${lib.length ? `<h2 class="sec">📚 Biblioteca en disco <span class="hint">PROYECTOS\\NICHO\\nicho\\video.mp4</span></h2>
       ${lib.map(g => `
         <div class="card" style="margin-bottom:12px">
           <b>📁 ${esc(g.niche)}</b> <small style="color:var(--muted)">· ${g.files.length} video(s)</small>

@@ -35,7 +35,7 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("main")
 
-app = FastAPI(title="YT Automation v2.0", version="2.11.0")
+app = FastAPI(title="YT Automation v2.0", version="2.11.1")
 
 AVATARS_DIR = DATA_DIR / "avatars"
 VALID_PLATFORMS = ("youtube", "tiktok", "instagram", "facebook")
@@ -78,10 +78,10 @@ async def auth_guard(request, call_next):
 # ──────────────────────────────────────────────────────── básicos ──
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "version": "2.11.0", "gemini": gemini_client.available(),
+    return {"ok": True, "version": "2.11.1", "gemini": gemini_client.available(),
             "whisper": whisper_service.available(),
             "youtube": youtube_publish.configured(),
-            "canales": False}  # puente WhatsApp/Telegram pendiente de re-cosecha (v2.11.0)
+            "canales": False}  # puente WhatsApp/Telegram pendiente de re-cosecha (v2.11.1)
 
 
 @app.get("/api/auth/status")
@@ -472,7 +472,14 @@ async def chat(body: dict):
 async def projects():
     out = []
     for p in db.list_projects():
-        p["scenes_count"] = len(db.get_scenes(p["id"]))
+        scenes = db.get_scenes(p["id"])
+        p["scenes_count"] = len(scenes)
+        # v2.11.1 · portada para la tarjeta: 1ª imagen de escena en disco > miniatura > None
+        cover = next((f"/api/scenes/{s['id']}/image" for s in scenes
+                      if s.get("image_path") and Path(s["image_path"]).exists()), None)
+        if not cover and p.get("thumbnail_url") and Path(p["thumbnail_url"]).exists():
+            cover = f"/api/projects/{p['id']}/thumbnail"
+        p["cover_url"] = cover
         out.append(p)
     return out
 
