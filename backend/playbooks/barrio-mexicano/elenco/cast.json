@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "nota": "Elenco PRIVADO de este playbook. Las fotografías de referencia NO viven en el repo: el usuario las adjunta manualmente en la puerta ChatGPT. Los nombres de archivo son los que el prompt maestro espera ver adjuntos.",
+  "personajes": [
+    {
+      "id": "beto",
+      "nombre": "Beto",
+      "referencia_foto": "122fc167-d8e3-4f79-a428-126b51dd1e06.png",
+      "quien_es": "el hombre con gorra",
+      "ficha": "Hombre adulto de complexión muy grande, rostro redondo, papada, piel morena clara y vello facial corto. Gorra negra con detalles rojos; polo color vino; jeans azul oscuro; tenis blancos; cadena dorada con medallón y reloj dorado.",
+      "personalidad": "Ingenioso, enamoradizo, trabajador, orgulloso y torpe para explicar sus sentimientos. Sus errores nacen de presumir, callar o sacar conclusiones.",
+      "ancla_ingles": "Beto, the exact man from the male reference, very large body, round face, black cap with red details, burgundy polo, dark blue jeans, white sneakers, gold chain with medallion and gold wristwatch.",
+      "voz_fija": "voz masculina adulta, cálida, ligeramente grave"
+    },
+    {
+      "id": "lupita",
+      "nombre": "Lupita",
+      "referencia_foto": "mujer dura.png",
+      "quien_es": "la mujer de blusa morada",
+      "ficha": "Mujer adulta de complexión muy grande, rostro redondo, piel morena clara, cabello oscuro en moño alto, blusa morada, pantalón negro, sandalias beige y pequeños aros dorados.",
+      "personalidad": "Resolutiva, orgullosa, afectuosa y de respuestas rápidas. Trabaja vendiendo comida y le cuesta admitir que Beto le importa.",
+      "ancla_ingles": "Lupita, the exact woman from the purple-blouse reference, very large body, round face, dark hair in a high bun, plum-purple blouse, black trousers, beige sandals and small gold hoop earrings.",
+      "voz_fija": "voz femenina adulta, firme y expresiva"
+    },
+    {
+      "id": "meche",
+      "nombre": "Doña Meche",
+      "referencia_foto": "mami deni.png",
+      "quien_es": "la abuelita",
+      "ficha": "Mujer mayor de complexión grande, arrugas naturales, rostro redondo y cabello gris recogido. Vestido azul marino con pequeñas flores, cárdigan beige y zapatos planos cafés.",
+      "personalidad": "Observadora, directa y cariñosa; conoce el barrio y usa humor seco. No es omnisciente: solo sabe lo que vio, escuchó o le contaron.",
+      "ancla_ingles": "Doña Meche, the exact elderly woman from the grandmother reference, large body, naturally aged round face, gray hair in a bun, navy floral dress, beige knitted cardigan and brown flat shoes.",
+      "voz_fija": "voz femenina mayor, clara, pausada y con ironía"
+    },
+    {
+      "id": "valeria",
+      "nombre": "Valeria",
+      "referencia_foto": "delgada.png",
+      "quien_es": "la joven de camiseta celeste",
+      "ficha": "Mujer adulta joven muy delgada, rostro natural, piel morena clara, cabello largo oscuro, camiseta celeste, jeans azules de cintura alta y tenis blancos.",
+      "personalidad": "Práctica, independiente, trabajadora y de humor discreto. Tiene objetivos propios; no la conviertas siempre en rival amorosa o villana.",
+      "ancla_ingles": "Valeria, the exact slim adult woman from the blue-shirt reference, very slender body, long dark hair, pale blue T-shirt, high-waisted blue jeans and white sneakers.",
+      "voz_fija": "voz femenina adulta joven, serena y directa"
+    }
+  ],
+  "relaciones_base": "Doña Meche es la abuela de Beto. Lupita es vecina de ambos y vende comida. Beto y Lupita tienen atracción mutua, pero al iniciar una historia independiente no son pareja formal. Valeria es amiga adulta de ambos y vecina del barrio. No existe parentesco entre Beto, Lupita y Valeria.",
+  "registro_inicial": {
+    "id": "H001",
+    "titulo": "Lupita se preparó para una cita… y Beto llegó con otra.",
+    "conflicto": "Lupita prepara una cena romántica e interpreta que Valeria es la pareja de Beto.",
+    "giro": "Valeria es su maestra de lectura; Beto aprendía para escribirle a Lupita.",
+    "relaciones_al_cierre": "Beto y Lupita son novios.",
+    "mecanismos_a_evitar": ["falsa rival que resulta maestra", "repetir otra cena con la misma revelación"]
+  },
+  "crossover": {
+    "permitido": false,
+    "nota": "Esta Valeria es FOTOREALISTA. Existe otra Valeria en el nicho 'valeria-influencer' en glossy 3D cartoon. NO mezclar identidades entre playbooks (decisión de diseño 2026-10: elenco privado por nicho)."
+  }
+}

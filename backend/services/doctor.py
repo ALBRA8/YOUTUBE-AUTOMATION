@@ -108,6 +108,28 @@ def _run_checks() -> list[dict]:
         ("modelo configurado: " + config.WHISPER_MODEL if wh_ok else "no instalado"),
         "pip install faster-whisper (alineación palabra-palabra Hormozi)")
 
+    # ── PyAV: motor interno de faster-whisper ─────────────────────────────
+    # v2.15.1 · PyAV 19 eliminó metadata_errors, que faster-whisper 1.2.1
+    # aún pasa a av.open() → TypeError «open() got an unexpected keyword
+    # argument 'metadata_errors'» que tumbaba el pipeline en el paso TTS.
+    if wh_ok:
+        av_ok = _import_ok("av")
+        av_ver = None
+        if av_ok:
+            try:
+                from importlib.metadata import version as _pkg_version
+                av_ver = _pkg_version("av")
+            except Exception:  # noqa: BLE001
+                av_ver = "?"
+        try:
+            av_major = int(str(av_ver).split(".")[0])
+        except ValueError:
+            av_major = 0
+        add("pyav", av_ok and 0 < av_major < 19,
+            f"av {av_ver}" if av_ok else "no instalado (faster-whisper no puede decodificar audio)",
+            'pip install "av>=11,<19"' if (not av_ok or av_major >= 19)
+            else "compatible con faster-whisper 1.2.1")
+
     # ── Investigación de tendencias ($0, sin API key) ─────────────────────
     ytdlp_ok = _import_ok("yt_dlp")
     if not ytdlp_ok:

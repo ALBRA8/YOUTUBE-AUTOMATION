@@ -71,3 +71,7 @@ desktop.ini
 *.zip
 *.tar.gz
 *.rar
+
+# ── 💾 BACKUPS (v2.12.2): contienen DB + env.bak con claves — NUNCA subir ──
+backend/data/backups/
+data/backups/

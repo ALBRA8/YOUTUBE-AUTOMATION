@@ -28,9 +28,17 @@ log = logging.getLogger("tts_step")
 GAP = 0.35          # pausa entre escenas en voice_full (segundos)
 TTS_BATCH_SIZE = 15 # escenas por llamada de TTS (cuota free-tier Gemini)
 MIN_SCENE_DUR = 0.4 # duración mínima válida para un audio de escena
+# v2.14 · production_json: silencio para unidades sin narración (tts_skip)
+DEFAULT_TTS_SILENCE = 2.0
+SILENCE_MIN, SILENCE_MAX = 0.5, 120.0
 
 
 def _text_of(sc: dict) -> str:
+    # v2.14 · production_json: unidad con tts_skip (sin narración) NUNCA
+    # llega a voz — ni se inventa audio ni se lee el título (dialogue jamás
+    # se convierte automáticamente en TTS).
+    if (sc.get("meta") or {}).get("tts_skip"):
+        return ""
     return (sc.get("narration") or sc.get("title") or "").strip()
 
 
@@ -69,6 +77,32 @@ async def synthesize_scenes(project: dict, scenes: list[dict], on_progress=None,
         else:
             todo.append(i)
 
+    # 1b) v2.14 · unidades production_json sin narración (meta.tts_skip):
+    # no se sintetiza NADA — silencio a la duración objetivo
+    # (meta.duration_target, cap [0.5, 120]) o 2.0 s; la desviación real la
+    # registra el orquestador (production_unit.duration_deviation). Solo se
+    # activa con tts_skip: los proyectos legacy siguen idénticos.
+    for i in list(todo):
+        meta = scenes[i].get("meta") or {}
+        if not meta.get("tts_skip"):
+            continue
+        wav = out_dir / f"scene_{i:02d}.wav"
+        try:
+            dur = float(meta.get("duration_target") or DEFAULT_TTS_SILENCE)
+        except (TypeError, ValueError):
+            dur = DEFAULT_TTS_SILENCE
+        dur = min(max(dur, SILENCE_MIN), SILENCE_MAX)
+        tts_service.silence_wav(wav, dur)
+        meta = {**meta, "tts": "silent", "tts_hash": _hash_of("")}
+        db.update_scene(scenes[i]["id"], audio_path=str(wav),
+                        duration=dur, meta=meta)
+        durations[i] = dur
+        used_per_scene[i] = "silent"
+        done += 1
+        todo.remove(i)
+        if on_progress:
+            await on_progress(done, n, "silent")
+
     # 2) RUTA BATCHED (gemini + faster-whisper + ≥2 escenas pendientes)
     if (todo and len(todo) >= 2
             and (provider in (None, "gemini"))
@@ -95,7 +129,10 @@ async def synthesize_scenes(project: dict, scenes: list[dict], on_progress=None,
             _, dur, used = await tts_service.synthesize(text, wav, provider, voice)
         except Exception as e:  # noqa: BLE001
             log.error("TTS escena %d falló definitivamente: %s", i, e)
-            tts_service.silence_wav(wav, 2.0)  # no romper el render
+            # fallback 2.0s «no romper el render»: marca tts="silence" y el
+            # gate _gate_voz_real del orquestador falla el proyecto si el
+            # producto entero quedaría mudo (nunca ready mentiroso)
+            tts_service.silence_wav(wav, 2.0)
             dur, used = 2.0, "silence"
         meta = {**(sc.get("meta") or {}), "tts": used, "tts_hash": _hash_of(text)}
         db.update_scene(sc["id"], audio_path=str(wav), duration=dur, meta=meta)
@@ -106,6 +143,11 @@ async def synthesize_scenes(project: dict, scenes: list[dict], on_progress=None,
             await on_progress(done, n, used)
 
     # 4) Timeline global de palabras (offset acumulado con GAP)
+    # v2.15.1 · Whisper NUNCA tumba el pipeline: las unidades tts_skip son
+    # silencio puro (no hay nada que alinear → words=[]) y cualquier fallo
+    # de Whisper (p.ej. TypeError «metadata_errors»: PyAV≥19 eliminó el
+    # kwarg que faster-whisper 1.2.1 aún pasa a av.open()) degrada a la
+    # estimación temporal, igual que cuando faster-whisper no está instalado.
     offset = 0.0
     for i, sc in enumerate(scenes):
         wav = out_dir / f"scene_{i:02d}.wav"
@@ -113,10 +155,22 @@ async def synthesize_scenes(project: dict, scenes: list[dict], on_progress=None,
             tts_service.silence_wav(wav, 2.0)
             durations[i] = 2.0
             used_per_scene[i] = used_per_scene[i] or "silence"
-        words = await whisper_service.align_scene(_text_of(sc), str(wav), durations[i])
-        words = [{**w, "start": round(w["start"] + offset, 3),
-                  "end": round(w["end"] + offset, 3)} for w in words]
-        words_per_scene[i] = words
+        if (sc.get("meta") or {}).get("tts_skip") and not _text_of(sc):
+            words_per_scene[i] = []       # silencio garantizado: 0 palabras
+        else:
+            try:
+                words = await whisper_service.align_scene(
+                    _text_of(sc), str(wav), durations[i])
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                log.warning("whisper falló en escena %d (%s) → estimación temporal",
+                            i, str(e)[:120])
+                words = whisper_service.estimate_words(
+                    _text_of(sc), 0.0, durations[i])
+            words = [{**w, "start": round(w["start"] + offset, 3),
+                      "end": round(w["end"] + offset, 3)} for w in words]
+            words_per_scene[i] = words
         offset += durations[i] + GAP
 
     return durations, words_per_scene

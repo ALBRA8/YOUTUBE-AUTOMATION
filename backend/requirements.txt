@@ -6,6 +6,9 @@ python-dotenv>=1.0
 
 # IA
 google-genai>=1.0          # Gemini: guion + imágenes 2.5 Flash + TTS
+httpx>=0.27                # requisito REAL de arranque: agent.py → nvidia_client.py
+                           # lo importa a nivel de módulo (antes llegaba solo
+                           # transitivo vía google-genai)
 edge-tts>=6.1              # locución gratuita ilimitada (fallback)
 yt-dlp>=2024.8.6           # modo "Desde URL" (TikTok/YouTube)
 
@@ -18,5 +21,12 @@ APScheduler>=3.10
 # ── recomendados (instalados por defecto; el sistema degrada con gracia
 #    si se comentan, pero pierde funciones) ────────────────────────────────
 faster-whisper>=1.0               # subtítulos palabra a palabra exactos
+av>=11,<19                        # motor de faster-whisper · v2.15.1: PyAV 19
+                                  # ELIMINÓ metadata_errors (que faster-whisper
+                                  # 1.2.1 aún pasa a av.open) → TypeError
+                                  # «open() got an unexpected keyword argument
+                                  # 'metadata_errors'» a mitad del pipeline.
+                                  # PIN obligatorio hasta que faster-whisper
+                                  # lo soporte.
 google-api-python-client>=2.100   # autopublish YouTube
 google-auth-oauthlib>=1.2         # OAuth YouTube (loopback, sin OOB)

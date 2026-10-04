@@ -1160,7 +1160,52 @@ async function renderSettings() {
         <div style="color:var(--muted);font-size:13px;margin-top:12px">Ejecutando 11 sondas reales (ffmpeg, disco, TTS, yt-dlp…)</div>
       </div>
 
+      <div class="card" id="backups-card">
+        <b>💾 Copias de seguridad</b> <span style="float:right"><button class="btn ghost small" onclick="loadBackups()">↻ Actualizar</button></span>
+        <div id="backups-body" style="color:var(--muted);font-size:13px;margin-top:12px">Cargando…</div>
+      </div>
+
     </div>`;
+  if (!S.demo) loadBackups();
+}
+
+/* v2.12.2 · backups (hallazgo auditoría: la DB moría sin réplica) */
+async function loadBackups() {
+  const body = document.getElementById('backups-body');
+  if (!body) return;
+  try {
+    const d = await api('/backups');
+    const bks = d.backups || [];
+    const ago = ts => { const m = Math.round((Date.now() / 1000 - ts) / 60);
+      return m < 60 ? `hace ${m} min` : `hace ${Math.round(m / 60)} h`; };
+    const rows = bks.slice(0, 6).map(b => `
+      <div class="idea-item doctor-item"><span>📦 ${esc(b.name.replace('yt_automation_', '').replace('.db', ''))} <small>${(b.size / 1048576).toFixed(1)} MB</small></span>
+      <span><small>${ago(b.ts)}</small> <button class="btn ghost small" onclick="restoreBackup('${esc(b.name)}')" title="Restaura esta copia (antes crea una de seguridad)">Restaurar</button></span></div>`).join('');
+    body.innerHTML = `
+      <div style="margin-bottom:8px">Copia automática al arrancar y cada <b>${d.interval_h} h</b> · se guardan <b>${d.keep}</b> · incluye DB + token YouTube + .env.<br>
+      <small>Disaster recovery: copia <code class="mini">backend/data/backups/</code> a otro disco y pega los archivos como indica la cabecera de <code class="mini">services/backup.py</code>.</small></div>
+      ${rows || '<div style="color:var(--muted)">Aún no hay backups</div>'}
+      <div class="cfg-actions" style="margin-top:10px">
+        <button class="btn primary small" onclick="createBackup()">💾 Crear backup ahora</button>
+      </div>`;
+  } catch (e) { body.innerHTML = '⚠️ ' + e.message; }
+}
+
+async function createBackup() {
+  try {
+    const r = await api('/backups', { method: 'POST' });
+    toast(r.message || 'Backup creado', 'ok');
+    loadBackups();
+  } catch (e) { toast('⚠️ ' + e.message); }
+}
+
+async function restoreBackup(name) {
+  if (!confirm(`¿Restaurar «${name}»?\nSe sustituye la base de datos ACTUAL (antes se crea una copia de seguridad automática).`)) return;
+  try {
+    const r = await api('/backups/restore', { method: 'POST', body: { name } });
+    toast(r.message || 'Restaurado', 'ok');
+    setTimeout(() => location.reload(), 1600);
+  } catch (e) { toast('⚠️ ' + e.message); }
 }
 
 async function loadDoctor() {

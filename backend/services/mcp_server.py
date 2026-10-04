@@ -1,11 +1,11 @@
-"""v2.11.0 · Servidor MCP (Model Context Protocol) de la fábrica — reconstruido.
+"""v2.16.0 · Servidor MCP (Model Context Protocol) de la fábrica — reconstruido.
 
 Montado en /mcp desde main.py. Implementación JSON-RPC 2.0 a mano (el venv no
 tiene el paquete `mcp`): soporta initialize, tools/list y tools/call, suficiente
 para clientes MCP (Claude Desktop vía proxy, Antigravity, agentes locales).
 
-14 tools — la puerta del contrato guion_json es `crear_video_guion_json`.
-v2.11 · nuevas: crear_avatar (personajes con ADN consistente) y
+16 tools — las puertas de producción son `crear_video_guion_json` y `submit_production_json`.
+v2.16 · nueva puerta Creative Production JSON; v2.11 · nuevas: crear_avatar (personajes con ADN consistente) y
 listar_recetas_camara (catálogo para el campo «camara» del contrato).
 
 NOTA: solo para uso LOCAL (sin auth). Para exponerlo a ChatGPT cloud hacen
@@ -23,16 +23,16 @@ from fastapi.responses import JSONResponse
 import database as db
 from pipeline import orchestrator
 from services import (avatar_schema, camera_recipes,
-                      gemini_client, guion_json as guion_svc,
+                      gemini_client, guion_json as guion_svc, production_json as production_svc,
                       library as library_svc, niches as niches_svc,
                       whisper_service, youtube_publish)
 from services.themes import STYLES
 
 log = logging.getLogger("mcp")
 
-app = FastAPI(title="YT Automation MCP", version="2.11.0")
+app = FastAPI(title="YT Automation MCP", version="2.16.1")
 
-SERVER_INFO = {"name": "yt-automation-v2", "version": "2.11.0"}
+SERVER_INFO = {"name": "yt-automation-v2", "version": "2.16.1"}
 PROTOCOL_VERSION = "2024-11-05"
 
 # ───────────────────────────────────────────────────────────── tools ──
@@ -40,7 +40,7 @@ def _t_ayuda() -> dict:
     return {
         "servidor": "Fábrica de videos IA (yt_automation_v2)",
         "puertas": [
-            "MCP (esta): tools crear_video / crear_video_guion_json",
+            "MCP (esta): tools crear_video / crear_video_guion_json / submit_production_json / lanzar_proyecto",
             "API: POST /api/projects con {\"mode\": \"guion_json\", ...}",
             "Spec para ChatGPT Actions: GET /api/guion_json/contrato",
         ],
@@ -87,6 +87,72 @@ async def _t_crear_video_guion_json(guion: str, lanzar: bool = False) -> dict:
             niche=g.get("nicho"))
 
     return await guion_svc.ingest(data, estilos, _crear)
+
+
+
+async def _t_submit_production_json(production_json, lanzar: bool = False) -> dict:
+    """Ingesta el Creative Production JSON sin regenerar creatividad.
+
+    Esta es la puerta MCP entre ChatGPT/Creative Engine y YOUTUBE-AUTOMATION.
+    El Adapter valida, normaliza, conserva el JSON original y crea las escenas.
+    """
+    if production_json is None:
+        raise ValueError("falta production_json")
+    try:
+        data = production_svc.parse_payload(production_json)
+    except ValueError:
+        raise
+
+    def _crear_pj(g: dict):
+        av = g.get("avatar_id")
+        if av and not db.get_avatar(av):
+            av = None
+        pmeta = {}
+        if g.get("camara"):
+            pmeta["camara"] = g["camara"]
+        if g.get("project_extra"):
+            pmeta["production_project_extra"] = g["project_extra"]
+        if g.get("root_extra"):
+            pmeta["production_root_extra"] = g["root_extra"]
+        return db.create_project(
+            title=(g.get("titulo") or "Video desde Production JSON"),
+            mode="production_json",
+            style=g.get("estilo") or "auto",
+            format=g.get("formato") or "short",
+            voice=g.get("voz"),
+            meta=pmeta,
+            avatar_id=av,
+            platforms=g.get("plataformas") or ["youtube"],
+            niche=g.get("nicho"),
+        )
+
+    return await production_svc.ingest(
+        data,
+        {s["id"] for s in STYLES},
+        _crear_pj,
+        auto_start_override=bool(lanzar),
+    )
+
+
+async def _t_lanzar_proyecto(project_id: str) -> dict:
+    """Lanza un proyecto ya creado sin volver a ingerir su Production JSON.
+
+    Esta puerta permite separar creación/ingesta de ejecución y evita duplicar
+    proyectos cuando ChatGPT ya creó un draft mediante submit_production_json.
+    """
+    project_id = (project_id or "").strip()
+    if not project_id:
+        raise ValueError("falta project_id")
+    p = db.get_project(project_id)
+    if not p:
+        raise ValueError(f"no existe el proyecto {project_id}")
+    if p.get("status") in ("processing", "queued", "running"):
+        active = db.active_job_for_project(project_id)
+        return {"ok": True, "project_id": project_id, "lanzado": False,
+                "motivo": "ya hay un pipeline activo", "job_id": active.get("id") if active else None}
+    job_id = await orchestrator.start_pipeline(project_id)
+    return {"ok": True, "project_id": project_id, "lanzado": True,
+            "job_id": job_id, "estado": db.get_project(project_id).get("status")}
 
 
 def _t_estado_proyecto(project_id: str) -> dict:
@@ -202,8 +268,23 @@ TOOLS = [
          "guion": {"type": "string", "description": "JSON del contrato como texto"},
          "lanzar": {"type": "boolean", "default": False,
                     "description": "true = arranca el pipeline completo"}}}},
+    {"name": "submit_production_json",
+     "description": "PUERTA PRINCIPAL DEL CREATIVE ENGINE: recibe un Creative Production JSON TERMINADO, lo valida mediante production_json.py, crea el proyecto y opcionalmente lanza el pipeline. NO genera ni modifica la creatividad. Acepta el JSON como objeto o texto JSON. Esta acción crea/ejecuta un proyecto en la fábrica.",
+     "inputSchema": {"type": "object", "required": ["production_json"], "properties": {
+         "production_json": {
+             "description": "Creative Production JSON completo, como objeto JSON o como texto JSON.",
+             "oneOf": [
+                 {"type": "object"},
+                 {"type": "string"}
+             ]
+         },
+         "lanzar": {"type": "boolean", "default": False,
+                    "description": "true = arranca el pipeline inmediatamente; false = crea el proyecto sin lanzarlo."}}}},
     {"name": "estado_proyecto", "description": "Estado detallado de un proyecto "
      "(paso actual, progreso, escenas, job activo, error si lo hay).",
+     "inputSchema": {"type": "object", "required": ["project_id"], "properties": {
+         "project_id": {"type": "string"}}}},
+    {"name": "lanzar_proyecto", "description": "Lanza un proyecto ya creado por su ID, sin volver a ingerir ni duplicar su Production JSON. Ideal para pasar un draft validado a producción.",
      "inputSchema": {"type": "object", "required": ["project_id"], "properties": {
          "project_id": {"type": "string"}}}},
     {"name": "guion_de_proyecto", "description": "Devuelve el guion completo de "
@@ -262,6 +343,10 @@ async def _dispatch(name: str, args: dict):
         return _t_crear_video(**args)
     if name == "crear_video_guion_json":
         return await _t_crear_video_guion_json(**args)
+    if name == "submit_production_json":
+        return await _t_submit_production_json(**args)
+    if name == "lanzar_proyecto":
+        return await _t_lanzar_proyecto(**args)
     if name == "estado_proyecto":
         return _t_estado_proyecto(**args)
     if name == "guion_de_proyecto":

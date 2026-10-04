@@ -23,10 +23,12 @@ from pipeline import images as imgs_pipeline
 from pipeline import orchestrator
 from pipeline import video as video_pipeline
 from pipeline.subtitles import words_to_srt
-from services import (agent as agent_svc, camera_recipes, doctor as doctor_svc,
+from services import (agent as agent_svc, backup as backup_svc, camera_recipes,
+                      doctor as doctor_svc,
                       gemini_client, guion_json as guion_svc,
                       library as library_svc,
-                      niches as niches_svc, nvidia_client, scheduler,
+                      niches as niches_svc, nvidia_client,
+                      production_json as prod_svc, scheduler,
                       trend_research as trends_svc,
                       tts_service, url_mode, whisper_service, youtube_publish)
 from services import avatar_schema
@@ -36,7 +38,20 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("main")
 
-app = FastAPI(title="YT Automation v2.0", version="2.12.1")
+app = FastAPI(title="YT Automation v2.0", version="2.16.2")
+
+
+@app.on_event("startup")
+async def _startup_tasks():
+    """v2.12.2 · hallazgo de la auditoría: la DB moría sin réplica.
+    Backup al arrancar (consistente, WAL-safe) + loop cada BACKUP_INTERVAL_H."""
+    try:
+        r = await asyncio.to_thread(backup_svc.create_backup, "arranque")
+        if r:
+            log.info("backup de arranque: %s (%.1f KB)", r["name"], r["size"] / 1024)
+    except Exception as e:  # noqa: BLE001
+        log.warning("backup de arranque falló: %s", str(e)[:120])
+    backup_svc.start_scheduler()
 
 AVATARS_DIR = DATA_DIR / "avatars"
 VALID_PLATFORMS = ("youtube", "tiktok", "instagram", "facebook")
@@ -79,7 +94,7 @@ async def auth_guard(request, call_next):
 # ──────────────────────────────────────────────────────── básicos ──
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "version": "2.12.1", "gemini": gemini_client.available(),
+    return {"ok": True, "version": "2.16.2", "gemini": gemini_client.available(),
             "nvidia": nvidia_client.available(),
             "nvidia_model": nvidia_client.last_model(),
             "whisper": whisper_service.available(),
@@ -103,6 +118,30 @@ async def cameras():
     """v2.11 · Catálogo de recetas de cámara (cine + UGC) para el campo
     «camara» del contrato guion_json y para el selector de escenas."""
     return camera_recipes.list()
+
+
+@app.get("/api/production_json/contrato")
+async def production_json_contrato():
+    """v2.14 · Spec machine-readable del contrato Creative Production JSON
+    (Creative Engine → Adapter). guion_json sigue intacto para guiones."""
+    return prod_svc.spec([s["id"] for s in STYLES])
+
+
+@app.post("/api/production_json/validate")
+async def production_json_validate(body: dict):
+    """v2.14 · Dry-run del Adapter: valida y traduce el envelope SIN crear
+    proyecto, escenas ni archivos. Ideal para el Creative Engine antes de
+    ingerir."""
+    try:
+        payload = body.get("production",
+                           body.get("production_json",
+                                    body if "sequence" in body else None))
+        if payload is None:
+            raise ValueError("falta «production» — envía el Creative "
+                             "Production JSON (objeto o string JSON)")
+        return prod_svc.validate_only(payload, {s["id"] for s in STYLES})
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.get("/api/guion_json/contrato")
@@ -538,6 +577,35 @@ async def chat(body: dict):
     return result
 
 
+# ─────────────────────────── backups (v2.12.2 · resiliencia) ──
+@app.get("/api/backups")
+async def backups_list():
+    """Backups disponibles (DB + token.json + .env) — el más nuevo primero."""
+    return {"dir": str(backup_svc.BACKUP_DIR), "keep": backup_svc.KEEP,
+            "interval_h": backup_svc.INTERVAL_H, "backups": backup_svc.list_backups()}
+
+
+@app.post("/api/backups")
+async def backups_create():
+    """Crea un backup ahora mismo (manual)."""
+    r = await asyncio.to_thread(backup_svc.create_backup, "manual")
+    if not r:
+        raise HTTPException(500, "el backup falló — revisa el log del servidor")
+    return {"ok": True, "backup": r, "message": "Backup creado ✅"}
+
+
+@app.post("/api/backups/restore")
+async def backups_restore(body: dict):
+    """Restaura un backup (antes deja uno de seguridad pre-restore)."""
+    name = str((body or {}).get("name") or "")
+    try:
+        r = await asyncio.to_thread(backup_svc.restore_backup, name)
+    except (ValueError, FileNotFoundError) as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, **r,
+            "message": f"Restaurado {name} — reinicia el servidor para recargar todo"}
+
+
 # ──────────────────────────────────────────────────────── proyectos ──
 @app.get("/api/projects")
 async def projects():
@@ -558,7 +626,8 @@ async def projects():
 @app.post("/api/projects")
 async def create_project(body: dict):
     mode = body.get("mode", "idea")
-    if mode not in ("script", "idea", "url", "audio", "nicho", "guion_json"):
+    if mode not in ("script", "idea", "url", "audio", "nicho", "guion_json",
+                    "production_json"):
         raise HTTPException(400, "modo inválido")
     if mode == "guion_json":
         # v2.10 · contrato guion_json: el guion llega HECHO desde ChatGPT —
@@ -579,6 +648,40 @@ async def create_project(body: dict):
                 niche=g.get("nicho"))
         try:
             return await guion_svc.ingest(body, {s["id"] for s in STYLES}, _crear)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    if mode == "production_json":
+        # v2.14 · Creative Production JSON (Creative Engine → Adapter): el
+        # nicho llega HECHO desde el motor creativo — cero LLM interno. El
+        # Adapter valida, traduce a unidades ejecutables, CONSERVA el JSON
+        # original como production.json y deja todo lo específico del nicho
+        # en meta. guion_json queda intacto como la otra puerta.
+        def _crear_pj(g: dict):
+            av = g.get("avatar_id")
+            if av and not db.get_avatar(av):
+                av = None
+            pmeta = {"transitions": bool(body.get("transitions", True)),
+                     "style_reference": bool(body.get("style_reference", True))}
+            if g.get("camara"):
+                pmeta["camara"] = g["camara"]
+            sub = (body.get("subtitle_style") or "hormozi").lower()
+            if sub in ("hormozi", "tiktok", "karaoke"):
+                pmeta["subtitle_style"] = sub
+            return db.create_project(
+                title=(g.get("titulo") or "Video desde Production JSON"),
+                mode="production_json", style=g.get("estilo") or "auto",
+                format=g.get("formato") or "short", voice=g.get("voz"),
+                meta=pmeta, avatar_id=av,
+                platforms=g.get("plataformas") or ["youtube"],
+                niche=g.get("nicho"))
+        try:
+            payload = body.get("production", body.get("production_json"))
+            if payload is None:
+                raise ValueError("falta «production» — envía el Creative "
+                                 "Production JSON (objeto o string JSON)")
+            return await prod_svc.ingest(
+                payload, {s["id"] for s in STYLES}, _crear_pj,
+                auto_start_override=body.get("auto_start"))
         except ValueError as e:
             raise HTTPException(400, str(e))
     meta = {}

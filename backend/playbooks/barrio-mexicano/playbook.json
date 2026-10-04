@@ -1,0 +1,86 @@
+{
+  "schema_version": "1.0",
+  "id": "barrio-mexicano",
+  "nombre": "Historias de Barrio Mexicano",
+  "emoji": "🏘️",
+  "version": "1.0",
+  "descripcion": "Comedia romántica y drama popular mexicano con elenco fijo (Beto, Lupita, Doña Meche, Valeria). Historias fotorealistas en vertical 9:16, de 10 escenas (o 6 para formato de 1 minuto), con prompts FREEPIK IMAGEN y KLING VIDEO en inglés y LIPSYNC en español mexicano.",
+  "estado": "empacado",
+  "tipo_pipeline": "monocerebro",
+  "cerebro_creativo": {
+    "preferido": "chatgpt_web",
+    "alternativos": ["cualquier LLM con visión que siga el prompt maestro"],
+    "modo_acceso": "manual_gratis",
+    "nota": "El repo COMPILA la solicitud (prompt maestro + idea + registro de continuidad) y el usuario la pega en ChatGPT junto con las 4 fotos de referencia del elenco."
+  },
+  "etapas": [
+    {
+      "id": "ideas",
+      "cerebro": "chatgpt_web",
+      "prompt": "prompts/prompt_maestro.md",
+      "entrada": ["elenco/cast.json + 4 fotografías de referencia adjuntas"],
+      "salida": "lista de 12 ideas (modo IDEAS por defecto)"
+    },
+    {
+      "id": "guion",
+      "cerebro": "chatgpt_web",
+      "prompt": "prompts/prompt_maestro.md (secciones 05-08)",
+      "entrada": ["idea elegida", "fotografías de referencia"],
+      "salida": "guion humano con 7 campos por escena (ESCENA, TIPO, DURACIÓN, PERSONAJES, FREEPIK IMAGEN, KLING VIDEO, LIPSYNC) + resumen + lipsyncs reunidos + registro de continuidad",
+      "contrato_objetivo": "guion_json_v2 (characters + chapters.scenes con image_prompt, video_prompt, dialogue) — migración Fase 2"
+    },
+    {
+      "id": "producir",
+      "cerebro": "artesano_externo",
+      "nota": "Hoy: FREEPIK IMAGEN (fotograma) → KLING VIDEO (animación) → herramienta de lipsync del usuario → montaje. Futuro (Fase 3+): la fábrica del repo puede absorber la producción usando los mismos prompts."
+    }
+  ],
+  "estructura": {
+    "modo_default": "IDEAS",
+    "cantidad_ideas": 12,
+    "tematicas": ["comedia", "amor", "celos", "humillación", "secretos", "reconciliación"],
+    "universo": "barrio mexicano contemporáneo",
+    "continuidad": "historias independientes con el mismo elenco (modo serie opcional vía registro H00x)",
+    "escenas_por_historia": 10,
+    "duracion_por_escena_s": 10,
+    "duracion_total_s": 100,
+    "variante_minuto": "6 escenas × 10s (comando 6)",
+    "presupuesto_dialogo": "10s → 14-22 palabras; 15s → 22-32; 8s → 10-17. Un hablante por escena por defecto.",
+    "estructura_dramatica": "gancho/incidente → escalada → pista → revelación/decisión → respuesta/resolución → remate",
+    "regla_carga": "un clip = una acción principal + una emoción dominante + máx 3 microacciones"
+  },
+  "estilo_visual": {
+    "nombre": "personas fotorealistas, cine natural, actuaciones contenidas",
+    "formato": "9:16 vertical",
+    "idioma_prompts": "inglés (diálogos en español mexicano)",
+    "extension_imagen": "110-180 palabras por prompt",
+    "camara_kling": "un solo movimiento: fixed camera | subtle push-in | gentle lateral tracking",
+    "prohibido_visual": ["glossy 3D cartoon", "cabezas de fruta", "cuerpos estilizados", "estética de videojuego", "collages o storyboards salvo pedido expreso"]
+  },
+  "formato_entrega": {
+    "campos_por_escena": ["ESCENA", "TIPO", "DURACIÓN", "PERSONAJES", "FREEPIK IMAGEN", "KLING VIDEO", "LIPSYNC"],
+    "bloques_finales": ["RESUMEN RÁPIDO - QUIÉN VA EN CADA ESCENA", "CÓMO TERMINA", "TODOS LOS LIPSYNC JUNTOS EN ORDEN", "REGISTRO PARA LA SIGUIENTE HISTORIA"]
+  },
+  "prohibiciones": [
+    "No prometer viralidad ni resultados garantizados",
+    "No usar golpes, coerción o amenazas como gesto romántico",
+    "No convertir el peso, la edad, la delgadez o las dificultades de lectura en el chiste central",
+    "No inventar reparto nuevo cuando se pidieron los cuatro personajes",
+    "No usar 'continuará' para evitar un desenlace",
+    "No sustituir un prompt por 'igual al anterior' o puntos suspensivos",
+    "No saturar todos los diálogos de modismos mexicanos",
+    "No describir en la imagen el antes y el después a la vez"
+  ],
+  "validaciones_extra": [
+    "personajes presentes ⊆ elenco del playbook (o secundario con ficha declarada)",
+    "los hablantes de PERSONAJES, KLING y LIPSYNC deben coincidir",
+    "los lipsyncs reunidos finales deben ser idénticos a los del guion"
+  ],
+  "comandos_rapidos": 10,
+  "fuentes": [
+    "upload/PROMPT_MAESTRO_HISTORIAS_MEXICANAS.txt (verbatim → prompts/prompt_maestro.md)"
+  ],
+  "pendiente": [
+    "capturar 1-2 guiones de oro completos en ejemplos/ (el registro H001 resume la primera historia; falta el guion íntegro)"
+  ]
+}

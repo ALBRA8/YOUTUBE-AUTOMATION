@@ -1,0 +1,106 @@
+{
+  "schema_version": "1.0",
+  "id": "tiktok-shop",
+  "nombre": "TikTok Shop — UGC de producto con modelo",
+  "emoji": "🛍️",
+  "version": "1.0",
+  "descripcion": "Contenido comercial UGC para TikTok Shop: un modelo (avatar) promociona un producto real en 6 escenas. Pipeline MULTI-CEREBRO: Gemini genera el collage de 6 paneles preservando identidad del modelo y fidelidad del producto; ChatGPT analiza el collage con visión y escribe un lipsync comercial individual por escena; el repo recorta los paneles y extrae los datos estructurados; la fábrica produce los clips.",
+  "estado": "empacado",
+  "tipo_pipeline": "multicerebro",
+  "elenco": {
+    "modelo": "por_campaña",
+    "nota": "Este nicho NO tiene elenco fijo: el usuario aporta avatar.png (modelo) y producto.png por campaña. Ver elenco/README.md."
+  },
+  "etapas": [
+    {
+      "id": "collage",
+      "numero": 1,
+      "cerebro": "gemini_web",
+      "porque_este_cerebro": "Gemini es el mejor generando imagen con MÚLTIPLES imágenes de referencia (identidad del modelo + producto) en una sola composición.",
+      "prompt": "prompts/collage.md",
+      "entrada": ["producto.png (usuario)", "avatar.png (usuario)"],
+      "salida": "collage.png — 6 paneles en grilla 2×3, cada panel 9:16 vertical real, identidad del modelo y producto preservados"
+    },
+    {
+      "id": "lipsyncs",
+      "numero": 2,
+      "cerebro": "chatgpt_web",
+      "porque_este_cerebro": "ChatGPT con visión es el mejor analizando la imagen escena por escena y escribiendo diálogos comerciales naturales, variados y no repetitivos.",
+      "prompt": "prompts/lipsync.md",
+      "entrada": ["assets/html_base.html (HTML universal)", "collage.png (de la etapa 1)"],
+      "salida": "html_final — tarjetas premium oscuras con: título, hook, LIPSYNC / DIÁLOGO COMERCIAL individual, movimiento, ángulo de cámara, escenario, CTA + botones de copia"
+    },
+    {
+      "id": "extraer",
+      "numero": 3,
+      "cerebro": "repo",
+      "porque_este_cerebro": "Trabajo mecánico: el código es exacto, gratis y sin errores. Nada de IA aquí.",
+      "tareas": [
+        "recortar collage.png en 6 paneles 9:16 exactos (grilla 2×3, PIL) → panel_1..panel_6.png",
+        "parsear const ideas=[...] del html_final → ideas.json (contrato de escenas del nicho)"
+      ]
+    },
+    {
+      "id": "producir",
+      "numero": 4,
+      "cerebro": "fabrica",
+      "nota": "Panel i + lipsync i → TTS (edge/gemini) o herramienta de lipsync IA → clip 9:16 → TikTok Shop. Hoy manual; Fase 3+: absorber en pipeline del repo."
+    }
+  ],
+  "estructura": {
+    "ideas_por_campaña": 6,
+    "duracion_lipsync_s": 10,
+    "lipsync": "2-4 frases cortas o medianas, español, tono creador real (no locutor, no robótico, no catálogo)",
+    "variedad_escenas": ["recomendación personal", "reacción honesta", "demostración segura", "mini testimonio", "venta elegante", "cierre con autoridad suave"],
+    "anti_repeticion": "ninguna escena repite apertura, cierre, cadencia ni hooks hablados",
+    "distribucion_paneles": ["frontal hero", "3/4 ángulo", "sentado", "perfil lateral", "close-up rostro+producto", "toma final de venta"]
+  },
+  "contrato_escena": {
+    "campos": ["scene", "title", "hook", "lipsync", "mov", "cam", "cta"],
+    "mapeo_contrato_v2": {
+      "scene": "titulo de escena",
+      "title": "hook narrativo / título de tarjeta",
+      "hook": "primer golpe de la escena",
+      "lipsync": "dialogue (narración hablada ~10s)",
+      "mov": "dirección de movimiento",
+      "cam": "receta de cámara",
+      "cta": "escena/cierre CTA"
+    }
+  },
+  "logica_fondos_por_producto": {
+    "ropa fitness": ["gym", "zona de workout limpia", "locker room", "treadmill", "pesas", "pared neutra fitness"],
+    "ropa casual": ["dormitorio", "espejo", "sala", "pasillo", "balcón", "fondo fashion creator"],
+    "suplemento/proteína": ["cocina", "counter", "desk", "gym", "shaker", "shelf wellness"],
+    "skincare": ["baño", "vanity", "espejo", "sink", "habitación limpia suave"],
+    "accesorio": ["espejo", "closet", "dressing room", "habitación lifestyle mínima"],
+    "gadget/hogar": ["desk", "cocina", "sala", "ambiente de uso real"]
+  },
+  "reglas_visuales": {
+    "identidad_modelo": "misma cara, pelo, tono de piel, proporciones, edad en los 6 paneles; no embellecer",
+    "fidelidad_producto": "color, diseño, logo, textura, empaquetado y proporciones exactos; sin deformación",
+    "calidad": "hyper-realistic, premium, UGC creator style, sharp, no text, no watermark, sin errores de anatomía",
+    "collage": "prioridad: mantener 9:16 REAL dentro de cada panel aunque el lienzo total NO sea 9:16"
+  },
+  "prohibiciones": [
+    "No preguntar al usuario qué producto es (deducirlo del collage)",
+    "No repetir lipsyncs ni plantillas de redacción entre escenas",
+    "No usar tono de locutor tradicional ni texto de catálogo",
+    "No forzar el collage total a 9:16 sacrificando la proporción interna de los paneles",
+    "No generar diálogos de una sola frase genérica"
+  ],
+  "ejemplo_oro": {
+    "html": "ejemplos/gymshark_html_final.html",
+    "ideas_json": "ejemplos/gymshark_ideas.json",
+    "producto": "camiseta Gymshark (ropa fitness)",
+    "nota": "El HTML de ejemplo ES la plantilla universal: el diseño/CSS es fijo y las ideas viven en un array JS `const ideas=[...]` — cambiar de campaña = cambiar ese array."
+  },
+  "fuentes": [
+    "upload/html_base/PEDIR COLLAGE CON EL PRODUCTO.txt (verbatim → prompts/collage.md)",
+    "instrucciones lipsync dictadas en chat (verbatim → prompts/lipsync.md)",
+    "upload/html_gymshark_9x16_interactivo_pro (1).zip (ejemplo de oro)"
+  ],
+  "pendiente": [
+    "Fase 1: endpoint /api/playbooks + UI de etapas con botón 'copiar prompt' y zona de arrastre de artefactos",
+    "Fase 3: recortador de collage 2×3 en repo + parser de const ideas=[...] + absorción en pipeline"
+  ]
+}

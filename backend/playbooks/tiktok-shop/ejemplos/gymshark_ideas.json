@@ -1,0 +1,56 @@
+[
+  {
+    "scene": "Frontal en gym",
+    "title": "Reacción real: se ve mejor puesto que en foto",
+    "hook": "Chicos, esta camiseta se ve mucho más premium puesta de lo que parece online.",
+    "voz": "Lo primero que noté fue cómo cae en pecho, hombros y brazos sin verse exagerada. Tiene ese fit atlético limpio que en cámara se ve más caro y más pro.",
+    "mov": "Empieza frontal, manos relajadas o en bolsillo, pausa de 2 segundos, mini giro 45 grados y un paso hacia cámara.",
+    "cam": "Plano entero + giro 45° + close-up del pecho/logo.",
+    "cta": "Comenta FIT si quieres comparación con otra camiseta."
+  },
+  {
+    "scene": "Perfil lateral",
+    "title": "Comparación de perfil",
+    "hook": "El perfil es donde más se nota si una camiseta sí tiene buen corte.",
+    "voz": "Cuando la manga, el hombro y el torso quedan bien alineados, todo el look se siente más atlético. Aquí el perfil vende muchísimo el fit.",
+    "mov": "Posición lateral, pecho afuera, brazos relajados, pausa de 2 segundos y giro corto hacia el frente.",
+    "cam": "Plano medio lateral + detalle de manga y bíceps.",
+    "cta": "Guárdalo si estás buscando camisetas fitness que sí se vean bien."
+  },
+  {
+    "scene": "Sentado en banco",
+    "title": "Sentado pero vendiendo el fit",
+    "hook": "Hasta sentado sigue viéndose bien, y eso no pasa con todas.",
+    "voz": "Hay camisetas que solo lucen bien parado. Esta mantiene la forma sentado y sigue marcando limpio hombros, pecho y torso sin verse tiesa.",
+    "mov": "Sentado en banco, antebrazos relajados, mirada a cámara y luego incorporarse con un corte rápido.",
+    "cam": "Plano americano sentado + detalle del torso.",
+    "cta": "Comenta GYM si quieres ideas solo para ropa fitness."
+  },
+  {
+    "scene": "Lateral pared limpia",
+    "title": "Vista lateral limpia",
+    "hook": "Una pared limpia hace que el producto destaque muchísimo más.",
+    "voz": "Con fondo simple, la atención se va directo al corte de la camiseta. Aquí se ve clarísimo cómo ajusta sin verse apretada de más.",
+    "mov": "Quieto de perfil, mano relajada, mini respiración, después mirada al frente con corte.",
+    "cam": "Perfil entero + close-up de costura lateral.",
+    "cta": "¿Quieres versión black o otra marca comparada?"
+  },
+  {
+    "scene": "Close-up rostro + logo",
+    "title": "Logo protagonista",
+    "hook": "El logo así de cerca vende solo.",
+    "voz": "Cuando una marca se ve limpia, grande y bien puesta en el pecho, se vuelve mucho más reconocible. Este tipo de toma funciona perfecto para TikTok Shop.",
+    "mov": "Acércate al torso, mano rozando la tela del pecho y luego corte a primer plano del rostro.",
+    "cam": "Close-up del pecho/logo + close-up rostro.",
+    "cta": "Escribe LOGO y te hago otra idea de close-up."
+  },
+  {
+    "scene": "Caminando al frente",
+    "title": "Walking shot comercial",
+    "hook": "No basta con verla quieta, hay que verla caminando.",
+    "voz": "Cuando caminas con una camiseta así, la caída y el movimiento de la tela muestran si realmente tiene buen fit. Esta mantiene muy bien la forma.",
+    "mov": "Camina directo hacia cámara con pasos lentos, hombros rectos y una pausa al final.",
+    "cam": "Plano entero frontal en movimiento.",
+    "cta": "Comenta LINK si quieres el guion completo para venderla."
+  }
+]
