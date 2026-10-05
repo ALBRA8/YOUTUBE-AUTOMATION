@@ -665,13 +665,19 @@ def _build_script_json_artesano(project: dict, scenes: list[dict], ai: dict | No
             "scene_number": i,
             "title": title,
             "narration": sc.get("narration") or "",
-            "duration": sc.get("duration") or VIDEO_SECONDS,
+            "duration": (sc.get("duration") or _creative_duration_target(sc)
+                         or VIDEO_SECONDS),
             "image_prompt": image_prompt,
             "imagePrompt": image_prompt,  # alias camelCase (interfaces TS)
         }
         if i < n:
-            motion = (ai_stages[k].get("video_prompt_en") if k < len(ai_stages) and ai_stages[k].get("video_prompt_en")
-                      else _artesano_video_block(i, n, sc, char, mat, prop))
+            creative = _creative_video_prompt(sc)   # P1: el prompt del Creative
+            if creative:                            # Engine manda SIEMPRE
+                motion = creative
+            elif k < len(ai_stages) and ai_stages[k].get("video_prompt_en"):
+                motion = ai_stages[k]["video_prompt_en"]
+            else:
+                motion = _artesano_video_block(i, n, sc, char, mat, prop)
             video_prompt = {
                 "motion": motion,
                 "camera_movement": "fixed vertical 9:16, natural handheld stability, no camera spin",
@@ -694,6 +700,32 @@ def _build_script_json_artesano(project: dict, scenes: list[dict], ai: dict | No
                   "prompt": "hyper-realistic documentary photography, myth-meets-reality"},
         "scenes": scenes_out,
     }
+
+
+# ── Contrato Golden Execution V1.0 (P1) ──────────────────────────────────────
+# El video_prompt del Creative Engine (Production JSON) es FUENTE PRIMARIA:
+# flow_export NUNCA lo reemplaza. Las plantillas del método (_video_block_text,
+# _artesano_video_block, ai_stages) son SOLO fallback cuando la unidad no trae
+# prompt propio. Orden de precedencia del motion:
+#   1. meta.production_unit.video_prompt  (Creative Engine — manda siempre)
+#   2. ai_stages[k].video_prompt_en       (enriquecimiento IA optativo)
+#   3. plantillas deterministas del método (fallback legacy)
+
+def _creative_video_prompt(sc: dict) -> str:
+    """video_prompt verbatim de la unidad de producción del Creative Engine."""
+    pu = ((sc or {}).get("meta") or {}).get("production_unit") or {}
+    vp = pu.get("video_prompt")
+    return (vp or "").strip() if isinstance(vp, str) else ""
+
+
+def _creative_duration_target(sc: dict) -> float | None:
+    """duration_target de la unidad de producción (segundos > 0) o None."""
+    pu = ((sc or {}).get("meta") or {}).get("production_unit") or {}
+    try:
+        dt = float(pu.get("duration_target"))
+    except (TypeError, ValueError):
+        return None
+    return dt if dt > 0 else None
 
 
 def _sanitize_flow_entry(entry: dict, brand: str) -> dict:
@@ -750,13 +782,19 @@ def build_script_json(project: dict, scenes: list[dict], ai: dict | None = None,
             "scene_number": i,
             "title": title,
             "narration": sc.get("narration") or "",
-            "duration": sc.get("duration") or VIDEO_SECONDS,
+            "duration": (sc.get("duration") or _creative_duration_target(sc)
+                         or VIDEO_SECONDS),
             "image_prompt": image_prompt,
             "imagePrompt": image_prompt,  # alias camelCase (interfaces TS)
         }
         if i < n:  # video i transforma Imagen i → Imagen i+1
-            motion = (ai_stages[k].get("video_prompt_en") if k < len(ai_stages) and ai_stages[k].get("video_prompt_en")
-                      else _video_block_text(i, sc, scenes[k + 1], fmt, brand))
+            creative = _creative_video_prompt(sc)   # P1: el prompt del Creative
+            if creative:                            # Engine manda SIEMPRE
+                motion = creative
+            elif k < len(ai_stages) and ai_stages[k].get("video_prompt_en"):
+                motion = ai_stages[k]["video_prompt_en"]
+            else:
+                motion = _video_block_text(i, sc, scenes[k + 1], fmt, brand)
             video_prompt = {
                 "motion": motion,
                 "camera_movement": _cam_move(image_prompt["composition"]),

@@ -20,6 +20,8 @@ BATERIAS = [
     "test_production_json.py",   # adapter Production JSON 2.16 (76 checks)
     "test_merge_216_pyav.py",    # merge/integración 2.16.x + fix PyAV (51 checks)
     "test_lanzar_preflight.py",  # preflight de lanzamiento vía MCP (29 checks)
+    "test_flow_contract_p1.py",  # GOLDEN EXECUTION CONTRACT P1: video_prompt
+                                 # del Creative Engine llega verbatim a Flow (44)
 ]
 
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")
