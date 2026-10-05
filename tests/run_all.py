@@ -33,6 +33,8 @@ BATERIAS = [
     "test_bridge_e2e.py",        # E2E extensión: node --check + bridge.js real
                                  # contra backend mock (sandbox VM)
     "test_humos_infra.py",       # humos: lo declarado EXISTE en el repo (~50)
+    "test_live_boot.py",         # BOOT VIVO: uvicorn real + ciclo completo del
+                                 # Flow Bridge por HTTP (boot + cycle smoke)
 ]
 
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")

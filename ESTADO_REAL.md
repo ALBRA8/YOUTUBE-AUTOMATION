@@ -37,7 +37,8 @@ mantiene el inventario público.
 | **Concurrencia**: 8 workers en raza sobre BEGIN IMMEDIATE (cero dobles claims, tokens únicos), aislamiento multi-proyecto con filtro pid, token de una sola era (409 tras re-claim), completes paralelos, enqueue en caliente | ✅ real | `test_concurrencia.py` (18 checks) |
 | **Chaos**: reinicio REAL de proceso (subprocess reabre la SQLite y reclama), rollback atómico a mitad de escritura, doble complete → 409 sin sobreescribir asset, HTML de Flow → 422 → dead por intentos, dead → re-enqueue limpio, heartbeat/complete sobre estados imposibles, carrera zombie | ✅ real | `test_chaos.py` (28 checks) |
 | **E2E extensión**: `bridge.js` REAL en sandbox VM (stubs Chrome MV3) contra backend mock HTTP con estado — claim→complete con bytes PNG validados, fail, 422→fail con detail, heartbeat true/409 false, cola vacía, backend caído no tumba el bucle, canal popup, anti-duplicado | ✅ real (capa contrato, sin Google Flow real) | `tests/e2e_bridge_mock.js` + `test_bridge_e2e.py` (24 checks Python + 26 en el harness) |
-| Suite canónica | ✅ 11 baterías en `tests/run_all.py` | runner |
+| **Boot vivo + ciclo completo por HTTP real**: uvicorn arrancado de verdad en sandbox aislado — startup, CORS preflight de la extensión, endpoints base, métricas, video QA; y ciclo Flow Bridge de punta a punta por HTTP: enqueue (build_script_json) → claim ordenado → complete con PNG/MP4 reales (PIL/ffprobe) → 409 doble complete → 422 HTML → fail/retry (attempts) → guard de tipo → project_done → **auto-render disparado** → status final → QA "ok" | ✅ real (capa HTTP; render de fondo sin claves TTS en sandbox) | `tests/live_boot_smoke.sh` + `tests/live_cycle_smoke.sh` vía `test_live_boot.py` (33 checks) |
+| Suite canónica | ✅ 12 baterías en `tests/run_all.py` (474 checks) | runner |
 
 ## 3. Lo que AÚN NO está demostrado (límites honestos)
 
