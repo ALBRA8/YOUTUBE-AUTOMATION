@@ -22,6 +22,9 @@ BATERIAS = [
     "test_lanzar_preflight.py",  # preflight de lanzamiento vía MCP (29 checks)
     "test_flow_contract_p1.py",  # GOLDEN EXECUTION CONTRACT P1: video_prompt
                                  # del Creative Engine llega verbatim a Flow (44)
+    "test_flow_bridge.py",       # FLOW BRIDGE v1: cola real claim/lease/
+                                 # heartbeat/complete/fail + 6 endpoints (48)
+    "test_humos_infra.py",       # humos: lo declarado EXISTE en el repo (~50)
 ]
 
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")

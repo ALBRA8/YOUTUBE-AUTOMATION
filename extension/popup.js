@@ -492,3 +492,62 @@ chrome.runtime.onMessage.addListener((msg) => {
     }
   }
 })();
+
+/* ===========================================================================
+ * [bridge v1] Puente Backend (Flow Bridge) — ver README.txt "PUENTE BACKEND"
+ * Botón ON/OFF + estado (baseUrl, job activo). Config: dos <input> simples.
+ * =========================================================================== */
+els.bridgeStatus = $('bridge-status');
+els.bridgeBtn = $('btn-bridge');
+els.bridgeBase = $('bridge-base-url');
+els.bridgeKey = $('bridge-api-key');
+
+function bridgeRender(cfg, running, active) {
+  const on = !!(cfg && cfg.enabled);
+  els.bridgeBtn.textContent = on ? 'Puente Backend: ON' : 'Puente Backend: OFF';
+  els.bridgeBtn.classList.toggle('bridge-on', on);
+  const job = active ? ' · job escena ' + String(active.scene_number).padStart(2, '0') + ' (' + active.kind + ')' : '';
+  els.bridgeStatus.textContent = 'Puente: ' + (on ? 'ON' : 'OFF')
+    + ' · ' + ((cfg && cfg.baseUrl) || 'http://127.0.0.1:8000')
+    + (running ? ' · sondeando' : '') + job;
+  // Pre-cargar inputs con la cfg guardada (sin pisar lo que el usuario escribe)
+  if (document.activeElement !== els.bridgeBase && !els.bridgeBase.value.trim() && cfg && cfg.baseUrl) {
+    els.bridgeBase.value = cfg.baseUrl;
+  }
+  if (document.activeElement !== els.bridgeKey && !els.bridgeKey.value.trim() && cfg && cfg.apiKey) {
+    els.bridgeKey.value = cfg.apiKey;
+  }
+}
+
+function bridgeRefresh() {
+  chrome.runtime.sendMessage({ type: 'BRIDGE_GET_CFG' }, (res) => {
+    if (res && res.ok) bridgeRender(res.cfg, res.running, res.active);
+    else els.bridgeStatus.textContent = 'Puente: no disponible (recarga la extensión)';
+  });
+}
+
+els.bridgeBtn.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'BRIDGE_GET_CFG' }, (res) => {
+    const cfg = (res && res.cfg) || {};
+    chrome.runtime.sendMessage({
+      type: 'BRIDGE_SET_CFG',
+      cfg: {
+        enabled: !cfg.enabled,
+        baseUrl: els.bridgeBase.value.trim(),
+        apiKey: els.bridgeKey.value.trim(),
+      },
+    }, (r2) => {
+      if (r2 && r2.ok) {
+        bridgeRender(r2.cfg, r2.running, r2.active);
+        toast(r2.cfg && r2.cfg.enabled
+          ? '🔗 Puente activo → ' + r2.cfg.baseUrl + ' (los prompts vienen del backend)'
+          : 'Puente backend desactivado.');
+      } else {
+        toast('⚠️ No se pudo guardar el puente: ' + ((r2 && r2.error) || 'error desconocido'));
+      }
+    });
+  });
+});
+
+bridgeRefresh();
+setInterval(bridgeRefresh, 4000); // estado en vivo mientras el popup esté abierto

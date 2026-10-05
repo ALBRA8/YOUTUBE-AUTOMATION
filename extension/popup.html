@@ -76,6 +76,20 @@
       </div>
     </section>
 
+    <!-- [bridge v1] Puente Backend (Flow Bridge): cola de jobs del backend -->
+    <section class="panel bridge-panel" id="bridge-panel">
+      <h2>Puente Backend</h2>
+      <div id="bridge-status" class="bridge-status">Puente: …</div>
+      <details class="bridge-config">
+        <summary>Servidor / API key</summary>
+        <input id="bridge-base-url" class="input" type="text" spellcheck="false" placeholder="http://127.0.0.1:8000" />
+        <input id="bridge-api-key" class="input" type="password" spellcheck="false" placeholder="X-API-Key (si el backend la exige)" />
+      </details>
+      <div class="row-actions bridge-row">
+        <button id="btn-bridge" class="btn primary">Puente Backend: OFF</button>
+      </div>
+    </section>
+
     <footer class="foot" id="foot-hint">
       Vincula la carpeta del proyecto (la que contiene <code>out/</code>) para
       guardar directo en disco. Plan B: Subir JSON.

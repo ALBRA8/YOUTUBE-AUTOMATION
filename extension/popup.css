@@ -288,3 +288,13 @@ html[data-theme="light"] .badge.json { color: #5f3fd6; }
   background: rgba(124, 92, 255, .35); border-radius: 999px;
 }
 .scenes-list::-webkit-scrollbar-track { background: transparent; }
+
+/* ── [bridge v1] Puente Backend ──────────────────────────────────────────── */
+.bridge-panel h2 { font-size: 15px; font-weight: 800; margin-bottom: 9px; display: flex; align-items: center; gap: 8px; }
+.bridge-panel h2::before { content: ''; width: 4px; height: 15px; border-radius: 999px; background: linear-gradient(180deg, var(--accent3), var(--gold)); }
+.bridge-status { font-size: 11.5px; font-weight: 700; color: var(--muted); background: var(--bg2); border: 1px solid var(--border); border-radius: 11px; padding: 9px 12px; line-height: 1.45; word-break: break-all; }
+.bridge-config { margin-top: 9px; }
+.bridge-config summary { cursor: pointer; font-size: 10.5px; font-weight: 700; letter-spacing: .6px; color: var(--muted); margin-bottom: 7px; }
+.bridge-config .input { margin-bottom: 7px; }
+.bridge-row { margin-top: 10px; }
+.btn.bridge-on { background: linear-gradient(120deg, var(--accent2), #6ff0dc); border: none; color: #06302a; box-shadow: 0 10px 26px rgba(0, 224, 198, .3); }

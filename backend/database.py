@@ -103,6 +103,26 @@ CREATE TABLE IF NOT EXISTS avatars (       -- personajes consistentes del canal
     updated_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_scenes_project ON scenes(project_id, idx);
+CREATE TABLE IF NOT EXISTS flow_jobs (    -- Flow Bridge: cola de assets para la extensión
+    id           TEXT PRIMARY KEY,
+    project_id   TEXT NOT NULL,
+    kind         TEXT NOT NULL,             -- image | video
+    scene_number INTEGER NOT NULL,          -- 1-based (Escena_NN)
+    part         INTEGER NOT NULL DEFAULT 1,
+    prompt       TEXT NOT NULL DEFAULT '',  -- fuente única: flow_export.build_script_json
+    prompt_meta  TEXT,                      -- JSON (título de escena, etc.)
+    status       TEXT NOT NULL DEFAULT 'queued',  -- queued | claimed | done | dead
+    attempts     INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3,-- imagen 3 · video 2
+    worker       TEXT,
+    job_token    TEXT,                      -- nonce del claim (complete/fail/heartbeat)
+    lease_until  TEXT,
+    error        TEXT,
+    asset_path   TEXT,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_flow_jobs_project ON flow_jobs(project_id, status);
 """
 
 

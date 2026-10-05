@@ -15,7 +15,7 @@
  *   - Deteccion dinamica de formatos PNG/MP4/WebM/GIF.
  * ========================================================================== */
 'use strict';
-importScripts('parser.js');
+importScripts('parser.js', 'bridge.js'); // [bridge v1] Flow Bridge: cola HTTP del backend (ver bridge.js)
 
 /* ------------------------- Constantes operativas ------------------------- */
 const MAX_CONCURRENT_IMAGES = 3;   // escenas en paralelo (imagenes)
@@ -1113,7 +1113,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       case 'SW_PING':
         sendResponse({ ok: true, alive: true, running });
         break;
+      case 'BRIDGE_JOB': // [bridge v1] job del backend: delega en el puente (uso desde otros contextos)
+        if (typeof self.__bridgeHandleJob === 'function') {
+          self.__bridgeHandleJob(msg.job, (res) => {
+            try {
+              chrome.runtime.sendMessage({
+                type: 'BRIDGE_JOB_RESULT',
+                jobId: (res && res.jobId) || (msg.job && msg.job.id) || null,
+                ok: !!(res && res.ok),
+                blob: (res && res.blob) || null,
+                error: (res && res.error) || null,
+              }).catch(() => {});
+            } catch (_) {}
+          });
+          sendResponse({ ok: true, accepted: true });
+        } else {
+          sendResponse({ ok: false, error: 'bridge no disponible (background sin [bridge v1])' });
+        }
+        break;
       default:
+        // [bridge v1] los BRIDGE_* (GET_CFG/SET_CFG/STATUS/JOB_RESULT) los atiende
+        // bridge.js con su propio listener: no robarle el sendResponse asíncrono.
+        if (msg && typeof msg.type === 'string' && msg.type.indexOf('BRIDGE_') === 0) break;
         sendResponse({ ok: false, error: 'mensaje desconocido' });
     }
   } catch (e) {
@@ -1121,3 +1142,164 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   return false; // respuestas sincronas
 });
+
+/* =========================================================================== */
+/* ================== [bridge v1] FLOW BRIDGE — handler de jobs ============== */
+/* Puente entre bridge.js (claim del backend) y la maquinaria existente de
+   este archivo (inyección Slate en labs.google + sondeo DOM + descarga).
+   Contrato con bridge.js: __bridgeHandleJob(job, sendResult) llama sendResult
+   UNA vez con { jobId, ok:true, blob } o { jobId, ok:false, error }.        */
+
+/* Captura del último blob descargado mientras un job del bridge está activo:
+   fetchBlobWithRetry se envuelve UNA sola vez y sólo registra cuando la
+   captura está activa (comportamiento normal intacto el resto del tiempo). */
+const __bridgeCapture = { active: false, url: null, blob: null }; // [bridge v1]
+const __bridgeOrigFetchBlob = fetchBlobWithRetry; // [bridge v1]
+fetchBlobWithRetry = async function (url) { // [bridge v1] wrapper transparente
+  const blob = await __bridgeOrigFetchBlob(url);
+  if (__bridgeCapture.active) { __bridgeCapture.url = url; __bridgeCapture.blob = blob; }
+  return blob;
+};
+
+/* Busca en el DOM de labs.google la URL del asset de una escena (plan B si la
+   captura directa no estuvo disponible: escritura vía pestaña worker o
+   fallback a descargas, caminos donde el blob no pasa por este SW). */
+async function __bridgeFindAssetUrl(tabId, prompt, isVideo) { // [bridge v1]
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: domScanFn,
+      args: [],
+    });
+    const data = results && results[0] && results[0].result;
+    const tiles = (data && Array.isArray(data.tiles)) ? data.tiles : [];
+    const norm = normalizeForMatch(prompt).slice(0, MAX_PROMPT_MATCH_LEN);
+    for (const tile of tiles) {
+      if (!tile) continue;
+      const normTile = normalizeForMatch(tile.text);
+      if (!norm || !normTile || normTile.indexOf(norm) === -1) continue;
+      const urls = isVideo
+        ? (tile.vidSrcs && tile.vidSrcs.length ? tile.vidSrcs : tile.imgSrcs)
+        : (tile.imgSrcs && tile.imgSrcs.length ? tile.imgSrcs : tile.vidSrcs);
+      if (urls && urls.length) return urls[urls.length - 1];
+    }
+  } catch (_) { /* pestaña cerrada o sin permiso: sin plan B */ }
+  return null;
+}
+
+/* Handler de jobs del Flow Bridge. Construye un QueueItem con el prompt del
+   backend y el scene_number, lo encola con la maquinaria existente (tick →
+   injectScene → pollTick → saveUrlToDisk) y cuando la escena llega a
+   DOWNLOADED entrega el Blob al bridge. Si el modo local no está disponible
+   (cola ocupada, sin pestaña de labs.google, error o watchdog) responde
+   ok:false para que bridge.js haga bridgeFail limpio y el backend reintente. */
+function __bridgeHandleJob(job, sendResult) { // [bridge v1]
+  const jobId = (job && job.id) || null;
+  (async () => {
+    const sceneNumber = Number(job && job.scene_number);
+    const prompt = String((job && job.prompt) || '').trim();
+    const isVideo = (job && job.kind) === 'video';
+    let captureOn = false;
+    try {
+      if (!jobId) throw new Error('job sin id');
+      if (!prompt) throw new Error('job sin prompt');
+      if (!Number.isInteger(sceneNumber) || sceneNumber < 1) throw new Error('job sin scene_number válido');
+      // Items bridge huérfanos (SW suspendido a mitad de job): se retiran; su
+      // lease del backend expirará y el job volverá a la cola del backend.
+      if (queue.some((i) => i && typeof i.id === 'string' && i.id.indexOf('bridge_') === 0)) {
+        queue = queue.filter((i) => !(i && typeof i.id === 'string' && i.id.indexOf('bridge_') === 0));
+        persistState();
+        broadcastState();
+      }
+      if (running && queue.some((i) => i.status === STATUS.PENDING || i.status === STATUS.IN_PROGRESS || i.status === STATUS.RATE_LIMITED)) {
+        throw new Error('cola local ocupada: detén la generación local para atender jobs del backend');
+      }
+      // Pestaña de labs.google: la vinculada (si sigue viva) o cualquiera abierta
+      let tabId = Number.isInteger(labTabId) ? labTabId : null;
+      if (tabId != null) {
+        try { await chrome.tabs.get(tabId); } catch (_) { tabId = null; }
+      }
+      if (tabId == null) {
+        const tabs = await chrome.tabs.query({ url: 'https://labs.google/*' });
+        tabId = (tabs && tabs.length) ? tabs[0].id : null;
+      }
+      if (tabId == null) throw new Error('sin pestaña de labs.google: abre un proyecto de Flow con el editor visible');
+      labTabId = tabId;
+      // Estado per-escena limpio (evita conteos/mapeos de ejecuciones viejas)
+      sceneMediaCounts.delete(sceneNumber);
+      for (const [mid, m] of Array.from(mediaIdToScene.entries())) {
+        if (m && m.sceneNumber === sceneNumber) mediaIdToScene.delete(mid);
+      }
+      // Encolar con la maquinaria existente (un job del bridge a la vez)
+      const item = {
+        id: 'bridge_' + jobId + '_' + Math.random().toString(36).slice(2, 7),
+        scene_number: sceneNumber,
+        prompt,
+        status: STATUS.PENDING,
+        error: null,
+      };
+      queue = queue.filter((i) => i.scene_number !== sceneNumber);
+      queue.push(item);
+      mode = isVideo ? 'videos' : 'images';
+      provider = 'flow';    // el bridge trabaja sobre labs.google (no meta.ai)
+      imagesPerScene = 1;   // el backend pide 1 asset por job
+      running = true;
+      lastInjectAt = 0;
+      rateLimitCooldownUntil = 0;
+      persistState();
+      startPollingIfNeeded();
+      ensureKeepalive();
+      broadcastState();
+      tickSoon(800);
+      // Captura activa mientras la maquinaria descarga el asset
+      captureOn = true;
+      __bridgeCapture.active = true;
+      __bridgeCapture.url = null;
+      __bridgeCapture.blob = null;
+      // Espera el ciclo de vida del item (el watchdog existente marca ERROR los atascos)
+      const TIMEOUT_MS = isVideo ? 18 * 60000 : 9 * 60000;
+      const t0 = Date.now();
+      let outcome = null;
+      while (!outcome) {
+        if (Date.now() - t0 > TIMEOUT_MS) {
+          outcome = { ok: false, error: 'timeout esperando la generación en labs.google' };
+          break;
+        }
+        const cur = queue.find((i) => i.id === item.id);
+        if (!cur) { outcome = { ok: false, error: 'el job del bridge desapareció de la cola local' }; break; }
+        if (cur.status === STATUS.DOWNLOADED) { outcome = { ok: true }; break; }
+        if (cur.status === STATUS.ERROR) { outcome = { ok: false, error: cur.error || 'generación con error en labs.google' }; break; }
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+      // Retirar el item del bridge (si stopQueue('completada') ya paró la cola, no pasa nada)
+      queue = queue.filter((i) => i.id !== item.id);
+      if (!queue.length && running) {
+        running = false;
+        stopPolling();
+        try { chrome.alarms.clear(KEEPALIVE_ALARM).catch(() => {}); } catch (_) {}
+        persistState();
+        broadcastState();
+      }
+      if (!outcome.ok) throw new Error(outcome.error);
+      // Obtener el Blob: 1) captura directa del wrapper de descarga
+      let blob = (__bridgeCapture.blob && __bridgeCapture.url && /^https?:/i.test(__bridgeCapture.url))
+        ? __bridgeCapture.blob : null;
+      // 2) plan B: re-scan del DOM + descarga fresca de la URL firmada
+      if (!blob) {
+        const url = await __bridgeFindAssetUrl(tabId, prompt, isVideo);
+        if (!url) throw new Error('asset generado pero su URL no se localizó para el bridge');
+        blob = await fetchBlobWithRetry(url);
+      }
+      if (!blob || !blob.size) throw new Error('blob del asset vacío');
+      sendResult({ jobId, ok: true, blob });
+    } catch (e) {
+      sendResult({ jobId, ok: false, error: String((e && e.message) || e) });
+    } finally {
+      if (captureOn) {
+        __bridgeCapture.active = false;
+        __bridgeCapture.blob = null;
+        __bridgeCapture.url = null;
+      }
+    }
+  })();
+}

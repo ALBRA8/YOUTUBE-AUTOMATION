@@ -54,6 +54,49 @@ Chrome suspende el Service Worker (30s de inactividad), al despertar recupera
 la cola y continua donde quedo. Un keepalive por alarmas reactiva el sondeo.
 
 --------------------------------------------------------------------------------
+PUENTE BACKEND (Flow Bridge) — v2.1 (bridge.js)
+--------------------------------------------------------------------------------
+QUE ES: la extensión puede trabajar como "worker" de un backend local. El
+backend guarda la cola de jobs (un asset por escena: imagen o vídeo) y la
+extensión los reclama, los genera en labs.google con la maquinaria de siempre
+(inyección Slate + sondeo DOM + descarga) y sube el resultado al backend.
+LOS PROMPTS VIENEN DEL BACKEND: son el script.json generado por
+build_script_json en el proyecto (backend/pipeline/flow_export.py); la
+extensión NUNCA los inventa ni los edita.
+
+COMO ACTIVARLO:
+1. Arranca el backend (uvicorn; por defecto http://127.0.0.1:8000) y encola un
+   proyecto (POST /api/extension/flow/jobs/enqueue o el panel del backend).
+2. Icono de la extensión → tarjeta "Puente Backend".
+3. (Opcional) despliega "Servidor / API key" y ajusta baseUrl / X-API-Key si
+   tu backend define MASTER_API_KEY (header X-API-Key).
+4. Botón "Puente Backend: OFF" → un clic → ON. El service worker empieza a
+   sondear la cola cada 5s. Otro clic lo desactiva.
+
+QUE HACE CADA CICLO (extension/bridge.js):
+  GET  /api/extension/flow/jobs/next?worker=w-XXXXXXXX  → claim atómico (204 =
+  sin jobs) → heartbeat cada 30s para extender el lease → genera el asset en
+  labs.google con el mismo camino de la cola local → POST /complete con los
+  bytes crudos (image/png o video/mp4) → si algo falla, POST /fail con el
+  error (el backend reintenta o marca dead). Un solo job a la vez.
+
+CONVENCION DE ASSETS (lado backend): data/output/<pid>/flow/ con
+Escena_NN_flow.png (imágenes, validadas con PIL) y Escena_NN_video_<part>.mp4
+(vídeos, validados con ffprobe). La extensión envía el asset tal cual lo
+generó Flow; si Flow entregara WebM el backend lo rechazará (422) y el job se
+reintenta.
+
+NOTAS:
+- Necesita una pestaña de labs.google con un proyecto de Flow abierto (editor
+  visible). Si la cola local está en uso, el job se rechaza limpio (fail) y el
+  backend lo reintenta más tarde.
+- Si Chrome suspende el Service Worker a mitad de job, el lease expira y el
+  backend reintenta; un keepalive por alarmas (flow-bridge-keepalive) minimiza
+  estos cortes.
+- El estado del puente (baseUrl, apiKey, workerId, enabled) vive en
+  chrome.storage.local bajo flow_bridge_cfg_v1.
+
+--------------------------------------------------------------------------------
 Si algo falla
 --------------------------------------------------------------------------------
 - "Editor Slate no encontrado": abre un proyecto dentro de Flow (la caja de

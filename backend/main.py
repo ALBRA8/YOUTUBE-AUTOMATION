@@ -15,7 +15,7 @@ import config
 import database as db
 import security
 from config import DATA_DIR, HOST, OUTPUT_DIR, PORT, TMP_DIR
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
                                StreamingResponse)
 from fastapi.staticfiles import StaticFiles
@@ -39,6 +39,18 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger("main")
 
 app = FastAPI(title="YT Automation v2.0", version="2.16.2")
+
+# [flow-bridge v1] CORS para la extensión Chrome (MV3 service worker):
+# los fetch desde chrome-extension:// exigen CORS — sin esto el puente no
+# puede ni saludar. Solo métodos lectura/escritura del puente, sin credenciales.
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
 
 
 @app.on_event("startup")
@@ -1244,6 +1256,107 @@ async def extension_images(body: dict):
 @app.get("/api/extension/pending")
 async def extension_pending():
     return {"pending": db.count_ext_images()}
+
+
+# ─────────────────────── [flow-bridge v1] cola de jobs de Google Flow ──
+# Circuito real: enqueue (desde build_script_json, única fuente de prompts)
+# → claim atómico por la extensión → heartbeat → complete (binario validado)
+# → auto-render con orchestrator.start_flow_render. Contrato en
+# services/flow_jobs.py. La autenticación la cubre auth_guard (X-API-Key).
+
+@app.post("/api/extension/flow/jobs/enqueue")
+async def flow_jobs_enqueue(body: dict):
+    """(Re)genera la cola de jobs del proyecto desde build_script_json.
+    Idempotente: conserva los jobs ya done (no re-trabaja assets subidos)."""
+    from services import flow_jobs
+    pid = ((body or {}).get("project_id") or "").strip()
+    if not pid:
+        raise HTTPException(400, "falta project_id")
+    fmt = (body or {}).get("format") or "transformacion"
+    try:
+        return flow_jobs.enqueue_project(pid, fmt=fmt,
+                                         brand=(body or {}).get("brand"),
+                                         character=(body or {}).get("character"))
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.get("/api/extension/flow/jobs/next")
+async def flow_jobs_next(worker: str = "", project_id: str = ""):
+    """Claim ATÓMICO del siguiente job (imagen antes que video, escena
+    ascendente). 204 = no hay trabajo. Recupera leases expirados al vuelo."""
+    from services import flow_jobs
+    if not (worker or "").strip():
+        raise HTTPException(400, "falta worker")
+    job = flow_jobs.claim_next(worker.strip(),
+                               pid=project_id.strip() or None)
+    if not job:
+        from fastapi import Response
+        return Response(status_code=204)
+    return {"ok": True, "job": job}
+
+
+@app.post("/api/extension/flow/jobs/{job_id}/heartbeat")
+async def flow_jobs_heartbeat(job_id: str, token: str = ""):
+    """Renueva el lease del job reclamado (worker vivo)."""
+    from services import flow_jobs
+    res = flow_jobs.heartbeat(job_id, token)
+    if not res:
+        raise HTTPException(409, "job no reclamado por este worker "
+                                 "(token/lease inválido)")
+    return res
+
+
+@app.post("/api/extension/flow/jobs/{job_id}/complete")
+async def flow_jobs_complete(job_id: str, request: Request, token: str = ""):
+    """Sube el asset generado en Flow (binario crudo en el body). Valida
+    PNG/JPEG/WEBP con PIL · MP4 con ffprobe. Si es el último job del proyecto
+    mapea los assets a las escenas y, si están completas, lanza el render
+    automáticamente (orchestrator.start_flow_render)."""
+    from services import flow_jobs
+    data = await request.body()
+    try:
+        res = flow_jobs.complete(job_id, token, data)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    if not res:
+        raise HTTPException(409, "job no reclamado por este worker "
+                                 "(token/lease inválido)")
+    pid = res.get("project_id") or ""
+    res["auto_render"] = False
+    if res.get("project_done") and res.get("renderable") and pid \
+            and not db.active_job_for_project(pid):
+        try:
+            res["render_job_id"] = await orchestrator.start_flow_render(pid)
+            res["auto_render"] = True
+            log.info("[flow-bridge] assets completos para %s → render automático "
+                     "(job %s)", pid, res["render_job_id"])
+        except Exception as e:  # noqa: BLE001
+            log.warning("[flow-bridge] auto-render falló para %s: %s",
+                        pid, str(e)[:200])
+    return res
+
+
+@app.post("/api/extension/flow/jobs/{job_id}/fail")
+async def flow_jobs_fail(job_id: str, token: str = "", body: dict | None = None):
+    """Marca error y reintenta (queued) o deja dead al agotar max_attempts
+    (imagen 3 · video 2)."""
+    from services import flow_jobs
+    res = flow_jobs.fail(job_id, token,
+                         ((body or {}).get("error") or "")[:500])
+    if not res:
+        raise HTTPException(409, "job no reclamado por este worker "
+                                 "(token/lease inválido)")
+    return res
+
+
+@app.get("/api/extension/flow/jobs/status/{pid}")
+async def flow_jobs_status(pid: str):
+    """Estado de la cola del proyecto: counts por status + detalle de jobs."""
+    from services import flow_jobs
+    return flow_jobs.status_for_project(pid)
 
 
 # ────────────────────────────────────────────────────── import audio ──
