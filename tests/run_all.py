@@ -24,6 +24,14 @@ BATERIAS = [
                                  # del Creative Engine llega verbatim a Flow (44)
     "test_flow_bridge.py",       # FLOW BRIDGE v1: cola real claim/lease/
                                  # heartbeat/complete/fail + 6 endpoints (48)
+    "test_golden_fixture.py",    # FIXTURE GOLDEN oficial: cadena completa con
+                                 # DB (fixture → ingest → export → cola → QA)
+    "test_concurrencia.py",      # concurrencia: raza de claims, multi-proyecto,
+                                 # token de una sola era, completes paralelos
+    "test_chaos.py",             # chaos: reinicio REAL de proceso, rollback,
+                                 # doble complete, asset corrupto, zombie
+    "test_bridge_e2e.py",        # E2E extensión: node --check + bridge.js real
+                                 # contra backend mock (sandbox VM)
     "test_humos_infra.py",       # humos: lo declarado EXISTE en el repo (~50)
 ]
 

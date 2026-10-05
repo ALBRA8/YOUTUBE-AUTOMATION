@@ -1359,6 +1359,28 @@ async def flow_jobs_status(pid: str):
     return flow_jobs.status_for_project(pid)
 
 
+# ─────────────────────────────── [qa v1] control de calidad de assets ──
+@app.get("/api/video_qa/{pid}")
+async def video_qa_endpoint(pid: str):
+    """QA REAL del proyecto con ffprobe/PIL: imágenes y clips de Flow por
+    escena + render final (si existe). Reporta flags error/warn/ok; nunca
+    lanza por assets malos (404 solo si el proyecto no existe)."""
+    from services import video_qa
+    try:
+        return video_qa.qa_project(pid)
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+
+
+# ─────────────────────────────── [obs v1] métricas de la fábrica ──
+@app.get("/api/metrics")
+async def metrics_endpoint():
+    """Snapshot de observabilidad: proyectos/cola Flow/jobs por estado,
+    escenas sin imagen y disco ocupado por data/output. Solo agregados."""
+    from services import metrics
+    return metrics.snapshot()
+
+
 # ────────────────────────────────────────────────────── import audio ──
 @app.post("/api/import/audio")
 async def import_audio(file: UploadFile = File(...)):

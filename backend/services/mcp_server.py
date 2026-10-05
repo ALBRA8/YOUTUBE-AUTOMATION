@@ -333,6 +333,27 @@ TOOLS = [
      "proyecto en curso.",
      "inputSchema": {"type": "object", "required": ["job_id"], "properties": {
          "job_id": {"type": "string"}}}},
+    {"name": "flow_encolar", "description": "FLOW BRIDGE: (re)genera la cola de "
+     "jobs de Google Flow del proyecto desde su script.json (fuente única de "
+     "prompts, contrato P1). Idempotente: conserva los assets ya subidos.",
+     "inputSchema": {"type": "object", "required": ["project_id"], "properties": {
+         "project_id": {"type": "string"},
+         "format": {"type": "string", "enum": ["transformacion", "generic", "artesano"],
+                    "default": "transformacion"}}}},
+    {"name": "flow_estado", "description": "FLOW BRIDGE: estado de la cola de "
+     "jobs de Flow del proyecto (queued/claimed/done/dead por job, worker, "
+     "asset_path, errores).",
+     "inputSchema": {"type": "object", "required": ["project_id"], "properties": {
+         "project_id": {"type": "string"}}}},
+    {"name": "video_qa", "description": "QA REAL con ffprobe/PIL del proyecto: "
+     "imágenes y clips de Flow por escena + render final. Devuelve flags "
+     "error/warn/ok y resumen (no revienta por assets malos).",
+     "inputSchema": {"type": "object", "required": ["project_id"], "properties": {
+         "project_id": {"type": "string"}}}},
+    {"name": "metricas", "description": "Snapshot de observabilidad de la fábrica: "
+     "proyectos por estado, cola Flow (incl. dead por tipo), jobs de pipeline, "
+     "escenas sin imagen y disco ocupado por data/output.",
+     "inputSchema": {"type": "object", "properties": {}}},
 ]
 
 
@@ -373,6 +394,31 @@ async def _dispatch(name: str, args: dict):
     if name == "cancelar_trabajo":
         orchestrator.cancel_job(args["job_id"])
         return {"ok": True}
+    if name == "flow_encolar":
+        from services import flow_jobs as _fj
+        try:
+            return _fj.enqueue_project(
+                args["project_id"],
+                fmt=args.get("format") or "transformacion")
+        except LookupError as e:
+            raise ValueError(str(e)) from e
+        except ValueError as e:
+            raise ValueError(str(e)) from e
+    if name == "flow_estado":
+        from services import flow_jobs as _fj
+        try:
+            return _fj.status_for_project(args["project_id"])
+        except Exception as e:  # noqa: BLE001
+            raise ValueError(f"estado no disponible: {e}") from e
+    if name == "video_qa":
+        from services import video_qa as _vqa
+        try:
+            return _vqa.qa_project(args["project_id"])
+        except LookupError as e:
+            raise ValueError(str(e)) from e
+    if name == "metricas":
+        from services import metrics as _mx
+        return _mx.snapshot()
     raise ValueError(f"tool desconocida: {name}")
 
 

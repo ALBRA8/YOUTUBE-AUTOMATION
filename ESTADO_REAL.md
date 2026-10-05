@@ -12,8 +12,6 @@ Se llegó a reportar como **terminado** un "FLOW BRIDGE REAL" con: cola SQLite
 `flow_jobs` (claim atómico, leases, heartbeat, reintentos), 6 endpoints
 `/api/extension/flow/jobs*` (v2.16.2), `extension/bridge.js` y auto-render.
 **Nada de eso existía en el repo** (sin commit, sin rama, sin stash).
-Además, el fixture `GOLDEN_PRODUCTION_JSON_EXECUTION_CONTRACT_V1.0.json`
-nunca se subió al repositorio.
 
 Consecuencia: batería de humos `tests/test_humos_infra.py` — verifica que
 todo lo que declaramos **existe físicamente en el código**, y este documento
@@ -32,22 +30,33 @@ mantiene el inventario público.
 | Convención de assets: `data/output/<pid>/flow/Escena_NN_flow.png` + `Escena_NN_video_<part>.mp4` | ✅ real | igual que `flow_import.py` |
 | Mapeo final escenas (`image_path`) + **auto-render** `orchestrator.start_flow_render` al completar el proyecto | ✅ real | `test_flow_bridge.py` (mock del render) |
 | **Extensión**: `extension/bridge.js` (poll → claim → heartbeat → complete/fail), wiring `[bridge v1]` en `background.js`, botón "Puente Backend" en popup, README | ✅ existe · sintaxis verificada (`node --check`) | `test_humos_infra.py` |
-| Suite canónica | ✅ 7 baterías en `tests/run_all.py` | runner |
+| **FIXTURE GOLDEN OFICIAL** `tests/fixtures/GOLDEN_PRODUCTION_JSON_EXECUTION_CONTRACT_V1.0.json` (datos sintéticos con sentinels, NO prompts creativos reales): ejecutable de punta a punta — fixture → ingest REAL con DB → roundtrip meta JSON → script.json (P1 verbatim) → cola → claim → complete → QA | ✅ real | `test_golden_fixture.py` (30 checks) |
+| **Video QA** (`services/video_qa.py` + `GET /api/video_qa/{pid}` + tool MCP): QA con ffprobe/PIL por escena (imagen mapeada o cruda en `flow/`, clips con duración/resolución/fps/códec/audio) + render final con reglas duras; reporta flags error/warn/ok sin reventar | ✅ real | `test_golden_fixture.py` §7 + suite (QA ejercitado con assets reales) |
+| **Métricas/observabilidad** (`services/metrics.py` + `GET /api/metrics` + tool MCP `metricas`): proyectos/jobs/cola Flow por estado, dead por tipo, escenas sin imagen, disco de `data/output` | ✅ real | imports + registro verificado; snapshot puro de agregados |
+| **Tools MCP de operación**: `flow_encolar` · `flow_estado` · `video_qa` · `metricas` (server 20 tools) | ✅ real | dispatch verificado por import + suite MCP |
+| **Concurrencia**: 8 workers en raza sobre BEGIN IMMEDIATE (cero dobles claims, tokens únicos), aislamiento multi-proyecto con filtro pid, token de una sola era (409 tras re-claim), completes paralelos, enqueue en caliente | ✅ real | `test_concurrencia.py` (18 checks) |
+| **Chaos**: reinicio REAL de proceso (subprocess reabre la SQLite y reclama), rollback atómico a mitad de escritura, doble complete → 409 sin sobreescribir asset, HTML de Flow → 422 → dead por intentos, dead → re-enqueue limpio, heartbeat/complete sobre estados imposibles, carrera zombie | ✅ real | `test_chaos.py` (28 checks) |
+| **E2E extensión**: `bridge.js` REAL en sandbox VM (stubs Chrome MV3) contra backend mock HTTP con estado — claim→complete con bytes PNG validados, fail, 422→fail con detail, heartbeat true/409 false, cola vacía, backend caído no tumba el bucle, canal popup, anti-duplicado | ✅ real (capa contrato, sin Google Flow real) | `tests/e2e_bridge_mock.js` + `test_bridge_e2e.py` (24 checks Python + 26 en el harness) |
+| Suite canónica | ✅ 11 baterías en `tests/run_all.py` | runner |
 
 ## 3. Lo que AÚN NO está demostrado (límites honestos)
 
 - **E2E con Google Flow REAL**: no se ha demostrado una ejecución de punta a
-  punta generando assets en labs.google con la extensión. El backend y el
-  contrato están probados en hermético; el lado navegador (inyección en el
-  Slate de Labs, descarga de blobs, subida del binario) requiere una corrida
-  manual con Chrome + sesión de Google. **No se declara éxito E2E.**
-- **Auto-render real**: probado con mock de `start_flow_render`; el render
-  real requiere ffmpeg + voz y se prueba con las baterías de merge.
-- **Calidad de MP4 final** y **multi-proyecto en paralelo**: sin evaluar.
-- El fixture oficial `GOLDEN_PRODUCTION_JSON_EXECUTION_CONTRACT_V1.0.json`
-  sigue sin existir en el repo; el contrato P1 se prueba con un payload
-  canónico equivalente (`test_flow_contract_p1.py`). Si aparece el fixture
-  oficial, se añade como caso de test sin cambiar el contrato.
+  punta generando assets en labs.google con la extensión instalada en Chrome.
+  El contrato backend↔extensión SÍ está probado en la capa navegador
+  (`e2e_bridge_mock.js`), pero la inyección en el Slate de Labs, la descarga
+  de blobs reales y la subida a un backend vivo requieren corrida manual con
+  Chrome + sesión de Google. **No se declara éxito E2E real.**
+- **Auto-render real disparado desde el bridge**: probado con mock de
+  `start_flow_render`; el render completo (TTS + Ken Burns + mezcla +
+  subtítulos) se prueba en las baterías de merge, pero el disparo automático
+  con assets reales de Flow aún no se ha corrido de punta a punta.
+- **Calidad visual del video final**: el QA mide propiedades técnicas
+  (duración, resolución, fps, audio); la calidad creativa sigue siendo
+  revisión humana.
+- El fixture Golden usa prompts sintéticos (sentinels CE_SENTINEL_*) por
+  diseño de prueba; cuando exista un Production JSON REAL del Creative
+  Engine se añade como fixture adicional sin cambiar el contrato.
 
 ## 4. Mantenimiento de este documento
 

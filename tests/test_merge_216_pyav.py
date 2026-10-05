@@ -2,7 +2,7 @@
 """Batería de integración del estado FUSIONADO 2.16.x + fix PyAV (v2.16.2).
 
 Secciones:
-  A · MCP 2.16.1 auditado por AST (16 tools, legacy intactas, dispatcher,
+  A · MCP 2.16.1 auditado por AST (20 tools, legacy intactas, dispatcher,
       handlers submit_production_json / lanzar_proyecto) — sin imports pesados.
   B · Adapter 2.16 real con módulo database fake (spec, preflight, extras).
   C · Fix PyAV verificado por strings de fuente (requirements, tts_step,
@@ -81,7 +81,8 @@ def main() -> int:
          if isinstance(n, ast.Assign)
          and any(getattr(t, "id", None) == "TOOLS" for t in n.targets)), None)
     n_tools = len(tools_assign.elts) if isinstance(tools_assign, ast.List) else -1
-    check("16 tools declaradas", n_tools == 16, f"={n_tools}")
+    check("20 tools declaradas (16 + 4 de operación Flow Bridge/QA v1)",
+          n_tools == 20, f"={n_tools}")
     for legacy in ("ayuda", "crear_video", "crear_video_guion_json",
                    "estado_proyecto", "guion_de_proyecto", "listar_proyectos",
                    "listar_biblioteca", "listar_estilos", "listar_nichos",

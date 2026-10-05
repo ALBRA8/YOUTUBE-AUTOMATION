@@ -1,0 +1,55 @@
+{
+  "project": {
+    "title": "Golden Execution Contract V1.0 (fixture canónico)",
+    "format": "short",
+    "niche": "Miniatures"
+  },
+  "sequence": [
+    {
+      "id": "beat_001",
+      "type": "functional_shot_transformation_beat",
+      "initial_state": "empty stone altar, macro",
+      "action": "jade fragments rise from the altar",
+      "change": "fragments assemble into a mask",
+      "final_state": "finished jade mask, golden light",
+      "visual_prompt": "macro jade mask on a stone altar, golden hour, tropical grove, no text",
+      "motion_prompt": "CE_SENTINEL_V1 :: slow dolly-in on the jade mask, dust settling, hand-carved details catching golden light, 8 seconds",
+      "audio": { "kind": "asmr", "sfx": ["stone", "wind"] },
+      "duration": 8,
+      "casting": { "artisan": "elderly hands, weathered" },
+      "story_function": "revelation",
+      "niche_extra": { "material": "jade" },
+      "references": [ { "kind": "image", "url": "https://example.com/ref_jade_1.png" } ]
+    },
+    {
+      "id": "beat_002",
+      "type": "functional_shot_transformation_beat",
+      "initial_state": "assembled jade mask",
+      "action": "mask floats upward in fast-motion",
+      "change": "mask rotates, engraving completes",
+      "final_state": "engraved mask floating",
+      "visual_prompt": "close-up engraved jade mask floating, rim light, jade dust, no text",
+      "motion_prompt": "CE_SENTINEL_V2 :: the mask floats upward in fast-motion assembly, pieces snapping together, sparks of jade dust",
+      "audio": { "kind": "ambient", "sfx": ["low hum"] },
+      "duration": 6,
+      "casting": { "artisan": "elderly hands, weathered" },
+      "story_function": "escalation",
+      "niche_extra": { "material": "jade" },
+      "references": [ { "kind": "image", "url": "https://example.com/ref_jade_2.png" } ]
+    },
+    {
+      "id": "beat_003",
+      "type": "functional_shot_transformation_beat",
+      "initial_state": "engraved mask floating",
+      "action": "artisan lifts the mask toward the sun",
+      "change": "sun backlights the jade",
+      "final_state": "hero shot of the finished mask",
+      "visual_prompt": "hero shot jade mask backlit by sun, palm grove, photorealistic, no text",
+      "casting": { "artisan": "elderly hands, weathered" },
+      "story_function": "payoff",
+      "niche_extra": { "material": "jade" },
+      "references": [ { "kind": "image", "url": "https://example.com/ref_jade_3.png" } ]
+    }
+  ],
+  "auto_start": false
+}

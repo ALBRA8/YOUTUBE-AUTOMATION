@@ -8,7 +8,7 @@ repositorio (`tests/../backend`), sin rutas absolutas.
 
 | Batería | Área | Checks |
 |---|---|---|
-| `test_guion_json.py` | Contrato **legacy guion_json**: spec 2.11, `parse_payload` (fences), `validate` (alias EN, sanitización de image_prompt, límites duros), ingest sin LLM contra la SQLite real de desarrollo, rama del orquestador (por fuente) y dispatch MCP (16 tools). | 42 |
+| `test_guion_json.py` | Contrato **legacy guion_json**: spec 2.11, `parse_payload` (fences), `validate` (alias EN, sanitización de image_prompt, límites duros), ingest sin LLM contra la SQLite real de desarrollo, rama del orquestador (por fuente) y dispatch MCP (20 tools). | 42 |
 | `test_production_json.py` | **Adapter Production JSON 2.16.1**: spec, `parse_payload`, `validate` estructural (aliases, extras/continuity verbatim), `validate_execution` (nivel 2, unidades bloqueadas), `validate_only` (dry-run) e `ingest` con DB fake (sha256, tts_skip, preflight en meta). | 76 |
 | `test_merge_216_pyav.py` | **Merge/integración 2.16.x + fix PyAV**: (A) MCP 2.16.1 auditado por AST sin imports pesados, (B) adapter real con DB fake, (C) fix PyAV por strings de fuente (requirements/tts_step/doctor/main), (D) compatibilidad cruzada Adapter↔pipeline↔MCP. | 51 |
 | `test_lanzar_preflight.py` | **Preflight de lanzamiento**: flujo real `submit_production_json` → `lanzar_proyecto` vía `mcp_server._dispatch` (DB fake + `orchestrator._run` grabado). El draft con unidades sin `image_prompt` se acepta pero NO se lanza; no-regresión legacy (sin production.json), JSON corrupto/borrado. | 29 |
