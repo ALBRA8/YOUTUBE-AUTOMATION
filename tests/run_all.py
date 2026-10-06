@@ -32,7 +32,9 @@ BATERIAS = [
                                  # reparaciones seguras, audit trail, SHA de lo
                                  # creativo invariante (54)
     "test_doctor_preflight.py",  # REAL FLOW PREFLIGHT: barrera antes de gastar
-                                 # una prueba real con Google Flow (23)
+                                 # una prueba real con Google Flow; criterio
+                                 # estricto video_prompt + STRUCTURAL ≠
+                                 # RUNTIME NOT_DEMONSTRATED (38)
     "test_concurrencia.py",      # concurrencia: raza de claims, multi-proyecto,
                                  # token de una sola era, completes paralelos
     "test_chaos.py",             # chaos: reinicio REAL de proceso, rollback,

@@ -22,9 +22,15 @@ def _imprimir_humano(rep: dict) -> None:
           f"· {rep.get('ts', '')} ═══")
     if rep.get("modo") == "preflight" or "verdict" in rep:
         print(f"VEREDICTO: {rep.get('verdict')}")
+        print(f"extensión: STRUCTURAL {rep.get('extension_structural')} · "
+              f"RUNTIME {rep.get('extension_runtime')}"
+              + ("" if rep.get("extension_runtime") == "CONNECTED"
+                 else " (no demostrado ≠ PASS)"))
         for c in rep.get("checks", []):
             marca = "✓" if c.get("ok") else "✗"
-            print(f"  {marca} {c.get('id')}: {c.get('detalle')[:140]}")
+            estado = c.get("estado")
+            tag = f" [{estado}]" if estado else ""
+            print(f"  {marca} {c.get('id')}{tag}: {c.get('detalle')[:140]}")
         for r in rep.get("blocked_reasons", []):
             print(f"  ⛔ BLOQUEA: {r[:160]}")
         return

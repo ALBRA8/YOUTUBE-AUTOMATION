@@ -94,13 +94,39 @@ un `fix`.
 
 Comprueba (bloqueante, determinístico): herramientas (ffmpeg/ffprobe/PIL) ·
 directorios canónicos escribibles · **backend disponible** (`/api/health`) ·
-**extensión** (manifest MV3 + host_permissions localhost/127.0.0.1 + archivos) ·
 **bridge** (`BRIDGE_API_BASE` real apuntando a `/api/extension/flow/jobs` y las
 4 rutas) · por proyecto: existe, tiene escenas, sin pipeline activo que
 interfiera, `production.json` parseable, `image_prompt` en todas las unidades,
-**al menos una unidad con `video_prompt`** (si no, Flow no generaría clips),
+**`video_prompt` en TODAS las unidades que generan clip** (criterio
+contractual explícito: si el proyecto genera clips — 2+ unidades —, NINGUNA
+unidad que deba generar video puede carecer de `video_prompt`; NO basta con
+que exista al menos uno. La única exenta es la última unidad, SOLO-imagen por
+diseño del export `build_script_json` — escena i = Imagen i + Video i; la
+última es solo imagen —; con 0 unidades de video el criterio no aplica),
 payload Flow reconstruible en seco, cola limpia (sin dead/lease vencido/claim
 inválido/agotados), jobs creados.
+
+### EXTENSION STRUCTURAL READY ≠ EXTENSION RUNTIME CONNECTED
+
+Dos conceptos separados, reportados por separado en el informe
+(`extension_structural`, `extension_runtime`, `extension_runtime_evidence`):
+
+- **STRUCTURAL READY** — checks `P-EXT-MANIFEST`, `P-EXT-HOST-PERMISSIONS`,
+  `P-EXT-ARCHIVOS`, `P-BRIDGE`: la extensión está completa y alineada EN
+  DISCO (manifest MV3, permisos, archivos, rutas del bridge). Es
+  verificable determinísticamente → PASS/FAIL normal, y agrupa en
+  `extension_structural: READY | NOT_READY`.
+- **RUNTIME CONNECTED** — check `P-EXT-RUNTIME`: que Chrome con la extensión
+  esté AHORA conectado al backend. El backend NO puede observar Chrome: la
+  única evidencia válida es un job `claimed` con `worker` y lease VIGENTE
+  (el lease se renueva por heartbeat y expira con worker muerto — mecanismo
+  de liveness del propio contrato). Con evidencia → `estado: PASS` y
+  `extension_runtime: CONNECTED` citando worker/job/lease. Sin evidencia →
+  `estado: NOT_DEMONSTRATED` (≈ UNKNOWN), `ok: false`, `bloqueante: false`:
+  **nunca se reporta como PASS ni se inventa conexión**. Un lease vencido no
+  es evidencia (worker muerto); el operador confirma Chrome+extensión
+  activos antes de gastar la prueba. Solo los checks bloqueantes fijan el
+  veredicto: un no-demostrado se reporta pero no lo falsifica.
 
 Si falla un requisito determinístico **NO ejecutar Google Flow**. El veredicto
 es exactamente:
@@ -126,7 +152,7 @@ El último informe completo vive en `backend/data/doctor/last_report.json`.
   reportando exactamente qué cambió.
 - Baterías propias del Doctor (también en `run_all.py`):
   `tests/test_production_doctor.py` (54 checks) y
-  `tests/test_doctor_preflight.py` (23 checks).
+  `tests/test_doctor_preflight.py` (38 checks).
 
 ## Ubicación del código
 

@@ -7,12 +7,23 @@ lista exacta de motivos — el preflight NUNCA ejecuta Flow ni repara nada
 (esperar/crear jobs es cosa del operador; reparar, cosa de DOCTOR FIX).
 
 Checks bloqueantes mínimos (contrato):
-  backend disponible · extensión disponible · bridge disponible ·
-  Production JSON válido · image_prompt presente · video_prompt presente ·
-  duration_target válido · job creado correctamente · project_id correcto ·
-  worker/claim posible (cola limpia, sin atascos) · payload Flow correcto ·
-  directorios necesarios · herramientas de validación disponibles ·
-  estado del proyecto listo para ejecutar.
+  backend disponible · extensión STRUCTURAL READY (manifest MV3 + archivos +
+  host_permissions + bridge alineado) · Production JSON válido ·
+  image_prompt en TODAS las unidades · video_prompt en TODAS las unidades
+  que generan clip — criterio contractual estricto: si el proyecto genera
+  clips (2+ unidades), NINGUNA unidad que deba generar video puede carecer
+  de video_prompt; NO basta con que exista al menos uno. La única exenta es
+  la última (SOLO-imagen por diseño del export); con 0 unidades de video el
+  criterio no aplica · duration_target válido · job creado correctamente ·
+  project_id correcto · worker/claim posible (cola limpia, sin atascos) ·
+  payload Flow correcto · directorios necesarios · herramientas de
+  validación disponibles · estado del proyecto listo para ejecutar.
+
+EXTENSION STRUCTURAL READY ≠ EXTENSION RUNTIME CONNECTED: la conexión
+runtime (Chrome ↔ backend) NO es observable desde el backend — la única
+evidencia válida es un job 'claimed' con worker y lease VIGENTE (mecanismo
+de liveness del contrato). Sin evidencia se clasifica
+NOT_DEMONSTRATED/UNKNOWN (ok=False, no bloqueante) y NUNCA como PASS.
 """
 from __future__ import annotations
 
@@ -28,9 +39,12 @@ from .layers import (EXT_FILES_REQUERIDOS, HOST_PERMISOS_OBLIGATORIOS,
 
 
 def _check(checks: list, cid: str, ok: bool, detalle: str,
-           bloqueante: bool = True) -> None:
-    checks.append({"id": cid, "ok": bool(ok), "detalle": detalle,
-                   "bloqueante": bloqueante})
+           bloqueante: bool = True, estado: str | None = None) -> None:
+    item = {"id": cid, "ok": bool(ok), "detalle": detalle,
+            "bloqueante": bloqueante}
+    if estado:
+        item["estado"] = estado
+    checks.append(item)
 
 
 def real_flow_preflight(project_id: str | None = None,
@@ -126,6 +140,46 @@ def real_flow_preflight(project_id: str | None = None,
                f"bridge.js desalineado (BRIDGE_API_BASE={base_b!r}, "
                f"rutas ausentes: {faltan_ep})")
 
+    # ── extensión RUNTIME (conexión viva Chrome ↔ backend) ───────────────
+    # Diferencia contractual: los checks P-EXT-*/P-BRIDGE de arriba son
+    # ESTRUCTURALES (la extensión está completa en disco). Que Chrome con la
+    # extensión esté CONECTADO AHORA no es observable desde el backend: la
+    # única evidencia válida es un job 'claimed' con worker y lease VIGENTE
+    # (el lease se renueva por heartbeat y expira con worker muerto —
+    # mecanismo de liveness del propio contrato). Sin evidencia → estado
+    # NOT_DEMONSTRATED (≈ UNKNOWN), NUNCA PASS ni conexión inventada.
+    evidencia_rt = None
+    try:
+        with db.connect() as con:
+            _ev = con.execute(
+                """SELECT id, project_id, worker, kind, lease_until
+                   FROM flow_jobs
+                   WHERE status='claimed' AND worker IS NOT NULL
+                         AND lease_until IS NOT NULL AND lease_until >= ?
+                   ORDER BY updated_at DESC LIMIT 1""",
+                (_ahora_iso(),)).fetchone()
+        if _ev:
+            evidencia_rt = dict(_ev)
+    except Exception:  # noqa: BLE001 — sin DB legible no hay evidencia
+        evidencia_rt = None
+    if evidencia_rt:
+        _check(checks, "P-EXT-RUNTIME", True,
+               f"EXTENSION RUNTIME CONNECTED — worker "
+               f"'{evidencia_rt.get('worker')}' mantiene lease vigente "
+               f"(job {evidencia_rt.get('id')}, proyecto "
+               f"{evidencia_rt.get('project_id')}, vence "
+               f"{evidencia_rt.get('lease_until')})",
+               bloqueante=False, estado="PASS")
+    else:
+        _check(checks, "P-EXT-RUNTIME", False,
+               "EXTENSION RUNTIME CONNECTED: NOT_DEMONSTRATED — el backend "
+               "no puede observar Chrome: sin ningún job 'claimed' con "
+               "worker y lease vigente NO hay evidencia de conexión viva; "
+               "se clasifica NOT_DEMONSTRATED/UNKNOWN, NUNCA PASS (no "
+               "bloquea: el operador confirma Chrome+extensión activos "
+               "antes de gastar la prueba)",
+               bloqueante=False, estado="NOT_DEMONSTRATED")
+
     # ── por proyecto: contrato + cola + estado ───────────────────────────
     if project_id:
         proy = db.get_project(project_id)
@@ -175,14 +229,82 @@ def real_flow_preflight(project_id: str | None = None,
                            if bloqueadas == 0 else
                            f"{bloqueadas} unidad(es) SIN image_prompt "
                            "(REAL FLOW no puede ejecutarlas)")
+                    # criterio contractual EXPLÍCITO (video): si el
+                    # proyecto genera clips, TODA unidad que deba generar
+                    # video exige video_prompt — no basta con que exista
+                    # al menos uno. Diseño del export (build_script_json):
+                    # escena i = Imagen i + Video i; la ÚLTIMA es
+                    # SOLO-imagen (revelación final) → única exenta.
                     sin_vp = int(rep.get("unidades_sin_video_prompt") or 0)
                     total = int(rep.get("unidades_auditadas") or 0)
-                    _check(checks, "P-PJSON-VIDEO-PROMPT", sin_vp < total,
-                           f"{total - sin_vp}/{total} unidad(es) con "
-                           "video_prompt (generarán clips)"
-                           if sin_vp < total else
-                           "NINGUNA unidad tiene video_prompt — Google Flow "
-                           "no generaría ningún clip")
+                    seq_unid = None
+                    for _k in pj._ALIASES["sequence"]:  # misma tabla de
+                        # alias que validate_execution (una sola fuente de
+                        # verdad; NO se duplica contrato)
+                        if isinstance(data.get(_k), list):
+                            seq_unid = data[_k]
+                            break
+                        _pr = data.get("project")
+                        if isinstance(_pr, dict) \
+                                and isinstance(_pr.get(_k), list):
+                            seq_unid = _pr[_k]
+                            break
+                    sin_vp_idx: list[int] = []
+                    for _i, _u in enumerate(seq_unid or []):
+                        if not isinstance(_u, dict):
+                            continue
+                        # presencia por unidad con la API pública del
+                        # contrato (validate_execution por unidad)
+                        if int(pj.validate_execution(
+                                {"sequence": [_u]}).get(
+                                "unidades_sin_video_prompt") or 0):
+                            sin_vp_idx.append(_i)
+                    _exenta = total - 1  # última SOLO-imagen por diseño
+                    _generan = max(0, total - 1)
+                    if seq_unid is None and sin_vp:
+                        faltan_lbl = ["sequence (no localizable para el "
+                                      "criterio por unidad)"]  # fail-closed
+                    else:
+                        faltan_lbl = []
+                        for _i in sin_vp_idx:
+                            if _i == _exenta:
+                                continue
+                            _uid = ""
+                            if isinstance(seq_unid[_i], dict):
+                                _uid = str(seq_unid[_i].get("id") or "")
+                            faltan_lbl.append(
+                                f"sequence[{_i}]" + (f" (id {_uid})"
+                                                     if _uid else ""))
+                    if faltan_lbl:
+                        if sin_vp >= total and total > 1:
+                            det_vp = (f"NINGUNA unidad tiene video_prompt — "
+                                      f"el criterio contractual exige "
+                                      f"video_prompt en TODAS las unidades "
+                                      f"que generan clip ({_generan}/{total}); "
+                                      f"Google Flow no generaría clips del "
+                                      f"Creative Engine")
+                        else:
+                            det_vp = (f"{len(faltan_lbl)} unidad(es) que DEBEN "
+                                      f"generar video SIN video_prompt: "
+                                      f"{', '.join(faltan_lbl[:6])} — "
+                                      f"criterio: TODA unidad que genere clip "
+                                      f"requiere video_prompt (solo la última "
+                                      f"es SOLO-imagen por diseño)")
+                        _check(checks, "P-PJSON-VIDEO-PROMPT", False, det_vp)
+                    elif _generan == 0:
+                        _check(checks, "P-PJSON-VIDEO-PROMPT", True,
+                               "el proyecto genera 0 clips de video por "
+                               "diseño (unidad única/última SOLO-imagen) — "
+                               "el criterio video_prompt no aplica")
+                    elif sin_vp == 0:
+                        _check(checks, "P-PJSON-VIDEO-PROMPT", True,
+                               f"video_prompt presente en TODAS las unidades "
+                               f"({total}/{total})")
+                    else:
+                        _check(checks, "P-PJSON-VIDEO-PROMPT", True,
+                               f"video_prompt presente en TODAS las unidades "
+                               f"que generan video ({_generan}/{total}); la "
+                               f"última es SOLO-imagen por diseño (exenta)")
                     sin_dur = int(
                         rep.get("unidades_con_faltantes_no_bloqueantes") or 0)
                     con_dur = total - sin_dur
@@ -261,9 +383,16 @@ def real_flow_preflight(project_id: str | None = None,
                            f"({pendientes} pendiente(s), "
                            f"{len(rows) - pendientes} done)")
 
-    blocked = [c["detalle"] for c in checks if not c["ok"]]
+    # solo los checks BLOQUEANtes bloquean; un no-demostrado (p.ej.
+    # P-EXT-RUNTIME NOT_DEMONSTRATED) se reporta pero no frena el veredicto
+    blocked = [c["detalle"] for c in checks
+               if not c["ok"] and c.get("bloqueante", True)]
     veredicto = "REAL FLOW PREFLIGHT PASS" if not blocked \
         else "REAL FLOW BLOCKED"
+    _ids_structurales = ("P-EXT-MANIFEST", "P-EXT-HOST-PERMISSIONS",
+                         "P-EXT-ARCHIVOS", "P-BRIDGE")
+    structural_ok = not any(c["id"] in _ids_structurales and not c["ok"]
+                            for c in checks)
     return {
         "doctor": "PRODUCTION DOCTOR",
         "version": "1.0",
@@ -273,9 +402,19 @@ def real_flow_preflight(project_id: str | None = None,
         "ok": not blocked,
         "project_id": project_id,
         "backend_url": base,
+        # EXTENSION STRUCTURAL READY (en disco, verificable) ≠
+        # EXTENSION RUNTIME CONNECTED (conexión viva, solo con evidencia)
+        "extension_structural": "READY" if structural_ok else "NOT_READY",
+        "extension_runtime": "CONNECTED" if evidencia_rt
+        else "NOT_DEMONSTRATED",
+        "extension_runtime_evidence": evidencia_rt,
         "blocked_reasons": blocked,
         "checks": checks,
         "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "nota": ("el preflight NUNCA ejecuta Google Flow: solo verifica "
-                 "listos. Reparaciones = DOCTOR FIX."),
+                 "listos. Reparaciones = DOCTOR FIX. EXTENSION STRUCTURAL "
+                 "READY (manifest/archivos/permisos/bridge en disco) ≠ "
+                 "EXTENSION RUNTIME CONNECTED (conexión viva Chrome↔"
+                 "backend): sin evidencia de lease vigente la conexión se "
+                 "clasifica NOT_DEMONSTRATED/UNKNOWN, jamás PASS."),
     }

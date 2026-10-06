@@ -8,6 +8,14 @@ test_flow_bridge) la regla 8 del contrato:
   · backend caído → REAL FLOW BLOCKED con el motivo exacto
   · Production JSON: parse roto, unidad sin image_prompt, cero
     video_prompt → bloquea (Google Flow no generaría clips)
+  · criterio contractual ESTRICTO video_prompt: unidad que debe generar
+    video sin video_prompt → bloquea (ya NO basta con que exista al menos
+    uno); la última SOLO-imagen queda exenta por diseño; proyecto sin
+    unidades de video → criterio no aplica
+  · EXTENSION STRUCTURAL READY ≠ EXTENSION RUNTIME CONNECTED: sin
+    evidencia (job claimed con lease vigente) la conexión runtime queda
+    NOT_DEMONSTRATED/UNKNOWN y NUNCA se reporta como PASS; un lease
+    vencido (worker muerto) NO es evidencia de conexión viva
   · cola sucia: dead / lease vencido → bloquea (interferirían)
   · sin jobs → bloquea; pipeline activo → bloquea
   · manifest sin host_permissions / bridge desalineado → bloquea
@@ -20,6 +28,7 @@ import json
 import shutil
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parents[1] / "backend"
@@ -152,9 +161,22 @@ def main() -> int:
     pf = pf_mod.real_flow_preflight()
     check("verdict REAL FLOW PREFLIGHT PASS", pf["verdict"] ==
           "REAL FLOW PREFLIGHT PASS", pf["verdict"])
-    check("ok=True y ningún check en rojo", pf["ok"] is True
-          and all(c["ok"] for c in pf["checks"]))
+    check("ok=True y ningún check en rojo salvo los no demostrados",
+          pf["ok"] is True
+          and all(c["ok"] or c.get("estado") == "NOT_DEMONSTRATED"
+                  for c in pf["checks"]))
     check("sin blocked_reasons", pf["blocked_reasons"] == [])
+    check("STRUCTURAL READY ≠ RUNTIME: structural READY, runtime "
+          "NOT_DEMONSTRATED sin conexión inventada",
+          pf["extension_structural"] == "READY"
+          and pf["extension_runtime"] == "NOT_DEMONSTRATED"
+          and pf["extension_runtime_evidence"] is None,
+          f"{pf['extension_structural']}/{pf['extension_runtime']}")
+    _rt = next(c for c in pf["checks"] if c["id"] == "P-EXT-RUNTIME")
+    check("P-EXT-RUNTIME sin evidencia: ok=False, estado "
+          "NOT_DEMONSTRATED, NO bloqueante (jamás PASS)",
+          _rt["ok"] is False and _rt.get("estado") == "NOT_DEMONSTRATED"
+          and _rt["bloqueante"] is False, str(_rt)[:140])
 
     print("── 2. backend caído → REAL FLOW BLOCKED")
     estado_http["ok"] = False
@@ -180,6 +202,11 @@ def main() -> int:
            "P-PAYLOAD-FLOW", "P-QUEUE-LIMPIA", "P-JOBS-CREADOS",
            "P-PROJ-EXISTS", "P-PROJ-SCENES"} <= ids_ok,
           repr(sorted(ids_ok)))
+    _c_vp = next(c for c in pf["checks"]
+                 if c["id"] == "P-PJSON-VIDEO-PROMPT")
+    check("criterio estricto: video_prompt en TODAS las unidades (2/2)",
+          _c_vp["ok"] and "TODAS las unidades" in _c_vp["detalle"]
+          and "2/2" in _c_vp["detalle"], _c_vp["detalle"])
 
     print("── 4. bloqueos del contrato (Production JSON)")
     # unidad sin image_prompt
@@ -208,6 +235,57 @@ def main() -> int:
     _limpiar()
     db.delete_project("pf_sinvp")
     shutil.rmtree(_cfg.OUTPUT_DIR / "pf_sinvp", ignore_errors=True)
+    # REGRESIÓN del criterio contractual: la unidad generadora de video
+    # (sequence[0]) SIN video_prompt pero la última CON — el criterio viejo
+    # ("al menos uno") daba PASS; el contractual debe BLOQUEAR
+    parcial = json.loads(json.dumps(PJSON_VALIDO))
+    del parcial["sequence"][0]["video_prompt"]
+    _proyecto("pf_vp_parcial", parcial)
+    pf = pf_mod.real_flow_preflight(project_id="pf_vp_parcial")
+    check("REGRESIÓN: unidad que debe generar video sin video_prompt → "
+          "BLOCKED (ya no basta 'al menos uno')",
+          pf["verdict"] == "REAL FLOW BLOCKED"
+          and any(c["id"] == "P-PJSON-VIDEO-PROMPT" and not c["ok"]
+                  for c in pf["checks"]),
+          repr(pf["blocked_reasons"]))
+    check("el motivo cita la unidad exacta (sequence[0]) y el criterio",
+          any("sequence[0]" in r and "video_prompt" in r
+              for r in pf["blocked_reasons"]),
+          repr(pf["blocked_reasons"]))
+    _limpiar()
+    db.delete_project("pf_vp_parcial")
+    shutil.rmtree(_cfg.OUTPUT_DIR / "pf_vp_parcial", ignore_errors=True)
+    # última unidad sin video_prompt (SOLO-imagen por diseño) → PASS exenta
+    ultima = json.loads(json.dumps(PJSON_VALIDO))
+    del ultima["sequence"][1]["video_prompt"]
+    _proyecto("pf_vp_ultima", ultima)
+    pf = pf_mod.real_flow_preflight(project_id="pf_vp_ultima")
+    _c_vp = next(c for c in pf["checks"]
+                 if c["id"] == "P-PJSON-VIDEO-PROMPT")
+    check("última SOLO-imagen sin video_prompt → PASS (exenta por diseño)",
+          pf["verdict"] == "REAL FLOW PREFLIGHT PASS" and _c_vp["ok"]
+          and "SOLO-imagen" in _c_vp["detalle"], _c_vp["detalle"])
+    check("criterio explícito: TODAS las unidades que generan video "
+          "(1/2) tienen video_prompt",
+          "TODAS las unidades que generan video" in _c_vp["detalle"]
+          and "1/2" in _c_vp["detalle"], _c_vp["detalle"])
+    _limpiar()
+    db.delete_project("pf_vp_ultima")
+    shutil.rmtree(_cfg.OUTPUT_DIR / "pf_vp_ultima", ignore_errors=True)
+    # proyecto de 1 unidad → 0 clips → el criterio video_prompt no aplica
+    una = json.loads(json.dumps(PJSON_VALIDO))
+    una["sequence"] = [una["sequence"][0]]
+    una["sequence"][0].pop("video_prompt", None)
+    _proyecto("pf_vp_una", una)
+    pf = pf_mod.real_flow_preflight(project_id="pf_vp_una")
+    _c_vp = next(c for c in pf["checks"]
+                 if c["id"] == "P-PJSON-VIDEO-PROMPT")
+    check("1 unidad = 0 clips → PASS con criterio no aplica",
+          pf["verdict"] == "REAL FLOW PREFLIGHT PASS" and _c_vp["ok"]
+          and "no aplica" in _c_vp["detalle"], _c_vp["detalle"])
+    _limpiar()
+    db.delete_project("pf_vp_una")
+    shutil.rmtree(_cfg.OUTPUT_DIR / "pf_vp_una", ignore_errors=True)
     # production.json corrupto / ausente
     _proyecto("pf_corrupto")
     (_cfg.OUTPUT_DIR / "pf_corrupto" / "production.json").write_text("{mal")
@@ -293,6 +371,11 @@ def main() -> int:
     check("manifest sin host_permissions → BLOCKED",
           any(c["id"] == "P-EXT-HOST-PERMISSIONS" and not c["ok"]
               for c in pf["checks"]))
+    check("structural NOT_READY y runtime NOT_DEMONSTRATED conviven "
+          "(conceptos independientes)",
+          pf["extension_structural"] == "NOT_READY"
+          and pf["extension_runtime"] == "NOT_DEMONSTRATED",
+          f"{pf['extension_structural']}/{pf['extension_runtime']}")
     fake_root2 = _TMP / "repo_fake2"
     shutil.copytree(REAL_REPO / "extension", fake_root2 / "extension",
                     dirs_exist_ok=True)
@@ -311,9 +394,11 @@ def main() -> int:
     print("── 7. el preflight nunca miente ni ejecuta Flow")
     _proyecto("pf_final")
     pf = pf_mod.real_flow_preflight(project_id="pf_final")
-    check("PASS implica todos los checks ok (sin PASS falso)",
+    check("PASS implica: ok, veredicto PASS y bloqueantes ok "
+          "(lo no demostrado nunca cuenta como PASS)",
           pf["ok"] is True and pf["verdict"] == "REAL FLOW PREFLIGHT PASS"
-          and all(c["ok"] for c in pf["checks"]))
+          and all(c["ok"] or c.get("estado") == "NOT_DEMONSTRATED"
+                  for c in pf["checks"]))
     check("el preflight no creó ni mutó jobs (solo lectura)",
           _ids_total() == 3)
     check("el preflight no repara (sin audit trail de fix en esta batería)",
@@ -322,6 +407,57 @@ def main() -> int:
     _limpiar()
     db.delete_project("pf_final")
     shutil.rmtree(_cfg.OUTPUT_DIR / "pf_final", ignore_errors=True)
+
+    print("── 8. EXTENSION RUNTIME CONNECTED: solo con evidencia real")
+    _proyecto("pf_rt")
+    pf = pf_mod.real_flow_preflight(project_id="pf_rt")
+    check("cola sin claims → runtime NOT_DEMONSTRATED (ni PASS ni "
+          "conexión inventada)",
+          pf["extension_runtime"] == "NOT_DEMONSTRATED"
+          and pf["extension_runtime_evidence"] is None)
+    # evidencia VIVA: claim con worker + lease VIGENTE (liveness del contrato)
+    _lease_vivo = (datetime.now(timezone.utc)
+                   + timedelta(minutes=10)).isoformat(timespec="seconds")
+    _job_raw("pf_rt", "video", 1, status="claimed", lease=_lease_vivo,
+             token="tok_vivo", id="rt_job_vivo")
+    with db.connect() as con:
+        con.execute("UPDATE flow_jobs SET worker='worker_rt' "
+                    "WHERE id='rt_job_vivo'")
+        con.commit()
+    pf = pf_mod.real_flow_preflight(project_id="pf_rt")
+    _rt = next(c for c in pf["checks"] if c["id"] == "P-EXT-RUNTIME")
+    check("claim con lease VIGENTE → CONNECTED con estado PASS",
+          pf["extension_runtime"] == "CONNECTED" and _rt["ok"] is True
+          and _rt.get("estado") == "PASS", _rt["detalle"][:130])
+    check("la evidencia cita el worker y el job reales",
+          (pf["extension_runtime_evidence"] or {}).get("worker")
+          == "worker_rt" and "worker_rt" in _rt["detalle"]
+          and "rt_job_vivo" in _rt["detalle"])
+    check("con conexión demostrada, TODOS los checks quedan ok (PASS pleno)",
+          all(c["ok"] for c in pf["checks"]))
+    # lease vencido → worker muerto NO es evidencia de conexión viva
+    _limpiar()
+    _job_raw("pf_rt", "video", 1, status="claimed",
+             lease="2020-01-01T00:00:00+00:00", token="tok_muerto",
+             id="rt_job_muerto")
+    with db.connect() as con:
+        con.execute("UPDATE flow_jobs SET worker='worker_muerto' "
+                    "WHERE id='rt_job_muerto'")
+        con.commit()
+    pf = pf_mod.real_flow_preflight(project_id="pf_rt")
+    check("lease VENCIDO → NOT_DEMONSTRATED (worker muerto no conecta)",
+          pf["extension_runtime"] == "NOT_DEMONSTRATED"
+          and pf["extension_runtime_evidence"] is None)
+    check("el lease vencido bloquea por P-QUEUE-LIMPIA (job atascado), "
+          "no por la conexión runtime",
+          pf["verdict"] == "REAL FLOW BLOCKED"
+          and any("lease vencido" in r for r in pf["blocked_reasons"])
+          and not any(c.get("bloqueante") and c.get("estado")
+                      for c in pf["checks"]),
+          repr(pf["blocked_reasons"]))
+    _limpiar()
+    db.delete_project("pf_rt")
+    shutil.rmtree(_cfg.OUTPUT_DIR / "pf_rt", ignore_errors=True)
 
     print(f"\n═══ {OK} OK · {FAIL} fallos ═══")
     return 1 if FAIL else 0
