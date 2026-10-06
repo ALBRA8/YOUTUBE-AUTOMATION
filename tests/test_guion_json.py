@@ -145,8 +145,9 @@ def main() -> int:
 
     print("── 6. servidor MCP (JSON-RPC) · 2.16")
     from services import mcp_server  # noqa: E402
-    check("20 tools (14 legacy + 2.16 + 4 de operación Flow Bridge/QA v1)",
-          len(mcp_server.TOOLS) == 20, f"={len(mcp_server.TOOLS)}")
+    check("22 tools (14 legacy + 2.16 + 4 Flow Bridge/QA v1 + 2 Production "
+          "Doctor V1.0)",
+          len(mcp_server.TOOLS) == 22, f"={len(mcp_server.TOOLS)}")
     check("tools 2.16 presentes",
           any(t["name"] == "submit_production_json" for t in mcp_server.TOOLS)
           and any(t["name"] == "lanzar_proyecto" for t in mcp_server.TOOLS))

@@ -28,6 +28,11 @@ BATERIAS = [
                                  # DB (fixture → ingest → export → cola → QA)
     "test_qa_forensics.py",      # QA FORENSE de medios: pantalla negra/azul,
                                  # audio silencioso, propagación de warns (30)
+    "test_production_doctor.py", # PRODUCTION DOCTOR V1.0: capas A-I, taxonomía,
+                                 # reparaciones seguras, audit trail, SHA de lo
+                                 # creativo invariante (54)
+    "test_doctor_preflight.py",  # REAL FLOW PREFLIGHT: barrera antes de gastar
+                                 # una prueba real con Google Flow (23)
     "test_concurrencia.py",      # concurrencia: raza de claims, multi-proyecto,
                                  # token de una sola era, completes paralelos
     "test_chaos.py",             # chaos: reinicio REAL de proceso, rollback,

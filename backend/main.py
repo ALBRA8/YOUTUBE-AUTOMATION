@@ -1400,6 +1400,58 @@ async def doctor():
     return await doctor_svc.run_doctor()
 
 
+# ───────────────────────────── PRODUCTION DOCTOR V1.0 (transversal) ──
+# Diagnóstico por capas A-I del pipeline completo + reparaciones seguras
+# (lista blanca) + REAL FLOW PREFLIGHT. Capa de diagnóstico SOBRE el
+# sistema existente: no crea backend/cola/tests paralelos.
+
+@app.post("/api/production_doctor/audit")
+async def production_doctor_audit(body: dict | None = None):
+    """DOCTOR AUDIT: diagnostica las 9 capas sin modificar nada."""
+    from services.production_doctor import audit as pdoc_audit
+    body = body or {}
+    return await asyncio.to_thread(
+        pdoc_audit, deep=bool(body.get("deep")),
+        in_process=True)  # dentro del servidor: juicio preciso de zombies
+
+
+@app.post("/api/production_doctor/fix")
+async def production_doctor_fix(body: dict | None = None):
+    """DOCTOR FIX: diagnostica, aplica SOLO reparaciones seguras
+    (lista blanca determinista), re-verifica capas y tests afectados."""
+    from services.production_doctor import fix as pdoc_fix
+    body = body or {}
+    return await asyncio.to_thread(
+        pdoc_fix, deep=bool(body.get("deep")), in_process=True,
+        ejecutar_tests=bool(body.get("ejecutar_tests", True)))
+
+
+@app.post("/api/production_doctor/verify")
+async def production_doctor_verify(body: dict | None = None):
+    """DOCTOR VERIFY: re-ejecuta checks + baterías de los componentes."""
+    from services.production_doctor import verify as pdoc_verify
+    body = body or {}
+    return await asyncio.to_thread(
+        pdoc_verify, deep=bool(body.get("deep")), in_process=True,
+        capas=body.get("capas"), componentes=body.get("componentes"),
+        ejecutar_tests=bool(body.get("ejecutar_tests", True)))
+
+
+@app.get("/api/production_doctor/report")
+async def production_doctor_report():
+    """DOCTOR REPORT: último informe persistido (o audit fresco)."""
+    from services.production_doctor import report as pdoc_report
+    return await asyncio.to_thread(pdoc_report)
+
+
+@app.get("/api/production_doctor/preflight")
+async def production_doctor_preflight(project_id: str | None = None):
+    """REAL FLOW PREFLIGHT: barrera antes de una prueba real con Google
+    Flow. Devuelve REAL FLOW PREFLIGHT PASS o REAL FLOW BLOCKED + motivos."""
+    from services.production_doctor import preflight as pdoc_preflight
+    return await asyncio.to_thread(pdoc_preflight, project_id)
+
+
 # ──────────────────────────────── tendencias $0 sin API key (Fase 3) ──
 @app.get("/api/trends/probe")
 async def trends_probe():

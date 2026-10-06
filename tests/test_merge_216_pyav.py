@@ -81,8 +81,8 @@ def main() -> int:
          if isinstance(n, ast.Assign)
          and any(getattr(t, "id", None) == "TOOLS" for t in n.targets)), None)
     n_tools = len(tools_assign.elts) if isinstance(tools_assign, ast.List) else -1
-    check("20 tools declaradas (16 + 4 de operación Flow Bridge/QA v1)",
-          n_tools == 20, f"={n_tools}")
+    check("22 tools declaradas (16 + 4 Flow Bridge/QA v1 + 2 Production Doctor)",
+          n_tools == 22, f"={n_tools}")
     for legacy in ("ayuda", "crear_video", "crear_video_guion_json",
                    "estado_proyecto", "guion_de_proyecto", "listar_proyectos",
                    "listar_biblioteca", "listar_estilos", "listar_nichos",

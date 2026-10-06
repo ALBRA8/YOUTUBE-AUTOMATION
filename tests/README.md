@@ -10,7 +10,7 @@ sin rutas absolutas.
 
 | Batería | Área | Checks |
 |---|---|---|
-| `test_guion_json.py` | Contrato **legacy guion_json**: spec 2.11, `parse_payload` (fences), `validate` (alias EN, sanitización de image_prompt, límites duros), ingest sin LLM contra la SQLite real de desarrollo, rama del orquestador (por fuente) y dispatch MCP (20 tools). | 42 |
+| `test_guion_json.py` | Contrato **legacy guion_json**: spec 2.11, `parse_payload` (fences), `validate` (alias EN, sanitización de image_prompt, límites duros), ingest sin LLM contra la SQLite real de desarrollo, rama del orquestador (por fuente) y dispatch MCP (22 tools). | 42 |
 | `test_production_json.py` | **Adapter Production JSON 2.16.1**: spec, `parse_payload`, `validate` estructural (aliases, extras/continuity verbatim), `validate_execution` (nivel 2, unidades bloqueadas), `validate_only` (dry-run) e `ingest` con DB fake (sha256, tts_skip, preflight en meta). | 76 |
 | `test_merge_216_pyav.py` | **Merge/integración 2.16.x + fix PyAV**: (A) MCP 2.16.1 auditado por AST sin imports pesados, (B) adapter real con DB fake, (C) fix PyAV por strings de fuente (requirements/tts_step/doctor/main), (D) compatibilidad cruzada Adapter↔pipeline↔MCP. | 51 |
 | `test_lanzar_preflight.py` | **Preflight de lanzamiento**: flujo real `submit_production_json` → `lanzar_proyecto` vía `mcp_server._dispatch` (DB fake + `orchestrator._run` grabado). El draft con unidades sin `image_prompt` se acepta pero NO se lanza; no-regresión legacy (sin production.json), JSON corrupto/borrado. | 29 |
@@ -18,6 +18,8 @@ sin rutas absolutas.
 | `test_flow_bridge.py` | **Flow Bridge v1**: motor de cola (`services/flow_jobs.py`) claim atómico/lease/heartbeat/complete/fail, 6 endpoints vía httpx ASGI, validación PIL/ffprobe, mapeo de escenas + auto-render (mock), re-enqueue idempotente. | 48 |
 | `test_golden_fixture.py` | **Fixture Golden oficial**: cadena completa con DB REAL — fixture → ingest → roundtrip meta JSON → script.json (P1 verbatim) → cola → claim → complete → Video QA. | 30 |
 | `test_qa_forensics.py` | **QA forense de medios**: fabrica assets enfermos y verifica detección REAL — pantalla negra, pantalla azul, audio completamente silencioso (volumedetect), no confusión entre tipos, propagación de warns a `qa_project` (status warn sin errores), HTML disfrazado de MP4 → error sin crash. | 30 |
+| `test_production_doctor.py` | **PRODUCTION DOCTOR V1.0**: taxonomía de 8 clasificaciones, capas A-I con evidencia (JSON corrupto, unidades bloqueadas, paridad, pérdida en adapter, P1 verbatim, estados de cola), ciclo AUDIT→FIX→re-audit→VERIFY, audit trail con 10 campos, SHA-256 de lo creativo invariante, UNKNOWN honesto, CLI exit codes. | 54 |
+| `test_doctor_preflight.py` | **REAL FLOW PREFLIGHT**: veredicto PASS honesto, backend caído, contrato (sin image_prompt/cero video_prompt/JSON corrupto/ausente/project_id incorrecto), cola sucia (dead/lease vencido/sin jobs), pipeline activo, manifest sin host_permissions, bridge desalineado, nunca ejecuta Flow ni muta. | 23 |
 | `test_concurrencia.py` | **Concurrencia**: raza de 8 workers sobre BEGIN IMMEDIATE (0 dobles claims), aislamiento multi-proyecto, token de una sola era (409 tras re-claim), completes paralelos, enqueue en caliente. | 18 |
 | `test_chaos.py` | **Chaos**: reinicio REAL de proceso (subprocess), rollback atómico, doble complete 409, HTML de Flow → 422 → dead, dead → re-enqueue, estados imposibles, carrera zombie. | 28 |
 | `test_10_escenas.py` | **Escala (TEST 4)**: proyecto de 10 escenas → 19 jobs (última solo-imagen por P1), sentinels verbatim por job + prompt de ~11KB intacto, orden de claims imágenes→videos, heartbeat/fail-retry/zombie/doble complete a escala, 10/10 escenas mapeadas, auto-render una vez, QA a escala con forense limpia, re-enqueue idempotente. | 44 |
@@ -25,7 +27,7 @@ sin rutas absolutas.
 | `test_humos_infra.py` | **Humos anti-fantasma**: todo lo que declaramos existe físicamente en el repo (tabla, endpoints, bridge.js, wiring, CORS, P1, auto-render, runner, ESTADO_REAL). | 51 |
 | `test_live_boot.py` | **Boot vivo**: arranca uvicorn REAL en sandbox aislado (`live_boot_smoke.sh`: startup, CORS preflight, endpoints base, métricas, video QA) + **ciclo completo del Flow Bridge por HTTP** (`live_cycle_smoke.sh`: enqueue → claim → complete PNG/MP4 reales → 409/422 → fail/retry → guard de tipo → project_done → auto-render → QA). | 33 |
 
-Total esperado: **548 checks**.
+Total esperado: **625 checks**.
 
 > Nota: `test_lanzar_preflight.py` verifica la barrera de preflight que vive en
 > `pipeline/orchestrator.py` (`_preflight_lanzamiento`). Contra un estado sin
@@ -36,7 +38,7 @@ Total esperado: **548 checks**.
 
 ```bash
 cd yt_automation_v2
-python3 tests/run_all.py                  # las 14 baterías + total; exit != 0 si algo falla
+python3 tests/run_all.py                  # las 16 baterías + total; exit != 0 si algo falla
 
 # individual (python3 plano, estilo autoejecutable):
 python3 tests/test_production_json.py

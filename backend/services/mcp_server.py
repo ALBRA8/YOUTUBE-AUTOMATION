@@ -14,6 +14,7 @@ de GET /api/guion_json/contrato.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -354,6 +355,29 @@ TOOLS = [
      "proyectos por estado, cola Flow (incl. dead por tipo), jobs de pipeline, "
      "escenas sin imagen y disco ocupado por data/output.",
      "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "production_doctor", "description": "PRODUCTION DOCTOR V1.0: "
+     "diagnóstico por capas del pipeline completo (Production JSON → Adapter "
+     "→ Flow Export → Jobs → Extensión → Google Flow → Assets → QA → Render). "
+     "Modos: audit (solo lee), fix (solo reparaciones seguras deterministas + "
+     "verify), verify (re-ejecuta checks y baterías afectadas), report "
+     "(último informe). Nunca modifica contenido creativo.",
+     "inputSchema": {"type": "object", "properties": {
+         "modo": {"type": "string", "enum": ["audit", "fix", "verify", "report"],
+                  "default": "audit"},
+         "deep": {"type": "boolean", "default": False,
+                  "description": "incluir QA forense pesado (ffprobe por asset)"},
+         "ejecutar_tests": {"type": "boolean", "default": True,
+                            "description": "re-ejecutar baterías afectadas en fix/verify"}}}},
+    {"name": "real_flow_preflight", "description": "REAL FLOW PREFLIGHT: barrera "
+     "antes de una prueba real con Google Flow. Comprueba backend, extensión, "
+     "bridge, Production JSON (image_prompt/video_prompt/duration_target), "
+     "cola limpia y herramientas. Devuelve REAL FLOW PREFLIGHT PASS o REAL "
+     "FLOW BLOCKED con los motivos exactos. NUNCA ejecuta Flow.",
+     "inputSchema": {"type": "object", "properties": {
+         "project_id": {"type": "string",
+                        "description": "proyecto a comprobar (opcional)"},
+         "backend_url": {"type": "string",
+                         "description": "URL del backend (default 127.0.0.1:PORT)"}}}},
 ]
 
 
@@ -419,6 +443,20 @@ async def _dispatch(name: str, args: dict):
     if name == "metricas":
         from services import metrics as _mx
         return _mx.snapshot()
+    if name == "production_doctor":
+        from services.production_doctor import run_mode as _pdoc
+        try:
+            return await asyncio.to_thread(
+                _pdoc, args.get("modo") or "audit",
+                deep=bool(args.get("deep")), in_process=True,
+                ejecutar_tests=bool(args.get("ejecutar_tests", True)))
+        except ValueError as e:
+            raise ValueError(str(e)) from e
+    if name == "real_flow_preflight":
+        from services.production_doctor import preflight as _pf
+        return await asyncio.to_thread(
+            _pf, project_id=args.get("project_id"),
+            backend_url=args.get("backend_url"))
     raise ValueError(f"tool desconocida: {name}")
 
 
