@@ -38,15 +38,17 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("main")
 
-app = FastAPI(title="YT Automation v2.0", version="2.16.2")
+app = FastAPI(title="YT Automation v2.0", version="2.18.0")
 
-# [flow-bridge v1] CORS para la extensión Chrome (MV3 service worker):
-# los fetch desde chrome-extension:// exigen CORS — sin esto el puente no
-# puede ni saludar. Solo métodos lectura/escritura del puente, sin credenciales.
+# [flow-bridge v1.1] CORS endurecido (fusión con la línea 2.2 del repo):
+# solo la extensión Chrome (chrome-extension:// con ID válido de 32 chars a-p)
+# y clientes locales (localhost/127.0.0.1). El fetch del Service Worker con
+# host_permissions del manifest 2.2 pasa sin CORS; el popup y un worker
+# remoto local sí lo necesitan. Sin credenciales.
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"^(chrome-extension://[a-p]+|https?://(localhost|127\.0\.0\.1)(:\d+)?)$",
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["*"],
@@ -106,7 +108,7 @@ async def auth_guard(request, call_next):
 # ──────────────────────────────────────────────────────── básicos ──
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "version": "2.16.2", "gemini": gemini_client.available(),
+    return {"ok": True, "version": "2.18.0", "gemini": gemini_client.available(),
             "nvidia": nvidia_client.available(),
             "nvidia_model": nvidia_client.last_model(),
             "whisper": whisper_service.available(),

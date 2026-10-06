@@ -93,7 +93,7 @@ def main() -> int:
           '{"name": "submit_production_json"' in SRC_MCP)
     check("tool lanzar_proyecto declarada",
           '{"name": "lanzar_proyecto"' in SRC_MCP)
-    check("SERVER_INFO 2.16.1", '"version": "2.16.1"' in SRC_MCP)
+    check("SERVER_INFO 2.18.0", '"version": "2.18.0"' in SRC_MCP)
     check("dispatcher ruta submit_production_json",
           'if name == "submit_production_json":' in SRC_MCP
           and "return await _t_submit_production_json(**args)" in SRC_MCP)
@@ -139,7 +139,7 @@ def main() -> int:
 
     ESTILOS = {s["id"] for s in STYLES}
     spec = pj.spec(sorted(ESTILOS))
-    check("spec 2.16.1", spec["version"] == "2.16.1")
+    check("spec 2.18.0", spec["version"] == "2.18.0")
     check("spec declara image_prompt OPCIONAL EN INGESTA",
           "OPCIONAL EN INGESTA" in spec["campos_de_unidad"]
           ["image_prompt|visual_prompt|prompt_image"])
@@ -194,8 +194,8 @@ def main() -> int:
                     SRC_TTS, re.S) is not None)
     check("doctor: check pyav con cota <19",
           'add("pyav", av_ok and 0 < av_major < 19' in SRC_DOC)
-    check("main.py: versión 2.16.2 (FastAPI)", 'version="2.16.2"' in SRC_MAIN)
-    check("main.py: versión 2.16.2 (/estado)", '"version": "2.16.2"' in SRC_MAIN)
+    check("main.py: versión 2.18.0 (FastAPI)", 'version="2.18.0"' in SRC_MAIN)
+    check("main.py: versión 2.18.0 (/estado)", '"version": "2.18.0"' in SRC_MAIN)
 
     # ═══════════════════ D · Compatibilidad entre líneas ═══════════════════
     print("── D. Compatibilidad Adapter ↔ pipeline ↔ MCP")
@@ -219,10 +219,10 @@ def main() -> int:
           "                 auto_start_override=None)" in SRC_PJ)
     check("sin narración no se inventa voz (Adapter)",
           "tts_skip = not narr" in SRC_PJ)
-    check("coherencia MCP/Adapter 2.16.1 y app 2.16.2",
-          '"version": "2.16.1"' in SRC_MCP
-          and '"version": "2.16.1"' in SRC_PJ
-          and 'version="2.16.2"' in SRC_MAIN)
+    check("coherencia MCP/Adapter 2.18.0 y app 2.18.0",
+          '"version": "2.18.0"' in SRC_MCP
+          and '"version": "2.18.0"' in SRC_PJ
+          and 'version="2.18.0"' in SRC_MAIN)
 
     print(f"\n═══ {OK} OK · {FAIL} fallos ═══")
     return 1 if FAIL else 0

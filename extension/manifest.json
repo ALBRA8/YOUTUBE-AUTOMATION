@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Flow Script Processor",
-  "version": "2.1.0",
-  "description": "Automatiza Google Labs (Flow / ImageFX) y Meta AI: inyecta prompts escena por escena, intercepta los resultados y guarda las imagenes/videos directo en la carpeta del proyecto. Sin API keys, $0 por video.",
+  "version": "2.2.0",
+  "description": "Automatiza Google Labs (Flow / ImageFX) y Meta AI: inyecta prompts escena por escena, intercepta los resultados y guarda las imagenes/videos directo en la carpeta del proyecto. Bridge 2.2: worker de la cola Flow del backend (claim/heartbeat/complete automaticos). Sin API keys, $0 por video.",
   "minimum_chrome_version": "111",
   "permissions": ["scripting", "activeTab", "downloads", "storage", "alarms"],
-  "host_permissions": ["https://labs.google/*", "https://meta.ai/*", "*://*.meta.ai/*"],
+  "host_permissions": ["https://labs.google/*", "https://meta.ai/*", "*://*.meta.ai/*",
+                       "http://127.0.0.1/*", "http://localhost/*"],
   "background": { "service_worker": "background.js" },
   "action": {
     "default_popup": "popup.html",

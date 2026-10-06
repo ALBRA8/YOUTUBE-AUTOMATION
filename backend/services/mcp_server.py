@@ -30,9 +30,9 @@ from services.themes import STYLES
 
 log = logging.getLogger("mcp")
 
-app = FastAPI(title="YT Automation MCP", version="2.16.1")
+app = FastAPI(title="YT Automation MCP", version="2.18.0")
 
-SERVER_INFO = {"name": "yt-automation-v2", "version": "2.16.1"}
+SERVER_INFO = {"name": "yt-automation-v2", "version": "2.18.0"}
 PROTOCOL_VERSION = "2024-11-05"
 
 # ───────────────────────────────────────────────────────────── tools ──
