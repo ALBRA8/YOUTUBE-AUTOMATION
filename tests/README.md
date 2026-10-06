@@ -17,13 +17,15 @@ sin rutas absolutas.
 | `test_flow_contract_p1.py` | **GOLDEN EXECUTION CONTRACT P1**: el `video_prompt` del Creative Engine llega **verbatim** al payload de Flow (transformación/genérico y artesano), gana sobre `ai_stages` y plantillas, `duration_target` al export, campos del contrato preservados, sanitización no muta. | 44 |
 | `test_flow_bridge.py` | **Flow Bridge v1**: motor de cola (`services/flow_jobs.py`) claim atómico/lease/heartbeat/complete/fail, 6 endpoints vía httpx ASGI, validación PIL/ffprobe, mapeo de escenas + auto-render (mock), re-enqueue idempotente. | 48 |
 | `test_golden_fixture.py` | **Fixture Golden oficial**: cadena completa con DB REAL — fixture → ingest → roundtrip meta JSON → script.json (P1 verbatim) → cola → claim → complete → Video QA. | 30 |
+| `test_qa_forensics.py` | **QA forense de medios**: fabrica assets enfermos y verifica detección REAL — pantalla negra, pantalla azul, audio completamente silencioso (volumedetect), no confusión entre tipos, propagación de warns a `qa_project` (status warn sin errores), HTML disfrazado de MP4 → error sin crash. | 30 |
 | `test_concurrencia.py` | **Concurrencia**: raza de 8 workers sobre BEGIN IMMEDIATE (0 dobles claims), aislamiento multi-proyecto, token de una sola era (409 tras re-claim), completes paralelos, enqueue en caliente. | 18 |
 | `test_chaos.py` | **Chaos**: reinicio REAL de proceso (subprocess), rollback atómico, doble complete 409, HTML de Flow → 422 → dead, dead → re-enqueue, estados imposibles, carrera zombie. | 28 |
+| `test_10_escenas.py` | **Escala (TEST 4)**: proyecto de 10 escenas → 19 jobs (última solo-imagen por P1), sentinels verbatim por job + prompt de ~11KB intacto, orden de claims imágenes→videos, heartbeat/fail-retry/zombie/doble complete a escala, 10/10 escenas mapeadas, auto-render una vez, QA a escala con forense limpia, re-enqueue idempotente. | 44 |
 | `test_bridge_e2e.py` | **E2E extensión**: `node --check` en los JS + `bridge.js` REAL en sandbox VM contra backend mock HTTP con estado (claim→complete con bytes validados, 422, heartbeat, backend caído, anti-duplicado). | 24 |
 | `test_humos_infra.py` | **Humos anti-fantasma**: todo lo que declaramos existe físicamente en el repo (tabla, endpoints, bridge.js, wiring, CORS, P1, auto-render, runner, ESTADO_REAL). | 51 |
 | `test_live_boot.py` | **Boot vivo**: arranca uvicorn REAL en sandbox aislado (`live_boot_smoke.sh`: startup, CORS preflight, endpoints base, métricas, video QA) + **ciclo completo del Flow Bridge por HTTP** (`live_cycle_smoke.sh`: enqueue → claim → complete PNG/MP4 reales → 409/422 → fail/retry → guard de tipo → project_done → auto-render → QA). | 33 |
 
-Total esperado: **474 checks**.
+Total esperado: **548 checks**.
 
 > Nota: `test_lanzar_preflight.py` verifica la barrera de preflight que vive en
 > `pipeline/orchestrator.py` (`_preflight_lanzamiento`). Contra un estado sin
@@ -34,7 +36,7 @@ Total esperado: **474 checks**.
 
 ```bash
 cd yt_automation_v2
-python3 tests/run_all.py                  # las 12 baterías + total; exit != 0 si algo falla
+python3 tests/run_all.py                  # las 14 baterías + total; exit != 0 si algo falla
 
 # individual (python3 plano, estilo autoejecutable):
 python3 tests/test_production_json.py
@@ -44,8 +46,9 @@ bash tests/live_boot_smoke.sh             # boot vivo aislado (opcional, sin pyt
 python3 -m pytest tests/ -q --ignore=tests/test_live_boot.py
 ```
 
-Requisitos: `python3 >= 3.10`, `bash`, `curl`, `ffmpeg/ffprobe` (solo para
-`test_live_boot.py`) y las dependencias de `backend/requirements.txt`
+Requisitos: `python3 >= 3.10`, `bash`, `curl`, `ffmpeg/ffprobe` (para
+`test_live_boot.py`, `test_qa_forensics.py` y `test_10_escenas.py`) y las
+dependencias de `backend/requirements.txt`
 instaladas (mínimo `fastapi`/`starlette`; las baterías NO importan `av` ni
 `faster_whisper` aunque no estén instalados). La primera corrida en un clone
 limpio crea el runtime mínimo (`backend/data/`, SQLite, `output/`) al importar

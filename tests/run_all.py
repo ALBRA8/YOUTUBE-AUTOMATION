@@ -26,10 +26,14 @@ BATERIAS = [
                                  # heartbeat/complete/fail + 6 endpoints (48)
     "test_golden_fixture.py",    # FIXTURE GOLDEN oficial: cadena completa con
                                  # DB (fixture → ingest → export → cola → QA)
+    "test_qa_forensics.py",      # QA FORENSE de medios: pantalla negra/azul,
+                                 # audio silencioso, propagación de warns (30)
     "test_concurrencia.py",      # concurrencia: raza de claims, multi-proyecto,
                                  # token de una sola era, completes paralelos
     "test_chaos.py",             # chaos: reinicio REAL de proceso, rollback,
                                  # doble complete, asset corrupto, zombie
+    "test_10_escenas.py",        # ESCALA: proyecto de 10 escenas (19 jobs),
+                                 # P1 verbatim + prompt de ~11KB + QA a escala
     "test_bridge_e2e.py",        # E2E extensión: node --check + bridge.js real
                                  # contra backend mock (sandbox VM)
     "test_humos_infra.py",       # humos: lo declarado EXISTE en el repo (~50)

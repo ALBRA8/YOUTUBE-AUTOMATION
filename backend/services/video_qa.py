@@ -9,6 +9,8 @@ Responde, con hechos medidos (no suposiciones), tres preguntas por proyecto:
   2. ¿Los clips de video de Flow son MP4 sanos y con qué propiedades?
      (ffprobe JSON: duración, resolución, fps, códec, pista de audio —
      detecta WebM disfrazado de .mp4, clips truncados y videos sin stream).
+     FORENSE de medios: muestrea frames (25/50/75%) para detectar pantalla
+     negra/azul y mide max_volume para detectar audio silencioso (warn).
   3. ¿El render final existe y cumple lo mínimo para publicar?
      (existe, es MP4 ffprobe-válido, duración razonable, tiene audio).
 
@@ -21,7 +23,9 @@ Uso desde MCP:     tool video_qa(project_id=...)
 """
 from __future__ import annotations
 
+import io
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -31,6 +35,13 @@ from database import get_project, get_scenes
 MIN_CLIP_S = 0.3        # igual que flow_jobs / flow_import
 MIN_FINAL_S = 3.0       # un render final de menos de 3s es sospechoso
 MIN_DIM = 240           # px; por debajo es basura para YouTube Shorts
+
+# ── forense de medios (pantalla negra/azul, audio silencioso) ────────────────
+BLACK_LUMA_MAX = 24     # luma media (0-255) por debajo → frame "negro"
+BLUE_B_MIN = 80         # canal azul mínimo para considerar "pantalla azul"
+BLUE_DOM_DIFF = 40      # B − max(R,G) por encima → azul dominante
+SILENT_MAX_DB = -60.0   # max_volume por debajo → pista de audio silenciosa
+FRAME_FRACS = (0.25, 0.5, 0.75)  # puntos de muestreo de la duración
 
 
 def _ffprobe_json(path: Path) -> dict | None:
@@ -57,6 +68,97 @@ def _fps_of(stream: dict) -> float:
         return float(num) / d if d else 0.0
     except (ValueError, ZeroDivisionError):
         return 0.0
+
+
+def _frame_verdict(im) -> str | None:
+    """Clasifica un frame muestreado: 'negro', 'azul' o None (normal).
+    Usa la media RGB (downsample 32x32): robusto ante ruido/localizaciones."""
+    try:
+        small = im.resize((32, 32))
+        px = list(small.getdata())
+    except Exception:  # noqa: BLE001
+        return None
+    if not px:
+        return None
+    n = len(px)
+    r = sum(p[0] for p in px) / n
+    g = sum(p[1] for p in px) / n
+    b = sum(p[2] for p in px) / n
+    luma = 0.299 * r + 0.587 * g + 0.114 * b
+    if luma <= BLACK_LUMA_MAX:
+        return "negro"
+    if b >= BLUE_B_MIN and (b - max(r, g)) >= BLUE_DOM_DIFF:
+        return "azul"
+    return None
+
+
+def _forensics_video(path: Path, dur: float) -> dict:
+    """Forense de medios sobre UN video (mide, no supone):
+
+    · Muestrea frames al 25/50/75% (ffmpeg → PNG en memoria → PIL) y
+      detecta pantalla NEGRA (todo el muestreo con luma ≈ 0) y pantalla
+      AZUL (todo el muestreo con azul dominante — crash típico de proveedor).
+    · Mide max_volume con volumedetect: una pista cuyo máximo está por
+      debajo de SILENT_MAX_DB es un audio completamente silencioso.
+
+    Nunca lanza: lo que no puede medir (sin audio, ffmpeg ausente, frame
+    no decodificable) lo omite — un QA que revienta no es un QA."""
+    out: dict = {"frames_muestreados": 0, "pantalla_negra": False,
+                 "pantalla_azul": False, "audio_silencioso": False}
+    flags: list[dict] = []
+    verdicts: list[str] = []
+    for frac in FRAME_FRACS:
+        t = min(dur * frac, max(dur - 0.05, 0.0))
+        try:
+            proc = subprocess.run(
+                ["ffmpeg", "-v", "error", "-ss", f"{t:.3f}", "-i", str(path),
+                 "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"],
+                capture_output=True, timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if proc.returncode != 0 or not proc.stdout:
+            continue
+        try:
+            from PIL import Image
+            with Image.open(io.BytesIO(proc.stdout)) as im:
+                v = _frame_verdict(im.convert("RGB"))
+        except Exception:  # noqa: BLE001
+            continue
+        if v:
+            verdicts.append(v)
+    out["frames_muestreados"] = len(verdicts)
+    if verdicts and all(v == "negro" for v in verdicts):
+        out["pantalla_negra"] = True
+        flags.append({"sev": "warn",
+                      "msg": f"pantalla negra en {len(verdicts)}/"
+                             f"{len(verdicts)} frames muestreados "
+                             "(¿asset vacío o fade total?)"})
+    if verdicts and all(v == "azul" for v in verdicts):
+        out["pantalla_azul"] = True
+        flags.append({"sev": "warn",
+                      "msg": f"pantalla azul en {len(verdicts)}/"
+                             f"{len(verdicts)} frames muestreados "
+                             "(¿crash del proveedor?)"})
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-v", "info", "-i", str(path), "-map", "0:a:0",
+             "-af", "volumedetect", "-f", "null", "-"],
+            capture_output=True, timeout=60)
+        m = re.search(r"max_volume:\s*(-?[\d.]+|-inf)\s*dB",
+                      proc.stderr.decode("utf-8", "replace"))
+        if m:
+            mv = (float("-inf") if m.group(1) == "-inf"
+                  else float(m.group(1)))
+            out["max_volume_db"] = None if mv == float("-inf") else mv
+            if mv <= SILENT_MAX_DB:
+                out["audio_silencioso"] = True
+                flags.append({"sev": "warn",
+                              "msg": "audio completamente silencioso "
+                                     f"(max {m.group(1)} dB)"})
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    out["flags"] = flags
+    return out
 
 
 def qa_image(path: str | Path) -> dict:
@@ -143,6 +245,16 @@ def qa_video(path: str | Path, *, final: bool = False) -> dict:
                                   "msg": "clip de Flow sin audio (normal)"})
     else:
         info["acodec"] = a.get("codec_name")
+    # forense de medios: pantalla negra/azul + audio silencioso (severidad
+    # warn: un clip 100% negro puede ser un fade legítimo — se reporta, no
+    # bloquea; el revisor humano decide con el flag delante)
+    if v is not None and dur > 0:
+        fore = _forensics_video(p, dur)
+        for k in ("frames_muestreados", "pantalla_negra", "pantalla_azul",
+                  "audio_silencioso", "max_volume_db"):
+            if k in fore:
+                info[k] = fore[k]
+        info["flags"].extend(fore["flags"])
     if not any(f["sev"] == "error" for f in info["flags"]):
         info["flags"].append({"sev": "ok",
                               "msg": f"video válido {dur:.1f}s "

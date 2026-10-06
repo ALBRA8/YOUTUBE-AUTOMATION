@@ -236,8 +236,9 @@ def _mp4() -> bytes:
     out = _TMP / "conc_clip.mp4"
     subprocess.run(
         ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
-         "-i", "color=c=black:s=64x64:d=1.0",
-         "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-shortest",
+         "-i", "color=c=0xFF8C00:s=64x64:d=1.0",
+         "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100",
+         "-shortest",
          "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
          "-c:a", "aac", str(out)],
         check=True, capture_output=True, timeout=60)
