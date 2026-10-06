@@ -52,6 +52,7 @@ backend/data/whisper/
 *.webm
 *.mkv
 !backend/data/music/.gitkeep
+!backend/data/music/*.mp3
 
 # ── 📝 LOGS Y BASURA DEL SISTEMA ─────────────────────────────────────
 *.log
