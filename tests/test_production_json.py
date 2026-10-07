@@ -90,7 +90,7 @@ def main() -> int:
 
     print("── 1. spec del contrato")
     spec = pj.spec(sorted(ESTILOS))
-    check("version 2.19.0", spec["version"] == "2.19.0")
+    check("version 2.19.1", spec["version"] == "2.19.1")
     check("campos clave", all(k in spec["campos"] for k in
                               ("project", "sequence", "title|name", "format",
                                "style", "voice", "avatar_id", "niche",
@@ -129,7 +129,7 @@ def main() -> int:
     check("1 escena", len(g["escenas"]) == 1)
     check("titulo Mini demo", g["titulo"] == "Mini demo")
     check("formato short", g["formato"] == "short")
-    check("adapter 2.19.0 en meta", g["production"]["adapter"] == "production_json/v2.19.0")
+    check("adapter 2.19.1 en meta", g["production"]["adapter"] == "production_json/v2.19.1")
     check("sin avisos en ejemplo limpio", not av, str(av))
     check("unidad con visual_prompt → image_prompt",
           g["escenas"][0]["image_prompt"].startswith("macro miniature"))

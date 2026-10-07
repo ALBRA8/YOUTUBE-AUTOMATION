@@ -1,4 +1,4 @@
-"""v2.19.0 · Servidor MCP (Model Context Protocol) de la fábrica — reconstruido.
+"""v2.19.1 · Servidor MCP (Model Context Protocol) de la fábrica — reconstruido.
 
 Montado en /mcp desde main.py. Implementación JSON-RPC 2.0 a mano (el venv no
 tiene el paquete `mcp`): soporta initialize, tools/list y tools/call, suficiente
@@ -32,9 +32,9 @@ from services.themes import STYLES
 
 log = logging.getLogger("mcp")
 
-app = FastAPI(title="YT Automation MCP", version="2.19.0")
+app = FastAPI(title="YT Automation MCP", version="2.19.1")
 
-SERVER_INFO = {"name": "yt-automation-v2", "version": "2.19.0"}
+SERVER_INFO = {"name": "yt-automation-v2", "version": "2.19.1"}
 PROTOCOL_VERSION = "2024-11-05"
 
 # ───────────────────────────────────────────────────────────── tools ──

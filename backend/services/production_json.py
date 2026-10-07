@@ -496,7 +496,7 @@ def validate(data: dict, estilos_validos: set[str],
         "project_extra": project_extra,
         "root_extra": root_extra,
         "production": {
-            "adapter": "production_json/v2.19.0",
+            "adapter": "production_json/v2.19.1",
             "production_id": production_id,
             "unidades": len(escenas),
             "sequence_key": seq_key,
@@ -765,7 +765,7 @@ def spec(estilos_ids: list[str]) -> dict:
     """Spec machine-readable del contrato (para el Creative Engine y humanos)."""
     camaras = ", ".join(sorted(camera_recipes.ids()))
     return {
-        "version": "2.19.0",
+        "version": "2.19.1",
         "uso": 'POST /api/projects con {"mode": "production_json", '
                '"production": <envelope>} (objeto, string JSON o fences). '
                'Dry-run: POST /api/production_json/validate. guion_json sigue '

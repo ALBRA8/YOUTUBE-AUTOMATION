@@ -532,12 +532,18 @@ def audit_jobs(in_process: bool = False, **_kw) -> list:
 
 
 # ── E. EXTENSION ─────────────────────────────────────────────────────────────
-def _http_probe(url: str, timeout: float = 2.5) -> tuple[bool, str]:
+def _http_probe(url: str, timeout: float = 2.5,
+                trusted_private: bool = False) -> tuple[bool, str]:
     try:
         # v2.19 · anti-SSRF: backend_url llega por MCP/API (origen no
         # confiable). Sin guardia, un file:// o 169.254.169.254 se sondeaba.
+        # v2.19.1 · fix clean-room: la sonda contra el backend PROPIO
+        # (host nacido de config, nunca del llamador) usa allow_private
+        # — antes el guard rechazaba 127.0.0.1 y P-BACKEND-HEALTH jamás
+        # podía pasar con el default legítimo. URLs suministradas por
+        # llamadores externos conservan la guardia estricta.
         import security as _sec
-        url = _sec.safe_url(url)
+        url = _sec.safe_url(url, allow_private=trusted_private)
     except ValueError as e:
         return False, f"URL rechazada (guardia SSRF): {e}"[:160]
     try:
@@ -623,7 +629,8 @@ def audit_extension(probe_http: bool = True, **_kw) -> list:
                 "backend: la cola no funcionará"))
     if probe_http:
         base = f"http://127.0.0.1:{config.PORT}"
-        ok, detail = _http_probe(f"{base}/api/health")
+        # host nacido de config (primera parte) → allow_private legítimo
+        ok, detail = _http_probe(f"{base}/api/health", trusted_private=True)
         if not ok:
             findings.append(finding(
                 "DOC-E-BACKEND-DOWN", "E", "backend",

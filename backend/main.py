@@ -38,7 +38,7 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("main")
 
-app = FastAPI(title="YT Automation v2.0", version="2.19.0")
+app = FastAPI(title="YT Automation v2.0", version="2.19.1")
 
 # [flow-bridge v1.1] CORS endurecido (fusión con la línea 2.2 del repo):
 # solo la extensión Chrome (chrome-extension:// con ID válido de 32 chars a-p)
@@ -112,7 +112,7 @@ async def auth_guard(request, call_next):
 # ──────────────────────────────────────────────────────── básicos ──
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "version": "2.19.0", "gemini": gemini_client.available(),
+    return {"ok": True, "version": "2.19.1", "gemini": gemini_client.available(),
             "nvidia": nvidia_client.available(),
             "nvidia_model": nvidia_client.last_model(),
             "whisper": whisper_service.available(),

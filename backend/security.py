@@ -71,7 +71,7 @@ class _SafeRedirectHandler(_urq.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def validar_url(url: str) -> str:
+def validar_url(url: str, allow_private: bool = False) -> str:
     """Valida una URL externa y la devuelve si es segura. Lanza ValueError.
 
     Reglas: esquema http/https exclusivamente; sin usuario/contraseña;
@@ -79,7 +79,14 @@ def validar_url(url: str) -> str:
     reservado/multicast/no especificado. Nota honesta: esto bloquea el SSRF
     por resolución; un atacante con DNS rebinding (cambia la IP entre la
     validación y la conexión) queda fuera del alcance de esta guardia mínima
-    — el egress real de producción debería complementarlo con firewall."""
+    — el egress real de producción debería complementarlo con firewall.
+
+    allow_private=True (solo para objetivos PROPIOS de primera parte, p.ej.
+    la sonda del Doctor contra su propio backend en 127.0.0.1:PORT, cuyo
+    host nace de config y no del llamador): relaja ÚNICAMENTE
+    is_private/is_loopback. Link-local (169.254.x — metadatos cloud),
+    reservadas, multicast y no especificadas siguen PROHIBIDAS incluso con
+    allow_private=True. Nunca exponer este flag a entradas de usuario."""
     u = (url or "").strip()
     p = _up.urlparse(u)
     if p.scheme not in ("http", "https"):
@@ -96,16 +103,19 @@ def validar_url(url: str) -> str:
         raise ValueError(f"host no resoluble: {host} ({e.__class__.__name__})") from e
     for info in infos:
         ip = ipaddress.ip_address(info[4][0])
-        if (ip.is_private or ip.is_loopback or ip.is_link_local
-                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+        prohibida = (ip.is_link_local or ip.is_reserved or ip.is_multicast
+                     or ip.is_unspecified)
+        if not allow_private:
+            prohibida = prohibida or ip.is_private or ip.is_loopback
+        if prohibida:
             raise ValueError(f"dirección no permitida ({host} → {ip}): "
                              "solo hosts públicos")
     return u
 
 
-def safe_url(url: str) -> str:
+def safe_url(url: str, allow_private: bool = False) -> str:
     """Alias público de validar_url (documentación en validar_url)."""
-    return validar_url(url)
+    return validar_url(url, allow_private=allow_private)
 
 
 _OPENER = _urq.build_opener(_SafeRedirectHandler)

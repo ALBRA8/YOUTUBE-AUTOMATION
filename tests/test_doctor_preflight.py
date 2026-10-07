@@ -150,7 +150,7 @@ def main() -> int:
     # sonda HTTP controlable (sin servidor real en el test)
     estado_http = {"ok": True}
 
-    def probe_fake(url, timeout=2.5):
+    def probe_fake(url, timeout=2.5, trusted_private=False):
         if estado_http["ok"]:
             return True, "HTTP 200: {\"ok\":true} (fake)"
         return False, "ConnectionRefusedError: fake down"
@@ -458,6 +458,106 @@ def main() -> int:
     _limpiar()
     db.delete_project("pf_rt")
     shutil.rmtree(_cfg.OUTPUT_DIR / "pf_rt", ignore_errors=True)
+
+    # ── 9. guardia SSRF vs backend PROPIO (regresión fix clean-room v2.19.1)
+    # Antes: _http_probe aplicaba la guardia de hosts públicos TAMBIÉN al
+    # backend propio (127.0.0.1:PORT, host nacido de config) → P-BACKEND-
+    # HEALTH jamás podía pasar y REAL FLOW quedaba bloqueado para siempre.
+    # Ahora: default propio → allow_private legítimo; backend_url externa
+    # (MCP/API/CLI) → guardia estricta intacta (nadie apunta la sonda del
+    # Doctor a loopback/metadata).
+    print("── 9. guardia SSRF vs backend propio (fix clean-room v2.19.1)")
+    import security as _sec
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from services.production_doctor import layers as _layers_real
+
+    class _Salud(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            if self.path == "/api/health":
+                body = b'{"ok":true}'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            else:
+                self.send_response(404)
+                self.end_headers()
+
+        def log_message(self, *a):  # silencio
+            pass
+
+    _srv = HTTPServer(("127.0.0.1", 0), _Salud)
+    _puerto = _srv.server_address[1]
+    threading.Thread(target=_srv.serve_forever, daemon=True).start()
+    try:
+        # 9a. sonda REAL (la de layers, no el mock) en unidad:
+        # loopback permitido SOLO como primera parte
+        okp, detp = _layers_real._http_probe(
+            f"http://127.0.0.1:{_puerto}/api/health", trusted_private=True)
+        check("sonda real + trusted_private=True → HTTP 200",
+              okp and "HTTP 200" in detp, detp)
+        okp, detp = _layers_real._http_probe(
+            f"http://127.0.0.1:{_puerto}/api/health")
+        check("sonda real sin trusted_private → loopback RECHAZADO por guardia",
+              not okp and "guardia SSRF" in detp, detp)
+
+        # 9b. validar_url: allow_private relaja SOLO private/loopback
+        try:
+            _sec.validar_url(f"http://127.0.0.1:{_puerto}/", allow_private=True)
+            check("validar_url allow_private=True acepta loopback", True)
+        except ValueError as e:
+            check("validar_url allow_private=True acepta loopback", False, str(e))
+        for _mala, _tag in (("http://169.254.169.254/latest/meta-data",
+                             "link-local (metadata cloud)"),
+                            ("http://0.0.0.0:8000/", "no especificada")):
+            try:
+                _sec.validar_url(_mala, allow_private=True)
+                check(f"allow_private=True sigue bloqueando {_tag}", False, _mala)
+            except ValueError:
+                check(f"allow_private=True sigue bloqueando {_tag}", True)
+        try:
+            _sec.validar_url("file:///etc/passwd", allow_private=True)
+            check("allow_private=True sigue bloqueando file://", False)
+        except ValueError:
+            check("allow_private=True sigue bloqueando file://", True)
+
+        # 9c. wiring END-TO-END del preflight: default propio contra servidor
+        # real; backend_url externa sigue bajo guardia (regresión del wiring)
+        _puerto_real = _cfg.PORT
+        _cfg.PORT = _puerto
+        try:
+            # wiring END-TO-END: reponer la sonda REAL en el módulo preflight
+            # (la fake sigue instalada en pf_mod) y restaurar al salir
+            _fake = pf_mod._http_probe
+            pf_mod._http_probe = _layers_real._http_probe
+            pf = pf_mod.real_flow_preflight()
+            _ph = next(c for c in pf["checks"] if c["id"] == "P-BACKEND-HEALTH")
+            check("preflight con default propio + backend VIVO → "
+                  "P-BACKEND-HEALTH ok (antes imposible)",
+                  _ph["ok"] and "HTTP 200" in _ph["detalle"], _ph["detalle"])
+            check("verdict deja de bloquear por backend con servidor vivo",
+                  all("backend NO disponible" not in r
+                      for r in pf["blocked_reasons"]),
+                  repr(pf["blocked_reasons"]))
+            pf = pf_mod.real_flow_preflight(
+                backend_url=f"http://127.0.0.1:{_puerto}")
+            _ph = next(c for c in pf["checks"] if c["id"] == "P-BACKEND-HEALTH")
+            check("backend_url EXTERNA a loopback → guardia SSRF intacta "
+                  "(P-BACKEND-HEALTH en rojo con motivo de guardia)",
+                  not _ph["ok"] and "guardia SSRF" in _ph["detalle"],
+                  _ph["detalle"])
+            check("verdict BLOCKED citando el rechazo de guardia",
+                  pf["verdict"] == "REAL FLOW BLOCKED"
+                  and any("guardia SSRF" in r for r in pf["blocked_reasons"]),
+                  repr(pf["blocked_reasons"]))
+            pf_mod._http_probe = _fake
+        finally:
+            _cfg.PORT = _puerto_real
+    finally:
+        _srv.shutdown()
+        _srv.server_close()
 
     print(f"\n═══ {OK} OK · {FAIL} fallos ═══")
     return 1 if FAIL else 0

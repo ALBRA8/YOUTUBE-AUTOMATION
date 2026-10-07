@@ -85,8 +85,15 @@ def real_flow_preflight(project_id: str | None = None,
                f"{d} escribible" if ok else f"{d} ausente o sin escritura")
 
     # ── backend disponible ───────────────────────────────────────────────
+    # v2.19.1 · fix clean-room: el DEFAULT (host nacido de config) es un
+    # objetivo propio de primera parte → allow_private legítimo. Una
+    # backend_url suministrada por llamador externo (MCP/API/CLI) conserva
+    # la guardia SSRF estricta: nadie puede apuntar la sonda del Doctor a
+    # loopback/redes internas (p.ej. http://127.0.0.1:PORT/api/config o
+    # metadatos 169.254.169.254).
     base = (backend_url or f"http://127.0.0.1:{config.PORT}").rstrip("/")
-    ok, detail = _http_probe(f"{base}/api/health", timeout=3.0)
+    ok, detail = _http_probe(f"{base}/api/health", timeout=3.0,
+                             trusted_private=(backend_url is None))
     _check(checks, "P-BACKEND-HEALTH", ok,
            f"{base}/api/health → {detail}" if ok else
            f"backend NO disponible en {base} ({detail}) — arranca el "
