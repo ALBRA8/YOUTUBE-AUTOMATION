@@ -1,16 +1,17 @@
-"""v2.16.0 · Servidor MCP (Model Context Protocol) de la fábrica — reconstruido.
+"""v2.19.0 · Servidor MCP (Model Context Protocol) de la fábrica — reconstruido.
 
 Montado en /mcp desde main.py. Implementación JSON-RPC 2.0 a mano (el venv no
 tiene el paquete `mcp`): soporta initialize, tools/list y tools/call, suficiente
 para clientes MCP (Claude Desktop vía proxy, Antigravity, agentes locales).
 
-16 tools — las puertas de producción son `crear_video_guion_json` y `submit_production_json`.
-v2.16 · nueva puerta Creative Production JSON; v2.11 · nuevas: crear_avatar (personajes con ADN consistente) y
-listar_recetas_camara (catálogo para el campo «camara» del contrato).
+TOOLS son la fuente de verdad del número de tools (len(TOOLS)); desde v2.19
+incluyen las 3 de gobernanza (memoria_resumen / memoria_consolidar /
+skills_validar). Las puertas de producción son `crear_video_guion_json` y
+`submit_production_json`; el MCP nunca salta queue/QA/Doctor/policy.
 
-NOTA: solo para uso LOCAL (sin auth). Para exponerlo a ChatGPT cloud hacen
-falta túnel + API key; ChatGPT habla mejor con Actions/OpenAPI usando el spec
-de GET /api/guion_json/contrato.
+NOTA: pensado para uso LOCAL; si se expone, MASTER_API_KEY cubre /mcp desde
+v2.19 (auth_guard). Para ChatGPT cloud hacen falta túnel + API key; ChatGPT
+habla mejor con Actions/OpenAPI usando el spec de GET /api/guion_json/contrato.
 """
 from __future__ import annotations
 
@@ -31,9 +32,9 @@ from services.themes import STYLES
 
 log = logging.getLogger("mcp")
 
-app = FastAPI(title="YT Automation MCP", version="2.18.0")
+app = FastAPI(title="YT Automation MCP", version="2.19.0")
 
-SERVER_INFO = {"name": "yt-automation-v2", "version": "2.18.0"}
+SERVER_INFO = {"name": "yt-automation-v2", "version": "2.19.0"}
 PROTOCOL_VERSION = "2024-11-05"
 
 # ───────────────────────────────────────────────────────────── tools ──
@@ -378,6 +379,27 @@ TOOLS = [
                         "description": "proyecto a comprobar (opcional)"},
          "backend_url": {"type": "string",
                          "description": "URL del backend (default 127.0.0.1:PORT)"}}}},
+    {"name": "memoria_resumen",
+     "description": "MemoryDV: resumen de la memoria del dominio (episodios/"
+                    "semántica/procedimental/hechos, candidatos de aprendizaje "
+                    "y estadísticas). §memoria.",
+     "inputSchema": {"type": "object", "properties": {
+         "texto": {"type": "string", "description": "búsqueda por substring (opcional)"},
+         "tipo": {"type": "string", "enum": ["EPISODIC", "SEMANTIC",
+                                                "PROCEDURAL", "FACTUAL"]},
+         "limite": {"type": "integer", "default": 20}}}},
+    {"name": "memoria_consolidar",
+     "description": "MemoryDV: consolidación controlada — observaciones "
+                    "repetidas → candidato → (validación con regresión) → "
+                    "memoria promoted. NUNCA modifica código ni pipeline.",
+     "inputSchema": {"type": "object", "properties": {
+         "min_patron": {"type": "integer", "default": 3},
+         "min_confianza": {"type": "number", "default": 0.75}}}},
+    {"name": "skills_validar",
+     "description": "Skill Contract: valida el registro completo de skills "
+                    "(campos del contrato, targets importables, regresiones "
+                    "existentes). §skills.",
+     "inputSchema": {"type": "object", "properties": {}}},
 ]
 
 
@@ -457,6 +479,20 @@ async def _dispatch(name: str, args: dict):
         return await asyncio.to_thread(
             _pf, project_id=args.get("project_id"),
             backend_url=args.get("backend_url"))
+    if name == "memoria_resumen":
+        from services import memorydv as _mem
+        return {"stats": _mem.stats(),
+                "registros": _mem.query(mem_type=args.get("tipo"),
+                                        text=args.get("texto"),
+                                        limit=int(args.get("limite") or 20)),
+                "candidatos": _mem.candidates()}
+    if name == "memoria_consolidar":
+        from services import memorydv as _mem
+        return _mem.consolidate(min_pattern=int(args.get("min_patron") or 3),
+                                min_confidence=float(args.get("min_confianza") or 0.75))
+    if name == "skills_validar":
+        from services import skills as _sk
+        return _sk.validate_registry()
     raise ValueError(f"tool desconocida: {name}")
 
 

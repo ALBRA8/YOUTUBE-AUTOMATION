@@ -78,3 +78,8 @@ backend/data/backups/
 data/backups/
 # runtime del Production Doctor (audit trail + último informe)
 backend/data/doctor/
+
+# ── 🧠 v2.19: memoria/observabilidad runtime (MemoryDV, métricas, skills) ──
+backend/data/memorydv/
+backend/data/metrics/
+backend/data/skills_state.json

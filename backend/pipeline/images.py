@@ -190,15 +190,16 @@ async def generate_scene_image(scene: dict, project: dict, idx: int,
     ext = db.take_ext_image(project["id"])
     if ext:
         try:
-            import urllib.request
-            req = urllib.request.Request(ext["url"],
-                                         headers={"User-Agent": "Mozilla/5.0"})
-            data = await asyncio.to_thread(lambda: urllib.request.urlopen(req, timeout=30).read())
+            # v2.19 · anti-SSRF: la URL llega de origen NO confiable (extensión
+            # / usuario). Antes urllib aceptaba file:// e IPs privadas — un URL
+            # malicioso se descargaba y servía como imagen de escena.
+            from security import safe_fetch_bytes
+            data = await asyncio.to_thread(safe_fetch_bytes, ext["url"], 30.0)
             out.write_bytes(data)
             _save_style_method(str(out), "extension")
             return out, "extension"
         except Exception as e:  # noqa: BLE001
-            log.warning("Imagen de extensión falló: %s", e)
+            log.warning("Imagen de extensión falló (guardia SSRF incluida): %s", e)
 
     # 4) Plan D: placeholder elegante
     _placeholder(out, scene, project, idx)

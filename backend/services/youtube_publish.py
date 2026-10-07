@@ -58,7 +58,9 @@ def exchange_code(code: str) -> bool:
         YT_CLIENT_SECRET, scopes=SCOPES, redirect_uri=redirect_uri())
     flow.fetch_token(code=code)
     creds = flow.credentials
-    Path(YT_TOKEN_FILE).write_text(creds.to_json())
+    tok = Path(YT_TOKEN_FILE)
+    tok.write_text(creds.to_json())
+    tok.chmod(0o600)  # v2.19: el token da acceso a la cuenta — 0600
     return True
 
 
@@ -68,8 +70,16 @@ def _credentials():
     if not creds.valid and creds.expired and creds.refresh_token:
         from google.auth.transport.requests import Request
         creds.refresh(Request())
-        Path(YT_TOKEN_FILE).write_text(creds.to_json())
+        tok = Path(YT_TOKEN_FILE)
+        tok.write_text(creds.to_json())
+        tok.chmod(0o600)  # v2.19: idem
     return creds
+
+
+# v2.19 · tope temporal del upload (§reintentos: timeout explícito). Antes
+# el bucle next_chunk() era ILIMITADO: un cuelgue de red dejaba el job de
+# publicación colgado para siempre.
+UPLOAD_TIMEOUT_S = 30 * 60
 
 
 def upload(video_path: str, title: str, description: str = "",
@@ -104,8 +114,14 @@ def upload(video_path: str, title: str, description: str = "",
                             mimetype="video/mp4")
     request = yt.videos().insert(part="snippet,status", body=body, media_body=media)
 
+    import time as _time
+    t0 = _time.monotonic()
     response = None
     while response is None:
+        if _time.monotonic() - t0 > UPLOAD_TIMEOUT_S:
+            raise TimeoutError(
+                f"upload de YouTube excedió {UPLOAD_TIMEOUT_S}s sin terminar "
+                "(resumable session colgada) — reintentar")
         status, response = request.next_chunk()
         if status and progress_cb:
             progress_cb(int(status.progress() * 100))

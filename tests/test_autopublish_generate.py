@@ -196,9 +196,21 @@ def _instalar_mocks(orch):
         return "video_raw.mp4"
 
     async def _burn(proj, raw, words):
+        # v2.19 · el orchestrator ahora corre _gate_qa_final REAL sobre el
+        # final (qa_video final=True): el final fabricado debe ser un MP4
+        # válido (naranja + tono 440 Hz, 3.5s ≥ MIN_FINAL_S) — el patrón
+        # «asset sano» de la suite. Si fuera basura, el gate marcaría
+        # failed y la batería dejaría de probar el flujo autopublish.
         out = OUTPUT / proj["id"] / f"{proj['id']}_final.mp4"
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_bytes(b"FAKE-VIDEO-BYTES")  # <1 KiB: library.archive real NO archivaría
+        cmd = ["ffmpeg", "-y", "-v", "error",
+               "-f", "lavfi", "-i", "color=c=0xFF8C00:s=256x256:d=3.5",
+               "-f", "lavfi", "-i", "sine=frequency=440:d=3.5",
+               "-c:v", "libx264", "-pix_fmt", "yuv420p",
+               "-c:a", "aac", "-shortest", str(out)]
+        import subprocess as _sp
+        r = _sp.run(cmd, capture_output=True, text=True)
+        assert r.returncode == 0, f"ffmpeg mock _burn falló: {r.stderr[-200:]}"
         return out
 
     def _thumb(*a, **k):

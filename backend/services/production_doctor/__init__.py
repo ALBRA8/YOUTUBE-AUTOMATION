@@ -27,6 +27,8 @@ from .layers import auditar_capas
 from .preflight import real_flow_preflight
 from .repairs import SAFE_REPAIRS, aplicar_reparaciones
 
+import json as _json  # persistencia del preflight (regla «cada modo persiste»)
+
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")
 
 __all__ = ["audit", "fix", "verify", "report", "preflight", "run_mode",
@@ -40,11 +42,12 @@ def _ts() -> str:
 
 # ── DOCTOR AUDIT ─────────────────────────────────────────────────────────────
 def audit(*, deep: bool = False, in_process: bool = False,
-          probe_http: bool = True) -> DoctorReport:
-    """Diagnóstico completo de las 9 capas, SOLO LECTURA."""
+          probe_http: bool = True, capas: list[str] | None = None) -> DoctorReport:
+    """Diagnóstico de las 9 capas, SOLO LECTURA. `capas` limita el
+    subconjunto (p. ej. ['A','D']) — por defecto todas."""
     with Crono() as cr:
         findings = auditar_capas(deep=deep, in_process=in_process,
-                                 probe_http=probe_http)
+                                 probe_http=probe_http, capas=capas)
     rep = DoctorReport(modo="audit", ts=_ts(), findings=findings,
                        resumen=resumen_de(findings), duracion_s=cr.s)
     rep.guardar()
@@ -224,22 +227,37 @@ def report(*, refrescar: bool = False) -> dict:
 # ── REAL FLOW PREFLIGHT ──────────────────────────────────────────────────────
 def preflight(project_id: str | None = None,
               backend_url: str | None = None) -> dict:
-    """Barrera REAL FLOW PREFLIGHT (regla 8). Nunca ejecuta Flow."""
-    return real_flow_preflight(project_id=project_id,
-                               backend_url=backend_url)
+    """Barrera REAL FLOW PREFLIGHT (regla 8). Nunca ejecuta Flow.
+    v2.19 · persiste el resultado en data/doctor/last_report.json (mismo
+    contrato que los demás modos — el docstring del paquete lo promete y
+    antes solo audit/fix/verify lo cumplían)."""
+    res = real_flow_preflight(project_id=project_id, backend_url=backend_url)
+    try:
+        d = doctor_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "last_report.json").write_text(_json.dumps(
+            {"doctor": "PRODUCTION DOCTOR", "version": "1.0",
+             "modo": "preflight", "ts": _ts(),
+             "preflight": res, "verdict": res.get("verdict"),
+             "ok": res.get("ok")},
+            ensure_ascii=False, indent=1), encoding="utf-8")
+    except OSError:  # la barrera NUNCA depende del disco
+        pass
+    return res
 
 
 # ── dispatcher único (CLI / MCP / API) ───────────────────────────────────────
 def run_mode(modo: str, *, deep: bool = False, in_process: bool = False,
              ejecutar_tests: bool = True, project_id: str | None = None,
-             backend_url: str | None = None) -> dict:
+             backend_url: str | None = None,
+             capas: list[str] | None = None) -> dict:
     if modo == "audit":
-        return audit(deep=deep, in_process=in_process).to_dict()
+        return audit(deep=deep, in_process=in_process, capas=capas).to_dict()
     if modo == "fix":
         return fix(deep=deep, in_process=in_process,
                    ejecutar_tests=ejecutar_tests).to_dict()
     if modo == "verify":
-        return verify(deep=deep, in_process=in_process,
+        return verify(deep=deep, in_process=in_process, capas=capas,
                       ejecutar_tests=ejecutar_tests).to_dict()
     if modo == "report":
         return report()

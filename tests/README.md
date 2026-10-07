@@ -10,7 +10,7 @@ sin rutas absolutas.
 
 | Batería | Área | Checks |
 |---|---|---|
-| `test_guion_json.py` | Contrato **legacy guion_json**: spec 2.11, `parse_payload` (fences), `validate` (alias EN, sanitización de image_prompt, límites duros), ingest sin LLM contra la SQLite real de desarrollo, rama del orquestador (por fuente) y dispatch MCP (22 tools). | 42 |
+| `test_guion_json.py` | Contrato **legacy guion_json**: spec 2.11, `parse_payload` (fences), `validate` (alias EN, sanitización de image_prompt, límites duros), ingest sin LLM contra la SQLite real de desarrollo, rama del orquestador (por fuente) y dispatch MCP (25 tools). | 42 |
 | `test_production_json.py` | **Adapter Production JSON 2.16.1**: spec, `parse_payload`, `validate` estructural (aliases, extras/continuity verbatim), `validate_execution` (nivel 2, unidades bloqueadas), `validate_only` (dry-run) e `ingest` con DB fake (sha256, tts_skip, preflight en meta). | 76 |
 | `test_merge_216_pyav.py` | **Merge/integración 2.16.x + fix PyAV**: (A) MCP 2.16.1 auditado por AST sin imports pesados, (B) adapter real con DB fake, (C) fix PyAV por strings de fuente (requirements/tts_step/doctor/main), (D) compatibilidad cruzada Adapter↔pipeline↔MCP. | 51 |
 | `test_lanzar_preflight.py` | **Preflight de lanzamiento**: flujo real `submit_production_json` → `lanzar_proyecto` vía `mcp_server._dispatch` (DB fake + `orchestrator._run` grabado). El draft con unidades sin `image_prompt` se acepta pero NO se lanza; no-regresión legacy (sin production.json), JSON corrupto/borrado. | 29 |
@@ -23,11 +23,16 @@ sin rutas absolutas.
 | `test_concurrencia.py` | **Concurrencia**: raza de 8 workers sobre BEGIN IMMEDIATE (0 dobles claims), aislamiento multi-proyecto, token de una sola era (409 tras re-claim), completes paralelos, enqueue en caliente. | 18 |
 | `test_chaos.py` | **Chaos**: reinicio REAL de proceso (subprocess), rollback atómico, doble complete 409, HTML de Flow → 422 → dead, dead → re-enqueue, estados imposibles, carrera zombie. | 28 |
 | `test_10_escenas.py` | **Escala (TEST 4)**: proyecto de 10 escenas → 19 jobs (última solo-imagen por P1), sentinels verbatim por job + prompt de ~11KB intacto, orden de claims imágenes→videos, heartbeat/fail-retry/zombie/doble complete a escala, 10/10 escenas mapeadas, auto-render una vez, QA a escala con forense limpia, re-enqueue idempotente. | 44 |
+| `test_autopublish_generate.py` | **Pipeline `_run` completo con mocks + QA gate REAL**: pasos pesados sustituidos por dobles instantáneos, el final fabricado es un MP4 válido (naranja+tono) que cruza `_gate_qa_final` real; publicador mockeado: éxito, fallo (quota 403) con publish_state FAILED + job kind=publish, modo generate, verificación SSE. | 45 |
+| `test_memorydv.py` | **MemoryDV §memoria**: 18 campos del contrato + dominio forzado, storage JSONL por tipo, query (tipo/scope/texto/limit + utility), línea corrupta tolerada, consolidación §9 (observaciones → candidato idempotente), validación (inválido / sin regresión → ValueError / con regresión real → promoción verificada), decaimiento con retiro, aislamiento del sandbox, stats. | 36 |
+| `test_skills_autonomia.py` | **Skill Contract §skills**: 17 skills con los 16 campos del contrato, `validate_registry` resuelve cada target con importlib y verifica regresiones en disco, kind (TOOL/SKILL/…/SELF-IMPROVEMENT), `mark_validated` con estado rolling. **Autonomía §26**: L0-L5, mapa acción→nivel (publicar=3, doctor fix=4, self-improve=5), check/require, `assert_no_bypass` (self-improvement jamás autoriza publishing). | 34 |
+| `test_security_hardening.py` | **SEGURIDAD §30**: `safe_filename` (path traversal/hidden/basename), `validar_url` (file://, loopback, privadas, link-local metadata, credenciales, no resoluble), `safe_fetch_bytes` sin IO inseguro, MASTER_API_KEY (verify constante + reload), `sanitize_external_text` anti-inyección (ignora órdenes externas, control chars, tope), wiring real (auth /mcp, publish idempotente+QA gate, chmod 0600 token, deadline upload, SSRF en plan C y `_http_probe`). | 47 |
+| `test_gobernanza.py` | **GOBERNANZA v2.19**: QA gate del render con MP4 real (inválido → RuntimeError + meta.qa_final worst=error; sano pasa; subs no quemados → warn), anti zombie-loop por `lease_cycles` (vencido→queued, agotado→dead, vigente intacto), gancho MemoryDV de la cola, métricas §28 (tasas honestas + persist JSONL), MCP de gobernanza vía dispatch real, autonomía integrada, publish_state y cierre observable. | 28 |
 | `test_bridge_e2e.py` | **E2E extensión**: `node --check` en los JS + `bridge.js` REAL en sandbox VM contra backend mock HTTP con estado (claim→complete con bytes validados, 422, heartbeat, backend caído, anti-duplicado). | 24 |
 | `test_humos_infra.py` | **Humos anti-fantasma**: todo lo que declaramos existe físicamente en el repo (tabla, endpoints, bridge.js, wiring, CORS, P1, auto-render, runner, ESTADO_REAL). | 51 |
 | `test_live_boot.py` | **Boot vivo**: arranca uvicorn REAL en sandbox aislado (`live_boot_smoke.sh`: startup, CORS preflight, endpoints base, métricas, video QA) + **ciclo completo del Flow Bridge por HTTP** (`live_cycle_smoke.sh`: enqueue → claim → complete PNG/MP4 reales → 409/422 → fail/retry → guard de tipo → project_done → auto-render → QA). | 33 |
 
-Total esperado: **640 checks**.
+Total esperado: **830 checks** en 21 baterías.
 
 > Nota: `test_lanzar_preflight.py` verifica la barrera de preflight que vive en
 > `pipeline/orchestrator.py` (`_preflight_lanzamiento`). Contra un estado sin
@@ -38,7 +43,7 @@ Total esperado: **640 checks**.
 
 ```bash
 cd yt_automation_v2
-python3 tests/run_all.py                  # las 16 baterías + total; exit != 0 si algo falla
+python3 tests/run_all.py                  # las 21 baterías + total; exit != 0 si algo falla
 
 # individual (python3 plano, estilo autoejecutable):
 python3 tests/test_production_json.py

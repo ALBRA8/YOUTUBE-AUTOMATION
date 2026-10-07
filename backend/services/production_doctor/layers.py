@@ -534,6 +534,13 @@ def audit_jobs(in_process: bool = False, **_kw) -> list:
 # ── E. EXTENSION ─────────────────────────────────────────────────────────────
 def _http_probe(url: str, timeout: float = 2.5) -> tuple[bool, str]:
     try:
+        # v2.19 · anti-SSRF: backend_url llega por MCP/API (origen no
+        # confiable). Sin guardia, un file:// o 169.254.169.254 se sondeaba.
+        import security as _sec
+        url = _sec.safe_url(url)
+    except ValueError as e:
+        return False, f"URL rechazada (guardia SSRF): {e}"[:160]
+    try:
         with urllib.request.urlopen(url, timeout=timeout) as resp:
             body = resp.read(300).decode("utf-8", "replace")
             return resp.status == 200, f"HTTP {resp.status}: {body[:120]}"
@@ -724,22 +731,44 @@ def audit_qa(deep: bool = False, **_kw) -> list:
             rep = vqa.qa_project(pid)
         except Exception:  # noqa: BLE001
             continue
-        for k in ("imagenes", "videos"):
-            for item in rep.get(k, []) or []:
+        # v2.19 · fix de claves: qa_project devuelve «scenes» (cada escena con
+        # «image» + «clips») — el código anterior iteraba «imagenes»/«videos»
+        # (claves inexistentes) y los hallazgos por escena NUNCA subían.
+        for sc in rep.get("scenes", []) or []:
+            no = sc.get("scene", "?")
+            bloques: list[tuple[str, dict]] = []
+            if sc.get("image"):
+                bloques.append(("imagen", sc["image"]))
+            for clip in sc.get("clips") or []:
+                bloques.append(("clip", clip))
+            for tipo, item in bloques:
                 for flag in item.get("flags", []) or []:
                     sev = flag.get("sev") or "warn"
                     if sev == "ok":
                         continue
                     findings.append(finding(
-                        f"DOC-H-QA#{pid}#{item.get('archivo', '?')}",
+                        f"DOC-H-QA#{pid}#E{no}#{tipo}",
                         "H", "video_qa",
-                        f"QA {sev}: {flag.get('msg', '')[:120]}",
+                        f"QA {sev} ({tipo} escena {no}): "
+                        f"{flag.get('msg', '')[:120]}",
                         Clasificacion.DATA_ERROR, "warn" if sev == "warn"
                         else "error",
-                        {"proyecto": pid, "archivo": item.get("archivo"),
-                         "flag": flag},
+                        {"proyecto": pid, "escena": no, "tipo": tipo,
+                         "path": item.get("path"), "flag": flag},
                         "asset generado por el proveedor con defectos "
                         "(remedio: re-encolar ese job)"))
+            for flag in sc.get("clip_flags", []) or []:
+                sev = flag.get("sev") or "warn"
+                if sev == "ok":
+                    continue
+                findings.append(finding(
+                    f"DOC-H-QA#{pid}#E{sc.get('scene', '?')}#pendiente",
+                    "H", "video_qa",
+                    f"QA {sev} (escena {sc.get('scene', '?')}): "
+                    f"{flag.get('msg', '')[:120]}",
+                    Clasificacion.DATA_ERROR, "warn",
+                    {"proyecto": pid, "escena": sc.get("scene"), "flag": flag},
+                    "clip esperado y ausente (job pendiente o en cola)"))
         final = rep.get("final") or {}
         for flag in final.get("flags", []) or []:
             if (flag.get("sev") or "ok") == "ok":

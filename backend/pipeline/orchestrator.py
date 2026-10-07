@@ -381,6 +381,7 @@ async def _run_flow_render(job_id: str, project_id: str) -> None:
         thumb = video.make_thumbnail(db.get_project(project_id), scenes[0].get("image_path"))
 
         total_dur = sum(durations)
+        _gate_qa_final(project_id, final)  # §render: QA antes de ready
         db.update_project(project_id, status="ready", progress=100,
                           step_label="Listo (Flow)", video_url=str(final),
                           thumbnail_url=str(thumb) if thumb else None)
@@ -473,6 +474,46 @@ def _gate_voz_real(project_id: str, scenes: list[dict]) -> None:
     if mudas:
         log.warning("preflight voz: degradación parcial %d/%d escenas mudas "
                     "(el render continúa)", len(mudas), len(con_texto))
+
+
+def _gate_qa_final(project_id: str, final) -> dict:
+    """QA técnico del render final ANTES de declarar ready (§render/§QA).
+
+    Regla del contrato: un render que falla queda FAILED — NUNCA se marca
+    exitoso por mera existencia del archivo. qa_video(final=True) con
+    severidad error → RuntimeError (el bloque except del pipeline marca el
+    proyecto failed con la causa exacta). El reporte completo queda en
+    meta.qa_final (auditable por API/MCP/publish) y las degradaciones
+    registradas por video.py (subs_status.json) suben como warn."""
+    from services import video_qa  # diferido: evita círculo de imports
+    rep = video_qa.qa_video(str(final), final=True)
+    flags = list(rep["flags"])
+    worst = ("error" if any(f["sev"] == "error" for f in flags)
+             else ("warn" if any(f["sev"] == "warn" for f in flags) else "ok"))
+    ss = OUTPUT_DIR / project_id / "subs_status.json"
+    if ss.exists():
+        try:
+            st = json.loads(ss.read_text(encoding="utf8"))
+            if not st.get("burned"):
+                flags.append({"sev": "warn",
+                              "msg": "subtítulos NO quemados: "
+                                     f"{st.get('reason', '?')}"})
+                if worst == "ok":
+                    worst = "warn"
+        except ValueError:
+            pass  # sidecar dañado no tumba el gate (el QA técnico ya corrió)
+    meta = {**(db.get_project(project_id).get("meta") or {})}
+    meta["qa_final"] = {"worst": worst, "flags": flags,
+                        "duration_s": rep.get("duration_s"),
+                        "resolution": (f"{rep.get('width')}x{rep.get('height')}"
+                                       if rep.get("width") else None)}
+    db.update_project(project_id, meta=meta)
+    if worst == "error":
+        errores = "; ".join(f["msg"] for f in flags if f["sev"] == "error")
+        raise RuntimeError(
+            "QA del render final FALLÓ (producto técnicamente inválido): "
+            + errores + ". El proyecto queda failed — corrige y re-lanza.")
+    return meta["qa_final"]
 
 
 # ── pipeline completo ─────────────────────────────────────────────────────
@@ -570,6 +611,13 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
             result = script_gen.build_result(raw)
             if not result["scenes"]:
                 raise RuntimeError("Gemini devolvió un guion vacío")
+            # disclosure del motor usado (§creative boundary): si el guion
+            # viene del fallback local (demo), queda REGISTRADO en meta —
+            # nunca se presenta como guion de LLM.
+            if result.get("engine"):
+                meta = {**(db.get_project(project_id).get("meta") or {}),
+                        "script_engine": result["engine"]}
+                db.update_project(project_id, meta=meta)
             # originalidad verificable del modo URL: el informe del guion
             # (overlap de 5-gramas contra la transcripción) queda en meta
             if result.get("originality"):
@@ -646,6 +694,7 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
         thumb = video.make_thumbnail(db.get_project(project_id), scenes[0].get("image_path"))
 
         total_dur = sum(durations)
+        _gate_qa_final(project_id, final)  # §render: QA antes de ready
         db.update_project(project_id, status="ready", progress=100,
                           step_label="Listo", video_url=str(final),
                           thumbnail_url=str(thumb) if thumb else None)
@@ -661,23 +710,51 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
             "duration": total_dur,
             "message": f"¡Video listo en {total_dur:.0f}s!"})
 
-        # PASO 6 — autopublicar (opcional)
+        # PASO 6 — autopublicar (opcional): side effect EXTERNO (§publishing).
+        # Se omite si el QA final quedó con errores y nunca re-publica un
+        # proyecto con youtube_id (idempotencia). Cada intento queda como
+        # job kind=publish + publish_state en meta (PUBLISHING→PUBLISHED/FAILED).
         if autopublish:
-            await _emit(job_id, project_id, "publishing", 97, "Subiendo a YouTube…")
-            try:
-                vid = youtube_publish.upload(
-                    str(final), (result or project)["title"],
-                    description=_description(result or {}, project),
-                    tags=_tags(project),
-                    private=True)
-                db.update_project(project_id, status="published", youtube_id=vid)
-                await broker.publish(job_id, {"type": "published",
-                                              "project_id": project_id,
-                                              "youtube_id": vid})
-            except Exception as e:  # noqa: BLE001
-                log.error("autopublish: %s", e)
+            meta_now = db.get_project(project_id).get("meta") or {}
+            if (meta_now.get("qa_final") or {}).get("worst") == "error":
                 await _emit(job_id, project_id, "ready", 100,
-                            f"Listo (autopublish falló: {str(e)[:80]})")
+                            "Listo (autopublish OMITIDO: QA final con errores)")
+            else:
+                await _emit(job_id, project_id, "publishing", 97, "Subiendo a YouTube…")
+                jid_pub = db.create_job(project_id, kind="publish")
+                db.update_job(jid_pub, status="running", step="publishing",
+                              message="Subiendo a YouTube…")
+                db.update_project(project_id,
+                                  meta={**(db.get_project(project_id)
+                                         .get("meta") or {}),
+                                        "publish_state": "PUBLISHING"})
+                try:
+                    vid = youtube_publish.upload(
+                        str(final), (result or project)["title"],
+                        description=_description(result or {}, project),
+                        tags=_tags(project),
+                        private=True)
+                    db.update_job(jid_pub, status="done", step="done",
+                                  message=f"publicado {vid}")
+                    db.update_project(project_id, status="published",
+                                      youtube_id=vid,
+                                      meta={**(db.get_project(project_id)
+                                             .get("meta") or {}),
+                                            "publish_state": "PUBLISHED"})
+                    await broker.publish(job_id, {"type": "published",
+                                                  "project_id": project_id,
+                                                  "youtube_id": vid})
+                except Exception as e:  # noqa: BLE001
+                    db.update_job(jid_pub, status="failed", step="failed",
+                                  error=str(e)[:500],
+                                  message=f"publish falló: {str(e)[:120]}")
+                    db.update_project(project_id,
+                                      meta={**(db.get_project(project_id)
+                                             .get("meta") or {}),
+                                            "publish_state": "FAILED"})
+                    log.error("autopublish: %s", e)
+                    await _emit(job_id, project_id, "ready", 100,
+                                f"Listo (autopublish falló: {str(e)[:80]})")
 
     except asyncio.CancelledError:
         db.update_job(job_id, status="cancelled", step="cancelled",
@@ -697,6 +774,31 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
                                       "message": str(e)[:200]})
     finally:
         current_job.reset(token)
+        _memoria_episodio(job_id, project_id, "_run")
+
+
+def _memoria_episodio(job_id: str, project_id: str, origen: str) -> None:
+    """Ganchos de cierre (§memoria + §observabilidad): cada ejecución deja
+    un episodio MemoryDV (qué se pidió, qué falló, qué resultado) y un
+    snapshot de métricas persistido. Jamás tumba el pipeline: la memoria y
+    las métricas son observabilidad, no camino crítico."""
+    try:
+        from services import memorydv
+        st = db.get_project(project_id) or {}
+        memorydv.record_episode(
+            f"pipeline {project_id} terminó: status={st.get('status')} "
+            f"step={st.get('step_label')} error={st.get('error')}",
+            source=f"orchestrator.{origen}", scope="production",
+            evidence=[{"kind": "job", "ref": job_id},
+                      {"kind": "project", "ref": project_id}],
+            confidence=1.0)
+    except Exception:  # noqa: BLE001 — nunca crítico
+        pass
+    try:
+        from services import metrics as _metrics
+        _metrics.persist_snapshot()
+    except Exception:  # noqa: BLE001 — nunca crítico
+        pass
 
 
 def _description(result: dict, project: dict) -> str:

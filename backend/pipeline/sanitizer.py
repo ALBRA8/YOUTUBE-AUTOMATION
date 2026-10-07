@@ -108,6 +108,42 @@ _REALISM_KWS = ("real", "realistic", "cinematic", "photography", "documentary",
                 "photorealistic", "raw", "hyper-real", "hyper-realistic",
                 "cine-blockbuster", "raw-reality")
 
+# ── 4. Anti-inyección de instrucciones (§seguridad) ────────────────────
+# Texto EXTERNO (transcripciones de YouTube, títulos scrapeados, metadata)
+# puede contener órdenes dirigidas al LLM («ignore previous instructions…»).
+# Se NEUTRALIZAN antes de interpolar el texto en cualquier prompt. La fábrica
+# nunca ejecuta contenido externo como instrucciones.
+_INSTRUCTION_REPLACEMENTS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"(?i)\bignore\s+(all\s+)?(previous|prior|above|earlier)\s+"
+                r"(instructions?|prompts?|rules?)\b"),
+     "[orden externa descartada]"),
+    (re.compile(r"(?i)\bdisregard\s+(all\s+)?(previous|prior|above|earlier)?\s*"
+                r"(instructions?|prompts?|rules?)\b"),
+     "[orden externa descartada]"),
+    (re.compile(r"(?i)\b(you\s+are|act\s+as|pretend\s+to\s+be|roleplay\s+as)\s+"
+                r"(now\s+)?(a|an|the)\b"), "[personificación externa descartada]"),
+    (re.compile(r"(?i)\bsystem\s*prompt\b"), "[referencia a prompt de sistema descartada]"),
+    (re.compile(r"(?i)\bdeveloper\s*(mode|message)\b"), "[modo desarrollador: descartado]"),
+    (re.compile(r"(?i)\bnew\s+instructions?\s*:\s*"), "[instrucciones externas descartadas: "),
+    (re.compile(r"(?i)\bjailbreak\b"), "[jailbreak descartado]"),
+    (re.compile(r"(?i)\bdo\s+not\s+follow\s+(the\s+)?(system|previous)\b"),
+     "[orden externa descartada]"),
+]
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def sanitize_external_text(text: str, max_len: int = 9000) -> str:
+    """Sanea texto de origen EXTERNO antes de meterlo en un prompt LLM:
+    quita caracteres de control, neutraliza órdenes tipo inyección y acota
+    longitud. Determinista y sin red semántica: es una guardia mínima, no un
+    clasificador (documentado en el informe de seguridad)."""
+    if not text:
+        return text or ""
+    cleaned = _CONTROL_RE.sub("", str(text))
+    for pat, rep in _INSTRUCTION_REPLACEMENTS:
+        cleaned = pat.sub(rep, cleaned)
+    return re.sub(r"[ \t]+", " ", cleaned).strip()[:max_len]
+
 
 def sanitize_text(text: str, brand_name: str | None = None,
                   allow_brand_text: bool = False,

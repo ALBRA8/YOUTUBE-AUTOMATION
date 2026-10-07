@@ -226,6 +226,13 @@ async def from_url_transcript(viral_meta: dict, transcript: str, style_id: str,
         return _local_fallback("url", seed, style_id, fmt, custom_prompt,
                                source_text=transcript)
 
+    # v2.19 · anti-inyección: título/canal/transcripción son texto EXTERNO
+    # (scraped) — se neutralizan órdenes dirigidas al LLM antes de interpolar.
+    from pipeline.sanitizer import sanitize_external_text
+    v_title = sanitize_external_text(viral_meta.get("title", ""), 300)
+    v_channel = sanitize_external_text(viral_meta.get("channel", ""), 120)
+    transcript = sanitize_external_text(transcript, 9000)
+
     def _prompt(hard: bool) -> str:
         anti = (
             "\nPROHIBIDO COPIAR: no uses NINGUNA secuencia de 4+ palabras "
@@ -240,8 +247,8 @@ async def from_url_transcript(viral_meta: dict, transcript: str, style_id: str,
             "El siguiente texto es la transcripción de un video viral. Analiza su "
             "estructura ganadora (hook, desarrollo, giro, CTA) y crea un guion 100% ORIGINAL "
             "sobre el mismo tema con nuevo ángulo y nuevas frases. " + anti +
-            f" Título del video viral: «{viral_meta.get('title', '')}» "
-            f"(canal {viral_meta.get('channel', '')}). "
+            f" Título del video viral: «{v_title}» "
+            f"(canal {v_channel}). "
             + _base_instructions(get_style(style_id)["prompt"], n, fmt,
                                  custom_prompt, avatar)
             + f"\n\nTRANSCRIPCIÓN (solo referencia de estructura):\n{transcript[:9000]}"

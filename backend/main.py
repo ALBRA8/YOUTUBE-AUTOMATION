@@ -38,7 +38,7 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("main")
 
-app = FastAPI(title="YT Automation v2.0", version="2.18.0")
+app = FastAPI(title="YT Automation v2.0", version="2.19.0")
 
 # [flow-bridge v1.1] CORS endurecido (fusión con la línea 2.2 del repo):
 # solo la extensión Chrome (chrome-extension:// con ID válido de 32 chars a-p)
@@ -87,9 +87,13 @@ async def auth_guard(request, call_next):
     """Blindaje opcional del panel (auditoría externa: «cero autenticación»).
     Si MASTER_API_KEY está definida en backend/.env, TODAS las rutas /api/*
     exigen la clave vía header X-API-Key, Bearer, cookie (SSE) o ?api_key=.
-    En modo local (sin clave definida) no bloquea nada: cero ruptura."""
-    if security.enabled() and request.url.path.startswith("/api/") \
-            and request.url.path not in security.PUBLIC_PATHS:
+    v2.19 · también cubre /mcp (antes el servidor MCP quedaba FUERA del
+    guard incluso con clave maestra: exponía lanzar_proyecto, cancelar
+    y doctor fix sin autenticación). En modo local (sin clave definida)
+    no bloquea nada: cero ruptura."""
+    _p = request.url.path
+    if security.enabled() and (_p.startswith("/api/") or _p.startswith("/mcp")) \
+            and _p not in security.PUBLIC_PATHS:
         provided = request.headers.get("X-API-Key", "")
         if not provided:
             auth = request.headers.get("Authorization", "")
@@ -1208,11 +1212,29 @@ async def publish_exchange(body: dict):
 
 @app.post("/api/publish/{pid}")
 async def publish_video(pid: str, body: dict):
+    """Publicación manual (side effect EXTERNO). v2.19:
+    · IDEMPOTENTE: un proyecto con youtube_id responde 409 (nunca doble
+      upload — §idempotencia: publicaciones duplicadas).
+    · QA GATE: si meta.qa_final quedó con errores del QA técnico del render
+      final, se rechaza 409 (nunca publicar un render fallido — §publishing).
+    · publish_state en meta (DRAFT→PUBLISHING→PUBLISHED/FAILED) + cada
+      intento queda como job kind=publish (historial auditable)."""
     p = db.get_project(pid)
     if not p or not p.get("video_url"):
         raise HTTPException(404, "video no disponible")
+    if p.get("youtube_id"):
+        raise HTTPException(409, f"ya publicado (idempotencia): youtube_id={p['youtube_id']}")
+    meta = dict(p.get("meta") or {})
+    qa = meta.get("qa_final") or {}
+    if qa.get("worst") == "error":
+        raise HTTPException(409, "QA del render final con errores — "
+                                 "publicación bloqueada; re-renderiza el proyecto")
     if not youtube_publish.configured():
         raise HTTPException(400, "Configura client_secret.json (README §Publicar)")
+    jid = db.create_job(pid, kind="publish")
+    db.update_job(jid, status="running", step="publishing",
+                  message="Subiendo a YouTube…")
+    db.update_project(pid, meta={**meta, "publish_state": "PUBLISHING"})
     try:
         vid = youtube_publish.upload(
             p["video_url"], body.get("title") or p["title"],
@@ -1221,11 +1243,18 @@ async def publish_video(pid: str, body: dict):
             private=bool(body.get("private", True)),
             publish_at=body.get("publish_at"),
         )
-        db.update_project(pid, status="published", youtube_id=vid)
-        return {"youtube_id": vid,
-                "url": f"https://youtube.com/watch?v={vid}"}
     except Exception as e:  # noqa: BLE001
+        db.update_job(jid, status="failed", step="failed", error=str(e)[:500],
+                      message=f"publish falló: {str(e)[:120]}")
+        db.update_project(pid, meta={**(db.get_project(pid).get("meta") or {}),
+                                     "publish_state": "FAILED"})
         raise HTTPException(500, str(e)[:300])
+    db.update_job(jid, status="done", step="done", message=f"publicado {vid}")
+    db.update_project(pid, status="published", youtube_id=vid,
+                      meta={**(db.get_project(pid).get("meta") or {}),
+                            "publish_state": "PUBLISHED"})
+    return {"youtube_id": vid,
+            "url": f"https://youtube.com/watch?v={vid}"}
 
 
 # ─────────────────────────────────────────────── cola de extensión ──
@@ -1378,17 +1407,95 @@ async def video_qa_endpoint(pid: str):
 @app.get("/api/metrics")
 async def metrics_endpoint():
     """Snapshot de observabilidad: proyectos/cola Flow/jobs por estado,
-    escenas sin imagen y disco ocupado por data/output. Solo agregados."""
+    escenas sin imagen, disco y tasas §observabilidad (producción/pasos/
+    reintentos/QA/publicación — lo no medible localmente queda null)."""
     from services import metrics
     return metrics.snapshot()
+
+
+# ───────────────────────────────────── contrato agente-a-agente (A2A) ──
+@app.post("/api/agent/execute")
+async def agent_execute(body: dict):
+    """CONTRATO A2A — la única puerta formal para que OTRO agente (p. ej. el
+    Creative Engine) encargue una producción. No acepta comandos ambiguos
+    como autoridad: exige requester + creative_spec; spec inválida →
+    VALIDATION_ERROR; spec con avisos (defaults mecánicos) y sin lanzar →
+    REQUIRES_CLARIFICATION (§creative boundary: la fábrica NO inventa).
+    Salida: {status, production_id, result, evidence, confidence,
+    execution_id, warnings}."""
+    requester = (body.get("requester") or "").strip()
+    spec = body.get("creative_spec",
+                    body.get("production", body.get("production_json")))
+    requested = body.get("requested_output") or {}
+    if not requester:
+        raise HTTPException(400, "contrato A2A: falta «requester» "
+                                 "(identidad del agente solicitante)")
+    if spec is None:
+        raise HTTPException(400, "contrato A2A: falta «creative_spec» "
+                                 "(Creative Production JSON)")
+    lanzar = bool(requested.get("launch") or body.get("auto_start"))
+
+    def _crear(g: dict):
+        pmeta = {}
+        if g.get("camara"):
+            pmeta["camara"] = g["camara"]
+        return db.create_project(
+            title=(g.get("titulo") or f"Producción A2A ({requester})"),
+            mode="production_json", style=g.get("estilo") or "auto",
+            format=g.get("formato") or "short", voice=g.get("voz"),
+            meta=pmeta, platforms=g.get("plataformas") or ["youtube"],
+            niche=g.get("nicho"))
+
+    try:
+        rep = await prod_svc.ingest(
+            spec, {s["id"] for s in STYLES}, _crear,
+            auto_start_override=True if lanzar else None)
+    except ValueError as e:
+        return {"status": "VALIDATION_ERROR", "production_id": None,
+                "result": None,
+                "evidence": [{"kind": "value_error", "msg": str(e)[:500]}],
+                "confidence": 0.0, "execution_id": None, "warnings": []}
+    avisos = list(rep.get("avisos") or [])
+    status = ("EXECUTING" if rep.get("job_id")
+              else ("REQUIRES_CLARIFICATION" if avisos else "ACCEPTED"))
+    return {
+        "status": status,
+        "production_id": rep.get("project_id"),
+        "result": {"unidades": rep.get("unidades"),
+                   "unit_types": rep.get("unit_types"),
+                   "formato": rep.get("formato"), "estilo": rep.get("estilo")},
+        "evidence": [{"kind": "production_json",
+                      "sha256": (rep.get("production_file") or {}).get("sha256"),
+                      "path": (rep.get("production_file") or {}).get("path")}],
+        "confidence": 1.0 if status == "EXECUTING" else 0.7,
+        "execution_id": rep.get("job_id"),
+        "warnings": avisos,
+    }
 
 
 # ────────────────────────────────────────────────────── import audio ──
 @app.post("/api/import/audio")
 async def import_audio(file: UploadFile = File(...)):
-    dest = TMP_DIR / f"voice_upload_{file.filename}"
+    """v2.19 · blindaje: el nombre del upload era origen NO confiable
+    (path traversal: «../../.env» escribía fuera de TMP_DIR). Ahora basename
+    + lista blanca [A-Za-z0-9._-] (security.safe_filename) + prefijo uuid
+    (anti colisión) + tope de tamaño (50 MB)."""
+    import uuid as _uuid
+    try:
+        base = security.safe_filename(file.filename or "")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    dest = TMP_DIR / f"voice_upload_{_uuid.uuid4().hex[:8]}_{base}"
+    MAX_BYTES = 50 * 1024 * 1024
+    written = 0
     with open(dest, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+        while chunk := await file.read(1024 * 1024):
+            written += len(chunk)
+            if written > MAX_BYTES:
+                f.close()
+                dest.unlink(missing_ok=True)
+                raise HTTPException(413, "audio demasiado grande (>50 MB)")
+            f.write(chunk)
     return {"path": str(dest)}
 
 

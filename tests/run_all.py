@@ -41,6 +41,17 @@ BATERIAS = [
                                  # doble complete, asset corrupto, zombie
     "test_10_escenas.py",        # ESCALA: proyecto de 10 escenas (19 jobs),
                                  # P1 verbatim + prompt de ~11KB + QA a escala
+    "test_autopublish_generate.py", # pipeline _run completo con mocks +
+                                 # QA gate real + autopublish (idempotencia v2.19)
+    "test_memorydv.py",          # MemoryDV §memoria: storage/retrieval/
+                                 # consolidación/isolation (36)
+    "test_skills_autonomia.py",  # Skill Contract §skills + autonomía L0-L5
+                                 # §26 (34)
+    "test_security_hardening.py", # SEGURIDAD §30: path traversal, SSRF,
+                                 # anti-inyección, auth /mcp, chmod token (47)
+    "test_gobernanza.py",        # GOBERNANZA v2.19: QA gate del render,
+                                 # anti zombie-loop, métricas §28, MCP
+                                 # gobernanza, autonomía, publish_state (28)
     "test_bridge_e2e.py",        # E2E extensión: node --check + bridge.js real
                                  # contra backend mock (sandbox VM)
     "test_humos_infra.py",       # humos: lo declarado EXISTE en el repo (~50)

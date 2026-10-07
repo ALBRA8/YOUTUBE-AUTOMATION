@@ -213,12 +213,16 @@ async def ideas_from_research(research: dict, n: int = 5) -> list[dict]:
     n = max(1, min(10, int(n or 5)))
     if gemini_client.available():
         top = research["videos"][:8]
-        lines = [f"- {v['title']} | {v['views']:,} vistas | {v['duration']:.0f}s"
+        # v2.19 · anti-inyección: los títulos scrapeados y la query son texto
+        # EXTERNO — se neutralizan órdenes dirigidas al LLM antes de interpolar.
+        from pipeline.sanitizer import sanitize_external_text
+        lines = [f"- {sanitize_external_text(v['title'], 200)} | "
+                 f"{v['views']:,} vistas | {v['duration']:.0f}s"
                  .replace(",", ".") for v in top]
         ins = research["insights"]
         prompt = (
-            f"Estás investigando el nicho «{research['query']}» en YouTube para "
-            f"producir shorts 9:16 virales en ESPAÑOL.\n\n"
+            f"Estás investigando el nicho «{sanitize_external_text(research['query'], 200)}» "
+            f"en YouTube para producir shorts 9:16 virales en ESPAÑOL.\n\n"
             f"Top videos reales por vistas:\n" + "\n".join(lines) + "\n\n"
             f"Keywords frecuentes: {', '.join(ins['keywords'])}\n"
             f"Duración mediana: {ins['median_duration_s']}s · "

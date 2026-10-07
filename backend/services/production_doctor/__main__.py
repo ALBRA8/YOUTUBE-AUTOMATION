@@ -67,6 +67,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--json", action="store_true", help="salida JSON completa")
     ap.add_argument("--no-tests", action="store_true",
                     help="no re-ejecutar baterías en fix/verify")
+    ap.add_argument("--capas", default=None,
+                    help="audit/verify: subconjunto de capas, p. ej. A,C,D")
     ap.add_argument("--project-id", default=None,
                     help="preflight/audit de un proyecto concreto")
     ap.add_argument("--backend-url", default=None,
@@ -76,8 +78,20 @@ def main(argv: list[str] | None = None) -> int:
     # sys.path: este módulo se ejecuta desde backend/ (python -m services.…)
     from services.production_doctor import run_mode
     try:
+        capas = None
+        if args.capas:
+            capas = [c.strip().upper() for c in args.capas.split(",") if c.strip()]
+            inválidas = [c for c in capas if c not in "ABCDEFGHI"]
+            if inválidas:
+                print(f"error: capas inválidas: {inválidas} (válido A-I)",
+                      file=sys.stderr)
+                return 2
+        if capas and args.modo == "preflight":
+            print("error: --capas no aplica a preflight", file=sys.stderr)
+            return 2
         rep = run_mode(
             args.modo, deep=args.deep,
+            capas=capas if args.modo in ("audit", "verify") else None,
             ejecutar_tests=not args.no_tests,
             project_id=args.project_id, backend_url=args.backend_url)
     except ValueError as e:

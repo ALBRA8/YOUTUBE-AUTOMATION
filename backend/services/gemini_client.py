@@ -35,10 +35,15 @@ def client():
     return _client
 
 
-async def _retry(coro_factory, tries: int = 3, base: float = 2.0):
+async def _retry(coro_factory, tries: int = 3, base: float = 2.0,
+                 timeout: float = 90.0):
+    """Reintentos con backoff exponencial + TIMEOUT por intento (§reintentos:
+    timeout explícito). Antes una llamada colgada de Gemini estancaba el paso
+    del pipeline indefinidamente; ahora cada intento vence a `timeout` s y
+    cuenta como fallo reintentable."""
     for attempt in range(tries):
         try:
-            return await coro_factory()
+            return await asyncio.wait_for(coro_factory(), timeout=timeout)
         except Exception as e:  # noqa: BLE001
             if attempt == tries - 1:
                 raise

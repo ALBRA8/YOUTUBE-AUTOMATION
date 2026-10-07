@@ -73,14 +73,18 @@ def _r_requeue_invalid_claimed(fids: list[str], _fs: list[Finding]) -> list[dict
 
 # ── 3. queued con attempts agotados → dead (contrato de fail) ────────────────
 def _r_deaden_exhausted_queued(fids, _fs) -> list[dict]:
+    # v2.19 · fix: el SQL tenía dos literales adyacentes (concatenación que
+    # SQLite NO soporta) → OperationalError SIEMPRE; la deshonestidad del flag
+    # reparado lo enmascaraba (finding marcado reparado con la reparación
+    # revienta). Ahora el mensaje va por parámetro y la reparación funciona.
     with db.connect() as con:
         cur = con.execute(
             """UPDATE flow_jobs SET status='dead',
-               error='PRODUCTION DOCTOR: attempts agotados en estado queued '
-                     '(inconsistencia según contrato de fail)',
-               worker=NULL, job_token=NULL, lease_until=NULL,
+               error=?, worker=NULL, job_token=NULL, lease_until=NULL,
                updated_at=datetime('now')
-               WHERE status='queued' AND attempts >= max_attempts""")
+               WHERE status='queued' AND attempts >= max_attempts""",
+            ("PRODUCTION DOCTOR: attempts agotados en estado queued "
+             "(inconsistencia según contrato de fail)",))
         n = cur.rowcount
         con.commit()
     return [_acc("deaden_exhausted_queued", fids,
@@ -345,9 +349,11 @@ def aplicar_reparaciones(findings: list[Finding]) -> tuple[list[dict], list[str]
         spec = SAFE_REPAIRS.get(rid)
         if spec is None:
             continue  # defensa: nunca ejecutar una reparación fuera de la lista
+        fallo = False
         try:
             nuevas = spec["fn"]([f.id for f in fs], fs)
         except Exception as e:  # noqa: BLE001
+            fallo = True
             nuevas = [_acc(rid, [f.id for f in fs],
                            f"la reparación revintió: {type(e).__name__}: {e}",
                            "desconocido", "sin cambio", {"error": str(e)[:200]})]
@@ -359,7 +365,10 @@ def aplicar_reparaciones(findings: list[Finding]) -> tuple[list[dict], list[str]
         if spec["componente"] not in componentes:
             componentes.append(spec["componente"])
         for f in fs:
-            f.reparado = True
-            f.detalle_reparacion = "; ".join(
+            # v2.19 · honestidad del audit trail: si la reparación revintió,
+            # el finding NO se marca reparado (antes se marcaba aunque la
+            # acción registrara el error → VERIFY daba falso «resuelto»).
+            f.reparado = not fallo
+            f.detalle_reparacion = "" if fallo else "; ".join(
                 a["cambio"] for a in nuevas if a.get("finding_ids"))[:300]
     return acciones, componentes

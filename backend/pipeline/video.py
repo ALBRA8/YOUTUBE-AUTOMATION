@@ -241,10 +241,15 @@ async def _concat_xfade(project: dict, clips: list[Path], out: Path,
 
 
 async def mux_audio_music(project: dict, video_silent: Path, voice_full: Path) -> Path:
-    """Une video + voz + música (con ducking automático sobre la voz)."""
+    """Une video + voz + música (con ducking automático sobre la voz).
+    v2.19: la pista elegida queda registrada en music_track.json — antes
+    era imposible saber qué música llevó cada video (observabilidad §28)."""
     proj_dir = OUTPUT_DIR / project["id"]
     music = _pick_music()
     out = proj_dir / "video_raw.mp4"
+    (proj_dir / "music_track.json").write_text(json.dumps(
+        {"track": music.name if music else None, "ducking": bool(music)},
+        ensure_ascii=False), encoding="utf8")
 
     if music and music.exists():
         # sidechaincompress: la música baja cuando habla la voz
@@ -273,13 +278,20 @@ async def mux_audio_music(project: dict, video_silent: Path, voice_full: Path) -
 
 
 async def burn_subtitles(project: dict, video_raw: Path, words_path: Path) -> Path:
-    """Quema los subtítulos ASS estilo TikTok/Hormozi sobre el video final."""
+    """Quema los subtítulos ASS estilo TikTok/Hormozi sobre el video final.
+    v2.19: el resultado queda REGISTRADO en subs_status.json — antes el
+    fallback «copiar raw sin subtítulos» era silencioso (degradación
+    invisible que llegaba a ready/publish)."""
     proj_dir = OUTPUT_DIR / project["id"]
     words = json.loads(Path(words_path).read_text())
     if not words:
         import shutil
         final = proj_dir / f"{project['id']}_final.mp4"
         shutil.copy(video_raw, final)
+        (proj_dir / "subs_status.json").write_text(json.dumps(
+            {"burned": False,
+             "reason": "words.json vacío — copiado sin subtítulos"},
+            ensure_ascii=False), encoding="utf8")
         return final
 
     ass_path = proj_dir / "subs.ass"
@@ -301,6 +313,14 @@ async def burn_subtitles(project: dict, video_raw: Path, words_path: Path) -> Pa
         log.error("subs burn: %s", p.stderr[-300:])
         import shutil
         shutil.copy(video_raw, final)
+        (proj_dir / "subs_status.json").write_text(json.dumps(
+            {"burned": False,
+             "reason": f"ffmpeg rc={p.returncode} — copiado sin subtítulos"},
+            ensure_ascii=False), encoding="utf8")
+    else:
+        (proj_dir / "subs_status.json").write_text(json.dumps(
+            {"burned": True, "reason": "ok"},
+            ensure_ascii=False), encoding="utf8")
     return final
 
 

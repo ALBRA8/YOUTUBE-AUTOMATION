@@ -19,7 +19,14 @@ Cierra el circuito REAL backend → extensión (Google Flow) → backend → ren
 Semántica de fallos: fail() incrementa attempts; al agotar el máximo
 (imagen 3, video 2) el job pasa a dead. Un job claimed cuyo lease expira
 (worker muerto) vuelve a queued automáticamente en el próximo claim
-(recuperación perezosa, sin contador de intentos).
+(recuperación perezosa): perder el lease NO consume attempts (el asset
+pudo generarse igualmente), pero SÍ cicla `lease_cycles` — al agotar
+MAX_LEASE_CYCLES el job pasa a dead (un worker que muriera en cada claim
+reciclaría el job para siempre: §reintentos — no reintentar infinitamente).
+
+Los UPDATE de heartbeat/fail son condicionales (status+job_token) dentro
+de BEGIN IMMEDIATE: un heartbeat/fail zombi que llega DESPUÉS de que otro
+worker reclamó el job ya no puede robarle el claim (TOCTOU cerrado).
 """
 from __future__ import annotations
 
@@ -36,6 +43,7 @@ from pipeline.flow_export import DEFAULT_BRAND, build_script_json
 # ── parámetros del contrato (lease / reintentos) ─────────────────────────────
 LEASE_S = {"image": 8 * 60, "video": 15 * 60}
 MAX_ATTEMPTS = {"image": 3, "video": 2}
+MAX_LEASE_CYCLES = 3                # expiraciones de lease antes de dead (anti zombie-loop)
 HEARTBEAT_EXTEND_S = 5 * 60          # heartbeat del worker cada ~30s
 MIN_VIDEO_S = 0.3                    # igual que flow_import.find_flow_videos
 
@@ -102,8 +110,10 @@ def enqueue_project(pid: str, fmt: str = "transformacion",
                     character: str | None = None) -> dict:
     """(Re)genera la cola del proyecto desde build_script_json.
 
-    Idempotente: borra jobs pendientes (queued/claimed) y conserva los done,
-    para que re-encolar no re-trabaje assets ya subidos."""
+    Idempotente: conserva los done (no re-trabaja assets ya subidos) y los
+    claimed con lease VIGENTE (trabajo en vuelo no se descarta); borra los
+    pendientes (queued/dead y claimed con lease vencido) para regenerarlos
+    con los prompts actuales."""
     project = db.get_project(pid)
     if not project:
         raise LookupError(f"proyecto {pid} no existe")
@@ -126,8 +136,12 @@ def enqueue_project(pid: str, fmt: str = "transformacion",
                 """SELECT kind, scene_number, part FROM flow_jobs
                    WHERE project_id=? AND status='done'""", (pid,))
         }
-        con.execute("DELETE FROM flow_jobs WHERE project_id=? "
-                    "AND status != 'done'", (pid,))
+        con.execute(
+            """DELETE FROM flow_jobs WHERE project_id=? AND (
+               status IN ('queued','dead')
+               OR (status='claimed' AND
+                   (lease_until IS NULL OR lease_until < ?)))""",
+            (pid, now))
         for sc in data["scenes"]:
             no = sc["scene_number"]
             meta = {"title": sc.get("title") or ""}
@@ -162,17 +176,47 @@ def enqueue_project(pid: str, fmt: str = "transformacion",
 
 # ── claim atómico + recuperación de leases ───────────────────────────────────
 
+def _recover_en_con(con, cutoff: str) -> int:
+    """Barrido de leases vencidos sobre una conexión YA en transacción.
+
+    Dos fases: (1) los que agotan MAX_LEASE_CYCLES pasan a dead — un worker
+    que muriera en cada claim reciclaría el job para siempre (anti
+    zombie-loop); (2) el resto vuelve a queued. La pérdida del lease NO
+    consume attempts. Devuelve cuántos jobs se reencolaron/marcaron dead."""
+    con.execute(
+        """UPDATE flow_jobs SET status='dead', lease_cycles=lease_cycles+1,
+           worker=NULL, job_token=NULL, lease_until=NULL, updated_at=?,
+           error=?
+           WHERE status='claimed' AND lease_until IS NOT NULL
+           AND lease_until < ? AND lease_cycles + 1 >= ?""",
+        (cutoff,
+         "lease expirado y agotado: el worker murió repetidamente "
+         "sin completar el job",
+         cutoff, MAX_LEASE_CYCLES))
+    cur = con.execute(
+        """UPDATE flow_jobs SET status='queued', lease_cycles=lease_cycles+1,
+           worker=NULL, job_token=NULL, lease_until=NULL, updated_at=?
+           WHERE status='claimed' AND lease_until IS NOT NULL
+           AND lease_until < ?""", (cutoff, cutoff))
+    return cur.rowcount
+
+
 def recover_expired() -> int:
-    """Jobs claimed con lease vencido → queued (worker muerto). Devuelve
-    cuántos se recuperaron. Llamado dentro de cada claim (BEGIN IMMEDIATE)."""
+    """Jobs claimed con lease vencido → queued (worker muerto) o dead si
+    agotó MAX_LEASE_CYCLES. Devuelve cuántos se recuperaron. Atomic:
+    BEGIN IMMEDIATE (mismo lock que claim_next)."""
     cutoff = _iso(_now())
-    with db.connect() as con:
-        cur = con.execute(
-            """UPDATE flow_jobs SET status='queued', worker=NULL,
-               job_token=NULL, lease_until=NULL, updated_at=?
-               WHERE status='claimed' AND lease_until IS NOT NULL
-               AND lease_until < ?""", (cutoff, cutoff))
-        return cur.rowcount
+    con = db.connect()
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        n = _recover_en_con(con, cutoff)
+        con.commit()
+        return n
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
 
 
 def claim_next(worker: str, pid: str | None = None) -> dict | None:
@@ -182,11 +226,7 @@ def claim_next(worker: str, pid: str | None = None) -> dict | None:
     try:
         con.execute("BEGIN IMMEDIATE")
         cutoff = _iso(_now())
-        con.execute(
-            """UPDATE flow_jobs SET status='queued', worker=NULL,
-               job_token=NULL, lease_until=NULL, updated_at=?
-               WHERE status='claimed' AND lease_until IS NOT NULL
-               AND lease_until < ?""", (cutoff, cutoff))
+        _recover_en_con(con, cutoff)  # barrido anti-zombie (2 fases, ver arriba)
         if pid:
             row = con.execute(
                 """SELECT * FROM flow_jobs WHERE status='queued' AND project_id=?
@@ -232,14 +272,31 @@ def _claimed_by_token(con, job_id: str, token: str):
 
 
 def heartbeat(job_id: str, token: str) -> dict | None:
-    with db.connect() as con:
+    """Renueva el lease SOLO si el job sigue claimed con ESE token. BEGIN
+    IMMEDIATE + UPDATE condicional: sin TOCTOU (un heartbeat antiguo que
+    compite contra un re-claim ya no puede robar el lease del nuevo worker)."""
+    con = db.connect()
+    try:
+        con.execute("BEGIN IMMEDIATE")
         row = _claimed_by_token(con, job_id, token)
         if not row:
+            con.rollback()
             return None
         lease_until = _iso(_now() + timedelta(seconds=HEARTBEAT_EXTEND_S))
-        con.execute("UPDATE flow_jobs SET lease_until=?, updated_at=? WHERE id=?",
-                    (lease_until, _iso(_now()), job_id))
-        return {"ok": True, "lease_until": lease_until}
+        cur = con.execute(
+            """UPDATE flow_jobs SET lease_until=?, updated_at=?
+               WHERE id=? AND status='claimed' AND job_token=?""",
+            (lease_until, _iso(_now()), job_id, token))
+        if cur.rowcount != 1:
+            con.rollback()
+            return None
+        con.commit()
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
+    return {"ok": True, "lease_until": lease_until}
 
 
 def complete(job_id: str, token: str, data: bytes) -> dict | None:
@@ -348,21 +405,56 @@ def _apply_assets_to_scenes(con, pid: str) -> bool:
 
 
 def fail(job_id: str, token: str, error: str) -> dict | None:
-    """Reintenta (queued) o marca dead al agotar max_attempts."""
-    with db.connect() as con:
+    """Reintenta (queued) o marca dead al agotar max_attempts. BEGIN
+    IMMEDIATE + UPDATE condicional por token: un fail antiguo que compite
+    contra un re-claim no puede tumbar el claim del nuevo worker (TOCTOU
+    cerrado; antes un fail tardío silenciosamente reencolaba el job que
+    otro worker ya estaba generando → trabajo Flow duplicado)."""
+    con = db.connect()
+    try:
+        con.execute("BEGIN IMMEDIATE")
         row = _claimed_by_token(con, job_id, token)
         if not row:
+            con.rollback()
             return None
         attempts = int(row["attempts"] or 0) + 1
         max_attempts = int(row["max_attempts"] or 2)
         status = "dead" if attempts >= max_attempts else "queued"
-        con.execute(
+        cur = con.execute(
             """UPDATE flow_jobs SET status=?, attempts=?, error=?,
                worker=NULL, job_token=NULL, lease_until=NULL, updated_at=?
-               WHERE id=?""",
-            (status, attempts, (error or "")[:500], _iso(_now()), job_id))
-        return {"ok": True, "status": status, "attempts": attempts,
-                "max_attempts": max_attempts}
+               WHERE id=? AND status='claimed' AND job_token=?""",
+            (status, attempts, (error or "")[:500], _iso(_now()),
+             job_id, token))
+        if cur.rowcount != 1:
+            con.rollback()
+            return None
+        con.commit()
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
+    _mem_obs(f"job flow {row['kind']} escena {row['scene_number']} falló "
+             f"(intento {attempts}/{max_attempts}): {(error or '')[:120]}",
+             job_id)
+    return {"ok": True, "status": status, "attempts": attempts,
+            "max_attempts": max_attempts}
+
+
+def _mem_obs(contenido: str, job_id: str) -> None:
+    """Gancho MemoryDV (episodio de proveedor): cada fallo de job es una
+    observación para la consolidación (patrón → aprendizaje). Jamás tumba
+    la operación de la cola si la memoria falla."""
+    try:
+        from services import memorydv
+        memorydv.record_observation(contenido, source="flow_jobs.fail",
+                                    scope="provider",
+                                    evidence=[{"kind": "flow_job",
+                                               "ref": job_id}],
+                                    confidence=0.6)
+    except Exception:  # noqa: BLE001 — observabilidad, nunca crítico
+        pass
 
 
 # ── estado ────────────────────────────────────────────────────────────────────
@@ -371,8 +463,8 @@ def status_for_project(pid: str) -> dict:
     with db.connect() as con:
         rows = con.execute(
             """SELECT id, kind, scene_number, part, status, attempts,
-               max_attempts, worker, error, asset_path, lease_until,
-               created_at, updated_at
+               max_attempts, lease_cycles, worker, error, asset_path,
+               lease_until, created_at, updated_at
                FROM flow_jobs WHERE project_id=? ORDER BY
                CASE kind WHEN 'image' THEN 0 ELSE 1 END, scene_number, part""",
             (pid,)).fetchall()

@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS flow_jobs (    -- Flow Bridge: cola de assets para la
     status       TEXT NOT NULL DEFAULT 'queued',  -- queued | claimed | done | dead
     attempts     INTEGER NOT NULL DEFAULT 0,
     max_attempts INTEGER NOT NULL DEFAULT 3,-- imagen 3 · video 2
+    lease_cycles INTEGER NOT NULL DEFAULT 0, -- expiraciones de lease (anti zombie-loop)
     worker       TEXT,
     job_token    TEXT,                      -- nonce del claim (complete/fail/heartbeat)
     lease_until  TEXT,
@@ -141,6 +142,12 @@ def _migrate(con: sqlite3.Connection) -> None:
         con.execute("ALTER TABLE projects ADD COLUMN platforms TEXT NOT NULL DEFAULT '[]'")
     if "niche" not in cols:
         con.execute("ALTER TABLE projects ADD COLUMN niche TEXT")
+    # v2.19 · flow_jobs.lease_cycles: el barrido de leases vencidos cicla este
+    # contador y manda a dead al agotar MAX_LEASE_CYCLES — sin él, un worker
+    # que muriera en cada claim reciclaría el job infinitamente.
+    fj = [r[1] for r in con.execute("PRAGMA table_info(flow_jobs)").fetchall()]
+    if fj and "lease_cycles" not in fj:
+        con.execute("ALTER TABLE flow_jobs ADD COLUMN lease_cycles INTEGER NOT NULL DEFAULT 0")
 
 
 # ── helpers genéricos ─────────────────────────────────────────────────────
