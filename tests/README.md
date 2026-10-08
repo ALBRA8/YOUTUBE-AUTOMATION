@@ -30,10 +30,11 @@ sin rutas absolutas.
 | `test_gobernanza.py` | **GOBERNANZA v2.19**: QA gate del render con MP4 real (inválido → RuntimeError + meta.qa_final worst=error; sano pasa; subs no quemados → warn), anti zombie-loop por `lease_cycles` (vencido→queued, agotado→dead, vigente intacto), gancho MemoryDV de la cola, métricas §28 (tasas honestas + persist JSONL), MCP de gobernanza vía dispatch real, autonomía integrada, publish_state y cierre observable. | 28 |
 | `test_bridge_e2e.py` | **E2E extensión**: `node --check` en los JS + `bridge.js` REAL en sandbox VM contra backend mock HTTP con estado (claim→complete con bytes validados, 422, heartbeat, backend caído, anti-duplicado) + anclajes `[bridge v1]` + migración de dominio flow.google.com (manifest, tabs.query de AMBOS dominios, origin check del popup, versión 2.2.x). | 42 |
 | `test_extension_resolver.py` | **Resolver/inyector de editor (ext 2.2.2)**: la UI real de Flow (AiSandboxAngularFrontend, raíz `<aisandbox-root>`) ya no monta Slate; el resolver elige el campo de prompt por estrategias A→D (aisandbox-root / textarea con señales de prompt / contenteditable role=textbox / compat Slate legacy), con vetos duros (nav/header/search/título/feedback/oculto/no-editable), inserción por el mecanismo del control real (setter nativo + input/change; selección + beforeinput + execCommand con fallback textContent), verificación del valor tras insertar y diagnóstico estructurado (estrategias probadas + candidatos) — mini-DOM determinista, sin Flow real (la prueba REAL se hace en el PC). | 70 |
+| `test_extension_tab_selector.py` | **Selector de pestaña Flow ([bridge v3], ext 2.2.3)**: fin del `tabs[0]` arbitrario (causa raíz del FAIL real con varias pestañas: la antigua perdía el contexto de scripting tras recargar la extensión → "Cannot access contents of the page"). Orden de preferencia determinista (activa de la ventana enfocada → activas de otras ventanas → vinculada viva → resto por recencia) + **VALIDACIÓN REAL**: cada candidata se sonda EJECUTANDO la función serializada contra su contexto de página falso (el manifest no basta) con re-chequeo de URL (la vinculada que navegó fuera se veta) + fallback (fallo de una candidata → siguiente) + diagnóstico estructurado `tried` — 17 escenas en mini-chrome determinista (demo exigida [antigua inválida, nueva válida] → nueva válida; caso inverso; fallback; sin coordenadas/títulos/project_id; resolver A→D e inyección intactos). | 58 |
 | `test_humos_infra.py` | **Humos anti-fantasma**: todo lo que declaramos existe físicamente en el repo (tabla, endpoints, bridge.js, wiring, CORS, P1, auto-render, runner, ESTADO_REAL). | 51 |
 | `test_live_boot.py` | **Boot vivo**: arranca uvicorn REAL en sandbox aislado (`live_boot_smoke.sh`: startup, CORS preflight, endpoints base, métricas, video QA) + **ciclo completo del Flow Bridge por HTTP** (`live_cycle_smoke.sh`: enqueue → claim → complete PNG/MP4 reales → 409/422 → fail/retry → guard de tipo → project_done → auto-render → QA). | 33 |
 
-Total esperado: **928 checks** en 22 baterías.
+Total esperado: **986 checks** en 23 baterías.
 
 > Nota: `test_lanzar_preflight.py` verifica la barrera de preflight que vive en
 > `pipeline/orchestrator.py` (`_preflight_lanzamiento`). Contra un estado sin
@@ -44,7 +45,7 @@ Total esperado: **928 checks** en 22 baterías.
 
 ```bash
 cd yt_automation_v2
-python3 tests/run_all.py                  # las 21 baterías + total; exit != 0 si algo falla
+python3 tests/run_all.py                  # las 23 baterías + total; exit != 0 si algo falla
 
 # individual (python3 plano, estilo autoejecutable):
 python3 tests/test_production_json.py

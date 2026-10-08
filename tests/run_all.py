@@ -58,6 +58,10 @@ BATERIAS = [
                                  # estrategias aisandbox/textarea/contenteditable/
                                  # slate-legacy, vetos, inserción por eventos,
                                  # verificación de valor y diagnóstico (70)
+    "test_extension_tab_selector.py", # SELECTOR DE PESTAÑA FLOW ([bridge v3],
+                                 # ext 2.2.3): fin del tabs[0] arbitrario —
+                                 # orden de preferencia + sonda REAL de
+                                 # executeScript + fallback entre candidatas (58)
     "test_humos_infra.py",       # humos: lo declarado EXISTE en el repo (~50)
     "test_live_boot.py",         # BOOT VIVO: uvicorn real + ciclo completo del
                                  # Flow Bridge por HTTP (boot + cycle smoke)

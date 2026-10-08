@@ -1438,6 +1438,123 @@ async function __bridgeFindAssetUrl(tabId, prompt, isVideo) { // [bridge v1]
   return null;
 }
 
+/* [bridge v3] RESOLUCIÓN ROBUSTA DE PESTAÑA FLOW — fin del tabs[0] arbitrario.
+   Causa raíz real (prueba v2.2.2): con varias pestañas de Flow abiertas,
+   tabs[0] podía ser una pestaña antigua que perdió el contexto de scripting
+   efectivo de la extensión (p.ej. tras recargar la extensión) y el job
+   fallaba con "Cannot access contents of the page. Extension manifest must
+   request permission to access the respective host.".
+   Estrategia (sin coordenadas, sin títulos frágiles, sin project_id):
+     1. Candidatas = TODAS las pestañas flow.google.com / labs.google abiertas
+        (+ la vinculada si sigue viva), NUNCA solo la primera de la lista.
+     2. Orden de preferencia determinista: a) activa de la ventana enfocada,
+        b) activas de otras ventanas, c) pestaña vinculada viva, d) resto por
+        último acceso (recencia, desempate estable por posición).
+     3. VALIDACIÓN REAL: cada candidata se sonda inyectando una función con
+        chrome.scripting.executeScript (comprobar el manifest NO basta) y se
+        verifica que su location sigue siendo Flow/labs; si la sonda falla por
+        permisos se continúa con la siguiente candidata.
+     4. Diagnóstico estructurado: el resultado incluye `tried` (todas las
+        candidatas probadas con su tabId, url, flags y la razón del fallo).
+   La sección es auto-contenida (solo usa `chrome`) para poder verificarse
+   standalone en tests/tab_selector_mock.js.
+   ---------------------------- */
+/* Sonda auto-contenida: se serializa a la pestaña vía executeScript. Solo usa
+   location/document (nada de closures ni del service worker). */
+function __flowTabProbeFn() {
+  try {
+    return {
+      ok: true,
+      url: String((typeof location !== 'undefined' && location && location.href) || ''),
+      ready: (typeof document !== 'undefined' && document) ? String(document.readyState || '') : null,
+    };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+/* Hosts válidos para un job del bridge (mismos dominios que tabs.query). */
+const __FLOW_HOST_RE = /^https:\/\/(flow\.google\.com|labs\.google)\//i;
+
+/* Sonda REAL de una pestaña: inyecta __flowTabProbeFn y valida el resultado.
+   Devuelve { ok:true, url } o { ok:false, reason } — NUNCA lanza (un fallo de
+   permisos de una candidata no debe abortar la resolución). */
+async function __bridgeProbeTab(tabId) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: __flowTabProbeFn,
+      args: [],
+    });
+    const r = results && results[0] && results[0].result;
+    if (!r || r.ok !== true) {
+      return { ok: false, reason: 'la sonda no devolvió resultado utilizable' };
+    }
+    if (!__FLOW_HOST_RE.test(String(r.url || ''))) {
+      return { ok: false, reason: 'la pestaña ya no está en Flow (' + (r.url || 'sin URL') + ')' };
+    }
+    return { ok: true, url: String(r.url || '') };
+  } catch (e) {
+    return { ok: false, reason: String((e && e.message) || e) };
+  }
+}
+
+/* Resuelve la pestaña Flow utilizable para un job del bridge (bridge v3).
+   linkedTabId: pestaña vinculada previa (puede ser null, estar muerta o haber
+   navegado fuera de Flow — en ese caso la sonda la veta).
+   Devuelve { tabId, url, tried } — tabId null si NINGUNA candidata pasa la
+   sonda; tried = diagnóstico completo de todas las candidatas probadas. */
+async function __bridgeResolveFlowTab(linkedTabId) {
+  // Todas las pestañas Flow/labs abiertas (orden de Chrome = NO confiable)
+  const all = (await chrome.tabs.query({ url: ['https://flow.google.com/*', 'https://labs.google/*'] })) || [];
+  // Activas de la ventana enfocada (consulta dedicada; si falla, sin prioridad)
+  let focusedIds = new Set();
+  try {
+    const fa = (await chrome.tabs.query({ url: ['https://flow.google.com/*', 'https://labs.google/*'], active: true, lastFocusedWindow: true })) || [];
+    focusedIds = new Set(fa.map((t) => t && t.id).filter((id) => typeof id === 'number'));
+  } catch (_) { focusedIds = new Set(); }
+  // Pestaña vinculada previa, si sigue viva (chrome.tabs.get lanza si murió)
+  let linked = null;
+  if (Number.isInteger(linkedTabId)) {
+    try { linked = await chrome.tabs.get(linkedTabId); } catch (_) { linked = null; }
+  }
+  const prio = (t) => {
+    if (t && t.active && focusedIds.has(t.id)) return 0; // activa de la ventana enfocada
+    if (t && t.active) return 1;                         // activa de otra ventana
+    if (linked && t.id === linked.id) return 2;          // vinculada viva
+    return 3;                                            // resto
+  };
+  const recency = (t) => Number((t && t.lastAccessed) || 0);
+  const pos = new Map((all || []).map((t, i) => [t && t.id, i]));
+  const cands = (all || []).filter((t) => t && typeof t.id === 'number').slice().sort((A, B) => {
+    const p = prio(A) - prio(B);
+    if (p !== 0) return p;
+    const r = recency(B) - recency(A); // más reciente primero
+    if (r !== 0) return r;
+    return (pos.get(A.id) || 0) - (pos.get(B.id) || 0); // estable
+  });
+  // La vinculada viva es candidata aunque haya navegado fuera de Flow (la
+  // query por URL ya no la devuelve): la sonda la veta con diagnóstico claro.
+  if (linked && typeof linked.id === 'number' && !cands.some((t) => t.id === linked.id)) {
+    cands.push(linked);
+  }
+  const tried = [];
+  for (const t of cands) {
+    const probe = await __bridgeProbeTab(t.id);
+    tried.push({
+      tabId: t.id,
+      url: String(t.url || t.pendingUrl || '') || null,
+      active: !!t.active,
+      focusedActive: !!(t.active && focusedIds.has(t.id)),
+      linked: !!(linked && t.id === linked.id),
+      probe,
+    });
+    if (probe.ok) return { tabId: t.id, url: probe.url, tried };
+  }
+  return { tabId: null, url: null, tried };
+}
+/* [bridge v3] fin resolución de pestaña */
+
 /* Handler de jobs del Flow Bridge. Construye un QueueItem con el prompt del
    backend y el scene_number, lo encola con la maquinaria existente (tick →
    injectScene → pollTick → saveUrlToDisk) y cuando la escena llega a
@@ -1465,18 +1582,27 @@ function __bridgeHandleJob(job, sendResult) { // [bridge v1]
       if (running && queue.some((i) => i.status === STATUS.PENDING || i.status === STATUS.IN_PROGRESS || i.status === STATUS.RATE_LIMITED)) {
         throw new Error('cola local ocupada: detén la generación local para atender jobs del backend');
       }
-      // Pestaña de Google Flow: la vinculada (si sigue viva) o cualquiera abierta.
+      // Pestaña de Google Flow (bridge v3): resolución robusta, NUNCA tabs[0].
       // Dominio ACTUAL: flow.google.com (labs.google/fx redirige 308 ahí —
       // migración 2.2.1; se conserva labs.google por compatibilidad).
-      let tabId = Number.isInteger(labTabId) ? labTabId : null;
-      if (tabId != null) {
-        try { await chrome.tabs.get(tabId); } catch (_) { tabId = null; }
+      // Con varias pestañas de Flow, tabs[0] podía ser una pestaña antigua sin
+      // contexto de scripting efectivo (p.ej. tras recargar la extensión). Se
+      // evalúan TODAS las candidatas en orden de preferencia (activa de la
+      // ventana enfocada → activas de otras ventanas → vinculada viva → resto
+      // por recencia) y cada una se valida con una SONDA REAL de
+      // chrome.scripting.executeScript antes de usarse; si la sonda falla por
+      // permisos se continúa con la siguiente candidata válida.
+      const resolved = await __bridgeResolveFlowTab(Number.isInteger(labTabId) ? labTabId : null);
+      if (resolved.tabId == null) {
+        const detalle = (resolved.tried || [])
+          .map((c) => '#' + c.tabId
+            + (c.focusedActive ? ' (activa enfocada)' : (c.active ? ' (activa)' : ''))
+            + ': ' + ((c.probe && c.probe.reason) || '?'))
+          .join(' | ');
+        throw new Error('sin pestaña de Google Flow (flow.google.com) utilizable: abre un proyecto con el editor visible'
+          + (detalle ? ' — candidatas: ' + detalle : ' — no hay pestañas de Flow abiertas'));
       }
-      if (tabId == null) {
-        const tabs = await chrome.tabs.query({ url: ['https://flow.google.com/*', 'https://labs.google/*'] });
-        tabId = (tabs && tabs.length) ? tabs[0].id : null;
-      }
-      if (tabId == null) throw new Error('sin pestaña de Google Flow (flow.google.com): abre un proyecto con el editor visible');
+      const tabId = resolved.tabId;
       labTabId = tabId;
       // Estado per-escena limpio (evita conteos/mapeos de ejecuciones viejas)
       sceneMediaCounts.delete(sceneNumber);
