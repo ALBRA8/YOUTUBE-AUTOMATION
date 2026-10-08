@@ -1214,16 +1214,18 @@ function __bridgeHandleJob(job, sendResult) { // [bridge v1]
       if (running && queue.some((i) => i.status === STATUS.PENDING || i.status === STATUS.IN_PROGRESS || i.status === STATUS.RATE_LIMITED)) {
         throw new Error('cola local ocupada: detén la generación local para atender jobs del backend');
       }
-      // Pestaña de labs.google: la vinculada (si sigue viva) o cualquiera abierta
+      // Pestaña de Google Flow: la vinculada (si sigue viva) o cualquiera abierta.
+      // Dominio ACTUAL: flow.google.com (labs.google/fx redirige 308 ahí —
+      // migración 2.2.1; se conserva labs.google por compatibilidad).
       let tabId = Number.isInteger(labTabId) ? labTabId : null;
       if (tabId != null) {
         try { await chrome.tabs.get(tabId); } catch (_) { tabId = null; }
       }
       if (tabId == null) {
-        const tabs = await chrome.tabs.query({ url: 'https://labs.google/*' });
+        const tabs = await chrome.tabs.query({ url: ['https://flow.google.com/*', 'https://labs.google/*'] });
         tabId = (tabs && tabs.length) ? tabs[0].id : null;
       }
-      if (tabId == null) throw new Error('sin pestaña de labs.google: abre un proyecto de Flow con el editor visible');
+      if (tabId == null) throw new Error('sin pestaña de Google Flow (flow.google.com): abre un proyecto con el editor visible');
       labTabId = tabId;
       // Estado per-escena limpio (evita conteos/mapeos de ejecuciones viejas)
       sceneMediaCounts.delete(sceneNumber);
@@ -1241,7 +1243,7 @@ function __bridgeHandleJob(job, sendResult) { // [bridge v1]
       queue = queue.filter((i) => i.scene_number !== sceneNumber);
       queue.push(item);
       mode = isVideo ? 'videos' : 'images';
-      provider = 'flow';    // el bridge trabaja sobre labs.google (no meta.ai)
+      provider = 'flow';    // el bridge trabaja sobre flow.google.com (no meta.ai)
       imagesPerScene = 1;   // el backend pide 1 asset por job
       running = true;
       lastInjectAt = 0;
@@ -1262,13 +1264,13 @@ function __bridgeHandleJob(job, sendResult) { // [bridge v1]
       let outcome = null;
       while (!outcome) {
         if (Date.now() - t0 > TIMEOUT_MS) {
-          outcome = { ok: false, error: 'timeout esperando la generación en labs.google' };
+          outcome = { ok: false, error: 'timeout esperando la generación en Google Flow' };
           break;
         }
         const cur = queue.find((i) => i.id === item.id);
         if (!cur) { outcome = { ok: false, error: 'el job del bridge desapareció de la cola local' }; break; }
         if (cur.status === STATUS.DOWNLOADED) { outcome = { ok: true }; break; }
-        if (cur.status === STATUS.ERROR) { outcome = { ok: false, error: cur.error || 'generación con error en labs.google' }; break; }
+        if (cur.status === STATUS.ERROR) { outcome = { ok: false, error: cur.error || 'generación con error en Google Flow' }; break; }
         await new Promise((r) => setTimeout(r, 2000));
       }
       // Retirar el item del bridge (si stopQueue('completada') ya paró la cola, no pasa nada)

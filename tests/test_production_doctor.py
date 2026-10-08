@@ -482,7 +482,7 @@ def main() -> int:
 
     print("── 9. capas E/I sobre el repo REAL (estático, sin HTTP)")
     res_e = layers.audit_extension(probe_http=False)
-    check("extensión real 2.2.0 → sin findings críticos",
+    check("extensión real (2.2.1, dominio flow.google.com) → sin findings críticos",
           not [f for f in res_e if f.severidad == "critical"],
           repr(_ids(res_e)))
     ext_real = layers.EXTENSION_DIR

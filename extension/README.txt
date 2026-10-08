@@ -19,8 +19,9 @@ recarga (⟳) de la tarjeta de la extension despues de reemplazar los archivos.
 --------------------------------------------------------------------------------
 PASO 2: Procedimiento operativo
 --------------------------------------------------------------------------------
-1. Abre una pestana y entra a tu herramienta en Google Labs (Flow / ImageFX):
-   https://labs.google/fx/...
+1. Abre una pestana y entra a Google Flow:
+   https://flow.google.com/  (tu proyecto: https://flow.google.com/project/...)
+   — compatibilidad: labs.google/fx redirige 308 al dominio actual
 2. Abre el icono de la extension en la barra superior.
 3. Haz clic en "Vincular Proyecto" y selecciona la carpeta del proyecto en tu
    disco (la que contiene out/ideas/... o el script.json).
@@ -58,7 +59,7 @@ PUENTE BACKEND (Flow Bridge) — v2.1 (bridge.js)
 --------------------------------------------------------------------------------
 QUE ES: la extensión puede trabajar como "worker" de un backend local. El
 backend guarda la cola de jobs (un asset por escena: imagen o vídeo) y la
-extensión los reclama, los genera en labs.google con la maquinaria de siempre
+extensión los reclama, los genera en flow.google.com con la maquinaria de siempre
 (inyección Slate + sondeo DOM + descarga) y sube el resultado al backend.
 LOS PROMPTS VIENEN DEL BACKEND: son el script.json generado por
 build_script_json en el proyecto (backend/pipeline/flow_export.py); la
@@ -76,7 +77,7 @@ COMO ACTIVARLO:
 QUE HACE CADA CICLO (extension/bridge.js):
   GET  /api/extension/flow/jobs/next?worker=w-XXXXXXXX  → claim atómico (204 =
   sin jobs) → heartbeat cada 30s para extender el lease → genera el asset en
-  labs.google con el mismo camino de la cola local → POST /complete con los
+  flow.google.com con el mismo camino de la cola local → POST /complete con los
   bytes crudos (image/png o video/mp4) → si algo falla, POST /fail con el
   error (el backend reintenta o marca dead). Un solo job a la vez.
 
@@ -87,7 +88,7 @@ generó Flow; si Flow entregara WebM el backend lo rechazará (422) y el job se
 reintenta.
 
 NOTAS:
-- Necesita una pestaña de labs.google con un proyecto de Flow abierto (editor
+- Necesita una pestaña de flow.google.com con un proyecto de Flow abierto (editor
   visible). Si la cola local está en uso, el job se rechaza limpio (fail) y el
   backend lo reintenta más tarde.
 - Si Chrome suspende el Service Worker a mitad de job, el lease expira y el

@@ -329,7 +329,7 @@ els.provider.addEventListener('change', () => {
   chrome.storage.local.set({ provider: els.provider.value });
   toast(els.provider.value === 'meta'
     ? '🔵 Proveedor: Meta AI. Abre meta.ai (sesión iniciada) en la pestaña activa.'
-    : '🟣 Proveedor: Google Flow. Abre labs.google en la pestaña activa.');
+    : '🟣 Proveedor: Google Flow. Abre flow.google.com en la pestaña activa.');
 });
 els.imgsPerScene.addEventListener('change', () => {
   chrome.storage.local.set({ imgs_per_scene: els.imgsPerScene.value });
@@ -343,11 +343,11 @@ els.btnStart.addEventListener('click', async () => {
   const tabUrl = (tab && tab.url) || '';
   const okTab = provider === 'meta'
     ? /^https?:\/\/([\w-]+\.)?meta\.ai\//.test(tabUrl)
-    : tabUrl.indexOf('https://labs.google/') === 0;
+    : (/^https:\/\/(flow\.google\.com|labs\.google)\//.test(tabUrl)); // migración 2.2.1: dominio actual + compat labs.google
   if (!okTab) {
     toast('⚠️ Abre ' + (provider === 'meta'
       ? 'meta.ai (sesión iniciada)'
-      : 'Google Labs (Flow / ImageFX)') + ' en la pestaña activa y vuelve a intentar.');
+      : 'Google Flow (flow.google.com)') + ' en la pestaña activa y vuelve a intentar.');
     return;
   }
   const mode = els.contentType.value === 'videos' ? 'videos' : 'images';
