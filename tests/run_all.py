@@ -53,7 +53,11 @@ BATERIAS = [
                                  # anti zombie-loop, métricas §28, MCP
                                  # gobernanza, autonomía, publish_state (28)
     "test_bridge_e2e.py",        # E2E extensión: node --check + bridge.js real
-                                 # contra backend mock (sandbox VM)
+                                 # contra backend mock (sandbox VM) (42)
+    "test_extension_resolver.py", # RESOLVER/INYECTOR de editor (ext 2.2.2):
+                                 # estrategias aisandbox/textarea/contenteditable/
+                                 # slate-legacy, vetos, inserción por eventos,
+                                 # verificación de valor y diagnóstico (70)
     "test_humos_infra.py",       # humos: lo declarado EXISTE en el repo (~50)
     "test_live_boot.py",         # BOOT VIVO: uvicorn real + ciclo completo del
                                  # Flow Bridge por HTTP (boot + cycle smoke)

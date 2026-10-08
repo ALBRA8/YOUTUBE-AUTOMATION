@@ -48,16 +48,19 @@ mantiene el inventario público.
 | **Contrato A2A (§25)**: `POST /api/agent/execute` — puerta formal para agentes externos (Creative Engine): exige `requester`+`creative_spec`; respuestas honestas `VALIDATION_ERROR` / `REQUIRES_CLARIFICATION` / `ACCEPTED` / `EXECUTING` con {status, production_id, result, evidence, confidence, execution_id, warnings} | ✅ real | wiring auditado en `test_security_hardening.py` §6 + contrato en `main.py` |
 | **Cola endurecida (§14-§17)**: `fail()`/`heartbeat()` con UPDATE condicional dentro de BEGIN IMMEDIATE (TOCTOU cerrado: un fail/heartbeat zombi ya no roba el claim del nuevo worker); barrido de leases vencidos con `lease_cycles` (MAX_LEASE_CYCLES=3 → dead: **no reintentar infinitamente**); re-enqueue conserva jobs claimed con lease vigente (trabajo en vuelo no se descarta) | ✅ real | `test_gobernanza.py` §2 + `test_concurrencia.py` + `test_chaos.py` sin regresión |
 | **Publicación como máquina de estados (§22)**: publish_state en meta (DRAFT→PUBLISHING→PUBLISHED/FAILED), cada intento = job `kind=publish` (historial), 409 idempotente si ya hay `youtube_id` (nunca doble upload), autopublish omitido si QA final con errores | ✅ real | `test_gobernanza.py` §7 + `test_autopublish_generate.py` |
-| Suite canónica | ✅ 21 baterías en `tests/run_all.py` (840 checks) | runner |
+| Suite canónica | ✅ 22 baterías en `tests/run_all.py` (928 checks) | runner |
 
 ## 3. Lo que AÚN NO está demostrado (límites honestos)
 
 - **E2E con Google Flow REAL**: no se ha demostrado una ejecución de punta a
-  punta generando assets en labs.google con la extensión instalada en Chrome.
-  El contrato backend↔extensión SÍ está probado en la capa navegador
-  (`e2e_bridge_mock.js`), pero la inyección en el Slate de Labs, la descarga
-  de blobs reales y la subida a un backend vivo requieren corrida manual con
-  Chrome + sesión de Google. **No se declara éxito E2E real.**
+  punta generando assets en flow.google.com con la extensión instalada en
+  Chrome. El contrato backend↔extensión SÍ está probado en la capa navegador
+  (`e2e_bridge_mock.js`) y el resolver/inyector del editor actual
+  (AiSandboxAngularFrontend, sin Slate) está verificado con mini-DOM
+  determinista (`test_extension_resolver.py`, 18 escenas), pero la inyección
+  en el campo de prompt REAL de Flow, la descarga de blobs reales y la subida
+  a un backend vivo requieren corrida manual con Chrome + sesión de Google.
+  **No se declara éxito E2E real.**
 - **Auto-render real disparado desde el bridge**: probado con mock de
   `start_flow_render`; el render completo (TTS + Ken Burns + mezcla +
   subtítulos) se prueba en las baterías de merge, pero el disparo automático

@@ -12,13 +12,13 @@ Dos capas de verificación (todo Node, sin Chrome ni sesión de Google):
      de mensajes del popup → anti-duplicado.
   3. ANCLAJES [bridge v1]: background.js mantiene el wiring declarado
      (importScripts de bridge.js, caso BRIDGE_JOB, handler __bridgeHandleJob).
-  4. MIGRACIÓN DE DOMINIO (extensión 2.2.1): manifest (host_permissions +
-     content_scripts) reconoce https://flow.google.com/* —incluyendo
+  4. MIGRACIÓN DE DOMINIO (extensión 2.2.1 → 2.2.2): manifest (host_permissions
+     + content_scripts) reconoce https://flow.google.com/* —incluyendo
      https://flow.google.com/project/<id>— conservando compatibilidad con
      labs.google; tabs.query del bridge cubre AMBOS dominios (causa raíz del
      bloqueo: la extensión 2.2.0 solo buscaba labs.google y Flow migró con
      redirect 308); el origin check del popup acepta el dominio actual y
-     rechaza impostores; el selector Slate NO cambió.
+     rechaza impostores; la extensión sigue siendo v2.2.x.
 
 Si esta batería pasa, el contrato backend↔extensión está verificado en la
 capa navegador re-ejecutable (la corrida E2E con Google Flow REAL sigue
@@ -100,7 +100,7 @@ def main() -> int:
     else:
         check("background.js existe", False)
 
-    print("── 4. migración de dominio Google Flow: flow.google.com (ext 2.2.1)")
+    print("── 4. migración de dominio Google Flow: flow.google.com (ext 2.2.2)")
 
     def _pat_a_regex(pat):
         """Traduce un match pattern de Chrome (https://host/path) a regex."""
@@ -112,6 +112,8 @@ def main() -> int:
     mf = json.loads((EXT / "manifest.json").read_text(encoding="utf-8"))
     hp = mf.get("host_permissions", [])
     check("manifest.json es JSON válido con MV3", mf.get("manifest_version") == 3)
+    check("extensión continúa siendo v2.2.x (sin salto mayor)",
+          str(mf.get("version", "")).startswith("2.2"), mf.get("version"))
     check("host_permissions incluye el dominio ACTUAL https://flow.google.com/*",
           "https://flow.google.com/*" in hp, repr(hp))
     check("host_permissions CONSERVA labs.google (compatibilidad)",

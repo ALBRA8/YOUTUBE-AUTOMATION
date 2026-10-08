@@ -331,59 +331,298 @@ function writeViaWorkerTab(imgUrl, slug, filename) {
   });
 }
 
-/* ---------------- Mecanografia humana en Slate (manual 4.3) --------------- */
-/* Funcion auto-contenida: se serializa y ejecuta DENTRO de la pestana. */
+/* -------- Resolucion e inyeccion de prompt (UI real flow.google.com) ------ */
+/* Funcion auto-contenida: se serializa y ejecuta DENTRO de la pestana.
+   v2.2.2 — la UI actual de Flow (AiSandboxAngularFrontend, raiz
+   <aisandbox-root>) ya no monta Slate: el bundle no contiene data-slate y la
+   entrada real son controles estandar (textarea / contenteditable
+   role=textbox). Resolver por estrategias EN ORDEN:
+     A) aisandbox-root       → control editable dentro del arbol aisandbox-*
+     B) textarea-prompt      → textarea visible/editable con senales de prompt
+     C) contenteditable      → contenteditable visible con role="textbox"
+     D) slate-legacy         → compat [data-slate-editor="true"] (UI anterior)
+   Filtrado por senales observables (placeholder/data-placeholder/aria-label/
+   aria-labelledby/label/id/name/data-testid, visibilidad, enabled, editable,
+   multilinea, <form>, boton de envio cercano) y vetos duros (nav/header,
+   role search|navigation|menubar|banner, campos de busqueda/titulo/feedback).
+   Sin clases generadas por Angular, sin coordenadas, sin clicks posicionales.
+   La insercion usa el mecanismo del control real: setter nativo + eventos
+   input/change (textarea) o seleccion + beforeinput + execCommand con
+   fallback textContent (contenteditable), y VERIFICA el valor antes de
+   devolver ok. Devuelve diagnostico estructurado (estrategias probadas y
+   candidatos evaluados) en vez del antiguo error opaco de Slate. */
 function slateInjectFn(promptText) {
+  const STRATEGIES = ['aisandbox-root', 'textarea-prompt', 'contenteditable-textbox', 'slate-legacy'];
+  const diag = { strategies: [], candidates: [] };
   try {
-    const editor = document.querySelector('[data-slate-editor="true"]');
-    if (!editor) return { ok: false, error: 'Editor Slate no encontrado. Abre un proyecto de Flow.' };
-    editor.focus();
-
-    // Limpiar texto residual de un envio anterior
-    const sel0 = window.getSelection();
-    const range0 = document.createRange();
-    range0.selectNodeContents(editor);
-    sel0.removeAllRanges();
-    sel0.addRange(range0);
-    if ((editor.textContent || '').trim().length) {
-      document.execCommand('delete');
+    const norm = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+    const target = norm(promptText);
+    if (!target) {
+      return { ok: false, error: 'prompt vacio: nada que inyectar', strategies: diag.strategies, candidates: diag.candidates };
     }
 
-    // Seleccion colapsada al final del editor
-    const sel = window.getSelection();
-    const range = document.createRange();
-    range.selectNodeContents(editor);
-    range.collapse(false);
-    sel.removeAllRanges();
-    sel.addRange(range);
+    /* ------- inspeccion: solo APIs estandar, sin clases de framework ------- */
+    const attrsOf = (el) => {
+      const out = {};
+      try {
+        const list = el.attributes;
+        for (let i = 0; i < list.length; i++) out[String(list[i].name).toLowerCase()] = String(list[i].value);
+      } catch (_) {}
+      return out;
+    };
+    const rectOf = (el) => { try { return el.getBoundingClientRect(); } catch (_) { return null; } };
+    const visible = (el) => {
+      try {
+        const r = rectOf(el);
+        if (!r || !(r.width > 0) || !(r.height > 0)) return false;
+        const cs = window.getComputedStyle(el);
+        if (cs && (cs.display === 'none' || cs.visibility === 'hidden')) return false;
+        for (let n = el; n; n = n.parentElement) {
+          if (n.getAttribute && n.getAttribute('aria-hidden') === 'true') return false;
+        }
+        return true;
+      } catch (_) { return false; }
+    };
+    const textOf = (n) => (n && n.textContent) || '';
+    const labelledText = (el) => {
+      try {
+        const ids = String(el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean);
+        return ids.map((id) => textOf(document.getElementById(id))).join(' ');
+      } catch (_) { return ''; }
+    };
+    const labelOf = (el) => {
+      try {
+        const id = el.getAttribute && el.getAttribute('id');
+        if (id) {
+          const l = document.querySelector('label[for="' + id + '"]');
+          if (l) return textOf(l);
+        }
+        for (let n = el.parentElement; n; n = n.parentElement) {
+          if (n.tagName === 'LABEL') return textOf(n);
+        }
+      } catch (_) {}
+      return '';
+    };
+    const richTextOf = (el) => {
+      try { const t = el.innerText; if (typeof t === 'string' && t.length) return t; } catch (_) {}
+      return el.textContent || '';
+    };
 
-    // beforeinput sintetico + execCommand (React registra los caracteres)
-    editor.dispatchEvent(new InputEvent('beforeinput', {
-      inputType: 'insertText',
-      data: promptText,
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-    }));
-    document.execCommand('insertText', false, promptText);
+    const VETO_RX = /(search|buscar|filter|filtr|navega|navigat|cookie|captcha|e-?mail|correo|password|contrasen|feedback|comentario|comment|t[íi]tulo|\btitle\b|\bname\b|\bnombre\b)/i;
+    const STRONG_RX = /(prompt|describe|describ|idea|escena|scene|imagine|imagina)/i;
+    const MID_RX = /(video|genera|crear|create|instruc)/i;
 
-    // Boton de envio (flecha) con props React internas
+    const ancestry = (el) => {
+      const info = { inAisandbox: false, inForm: false, veto: null, sendNear: false };
+      for (let n = el.parentElement, hops = 0; n && hops < 30; n = n.parentElement, hops++) {
+        const tag = (n.tagName || '').toLowerCase();
+        if (tag === 'form') info.inForm = true;
+        if (tag === 'nav' || tag === 'header') info.veto = info.veto || ('dentro de <' + tag + '>');
+        if (tag.indexOf('aisandbox-') === 0) info.inAisandbox = true;
+        const r = String((n.getAttribute && n.getAttribute('role')) || '').toLowerCase();
+        if (r === 'search' || r === 'navigation' || r === 'menubar' || r === 'banner') {
+          info.veto = info.veto || ('dentro de [role="' + r + '"]');
+        }
+        const al = String((n.getAttribute && n.getAttribute('aria-label')) || '');
+        if (al && VETO_RX.test(al)) info.veto = info.veto || ('ancestro aria-label "' + al.slice(0, 40) + '"');
+        if (!info.sendNear && hops < 6) {
+          try { const bs = n.querySelectorAll('button'); if (bs && bs.length) info.sendNear = true; } catch (_) {}
+        }
+      }
+      return info;
+    };
+    const isEditableEl = (el, kind) => {
+      try {
+        if (el.getAttribute && el.getAttribute('aria-disabled') === 'true') return false;
+        if (kind === 'textarea') {
+          return !el.disabled && !el.readOnly && el.getAttribute('readonly') === null;
+        }
+        return !!el.isContentEditable;
+      } catch (_) { return false; }
+    };
+
+    /* -------------------------- coleccion de candidatos -------------------- */
+    const cands = [];
+    const seen = new Set();
+    const collect = (els, kind, slate) => {
+      for (const el of els) {
+        if (!el || seen.has(el)) continue;
+        seen.add(el);
+        const at = attrsOf(el);
+        const vis = visible(el);
+        const editable = isEditableEl(el, kind);
+        const anc = ancestry(el);
+        const role = String(at.role || '').toLowerCase();
+        const sigParts = [at.placeholder, at['data-placeholder'], at['aria-label'],
+          labelledText(el), labelOf(el), at.id, at.name, at['data-testid'], at['data-test']];
+        const sig = sigParts.filter(Boolean).join(' ');
+        const vetoHay = [at.placeholder, at['data-placeholder'], at['aria-label'],
+          labelledText(el), at.id, at.name, at['data-testid'], at['data-test']].filter(Boolean).join(' ');
+        const selfVeto = VETO_RX.test(vetoHay)
+          ? 'atributos ajenos a prompt: "' + vetoHay.slice(0, 60) + '"'
+          : null;
+        const veto = !vis ? 'no visible' : (!editable ? 'no editable' : (anc.veto || selfVeto));
+        let score = 0;
+        if (!veto) {
+          if (STRONG_RX.test(sig)) score += 3;
+          if (MID_RX.test(sig)) score += 2;
+          if (anc.inAisandbox) score += 2;
+          if (anc.inForm) score += 1;
+          if (anc.sendNear) score += 2;
+          if (role === 'textbox') score += 1;
+          if (kind === 'textarea'
+              && ((parseInt(at.rows, 10) || 1) > 1 || ((rectOf(el) || {}).height || 0) >= 40)) score += 1;
+        }
+        let group = null;
+        if (slate) group = 'D';
+        else if (anc.inAisandbox) group = 'A';
+        else if (kind === 'textarea') group = 'B';
+        else if (kind === 'rich' && role === 'textbox') group = 'C';
+        diag.candidates.push({
+          kind, group, score, visible: vis, editable, veto: veto || null,
+          signal: sig ? sig.slice(0, 80) : null,
+        });
+        if (group && !veto) cands.push({ el, kind, group, score });
+      }
+    };
+    try { collect(Array.from(document.querySelectorAll('[data-slate-editor="true"]')), 'rich', true); } catch (_) {}
+    try { collect(Array.from(document.querySelectorAll('textarea')), 'textarea', false); } catch (_) {}
+    try { collect(Array.from(document.querySelectorAll('*')).filter((n) => n && n.isContentEditable), 'rich', false); } catch (_) {}
+
+    /* ------------------------- seleccion por estrategia -------------------- */
+    const order = { A: 0, B: 1, C: 2, D: 3 };
+    const strategyOf = { A: 'aisandbox-root', B: 'textarea-prompt', C: 'contenteditable-textbox', D: 'slate-legacy' };
+    cands.sort((x, y) => (order[x.group] - order[y.group]) || (y.score - x.score));
+    let top = null;
+    for (const g of ['A', 'B', 'C', 'D']) {
+      const inG = cands.filter((c) => c.group === g);
+      if (!inG.length) { diag.strategies.push({ strategy: strategyOf[g], result: 'sin candidatos' }); continue; }
+      inG.sort((x, y) => y.score - x.score);
+      const t = inG[0];
+      const hayOtros = cands.some((c) => c.group !== g);
+      const unicoEnTodo = inG.length === 1 && !hayOtros;
+      if (t.score > 0 || unicoEnTodo || g === 'D') {
+        top = t;
+        top.strategyDetail = t.score > 0
+          ? 'senales de prompt (puntaje ' + t.score + ')'
+          : 'unico candidato editable';
+        diag.strategies.push({ strategy: strategyOf[g], result: 'seleccionado: ' + top.strategyDetail });
+        break;
+      }
+      diag.strategies.push({ strategy: strategyOf[g], result: 'ambiguo: ' + inG.length + ' candidato(s) sin senales de prompt' });
+    }
+    if (!top) {
+      const resumen = diag.strategies.map((s) => s.strategy + '=' + s.result).join('; ');
+      return {
+        ok: false,
+        error: 'No se encontro un campo de prompt editable para la UI actual. '
+          + 'Estrategias probadas [' + STRATEGIES.join(', ') + ']: ' + resumen
+          + '. Candidatos evaluados: ' + diag.candidates.length + '.',
+        strategies: diag.strategies,
+        candidates: diag.candidates,
+      };
+    }
+    const editor = top.el;
+
+    /* --------------------- insercion segun el control real ------------------ */
+    const fire = (el, type, Ctor, init) => {
+      try { el.dispatchEvent(new Ctor(type, init)); } catch (_) {
+        try { el.dispatchEvent(new Event(type, { bubbles: !!(init && init.bubbles) })); } catch (_2) {}
+      }
+    };
+    let path = null;
+    if (top.kind === 'textarea') {
+      editor.focus();
+      let desc = null;
+      try { desc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(editor) || {}, 'value'); } catch (_) {}
+      try {
+        if (desc && typeof desc.set === 'function') { desc.set.call(editor, promptText); path = 'native-setter'; }
+        else { editor.value = promptText; path = 'direct-assign'; }
+      } catch (_) { editor.value = promptText; path = 'direct-assign'; }
+      fire(editor, 'input', Event, { bubbles: true });
+      fire(editor, 'change', Event, { bubbles: true });
+    } else {
+      editor.focus();
+      try {
+        const sel = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(editor);
+        if (sel) { sel.removeAllRanges(); sel.addRange(range); }
+        if ((editor.textContent || '').trim().length) {
+          if (typeof document.execCommand === 'function') {
+            try { document.execCommand('delete'); } catch (_) {}
+          } else { editor.textContent = ''; }
+        }
+        const r2 = document.createRange();
+        r2.selectNodeContents(editor);
+        r2.collapse(false);
+        if (sel) { sel.removeAllRanges(); sel.addRange(r2); }
+      } catch (_) { /* seleccion best-effort */ }
+      fire(editor, 'beforeinput', (window && window.InputEvent) || Event, {
+        inputType: 'insertText', data: promptText, bubbles: true, cancelable: true, composed: true,
+      });
+      let done = false;
+      if (typeof document.execCommand === 'function') {
+        try { done = document.execCommand('insertText', false, promptText) === true; } catch (_) { done = false; }
+      }
+      if (done && norm(richTextOf(editor)) === target) {
+        path = 'execcommand';
+      } else {
+        try { editor.textContent = promptText; } catch (_) {}
+        fire(editor, 'input', Event, { bubbles: true });
+        path = 'textcontent-fallback';
+      }
+    }
+
+    /* -------------- verificacion: el valor quedo en el editor --------------- */
+    const valueNow = top.kind === 'textarea' ? String(editor.value || '') : richTextOf(editor);
+    const verified = norm(valueNow) === target;
+    if (!verified) {
+      const vistos = diag.strategies.map((s) => s.strategy);
+      for (const g of ['A', 'B', 'C', 'D']) {
+        if (!vistos.includes(strategyOf[g])) {
+          diag.strategies.push({ strategy: strategyOf[g], result: 'no alcanzada (fallo en la verificacion del valor)' });
+        }
+      }
+      return {
+        ok: false,
+        editorType: top.kind === 'textarea' ? 'textarea' : 'contenteditable',
+        selectorStrategy: strategyOf[top.group],
+        error: 'El valor no quedo presente en el editor tras la insercion (path=' + path + '). '
+          + 'Estrategias probadas [' + STRATEGIES.join(', ') + '].',
+        strategies: diag.strategies,
+        candidates: diag.candidates,
+      };
+    }
+
+    /* --------------------- boton de envio + Enter sintetico ----------------- */
+    const sendish = (b) => {
+      try {
+        const icon = b.querySelector && b.querySelector('i.google-symbols, span.google-symbols, .google-symbols');
+        if (icon && /arrow_forward|arrow_upward|send|north/i.test(icon.textContent || '')) return true;
+      } catch (_) {}
+      try {
+        const lab = ((b.getAttribute && b.getAttribute('aria-label')) || '')
+          + ' ' + ((b.getAttribute && b.getAttribute('title')) || '');
+        if (/(^|\s)(send|enviar|submit|generar|generate|crear|create)(\s|$)/i.test(lab)) return true;
+      } catch (_) {}
+      return false;
+    };
     let btn = null;
-    const buttons = Array.from(document.querySelectorAll('button'));
-    for (const b of buttons) {
-      const icon = b.querySelector('i.google-symbols, span.google-symbols, .google-symbols');
-      if (icon && /arrow_forward|arrow_upward|send/i.test(icon.textContent || '')) { btn = b; break; }
-    }
+    try { btn = Array.from(document.querySelectorAll('button')).find(sendish) || null; } catch (_) {}
     if (!btn) {
-      const scope = editor.closest('form') || editor.parentElement || document;
-      const candidates = Array.from(scope.querySelectorAll('button')).filter((b) => !b.disabled);
-      btn = candidates.length ? candidates[candidates.length - 1] : null;
+      let scope = editor.parentElement;
+      for (let i = 0; i < 6 && scope && scope !== document.body; i++) {
+        try {
+          const bs = Array.from(scope.querySelectorAll('button')).filter((b) => !b.disabled);
+          if (bs.length) { btn = bs[bs.length - 1]; break; }
+        } catch (_) {}
+        scope = scope.parentElement;
+      }
     }
     let clicked = false;
     if (btn) {
-      btn.disabled = false;
-      btn.removeAttribute('disabled');
-      btn.removeAttribute('aria-disabled');
+      try { btn.disabled = false; btn.removeAttribute('disabled'); btn.removeAttribute('aria-disabled'); } catch (_) {}
       try {
         const key = Object.keys(btn).find((k) => k.startsWith('__reactProps$'));
         if (key && btn[key] && typeof btn[key].onClick === 'function') {
@@ -393,14 +632,26 @@ function slateInjectFn(promptText) {
       } catch (_) {}
       if (!clicked) { try { btn.click(); clicked = true; } catch (_) {} }
     }
-
-    // Enter sintetico simultaneo
-    editor.dispatchEvent(new KeyboardEvent('keydown', {
+    fire(editor, 'keydown', (window && window.KeyboardEvent) || Event, {
       key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true,
-    }));
-    return { ok: true, clicked, len: promptText.length };
+    });
+
+    return {
+      ok: true,
+      editorType: top.kind === 'textarea'
+        ? 'textarea'
+        : ((editor.getAttribute && editor.getAttribute('data-slate-editor') === 'true') ? 'slate-legacy' : 'contenteditable'),
+      selectorStrategy: strategyOf[top.group],
+      strategyDetail: top.strategyDetail,
+      promptInjected: true,
+      valueVerified: true,
+      injectPath: path,
+      score: top.score,
+      clicked,
+      len: promptText.length,
+    };
   } catch (e) {
-    return { ok: false, error: String((e && e.message) || e) };
+    return { ok: false, error: String((e && e.message) || e), strategies: diag.strategies, candidates: diag.candidates };
   }
 }
 
