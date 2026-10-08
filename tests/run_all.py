@@ -62,6 +62,10 @@ BATERIAS = [
                                  # ext 2.2.3): fin del tabs[0] arbitrario —
                                  # orden de preferencia + sonda REAL de
                                  # executeScript + fallback entre candidatas (58)
+    "test_extension_error_tile.py", # FIX error-tile ([error-tile v2], ext
+                                 # 2.2.4): fin del falso positivo — el
+                                 # flow-error-tile solo es fatal SIN evidencia
+                                 # de resultados; código REAL en SW simulado (54)
     "test_humos_infra.py",       # humos: lo declarado EXISTE en el repo (~50)
     "test_hands.py",             # HANDS V1.0 núcleo aislado: contratos,
                                  # permisos deny-by-default, workspace, sesiones,

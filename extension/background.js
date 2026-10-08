@@ -795,11 +795,32 @@ async function processDomSnapshot(data) {
   }
 
   /* PLAN B semantico: si tRPC no entrego mapeo y Flow esta en UI Angular,
-     img[data-media-id] / flow-error-tile dan cobertura sin interceptacion. */
+     img[data-media-id] / flow-error-tile dan cobertura sin interceptacion.
+
+     [error-tile v2] FIX falso positivo (prueba REAL, proyecto 26b63daa9bdd):
+     Flow puede fallar UN intento (tile de error en el DOM) mientras la MISMA
+     generacion ya produjo videos validos (4 MP4 H.264/AAC 720x1280 con firma
+     Google/C2PA confirmados). Un flow-error-tile solo es FATAL cuando NO hay
+     evidencia de resultados: sin media/video visible en el snapshot, sin
+     tiles pendientes y sin media ya atribuida a la escena candidata. Con
+     evidencia, el tile se ignora (fallo parcial de un intento) y las redes
+     de seguridad no cambian: watchdog por escena, error de politicas por
+     tile clasico (texto infringement/policy) y rate limit. */
   const sem = data && data.semantic;
   if (sem && Array.isArray(sem.errorTiles) && sem.errorTiles.length) {
     const errScene = resolveSemanticScene(null);
-    if (errScene != null) markSceneError(errScene, 'flow-error-tile: ' + (sem.errorTiles[0] || '').slice(0, 120));
+    const hayMediaEnTiles = (data.tiles || []).some((t) => t
+      && ((Array.isArray(t.imgSrcs) && t.imgSrcs.length)
+        || (Array.isArray(t.vidSrcs) && t.vidSrcs.length)));
+    const hayMediaVisible = hayMediaEnTiles
+      || (Array.isArray(sem.media) && sem.media.length > 0)
+      || (Array.isArray(sem.videos) && sem.videos.length > 0);
+    const hayPendientes = (sem.pending || 0) > 0;
+    const escenaConMedia = errScene != null
+      && (sceneMediaCounts.get(errScene) || 0) > 0;
+    if (errScene != null && !hayMediaVisible && !hayPendientes && !escenaConMedia) {
+      markSceneError(errScene, 'flow-error-tile: ' + (sem.errorTiles[0] || '').slice(0, 120));
+    }
   }
   if (sem && Array.isArray(sem.media) && sem.media.length) {
     for (const m of sem.media) {
