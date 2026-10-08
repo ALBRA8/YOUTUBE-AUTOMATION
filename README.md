@@ -178,7 +178,11 @@ yt_automation_v2/
 │   │   ├── url_mode.py       # yt-dlp + transcripción
 │   │   ├── youtube_publish.py# OAuth + upload + programar
 │   │   ├── scheduler.py      # modo fábrica (APScheduler)
-│   │   └── themes.py         # 25 estilos visuales
+│   │   ├── themes.py         # 25 estilos visuales
+│   │   └── hands/            # HANDS V1.0: capa de ejecución física AISLADA
+│   │                         #   (permisos deny-by-default, sesiones, locks,
+│   │                         #    evidencia, kill switch; NOT CONNECTED —
+│   │                         #    ver docs/HANDS.md)
 │   ├── static/               # dashboard v2 (HTML/CSS/JS sin build)
 │   └── data/                 # DB, videos, audios, thumbs (gitignored)
 ├── extension/                # Chrome MV3: puente ImageFX

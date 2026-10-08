@@ -63,6 +63,18 @@ BATERIAS = [
                                  # orden de preferencia + sonda REAL de
                                  # executeScript + fallback entre candidatas (58)
     "test_humos_infra.py",       # humos: lo declarado EXISTE en el repo (~50)
+    "test_hands.py",             # HANDS V1.0 núcleo aislado: contratos,
+                                 # permisos deny-by-default, workspace, sesiones,
+                                 # locks, evidencia, waits, verificación,
+                                 # recovery, kill switch, engine, runtime (121)
+    "test_hands_operators.py",   # HANDS V1.0 operadores: desktop mock,
+                                 # físico NOT_VERIFIED, flow operator, adaptador
+                                 # bridge (contrato HTTP), integración futura
+                                 # NOT CONNECTED, self-audit §40, clean-room (58)
+    "test_hands_chaos.py",       # HANDS V1.0 chaos: timeouts, UI cambia,
+                                 # permisos, BLOCKED, recovery agotado,
+                                 # UNKNOWN honesto, kill switch, fichero lento,
+                                 # descarga fallida, locks muertos (33)
     "test_live_boot.py",         # BOOT VIVO: uvicorn real + ciclo completo del
                                  # Flow Bridge por HTTP (boot + cycle smoke)
 ]

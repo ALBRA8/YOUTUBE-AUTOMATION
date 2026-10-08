@@ -83,3 +83,6 @@ backend/data/doctor/
 backend/data/memorydv/
 backend/data/metrics/
 backend/data/skills_state.json
+
+# ── 🖐️ HANDS V1.0: runtime físico aislado (workspace, evidencia, sesiones) ──
+backend/data/hands/

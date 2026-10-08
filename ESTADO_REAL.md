@@ -48,9 +48,22 @@ mantiene el inventario público.
 | **Contrato A2A (§25)**: `POST /api/agent/execute` — puerta formal para agentes externos (Creative Engine): exige `requester`+`creative_spec`; respuestas honestas `VALIDATION_ERROR` / `REQUIRES_CLARIFICATION` / `ACCEPTED` / `EXECUTING` con {status, production_id, result, evidence, confidence, execution_id, warnings} | ✅ real | wiring auditado en `test_security_hardening.py` §6 + contrato en `main.py` |
 | **Cola endurecida (§14-§17)**: `fail()`/`heartbeat()` con UPDATE condicional dentro de BEGIN IMMEDIATE (TOCTOU cerrado: un fail/heartbeat zombi ya no roba el claim del nuevo worker); barrido de leases vencidos con `lease_cycles` (MAX_LEASE_CYCLES=3 → dead: **no reintentar infinitamente**); re-enqueue conserva jobs claimed con lease vigente (trabajo en vuelo no se descarta) | ✅ real | `test_gobernanza.py` §2 + `test_concurrencia.py` + `test_chaos.py` sin regresión |
 | **Publicación como máquina de estados (§22)**: publish_state en meta (DRAFT→PUBLISHING→PUBLISHED/FAILED), cada intento = job `kind=publish` (historial), 409 idempotente si ya hay `youtube_id` (nunca doble upload), autopublish omitido si QA final con errores | ✅ real | `test_gobernanza.py` §7 + `test_autopublish_generate.py` |
-| Suite canónica | ✅ 23 baterías en `tests/run_all.py` (986 checks) | runner |
+| **HANDS V1.0 — capa de ejecución física AISLADA (NOT CONNECTED)**: `backend/services/hands/` (22 módulos stdlib, cero imports del orquestador — verificado por AST) con contratos de 9 estados (UNKNOWN nunca→COMPLETED) y 10 errores, permisos deny-by-default en 5 categorías + allowlists (comandos por binario+prefijo, sin shell jamás), workspace aislado con frontera fs anti-escape/symlink, sesiones auditables persistidas, locks desktop/browser/flow con dueño+timeout + file-lock cross-proceso con caducidad, evidencia JSONL hasheada (SHA-256) con redacción automática de secretos, audit trail append-only, wait engine con 8 kinds y timeout obligatorio (reloj inyectable), verificación PASS/FAIL/UNKNOWN + file verification por magic bytes (HTML disfrazado de PNG/MP4 rechazado), recovery acotado (1+max_retries, no-reintentables se propagan), identificación semántico→a11y→texto→DOM→visual→coords (vetadas por política), action engine OBSERVE→IDENTIFY→ACTION→OBSERVE→VERIFY con idempotencia, kill switch (STOPPED + locks liberados + evidencia preservada), Desktop Operator (mock completo + físico con triple candado), Flow Operator (driver mock + adaptador al contrato HTTP REAL del bridge, OFF por defecto), MockEnvironment, self-audit §40 y clean-room §42 | ✅ real (capa aislada, sin Flow real ni PC real) | `test_hands.py` (121) + `test_hands_operators.py` (58) + `test_hands_chaos.py` (33); docs: `docs/HANDS.md` |
+| Suite canónica | ✅ 26 baterías en `tests/run_all.py` (1198 checks) | runner |
 
 ## 3. Lo que AÚN NO está demostrado (límites honestos)
+
+- **HANDS: ejecución física REAL (§35/§43)**: `PhysicalDesktopBackend` es
+  `NOT_VERIFIED` — la arquitectura exige consentimiento explícito + mapeo de
+  operaciones a comandos + allowlist, pero NINGÚN método ha tocado un
+  escritorio real. El adaptador `ExtensionBridgeDriver` habla el contrato
+  HTTP del Flow Bridge existente y está probado contra un servidor simulado
+  con ese contrato, pero NO contra un backend vivo. No se declara
+  REAL_WORLD_VERIFIED en ninguna capacidad de HANDS.
+- **HANDS: integración con el orquestador**: por diseño en V1.0,
+  `YOUTUBE-AUTOMATION INTEGRATION: NOT CONNECTED` — no hay wiring, no hay
+  puerta activa, no se dispara producción. La lista de pasos pendientes
+  vive en `future_integration.integration_checklist()` y `docs/HANDS.md §8`.
 
 - **E2E con Google Flow REAL**: no se ha demostrado una ejecución de punta a
   punta generando assets en flow.google.com con la extensión instalada en
