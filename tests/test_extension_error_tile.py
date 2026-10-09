@@ -1,43 +1,43 @@
 #!/usr/bin/env python3
-"""Batería determinista del FIX error-tile ([error-tile v2], ext 2.2.4).
+"""Batería determinista del tratamiento de error-tiles (ext 2.3.0, [attempt v3]).
 
-Falso positivo corregido (prueba REAL, proyecto 26b63daa9bdd): Google Flow SÍ
-generó correctamente los videos (≥4 MP4 H.264/AAC 720x1280 de 8 s con firma
-C2PA/SynthID de Google, con el texto del prompt de la prueba dentro de los
-frames), pero la extensión marcó la escena como ERROR porque el snapshot del
-DOM contenía un <flow-error-tile> (fallo de UN intento/variante) y el bloque
-PLAN B de background.js lo trataba como fallo fatal sin mirar la evidencia de
-resultados del mismo snapshot.
+Evolución del fix V1 ([error-tile v2], ext 2.2.4): la evidencia REAL_WORLD
+(proyecto 26b63daa9bdd: 4 MP4 H.264/AAC 720x1280 válidos con firma
+Google/C2PA JUNTO a tarjetas "No se pudo completar la acción" en el MISMO
+snapshot) demostró que un flow-error-tile es el fallo de UN intento/variante,
+NO un veredicto sobre la escena.
+
+V3 (JOB vs ATTEMPT, mandato FLOW VIDEO v3): NINGÚN error-tile — semántico o
+cásico — emite un veredicto fatal en el snapshot. Se registra como INTENTO
+(recordSceneAttempt, con dedupe anti-residuo) y Flow sigue procesando; el
+RESULTADO VÁLIDO tiene prioridad y el ERROR solo lo emite el watchdog al
+agotarse la ventana SIN resultado.
 
 Qué verifica (sin Chrome, sin red, sin Google Flow real — la prueba REAL se
 hará después en el PC del usuario):
 
-  1. ANCLAJES del FIX en background.js:
-     - el error-tile solo es FATAL si NO hay evidencia de resultados:
-       sin media/video visible en el snapshot, sin tiles pendientes y sin
-       media ya atribuida a la escena candidata
-     - comentario forense del FIX presente; una sola llamada fatal
-  2. REDES DE SEGURIDAD INTACTAS: watchdog por escena, error de políticas por
-     tile clásico (texto infringement/policy), rate limit tooQuick y la
-     extracción semántica de domScanFn no cambian.
+  1. ANCLAJES de [attempt v3] en background.js:
+     - ningún error-tile dispara markSceneError en processDomSnapshot
+     - los intentos se registran con evidencia (semántico y clásico)
+     - el watchdog emite el veredicto con evidencia de intentos
+     - la ventana de video configurable existe (VIDEO_GENERATION_TIMEOUT_SECONDS)
+  2. REDES DE SEGURIDAD INTACTAS: watchdog por escena, rate limit tooQuick y
+     la extracción semántica de domScanFn no cambian; ventana imagen 5 min.
   3. ESCENARIOS deterministas (node tests/error_tile_mock.js; el arnés carga
-     el CÓDIGO REAL extraído de background.js — processDomSnapshot,
-     resolveSemanticScene, resolveSceneForTile, markSceneError,
-     normalizeForMatch, detectExtension, STATUS — en un service worker
-     simulado y ejecuta snapshots con la forma EXACTA de domScanFn):
-       A  CASO FORENSE EXIGIDO: error-tile + video válido en el mismo
-          snapshot → la escena NO se marca ERROR (antes: falso positivo)
-       B  fallo total sin evidencia → sigue siendo FATAL (la cobertura
-          original no se pierde)
-       C  pendientes (generación en vuelo) → suprimen el veredicto fatal
+     el CÓDIGO REAL extraído de background.js en un service worker simulado
+     y ejecuta snapshots con la forma EXACTA de domScanFn):
+       A  CASO FORENSE: error-tile + video válido en el mismo snapshot →
+          la escena NO se marca ERROR y se completa (DOWNLOADED)
+       B  fallo total sin evidencia → se registra el INTENTO (no veredicto)
+       C  pendientes (generación en vuelo) → la escena sigue IN_PROGRESS
        D  orden interno: el bloque de error corre antes que el de media
           semántica y aun así la escena se completa (DOWNLOADED)
        E  escena ya con media atribuida (idempotencia) → no se mata
        F  tile clásico con video en el mismo snapshot → descarga y completa
-          sin falso positivo
-       G  varias escenas en curso → sin resolución 1-a-1 no se marca nada
-       H  ciclo acotado: pendientes difieren el veredicto, no lo cancelan
-       I  rate limit tooQuick y tile de políticas intactos
+       G  varias escenas en curso → sin resolución 1-a-1 no se registra nada
+       H  ciclo acotado: el tile residual ESTÁTICO no infla el conteo (dedupe)
+       I  rate limit tooQuick intacto; tile de políticas registra INTENTO con
+          la evidencia política preservada (sin veredicto)
 
 Uso:  cd yt_automation_v2 && python3 tests/test_extension_error_tile.py
       python3 -m pytest tests/test_extension_error_tile.py -q
@@ -78,7 +78,7 @@ def _extraer_seccion(src: str, ini: str, fin: str) -> str:
 
 def _bundle_real(src: str) -> str:
     """Extrae el código REAL que la batería ejecuta: constantes + helpers +
-    sección processDomSnapshot..markSceneError (sin el watchdog ni nada más)."""
+    sección processDomSnapshot..watchdog (sin el watchdog ni nada más)."""
     m_status = re.search(r"const STATUS = \{[^}]+\};", src)
     m_len = re.search(r"const MAX_PROMPT_MATCH_LEN = \d+;", src)
     norm = _extraer_seccion(
@@ -100,35 +100,53 @@ def main() -> int:
     check("node disponible en el sandbox", bool(node),
           "instala Node.js para poder verificar el FIX")
 
-    print("── 1. anclajes del FIX en background.js")
+    print("── 1. anclajes de [attempt v3] en background.js")
     bg = EXT / "background.js"
     check("background.js existe", bg.exists())
     src = bg.read_text(encoding="utf-8", errors="replace")
 
-    check("comentario forense del FIX presente ([error-tile v2])",
-          "[error-tile v2] FIX falso positivo" in src)
-    guard = ("if (errScene != null && !hayMediaVisible && !hayPendientes"
-             " && !escenaConMedia) {")
-    check("guard de evidencia presente (media visible / pendientes / media "
-          "ya atribuida)", guard in src, "ancla no encontrada")
-    check("evidencia por tiles clásicos (hayMediaEnTiles)", "hayMediaEnTiles" in src)
-    check("evidencia semántica de video (sem.videos)", "sem.videos.length > 0" in src)
-    check("evidencia semántica de imagen (sem.media)", "sem.media.length > 0" in src)
-    check("pendientes en vuelo (sem.pending)", "(sem.pending || 0) > 0" in src)
-    check("media ya atribuida a la escena (sceneMediaCounts)",
-          "(sceneMediaCounts.get(errScene) || 0) > 0" in src)
+    check("comentario forense [attempt v3] presente (JOB vs ATTEMPT)",
+          "[attempt v3] JOB vs ATTEMPT" in src)
     n_fatal = src.count("markSceneError(errScene, 'flow-error-tile: '")
-    check("exactamente UNA llamada fatal flow-error-tile", n_fatal == 1,
-          f"esperado 1, hay {n_fatal}")
+    check("NINGUNA llamada fatal desde error-tiles (supersede V1)", n_fatal == 0,
+          f"esperado 0, hay {n_fatal}")
+    n_rec = src.count("recordSceneAttempt(")
+    check("los intentos se registran (semántico + clásico)", n_rec >= 3,
+          f"esperado >=3 (definición + 2 llamadas), hay {n_rec}")
+    check("evidencia semántica registrada ('flow-error-tile: ')",
+          "'flow-error-tile: '" in src)
+    check("evidencia política preservada (bloqueo de politicas)",
+          "'bloqueo de politicas de contenido'" in src)
+    check("dedupe anti-residuo presente (CAMBIO 7)",
+          "prev.lastError === reason" in src)
+    check("limpieza al completar (clearSceneAttempts en DOWNLOADED)",
+          src.count("clearSceneAttempts(scene)") >= 2)
+    check("limpieza al iniciar (injectScene CAMBIO 7)",
+          "clearSceneAttempts(item.scene_number)" in src)
+    check("limpieza al reclamar job del bridge",
+          "sceneAttempts.delete(sceneNumber)" in src)
     n_sem_null = src.count("resolveSemanticScene(null)")
     check("resolución de escena semántica sin mediaId intacta (1 llamada)",
           n_sem_null == 1, f"esperado 1, hay {n_sem_null}")
 
-    print("── 2. redes de seguridad intactas (no forman parte del FIX)")
-    check("error de políticas por tile clásico intacto",
-          "'bloqueo de politicas de contenido'" in src)
-    check("watchdog por escena intacto",
-          "watchdog: generación atascada" in src)
+    print("── 1b. anclajes [video-window v3] (ventana de video operativa)")
+    check("constante VIDEO_GENERATION_TIMEOUT_SECONDS (15*60)",
+          "const VIDEO_GENERATION_TIMEOUT_SECONDS = 15 * 60;" in src)
+    check("piso razonable 1 min", "VIDEO_TIMEOUT_MIN_MS = 60 * 1000" in src)
+    check("techo razonable 2 h", "VIDEO_TIMEOUT_MAX_MS = 120 * 60000" in src)
+    check("configurable via storage (videoTimeoutSeconds)",
+          "videoTimeoutSeconds" in src)
+    check("presupuesto por modo (videoTimeoutMs vs imagen)",
+          "mode === 'videos' ? videoTimeoutMs() : SCENE_WATCHDOG_MS_IMAGES"
+          in src)
+    check("constante fija SCENE_WATCHDOG_MS_VIDEOS eliminada",
+          "const SCENE_WATCHDOG_MS_VIDEOS" not in src)
+    check("techo del handler bridge derivado de la ventana",
+          "Math.max(18 * 60000, videoTimeoutMs() + 3 * 60000)" in src)
+
+    print("── 2. redes de seguridad intactas (no forman parte del cambio)")
+    check("watchdog por escena con veredicto con evidencia",
+          "watchdog: sin resultado válido en" in src)
     check("rate limit tooQuick intacto", "triggerRateLimit()" in src)
     check("extracción semántica pending intacta",
           '\'flow-pending-tile, [data-testid="pending-tile"]\'' in src)
@@ -138,11 +156,13 @@ def main() -> int:
           "'img[data-media-id]'" in src)
     check("descarga semántica intacta (loop sem.media)",
           "Array.isArray(sem.media) && sem.media.length" in src)
+    check("ventana de imagen SIN CAMBIOS (5 min)",
+          "SCENE_WATCHDOG_MS_IMAGES = 5 * 60000" in src)
 
     print("── 3. versión y sintaxis")
     mf = json.loads((EXT / "manifest.json").read_text(encoding="utf-8"))
-    check("manifest 2.2.4 (bump de parche, sin salto mayor)",
-          mf.get("version") == "2.2.4", mf.get("version"))
+    check("manifest 2.3.0 (bump menor: cambio conductual JOB vs ATTEMPT)",
+          mf.get("version") == "2.3.0", mf.get("version"))
     if node:
         for js in ("background.js", "bridge.js", "injector.js"):
             proc = subprocess.run([node, "--check", str(EXT / js)],
@@ -162,7 +182,7 @@ def main() -> int:
         bundle, balanceado = "", False
         print(f"  (extracción: {e})")
     check("código REAL extraíble y balanceado (processDomSnapshot.."
-          "markSceneError)", balanceado and "processDomSnapshot" in bundle)
+          "watchdog)", balanceado and "processDomSnapshot" in bundle)
     check("el bundle NO arrastra el watchdog (sección acotada)",
           "function watchdogCheck" not in bundle)
     proc_syn = subprocess.run([node, "--check", str(HARNESS)],
@@ -189,11 +209,11 @@ def main() -> int:
     check("sin error_de_harness",
           "error_de_harness" not in (proc.stderr or ""))
 
-    esperadas = ["forense_video_valido", "fallo_total_fatal",
+    esperadas = ["forense_video_valido", "fallo_total_registra_intento",
                  "pendientes_suprimen", "media_semantica_mismo_snapshot",
                  "escena_ya_con_media", "tile_clasico_con_video",
                  "varias_escenas_en_curso", "ciclo_pendientes_luego_fallo",
-                 "rate_limit_intacto", "politica_tile_intacta"]
+                 "rate_limit_intacto", "politica_tile_intento"]
     check("las 10 escenas deterministas corrieron",
           all(n in esc for n in esperadas),
           repr([n for n in esperadas if n not in esc]))
@@ -208,14 +228,19 @@ def main() -> int:
           a.get("status") == "IN_PROGRESS", repr(a))
     check("forense: sin error en el item", not a.get("error"), repr(a.get("error")))
 
-    print("── 5.B fallo total sin evidencia → sigue siendo fatal")
-    b = e("fallo_total_fatal")
-    check("fallo total: status ERROR",
-          b.get("status") == "ERROR", repr(b))
-    check("fallo total: causa flow-error-tile",
-          str(b.get("error", "")).startswith("flow-error-tile: "),
+    print("── 5.B fallo total sin evidencia → registra INTENTO (no veredicto)")
+    b = e("fallo_total_registra_intento")
+    check("fallo total: la escena NO se marca ERROR en el snapshot",
+          b.get("status") == "IN_PROGRESS", repr(b))
+    check("fallo total: sin error en el item", not b.get("error"),
           repr(b.get("error")))
-    check("fallo total: avanza la cola (tickSoon)", b.get("ticked") is True)
+    check("fallo total: el intento quedó registrado (count 1)",
+          b.get("intentos") == 1, repr(b))
+    check("fallo total: evidencia preservada (flow-error-tile:)",
+          str(b.get("ultima") or "").startswith("flow-error-tile: "),
+          repr(b.get("ultima")))
+    check("fallo total: no dispara tick de avance (sin veredicto)",
+          b.get("ticked") is False, repr(b))
 
     print("── 5.C pendientes en vuelo suprimen el veredicto")
     c = e("pendientes_suprimen")
@@ -259,27 +284,28 @@ def main() -> int:
           g.get("estados") == ["IN_PROGRESS", "IN_PROGRESS"], repr(g))
     check("varias: sin errores", g.get("errores") == [None, None], repr(g))
 
-    print("── 5.H ciclo acotado: pendientes difieren, no cancelan")
+    print("── 5.H ciclo acotado: residual estático no infla el conteo")
     h = e("ciclo_pendientes_luego_fallo")
     check("ciclo: con pendientes sigue IN_PROGRESS",
           (h.get("trasPendientes") or {}).get("status") == "IN_PROGRESS",
           repr(h.get("trasPendientes")))
-    check("ciclo: al agotarse pendientes y evidencia → ERROR",
-          (h.get("final") or {}).get("status") == "ERROR",
+    check("ciclo: sin evidencia nueva sigue IN_PROGRESS (la ventana manda)",
+          (h.get("final") or {}).get("status") == "IN_PROGRESS",
           repr(h.get("final")))
-    check("ciclo: causa flow-error-tile",
-          str((h.get("final") or {}).get("error", "")).startswith(
-              "flow-error-tile: "), repr((h.get("final") or {}).get("error")))
+    check("ciclo: dedupe — 3 snapshots con el MISMO tile = 1 intento",
+          h.get("intentos") == 1, repr(h))
 
-    print("── 5.I rate limit y políticas intactos")
+    print("── 5.I rate limit intacto; políticas registra INTENTO con evidencia")
     i = e("rate_limit_intacto")
     check("tooQuick dispara rate limit", i.get("rateLimited") == 1, repr(i))
-    i2 = e("politica_tile_intacta")
-    check("tile de políticas sigue siendo fatal",
-          i2.get("status") == "ERROR", repr(i2))
-    check("tile de políticas: causa correcta",
-          i2.get("error") == "bloqueo de politicas de contenido",
-          repr(i2.get("error")))
+    i2 = e("politica_tile_intento")
+    check("tile de políticas: NO es veredicto (IN_PROGRESS)",
+          i2.get("status") == "IN_PROGRESS", repr(i2))
+    check("tile de políticas: intento registrado (count 1)",
+          i2.get("intentos") == 1, repr(i2))
+    check("tile de políticas: evidencia política preservada para el backend",
+          i2.get("evidencia") == "bloqueo de politicas de contenido",
+          repr(i2.get("evidencia")))
 
     print(f"\n═══ {OK} OK · {FAIL} fallos ═══")
     return 1 if FAIL else 0

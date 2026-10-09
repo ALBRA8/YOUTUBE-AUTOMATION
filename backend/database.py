@@ -110,6 +110,9 @@ CREATE TABLE IF NOT EXISTS flow_jobs (    -- Flow Bridge: cola de assets para la
     scene_number INTEGER NOT NULL,          -- 1-based (Escena_NN)
     part         INTEGER NOT NULL DEFAULT 1,
     prompt       TEXT NOT NULL DEFAULT '',  -- fuente única: flow_export.build_script_json
+    prompt_adapted TEXT,                    -- [flow-adaptation v1] P2: prompt adaptado SOLO
+                                            -- para ejecución operacional en Flow; P1
+                                            -- (prompt) NUNCA se sobrescribe ni se borra
     prompt_meta  TEXT,                      -- JSON (título de escena, etc.)
     status       TEXT NOT NULL DEFAULT 'queued',  -- queued | claimed | done | dead
     attempts     INTEGER NOT NULL DEFAULT 0,
@@ -148,6 +151,12 @@ def _migrate(con: sqlite3.Connection) -> None:
     fj = [r[1] for r in con.execute("PRAGMA table_info(flow_jobs)").fetchall()]
     if fj and "lease_cycles" not in fj:
         con.execute("ALTER TABLE flow_jobs ADD COLUMN lease_cycles INTEGER NOT NULL DEFAULT 0")
+    # [flow-adaptation v1] flow_jobs.prompt_adapted: P2 (prompt adaptado para
+    # la ejecución operacional en Flow). P1 vive en `prompt` y JAMÁS se toca;
+    # la separación P1/P2 es la garantía de que Flow Adaptation no es un
+    # segundo Creative Engine (ver services/flow_adaptation.py).
+    if fj and "prompt_adapted" not in fj:
+        con.execute("ALTER TABLE flow_jobs ADD COLUMN prompt_adapted TEXT")
 
 
 # ── helpers genéricos ─────────────────────────────────────────────────────

@@ -86,3 +86,6 @@ backend/data/skills_state.json
 
 # ── 🖐️ HANDS V1.0: runtime físico aislado (workspace, evidencia, sesiones) ──
 backend/data/hands/
+
+# ── 🔄 v2.3.0 [flow-adaptation v1]: memoria operacional (ledger JSONL) ──
+backend/data/flow_adaptation/

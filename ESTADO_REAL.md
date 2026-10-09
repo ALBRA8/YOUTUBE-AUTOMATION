@@ -49,7 +49,8 @@ mantiene el inventario público.
 | **Cola endurecida (§14-§17)**: `fail()`/`heartbeat()` con UPDATE condicional dentro de BEGIN IMMEDIATE (TOCTOU cerrado: un fail/heartbeat zombi ya no roba el claim del nuevo worker); barrido de leases vencidos con `lease_cycles` (MAX_LEASE_CYCLES=3 → dead: **no reintentar infinitamente**); re-enqueue conserva jobs claimed con lease vigente (trabajo en vuelo no se descarta) | ✅ real | `test_gobernanza.py` §2 + `test_concurrencia.py` + `test_chaos.py` sin regresión |
 | **Publicación como máquina de estados (§22)**: publish_state en meta (DRAFT→PUBLISHING→PUBLISHED/FAILED), cada intento = job `kind=publish` (historial), 409 idempotente si ya hay `youtube_id` (nunca doble upload), autopublish omitido si QA final con errores | ✅ real | `test_gobernanza.py` §7 + `test_autopublish_generate.py` |
 | **HANDS V1.0 — capa de ejecución física AISLADA (NOT CONNECTED)**: `backend/services/hands/` (22 módulos stdlib, cero imports del orquestador — verificado por AST) con contratos de 9 estados (UNKNOWN nunca→COMPLETED) y 10 errores, permisos deny-by-default en 5 categorías + allowlists (comandos por binario+prefijo, sin shell jamás), workspace aislado con frontera fs anti-escape/symlink, sesiones auditables persistidas, locks desktop/browser/flow con dueño+timeout + file-lock cross-proceso con caducidad, evidencia JSONL hasheada (SHA-256) con redacción automática de secretos, audit trail append-only, wait engine con 8 kinds y timeout obligatorio (reloj inyectable), verificación PASS/FAIL/UNKNOWN + file verification por magic bytes (HTML disfrazado de PNG/MP4 rechazado), recovery acotado (1+max_retries, no-reintentables se propagan), identificación semántico→a11y→texto→DOM→visual→coords (vetadas por política), action engine OBSERVE→IDENTIFY→ACTION→OBSERVE→VERIFY con idempotencia, kill switch (STOPPED + locks liberados + evidencia preservada), Desktop Operator (mock completo + físico con triple candado), Flow Operator (driver mock + adaptador al contrato HTTP REAL del bridge, OFF por defecto), MockEnvironment, self-audit §40 y clean-room §42 | ✅ real (capa aislada, sin Flow real ni PC real) | `test_hands.py` (121) + `test_hands_operators.py` (58) + `test_hands_chaos.py` (33); docs: `docs/HANDS.md` |
-| Suite canónica | ✅ 26 baterías en `tests/run_all.py` (1198 checks) | runner |
+| **FLOW VIDEO v3 + FLOW ADAPTATION v1 (ext 2.3.0)**: `extension/background.js` — [video-window v3] ventana de video 15 min configurable (piso 1 min, techo 2 h; imagen 5 min intacta) y [attempt v3] JOB vs ATTEMPT (error-tile = intento, no veredicto; resultado válido prioritario; dedupe anti-residuo; veredicto solo por watchdog con evidencia); `services/flow_adaptation.py` — [flow-adaptation v1] capa operacional: taxonomía A-G por evidencia, S1/S2 solo con rechazo, P1/P2 separados en `flow_jobs.prompt` / `prompt_adapted`, retry limitado (`MAX_EXTRA_GRANTS=1`), `FLOW_ADAPTATION_REQUIRED`, ledger JSONL en `backend/data/flow_adaptation/` | ✅ real (código REAL de background.js verificado en service worker simulado + DB tmp; REAL EXECUTION con Flow sigue sin demostrarse — ver §3) | `test_flow_video_v3.py` (119 checks) + `test_extension_error_tile.py` (65 checks) |
+| Suite canónica | ✅ 28 baterías en `tests/run_all.py` (1382 checks · 0 fallos) | runner |
 
 ## 3. Lo que AÚN NO está demostrado (límites honestos)
 
@@ -77,6 +78,13 @@ mantiene el inventario público.
   pero la inyección
   en el campo de prompt REAL de Flow, la descarga de blobs reales y la subida
   a un backend vivo requieren corrida manual con Chrome + sesión de Google.
+  La extensión **2.3.0** (FLOW VIDEO v3: ventana de video configurable,
+  JOB vs ATTEMPT) y la capa **FLOW ADAPTATION v1** del backend están
+  verificadas con baterías (`test_flow_video_v3.py`, 119 checks;
+  `test_extension_error_tile.py`, 65 checks), pero REAL EXECUTION con Flow
+  sigue sin demostrarse — requiere Chrome + sesión del usuario; la ventana
+  configurable >17 min está limitada en la práctica por el techo local de
+  `bridge.js` (20 min), documentado.
   **No se declara éxito E2E real.**
 - **Auto-render real disparado desde el bridge**: probado con mock de
   `start_flow_render`; el render completo (TTS + Ken Burns + mezcla +

@@ -178,8 +178,8 @@ def main() -> int:
     mf_path = EXT / "manifest.json"
     mf = json.loads(mf_path.read_text(encoding="utf-8"))
     hp = mf.get("host_permissions", [])
-    check("extensión 2.2.4 (bump de parche, sin salto mayor)",
-          mf.get("version") == "2.2.4", mf.get("version"))
+    check("extensión 2.3.0 (bump menor: JOB vs ATTEMPT + ventana video v3)",
+          mf.get("version") == "2.3.0", mf.get("version"))
     check("host_permissions conserva flow.google.com Y labs.google",
           "https://flow.google.com/*" in hp and "https://labs.google/*" in hp)
     check("permisos intactos (scripting/activeTab/downloads/storage/alarms)",

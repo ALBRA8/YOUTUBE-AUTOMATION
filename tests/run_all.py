@@ -66,6 +66,12 @@ BATERIAS = [
                                  # 2.2.4): fin del falso positivo — el
                                  # flow-error-tile solo es fatal SIN evidencia
                                  # de resultados; código REAL en SW simulado (54)
+    "test_flow_video_v3.py",     # FLOW VIDEO v3 ([video-window v3]+[attempt v3]
+                                 # +[flow-adaptation v1], ext 2.3.0): ventana de
+                                 # video 15 min configurable, JOB vs ATTEMPT,
+                                 # P1/P2, taxonomía A-G, retry limitado,
+                                 # FLOW_ADAPTATION_REQUIRED; código REAL en SW
+                                 # simulado + DB tmp (119)
     "test_humos_infra.py",       # humos: lo declarado EXISTE en el repo (~50)
     "test_hands.py",             # HANDS V1.0 núcleo aislado: contratos,
                                  # permisos deny-by-default, workspace, sesiones,

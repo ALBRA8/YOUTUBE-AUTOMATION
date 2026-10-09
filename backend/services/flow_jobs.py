@@ -328,6 +328,7 @@ def complete(job_id: str, token: str, data: bytes) -> dict | None:
             """UPDATE flow_jobs SET status='done', asset_path=?, error=NULL,
                lease_until=NULL, updated_at=? WHERE id=?""",
             (str(asset_path), _iso(_now()), job_id))
+        cierre_p2 = bool(row["prompt_adapted"])  # [flow-adaptation v1]
         pending = con.execute(
             """SELECT COUNT(*) c FROM flow_jobs WHERE project_id=?
                AND status != 'done'""", (pid,)).fetchone()["c"]
@@ -341,6 +342,17 @@ def complete(job_id: str, token: str, data: bytes) -> dict | None:
         raise
     finally:
         con.close()
+    # [flow-adaptation v1] cierre del ciclo en el ledger: si el job completó
+    # CON P2, la adaptación FUNCIONÓ (evidencia operacional 'si funcionó').
+    # Jamás tumba la operación de la cola si la memoria falla (patrón _mem_obs).
+    if cierre_p2:
+        try:
+            from services import flow_adaptation
+            flow_adaptation.registrar_cierre(
+                job_id, "P2 funcionó: asset validado y guardado",
+                detalle=str(asset_path))
+        except Exception:  # noqa: BLE001 — observabilidad, nunca crítico
+            pass
     return {"ok": True, "project_id": pid, "asset_path": str(asset_path),
             "project_done": project_done, "renderable": renderable}
 
@@ -438,8 +450,23 @@ def fail(job_id: str, token: str, error: str) -> dict | None:
     _mem_obs(f"job flow {row['kind']} escena {row['scene_number']} falló "
              f"(intento {attempts}/{max_attempts}): {(error or '')[:120]}",
              job_id)
-    return {"ok": True, "status": status, "attempts": attempts,
-            "max_attempts": max_attempts}
+    # [flow-adaptation v1] JOB vs ATTEMPT: al quedar dead un job de VIDEO, la
+    # capa operacional Flow Adaptation examina la EVIDENCIA (texto del error)
+    # y, SOLO si la clasificación y la política de retry lo permiten, otorga
+    # el único intento extra (con P2 cuando existe estrategia segura S1/S2).
+    # Jamás tumba la operación de la cola si la capa falla (patrón _mem_obs).
+    adaptacion = None
+    if status == "dead" and row["kind"] == "video":
+        try:
+            from services import flow_adaptation
+            adaptacion = flow_adaptation.procesar_fallo_job(job_id)
+        except Exception:  # noqa: BLE001 — la capa nunca rompe la cola
+            adaptacion = None
+    out = {"ok": True, "status": status, "attempts": attempts,
+           "max_attempts": max_attempts}
+    if adaptacion:
+        out["adaptacion"] = adaptacion
+    return out
 
 
 def _mem_obs(contenido: str, job_id: str) -> None:
@@ -455,6 +482,84 @@ def _mem_obs(contenido: str, job_id: str) -> None:
                                     confidence=0.6)
     except Exception:  # noqa: BLE001 — observabilidad, nunca crítico
         pass
+
+
+# ── [flow-adaptation v1] P1/P2 — capa operacional Flow Adaptation ────────────
+
+def set_adapted_prompt(job_id: str, prompt_adapted: str,
+                       motivo: str = "") -> dict | None:
+    """Escribe P2 (prompt ADAPTADO) en flow_jobs.prompt_adapted.
+
+    Contrato P1/P2 (garantía anti-invasión de la capa creativa):
+      - P1 vive en la columna `prompt` (fuente única: build_script_json,
+        blindada por el contrato P1 del docstring del módulo) y NUNCA se
+        sobrescribe, se borra ni se modifica aquí.
+      - P2 SOLO sirve para la ejecución operacional en Flow: la extensión
+        inyecta job.prompt_adapted si existe; si no, P1.
+      - UNA sola oportunidad de adaptación por job: si P2 ya existe NO se
+        sobrescribe (devuelve None) — evita bucles de adaptación.
+      - Solo jobs kind='video' (no se comparte política con imagen) y no
+        done. Devuelve {ok, ...} o None si el job no es elegible.
+    """
+    p2 = (prompt_adapted or "").strip()
+    if not p2:
+        return None
+    con = db.connect()
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        row = con.execute(
+            "SELECT * FROM flow_jobs WHERE id=?", (job_id,)).fetchone()
+        if not row or row["kind"] != "video" or row["status"] == "done":
+            con.rollback()
+            return None
+        if row["prompt_adapted"]:
+            con.rollback()  # una sola adaptación por job (anti-bucle)
+            return None
+        con.execute(
+            """UPDATE flow_jobs SET prompt_adapted=?, updated_at=?
+               WHERE id=?""",
+            (p2[:2000], _iso(_now()), job_id))
+        con.commit()
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
+    _mem_obs(f"P2 operacional establecido para job video escena "
+             f"{row['scene_number']}: {motivo[:120]}", job_id)
+    return {"ok": True, "job_id": job_id,
+            "p1_intacto": row["prompt"], "p2": p2[:2000],
+            "motivo": (motivo or "")[:300]}
+
+
+def requeue_for_adaptation(job_id: str) -> dict | None:
+    """Reencola un job VIDEO dead para su ÚNICO intento extra con P2.
+
+    Política anti-bucle: attempts = max_attempts - 1 (queda UN intento),
+    lease_cycles intacto (MAX_LEASE_CYCLES del contrato sigue mandando).
+    Solo jobs dead de video. Devuelve {ok, attempts, max_attempts} o None."""
+    con = db.connect()
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        row = con.execute(
+            "SELECT * FROM flow_jobs WHERE id=?", (job_id,)).fetchone()
+        if not row or row["kind"] != "video" or row["status"] != "dead":
+            con.rollback()
+            return None
+        max_attempts = int(row["max_attempts"] or 2)
+        con.execute(
+            """UPDATE flow_jobs SET status='queued',
+               attempts=?, worker=NULL, job_token=NULL, lease_until=NULL,
+               updated_at=? WHERE id=?""",
+            (max_attempts - 1, _iso(_now()), job_id))
+        con.commit()
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
+    return {"ok": True, "job_id": job_id, "status": "queued",
+            "attempts": max_attempts - 1, "max_attempts": max_attempts}
 
 
 # ── estado ────────────────────────────────────────────────────────────────────

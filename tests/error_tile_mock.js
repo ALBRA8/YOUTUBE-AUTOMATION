@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 'use strict';
-/* Arnés determinista del FIX error-tile (ext 2.2.4, [error-tile v2]).
+/* Arnés determinista del FIX error-tile (ext 2.3.0, [attempt v3]).
  *
  * Carga el CODIGO REAL extraido de background.js (STATUS, MAX_PROMPT_MATCH_LEN,
  * normalizeForMatch, detectExtension, processDomSnapshot, resolveSemanticScene,
- * resolveSceneForTile, markSceneError) en un contexto VM con el estado global
- * del service worker simulado (queue / mode / imagesPerScene / running /
- * downloadedTileIds / mediaIdToScene / sceneMediaCounts) y stubs de las
- * dependencias fuera de la seccion (persistState, broadcastState, tickSoon,
- * rearmWatchdog, triggerRateLimit, saveUrlToDisk).
+ * resolveSceneForTile, recordSceneAttempt, clearSceneAttempts,
+ * sceneAttemptsSummary) en un contexto VM con el estado global del service
+ * worker simulado (queue / mode / imagesPerScene / running / downloadedTileIds /
+ * mediaIdToScene / sceneMediaCounts / sceneAttempts) y stubs de las dependencias
+ * fuera de la seccion (persistState, broadcastState, tickSoon, rearmWatchdog,
+ * triggerRateLimit, saveUrlToDisk).
  *
  * Los snapshots de entrada tienen EXACTAMENTE la forma que domScanFn produce
  * en la pestana real ({ tiles, tooQuick, semantic: {pending, errorTiles,
@@ -52,6 +53,7 @@ function makeCtx(opts) {
     downloadedTileIds: new Set(),
     mediaIdToScene: new Map(),
     sceneMediaCounts: new Map(),
+    sceneAttempts: new Map(), // [attempt v3] intentos por escena (JOB vs ATTEMPT)
     // ---- stubs de dependencias fuera de la seccion extraida ----
     persistState() { recorded.persisted += 1; },
     broadcastState() { recorded.broadcast += 1; },
@@ -119,9 +121,10 @@ async function run() {
     };
   }
 
-  /* B. FALLO REAL SIGUE SIENDO FATAL: error-tile sin NINGUNA evidencia de
-   *    resultados (sin media/video, sin pendientes, sin media previa) ->
-   *    markSceneError como siempre. */
+  /* B. FALLO TOTAL SIN RESULTADO: error-tile sin NINGUNA evidencia de
+   *    resultados -> ya NO es fatal en el snapshot ([attempt v3]): se
+   *    registra el INTENTO (con dedupe) y la escena sigue IN_PROGRESS — el
+   *    veredicto ERROR lo emite el watchdog solo al agotarse la ventana. */
   {
     const { sandbox, ctx, recorded } = makeCtx({ mode: 'videos' });
     sandbox.queue.push(escena(1));
@@ -129,9 +132,12 @@ async function run() {
       pending: 0, errorTiles: [ERR], media: [], videos: [],
     }));
     const item = sandbox.queue[0];
-    escenas.fallo_total_fatal = {
+    const att = sandbox.sceneAttempts.get(1);
+    escenas.fallo_total_registra_intento = {
       status: item.status, error: item.error || null,
-      ticked: recorded.ticks.length > 0,
+      intentos: att ? att.count : 0,
+      ultima: att ? att.lastError : null,
+      ticked: recorded.ticks.length > 0, // ya no hay veredicto→no hay tick
     };
   }
 
@@ -215,9 +221,9 @@ async function run() {
     };
   }
 
-  /* H. CICLO COMPLETO ACOTADO: pendientes difieren el veredicto, no lo
-   *    cancelan: snapshot con pendientes -> IN_PROGRESS; snapshot final sin
-   *    pendientes ni evidencia -> ERROR (fallo real detectado igualmente). */
+  /* H. CICLO ACOTADO CON DEDUPE: pendientes difieren el veredicto; el tile
+   *    residual ESTATICO no infla el conteo (dedupe por texto, CAMBIO 7);
+   *    la escena sigue IN_PROGRESS — el ERROR solo llega por la ventana. */
   {
     const { sandbox, ctx } = makeCtx({ mode: 'videos' });
     sandbox.queue.push(escena(1));
@@ -228,9 +234,14 @@ async function run() {
     await ctx.processDomSnapshot(snap({
       pending: 0, errorTiles: [ERR], media: [], videos: [],
     }));
+    await ctx.processDomSnapshot(snap({
+      pending: 0, errorTiles: [ERR], media: [], videos: [], // residual repetido
+    }));
+    const att = sandbox.sceneAttempts.get(1);
     escenas.ciclo_pendientes_luego_fallo = {
       trasPendientes,
       final: { status: sandbox.queue[0].status, error: sandbox.queue[0].error || null },
+      intentos: att ? att.count : 0,
     };
   }
 
@@ -251,6 +262,9 @@ async function run() {
       status: sandbox.queue[0].status,
     };
   }
+  /* I2. TILE CLASICO DE POLITICAS: ya NO es fatal ([attempt v3]): registra
+   *     el intento CON la evidencia política preservada (para la capa Flow
+   *     Adaptation del backend) y la escena sigue en su ventana. */
   {
     const { sandbox, ctx } = makeCtx({ mode: 'videos' });
     sandbox.queue.push(escena(1, 'relato cotidiano sin marcas'));
@@ -265,8 +279,11 @@ async function run() {
       }],
     ));
     const item = sandbox.queue[0];
-    escenas.politica_tile_intacta = {
+    const att = sandbox.sceneAttempts.get(1);
+    escenas.politica_tile_intento = {
       status: item.status, error: item.error || null,
+      intentos: att ? att.count : 0,
+      evidencia: att ? att.lastError : null,
     };
   }
 

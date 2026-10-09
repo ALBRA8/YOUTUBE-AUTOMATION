@@ -196,9 +196,15 @@ def main() -> int:
     check("video escena 2 re-entregado (intento 2)",
           jv3 and jv3["kind"] == "video" and jv3["scene_number"] == 2
           and jv3["attempts"] == 1, str(jv3)[:100])
-    r2 = fj.fail(jv3["id"], jv3["job_token"], "Flow se trabó otra vez")
+    # [flow-adaptation v1] el texto es el veredicto REAL de la extensión V3
+    # al agotarse la ventana de video (clase B GENERATION_TIMEOUT): la capa
+    # NO concede reintento extra (la ventana manda) → dead permanece dead.
+    r2 = fj.fail(jv3["id"], jv3["job_token"],
+                 "watchdog: sin resultado válido en 15 min "
+                 "(2 intento(s) fallido(s))")
     check("fallo 2 de 2 → dead", r2["status"] == "dead", str(r2))
-    check("cola vacía → claim None", fj.claim_next("w-A") is None)
+    check("cola vacía → claim None (B: la ventana manda, sin grant extra)",
+          fj.claim_next("w-A") is None)
 
     print("── 7. lease expirado se recupera solo (worker muerto)")
     pid_b = _proyecto("proj_bridge_lb", n=1)

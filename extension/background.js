@@ -31,11 +31,67 @@ const MAX_PROMPT_MATCH_LEN = 80;
 /* --- Fase 1 (hardening): watchdog + reintentos + worker tab (patrones
        probados en meta-video-generator / vibes-content-generator) --- */
 const SCENE_WATCHDOG_ALARM = 'flow-scene-watchdog';
-const SCENE_WATCHDOG_MS_IMAGES = 5 * 60000;   // 5 min por escena de imagenes
-const SCENE_WATCHDOG_MS_VIDEOS = 10 * 60000;  // 10 min por escena de video (Veo es lento)
+const SCENE_WATCHDOG_MS_IMAGES = 5 * 60000;   // 5 min por escena de imagenes (SIN CAMBIOS)
+/* [video-window v3] La ventana de VIDEO ya NO es la constante fija de arriba
+   (SCENE_WATCHDOG_MS_VIDEOS eliminada): ahora es una ventana OPERATIVA propia,
+   separada de la de imagen y configurable — ver el bloque [video-window v3]
+   mas abajo (VIDEO_GENERATION_TIMEOUT_SECONDS = 15*60 por defecto, piso 1 min,
+   techo 2 h; NO es una espera fija: si el video valido aparece antes, la
+   escena termina inmediatamente por su ciclo de vida normal). */
 const FETCH_TIMEOUT_MS = 60000;               // timeout por intento de descarga
 const FETCH_BACKOFF_MS = [1000, 2000, 4000];  // reintentos con backoff
 const FS_WORKER_KEY = 'fsWorkerTabId';        // pestaña oculta para escrituras FS
+
+/* --- [video-window v3] Ventana operativa de VIDEO (CAMBIO 1) --------------
+ * La evidencia REAL_WORLD demostro que Flow SI genera MP4 validos (720x1280,
+ * 8s, H.264/AAC) pero a veces tarda MAS de los 10 min fijos de antes, y que
+ * manualmente es habitual que UNA generacion falle y haya que regenerarla
+ * dentro de la misma sesion. Por eso:
+ *   - VIDEO_GENERATION_TIMEOUT_SECONDS = 15*60 es el LIMITE MAXIMO de la
+ *     ventana de video, NO una espera fija: si el video valido aparece antes,
+ *     el ciclo de vida normal (DOWNLOADED) termina la escena inmediatamente.
+ *   - La ventana es CONFIGURABLE via chrome.storage.local {videoTimeoutSeconds}
+ *     (piso razonable 1 min, techo razonable 2 h) sin tocar el codigo.
+ *   - La ventana de IMAGEN no cambia: SCENE_WATCHDOG_MS_IMAGES = 5 min.
+ *   - Stack cubierto por defecto: bridge.js MAX_WAIT_MS 20 min (> 15), techo
+ *     del handler en background = ventana+3 min (>= 18 min), lease de video
+ *     del backend 15 min renovado por heartbeat cada ~30 s (+5 min por latido).
+ *   - Heartbeat/lease/watchdog quedan INTACTOS: solo cambia el presupuesto. */
+const VIDEO_GENERATION_TIMEOUT_SECONDS = 15 * 60; // limite maximo por defecto: 15 min
+const VIDEO_TIMEOUT_MIN_MS = 60 * 1000;      // piso razonable: 1 min
+const VIDEO_TIMEOUT_MAX_MS = 120 * 60000;    // techo razonable: 2 h
+let videoTimeoutMsOverride = null;           // null = usar el defecto (15 min)
+
+function videoTimeoutMs() {
+  const baseS = Number(VIDEO_GENERATION_TIMEOUT_SECONDS) > 0
+    ? Number(VIDEO_GENERATION_TIMEOUT_SECONDS) : 900;
+  const o = Number(videoTimeoutMsOverride);
+  const sec = Number.isFinite(o) && o > 0 ? o : baseS;
+  return Math.min(VIDEO_TIMEOUT_MAX_MS, Math.max(VIDEO_TIMEOUT_MIN_MS, sec * 1000));
+}
+
+/* Punto de extension para la configuracion (popup / storage futuro). */
+function setVideoTimeoutSeconds(n) {
+  const v = Number(n);
+  videoTimeoutMsOverride = Number.isFinite(v) && v > 0 ? v : null;
+  rearmWatchdog(); // el presupuesto puede cambiar con escenas en curso
+}
+
+async function loadVideoTimeoutSetting() {
+  try {
+    const o = await chrome.storage.local.get('videoTimeoutSeconds');
+    if (o && o.videoTimeoutSeconds != null) setVideoTimeoutSeconds(o.videoTimeoutSeconds);
+  } catch (_) { /* sin storage (tests/primera carga): defecto 15 min */ }
+}
+try {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes && changes.videoTimeoutSeconds) {
+      setVideoTimeoutSeconds(changes.videoTimeoutSeconds.newValue);
+    }
+  });
+} catch (_) { /* contexto sin storage (tests): defecto 15 min */ }
+loadVideoTimeoutSetting();
+/* --- fin [video-window v3] ------------------------------------------------ */
 
 /* --- Fase 3-e: Meta AI como 2º proveedor (patrón meta-video-generator) --- */
 const META_INJECT_DELAY_MS = 30000;   // meta.ai tolera un ritmo algo mayor que Flow
@@ -60,6 +116,9 @@ let running = false;
 let downloadedTileIds = new Set();       // tiles ya guardados
 let mediaIdToScene = new Map();          // mediaId -> {sceneNumber, imageIndex}
 let sceneMediaCounts = new Map();        // sceneNumber -> ultima imagen N guardada
+let sceneAttempts = new Map();           // [attempt v3] sceneNumber -> {count, lastError, lastAt}
+                                         // (intentos fallidos DENTRO de la ventana: un intento
+                                         //  fallido NO es un veredicto — CAMBIOS 2/4/6 del mandato)
 let rateLimitCooldownUntil = 0;
 let lastInjectAt = 0;
 let pollTimer = null;
@@ -85,6 +144,7 @@ function serializeState() {
     downloadedTileIds: Array.from(downloadedTileIds),
     mediaIdToScene: Array.from(mediaIdToScene.entries()),
     sceneMediaCounts: Array.from(sceneMediaCounts.entries()),
+    sceneAttempts: Array.from(sceneAttempts.entries()),
   };
 }
 
@@ -109,6 +169,7 @@ function hydrateState(o) {
   downloadedTileIds = new Set(Array.isArray(o.downloadedTileIds) ? o.downloadedTileIds : []);
   mediaIdToScene = new Map(Array.isArray(o.mediaIdToScene) ? o.mediaIdToScene : []);
   sceneMediaCounts = new Map(Array.isArray(o.sceneMediaCounts) ? o.sceneMediaCounts : []);
+  sceneAttempts = new Map(Array.isArray(o.sceneAttempts) ? o.sceneAttempts : []);
 }
 
 async function loadState() {
@@ -751,10 +812,16 @@ async function processDomSnapshot(data) {
     if (tile.tooQuick) { triggerRateLimit(); continue; }
     if (downloadedTileIds.has(tile.id)) continue;
 
-    // Error de contenido: marcar la escena y no trabar la cola
+    // Error de contenido: [attempt v3] es el fallo de UN intento, no un
+    // veredicto: se registra como evidencia (texto de política preservado
+    // para la capa Flow Adaptation del backend) y Flow sigue procesando.
+    // El veredicto lo emite el watchdog SOLO si la ventana se agota sin
+    // resultado válido (CAMBIOS 2/3/5 del mandato). Sin regresión: si Flow
+    // bloquea TODO (sin media, sin pendientes), la ventana expira y la
+    // escena termina ERROR con la evidencia política en el mensaje.
     if (tile.error) {
       const scene = resolveSceneForTile(tile);
-      if (scene != null) markSceneError(scene, 'bloqueo de politicas de contenido');
+      if (scene != null) recordSceneAttempt(scene, 'bloqueo de politicas de contenido');
       continue;
     }
 
@@ -786,6 +853,7 @@ async function processDomSnapshot(data) {
     if (saved && saved.ok) {
       if (item && (sceneMediaCounts.get(scene) || 0) >= need) {
         item.status = STATUS.DOWNLOADED;
+        clearSceneAttempts(scene); // [attempt v3] resultado válido → sin intentos residuales
         broadcastState();
         tickSoon(800);
       }
@@ -797,29 +865,26 @@ async function processDomSnapshot(data) {
   /* PLAN B semantico: si tRPC no entrego mapeo y Flow esta en UI Angular,
      img[data-media-id] / flow-error-tile dan cobertura sin interceptacion.
 
-     [error-tile v2] FIX falso positivo (prueba REAL, proyecto 26b63daa9bdd):
-     Flow puede fallar UN intento (tile de error en el DOM) mientras la MISMA
-     generacion ya produjo videos validos (4 MP4 H.264/AAC 720x1280 con firma
-     Google/C2PA confirmados). Un flow-error-tile solo es FATAL cuando NO hay
-     evidencia de resultados: sin media/video visible en el snapshot, sin
-     tiles pendientes y sin media ya atribuida a la escena candidata. Con
-     evidencia, el tile se ignora (fallo parcial de un intento) y las redes
-     de seguridad no cambian: watchdog por escena, error de politicas por
-     tile clasico (texto infringement/policy) y rate limit. */
+     [attempt v3] JOB vs ATTEMPT (supersede del fix V1 [error-tile v2]):
+     la evidencia REAL_WORLD (proyecto 26b63daa9bdd: 4 MP4 H.264/AAC 720x1280
+     validos CON firma Google/C2PA junto a tarjetas "No se pudo completar la
+     accion" en el MISMO snapshot) demostro que un flow-error-tile es el fallo
+     de UN intento/variante, no un veredicto sobre la escena. Por eso NINGUN
+     error-tile emite aqui markSceneError: se registra como intento
+     (recordSceneAttempt, con dedupe anti-residuo CAMBIO 7) y Flow sigue
+     procesando. RESULTADO VALIDO > ERROR-TILE INDIVIDUAL (CAMBIO 3): el loop
+     semantico de abajo descarga la media y completa la escena igual.
+     El veredicto ERROR lo emite UNICAMENTE el watchdog al agotarse la
+     ventana sin resultado (CAMBIO 5), con la evidencia de los intentos en
+     el mensaje (trazabilidad para la capa Flow Adaptation del backend).
+     Redes de seguridad que NO cambian: watchdog por escena (ahora con la
+     ventana de video configurable), rate limit tooQuick. */
   const sem = data && data.semantic;
   if (sem && Array.isArray(sem.errorTiles) && sem.errorTiles.length) {
     const errScene = resolveSemanticScene(null);
-    const hayMediaEnTiles = (data.tiles || []).some((t) => t
-      && ((Array.isArray(t.imgSrcs) && t.imgSrcs.length)
-        || (Array.isArray(t.vidSrcs) && t.vidSrcs.length)));
-    const hayMediaVisible = hayMediaEnTiles
-      || (Array.isArray(sem.media) && sem.media.length > 0)
-      || (Array.isArray(sem.videos) && sem.videos.length > 0);
-    const hayPendientes = (sem.pending || 0) > 0;
-    const escenaConMedia = errScene != null
-      && (sceneMediaCounts.get(errScene) || 0) > 0;
-    if (errScene != null && !hayMediaVisible && !hayPendientes && !escenaConMedia) {
-      markSceneError(errScene, 'flow-error-tile: ' + (sem.errorTiles[0] || '').slice(0, 120));
+    if (errScene != null) {
+      recordSceneAttempt(errScene, 'flow-error-tile: '
+        + (sem.errorTiles[0] || '').slice(0, 120));
     }
   }
   if (sem && Array.isArray(sem.media) && sem.media.length) {
@@ -843,6 +908,7 @@ async function processDomSnapshot(data) {
       const need = isVideoMode ? 1 : imagesPerScene;
       if (saved && saved.ok && item && (sceneMediaCounts.get(scene) || 0) >= need) {
         item.status = STATUS.DOWNLOADED;
+        clearSceneAttempts(scene); // [attempt v3] resultado válido → sin intentos residuales
         rearmWatchdog();
         broadcastState();
         tickSoon(800);
@@ -881,16 +947,45 @@ function resolveSceneForTile(tile) {
   return null;
 }
 
-function markSceneError(sceneNumber, reason) {
-  let changed = false;
-  for (const item of queue) {
-    if (item.scene_number === sceneNumber && item.status === STATUS.IN_PROGRESS) {
-      item.status = STATUS.ERROR;
-      item.error = reason;
-      changed = true;
-    }
-  }
-  if (changed) { persistState(); rearmWatchdog(); broadcastState(); tickSoon(1500); }
+/* --- [attempt v3] JOB vs ATTEMPT (CAMBIOS 2/3/4/6/7) ----------------------
+ * Un flow-error-tile (o un tile clasico de error) es el fallo de UN intento
+ * de generacion, NO un veredicto sobre el job: la evidencia REAL_WORLD
+ * demostro que Flow muestra simultaneamente videos validos y tarjetas
+ * "No se pudo completar la accion", y que manualmente es habitual que una
+ * generacion falle y haya que regenerarla. Por eso:
+ *   - recordSceneAttempt REGISTRA el intento (diagnostico, sin estado fatal)
+ *     y permite que Flow siga procesando; el DEDUPE evita que un tile
+ *     residual estatico de una generacion anterior infle el conteo (CAMBIO 7).
+ *   - El RESULTADO VALIDO siempre tiene prioridad (CAMBIO 3): si llega media,
+ *     el ciclo de vida normal marca DOWNLOADED y limpia los intentos.
+ *   - ERROR solo lo emite el WATCHDOG cuando se agota la ventana SIN
+ *     resultado (CAMBIO 5): triple condicion estructural — (A) sin resultado
+ *     (el item sigue IN_PROGRESS), (B) ventana agotada (now-startedAt >
+ *     presupuesto), (C) evidencia de lo observado (intentos + ultimo texto).
+ *   - Los intentos se limpian al INICIAR la escena (injectScene), al
+ *     reclamar un job del bridge y al COMPLETARLA (sin contaminacion
+ *     residual hacia jobs posteriores). */
+function recordSceneAttempt(sceneNumber, reason) {
+  if (sceneNumber == null) return;
+  const prev = sceneAttempts.get(sceneNumber);
+  if (prev && prev.lastError === reason) return; // tile residual estatico: no infla
+  sceneAttempts.set(sceneNumber, {
+    count: ((prev && prev.count) || 0) + 1,
+    lastError: String(reason || '').slice(0, 200),
+    lastAt: Date.now(),
+  });
+  persistState();
+}
+
+function clearSceneAttempts(sceneNumber) {
+  if (sceneNumber == null) return;
+  if (sceneAttempts.delete(sceneNumber)) persistState();
+}
+
+function sceneAttemptsSummary(sceneNumber) {
+  const a = sceneAttempts.get(sceneNumber);
+  if (!a || !a.count) return 'sin intentos fallidos registrados';
+  return a.count + ' intento(s) fallido(s) · última evidencia: ' + (a.lastError || '?');
 }
 
 /* ---------------- Watchdog por escena (chrome.alarms) --------------------- */
@@ -899,7 +994,10 @@ function markSceneError(sceneNumber, reason) {
    unica forma fiable de despertar el SW MV3: al dispararse, marca ERROR las
    escenas que excedan su presupuesto y avanza a la siguiente. */
 function watchdogBudgetMs() {
-  return mode === 'videos' ? SCENE_WATCHDOG_MS_VIDEOS : SCENE_WATCHDOG_MS_IMAGES;
+  /* [video-window v3] VIDEO: ventana operativa propia y configurable
+   * (videoTimeoutMs(), defecto 15 min como LIMITE, no espera fija).
+   * IMAGEN: 5 min, SIN CAMBIOS. */
+  return mode === 'videos' ? videoTimeoutMs() : SCENE_WATCHDOG_MS_IMAGES;
 }
 
 function rearmWatchdog() {
@@ -927,8 +1025,15 @@ function watchdogCheck() {
   let expired = false;
   for (const item of queue) {
     if (item.status === STATUS.IN_PROGRESS && item.startedAt && (now - item.startedAt) > budget) {
+      /* [attempt v3] CAMBIO 5: ERROR solo cuando (A) no hay resultado válido
+       * (el item sigue IN_PROGRESS: si hubiese media, ya estaría DOWNLOADED),
+       * (B) la ventana se agotó y (C) hay evidencia de lo observado (intentos
+       * registrados + último texto). Un error-tile AISLADO nunca llega aquí
+       * por sí solo: solo el agotamiento de la ventana emite el veredicto. */
       item.status = STATUS.ERROR;
-      item.error = 'watchdog: generación atascada >' + Math.round(budget / 60000) + ' min';
+      item.error = 'watchdog: sin resultado válido en '
+        + Math.round(budget / 60000) + ' min ('
+        + sceneAttemptsSummary(item.scene_number) + ')';
       expired = true;
     }
   }
@@ -1007,6 +1112,7 @@ function onMessageStartQueue(msg) {
   mediaIdToScene = new Map();
   sceneMediaCounts = new Map();
   lastStateSummary = '';
+  sceneAttempts = new Map(); // [attempt v3] cola nueva: cero intentos residuales
   persistState();
   startPollingIfNeeded();
   ensureKeepalive();
@@ -1050,6 +1156,7 @@ async function injectScene(item) {
   item.status = STATUS.IN_PROGRESS;
   item.startedAt = Date.now();
   lastInjectAt = Date.now();
+  clearSceneAttempts(item.scene_number); // [attempt v3] CAMBIO 7: cada job arranca con intentos en cero
   persistState();
   rearmWatchdog();
   broadcastState();
@@ -1586,7 +1693,12 @@ function __bridgeHandleJob(job, sendResult) { // [bridge v1]
   const jobId = (job && job.id) || null;
   (async () => {
     const sceneNumber = Number(job && job.scene_number);
-    const prompt = String((job && job.prompt) || '').trim();
+    /* [flow-adaptation v1] P1/P2: si el backend trae un prompt adaptado (P2,
+     * decidido por la capa operacional flow_adaptation con EVIDENCIA de un
+     * rechazo previo de Flow), se usa P2 SOLO para esta ejecución; P1 viaja
+     * intacto en job.prompt y nunca se altera. Sin P2 → P1 (comportamiento
+     * por defecto idéntico a 2.2.4). */
+    const prompt = String((job && job.prompt_adapted) || (job && job.prompt) || '').trim();
     const isVideo = (job && job.kind) === 'video';
     let captureOn = false;
     try {
@@ -1627,6 +1739,7 @@ function __bridgeHandleJob(job, sendResult) { // [bridge v1]
       labTabId = tabId;
       // Estado per-escena limpio (evita conteos/mapeos de ejecuciones viejas)
       sceneMediaCounts.delete(sceneNumber);
+      sceneAttempts.delete(sceneNumber); // [attempt v3] CAMBIO 7: sin contaminación residual entre jobs
       for (const [mid, m] of Array.from(mediaIdToScene.entries())) {
         if (m && m.sceneNumber === sceneNumber) mediaIdToScene.delete(mid);
       }
@@ -1656,8 +1769,13 @@ function __bridgeHandleJob(job, sendResult) { // [bridge v1]
       __bridgeCapture.active = true;
       __bridgeCapture.url = null;
       __bridgeCapture.blob = null;
-      // Espera el ciclo de vida del item (el watchdog existente marca ERROR los atascos)
-      const TIMEOUT_MS = isVideo ? 18 * 60000 : 9 * 60000;
+      // Espera el ciclo de vida del item (el watchdog existente marca ERROR
+      // los atascos). [video-window v3] El techo del handler se DERIVA de la
+      // ventana de video (ventana + 3 min de margen), manteniendo el piso
+      // histórico de 18 min; imagen conserva su 9 min (ventana 5 min + margen).
+      const TIMEOUT_MS = isVideo
+        ? Math.max(18 * 60000, videoTimeoutMs() + 3 * 60000)
+        : 9 * 60000;
       const t0 = Date.now();
       let outcome = null;
       while (!outcome) {
