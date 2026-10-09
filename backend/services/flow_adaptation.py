@@ -24,11 +24,36 @@ QUÉ NO ES (límites duros, inviolables):
     video_prompt ni ningún campo creativo: SOLO escribe (1) la columna
     operacional flow_jobs.prompt_adapted (P2) vía flow_jobs.set_adapted_prompt
     y (2) su propio ledger JSONL (memoria operacional separada).
-  - NO inventa causas: la taxonomía A-G se asigna SOLO con evidencia
-    observada (texto del rechazo/tiempo agotado). Sin evidencia → G UNKNOWN.
-  - NO degrada silenciosamente el contenido creativo: si no existe una
-    adaptación segura y determinista, reporta FLOW_ADAPTATION_REQUIRED y
-    se detiene (política de escape del mandato).
+  - NO inventa causas: la taxonomía V1.1 (A-I) se asigna SOLO con evidencia
+    observada y con PRIORIDAD DE EVIDENCIA (④). Sin evidencia → I UNKNOWN.
+
+FLOW OBSERVABILITY V1.1 (separación watchdog vs proveedor, mandato ③④):
+  La evidencia que llega del veredicto local de la extensión trae CAPAS
+  CRUDAS: red (http:/http-body:), notificaciones del sistema de Flow
+  (notif: "…", source flow_notification), error-tiles (tile:),
+  configuración (cfg:, source flow_generation_settings) y audio (audio=).
+  Taxonomía A-I — SOLO con evidencia textual clara para C-H:
+
+    A) FLOW_WATCHDOG_TIMEOUT     ventana LOCAL agotada sin evidencia
+                                 específica del proveedor (NUNCA se
+                                 interpreta como timeout del proveedor)
+    B) FLOW_PROVIDER_ERROR       Flow reportó un error explícito y la causa
+                                 NO es determinable (no se inventa)
+    C) FLOW_AUDIO_ERROR          video generado pero audio falló/omitido
+                                 (SOLO con texto explícito de audio)
+    D) FLOW_POLICY_ERROR         rechazo de política de contenido
+    E) FLOW_CREDIT_ERROR         créditos insuficientes/agotados
+    F) FLOW_IDENTITY_LIKENESS_ERROR  restricción de identidad/likeness
+    G) FLOW_COPYRIGHT_ERROR      copyright/contenido protegido
+    H) FLOW_UNUSUAL_ACTIVITY     actividad inusual señalada por Flow
+    I) UNKNOWN_FLOW_FAILURE      sin resultado/evidencia clasificable
+
+  Prioridad de evidencia (④, de fuerte a débil — la débil JAMÁS contradice
+  a la fuerte): 1 red/respuesta con causa clara > 2 notificación del
+  sistema con causa clara > 3 error-tile con texto claro > 4 estado DOM >
+  5 watchdog local > 6 sin resultado. Un status HTTP aislado NO infiere
+  causa (403 genérico → B, no D); "No se pudo generar el video" NO es un
+  fallo de audio; un tile genérico + watchdog → A (no B de proveedor).
 
 P1 / P2 (separación inequívoca):
   P1 = prompt creativo original (flow_jobs.prompt, fuente única
@@ -37,12 +62,10 @@ P1 / P2 (separación inequívoca):
        (flow_jobs.prompt_adapted) — un único intento extra por job.
 
 Memoria operacional (ledger JSONL, append-only): cada retry registra
-  prompt_original, evidencia observada, clasificación, transformación,
-  prompt_adaptado, resultado y retry. Sirve para priorizar adaptación,
-  evitar estrategias ya fallidas y diagnosticar tendencias. Las
-  observaciones son EVIDENCIA OPERACIONAL, no reglas universales: un fallo
-  no demuestra "Flow nunca acepta esta palabra" ni un éxito "siempre la
-  acepta". NO modifica Creative Engine, Niche Blueprint, narrativa ni
+  prompt_original, evidencia cruda + estructura, clasificación con
+  confianza y fuente de la evidencia, transformación, prompt_adaptado,
+  resultado y retry. Las observaciones son EVIDENCIA OPERACIONAL, no reglas
+  universales. NO modifica Creative Engine, Niche Blueprint, narrativa ni
   Production JSON.
 """
 from __future__ import annotations
@@ -58,72 +81,104 @@ import database as db
 
 FLOW_ADAPTATION_REQUIRED = "FLOW_ADAPTATION_REQUIRED"
 
-# Taxonomía del mandato (SOLO con evidencia; sin evidencia → G):
+# Taxonomía V1.1 (③): SOLO con evidencia; sin evidencia → I.
 CLASES = {
-    "A": "TRANSIENT_GENERATION_ERROR",
-    "B": "GENERATION_TIMEOUT",
-    "C": "CONTENT_POLICY_REJECTION",
-    "D": "IDENTITY_OR_LIKENESS_RESTRICTION",
-    "E": "COPYRIGHT_OR_PROTECTED_CONTENT_RESTRICTION",
-    "F": "PROMPT_INTERPRETATION_PROBLEM",
-    "G": "UNKNOWN_FLOW_FAILURE",
+    "A": "FLOW_WATCHDOG_TIMEOUT",
+    "B": "FLOW_PROVIDER_ERROR",
+    "C": "FLOW_AUDIO_ERROR",
+    "D": "FLOW_POLICY_ERROR",
+    "E": "FLOW_CREDIT_ERROR",
+    "F": "FLOW_IDENTITY_LIKENESS_ERROR",
+    "G": "FLOW_COPYRIGHT_ERROR",
+    "H": "FLOW_UNUSUAL_ACTIVITY",
+    "I": "UNKNOWN_FLOW_FAILURE",
 }
 
-# Patrones operacionales observados en textos de rechazo de Flow. Son
-# EVIDENCIA OPERACIONAL acumulable (el ledger permite extenderlos con datos
-# reales), NO reglas universales. Matching case-insensitive por subcadena.
+# Patrones operacionales V1.1 (clases C-H: SOLO texto claro; sin patrón →
+# B/I, jamás se inventa causa). Matching case-insensitive por subcadena.
 _PATRONES = {
-    "C": ("politica", "política", "policy", "infringement",
+    "D": ("politica", "política", "policy", "infringement",
           "bloqueo de politicas", "bloqueo de políticas", "content policy",
           "no permitido", "viola nuestras"),
-    "D": ("persona real", "personas reales", "identidad", "likeness",
+    "E": ("no tienes creditos", "no tienes créditos", "sin creditos",
+          "sin créditos", "insuficientes creditos", "insuficientes créditos",
+          "creditos insuficientes", "créditos insuficientes",
+          "credito insuficiente", "crédito insuficiente",
+          "not enough credits", "out of credits", "insufficient credits",
+          "agotaste tus creditos", "agotaste tus créditos",
+          "compra creditos", "compra créditos", "buy credits to",
+          "upgrade your plan", "actualiza tu plan"),
+    "F": ("persona real", "personas reales", "identidad", "likeness",
           "derechos de imagen", "imagen de una persona",
           "figura publica", "figura pública", "celebridad",
           "rostro de una persona"),
-    "E": ("copyright", "derechos de autor", "material protegido",
+    "G": ("copyright", "derechos de autor", "material protegido",
           "marca registrada", "contenido protegido",
           "propiedad intelectual"),
-    "F": ("no se pudo interpretar", "no pudimos interpretar",
-          "interpretar el prompt", "interpretacion del prompt",
-          "interpretación del prompt", "reformular", "reformula el prompt",
-          "instruccion no clara", "instrucción no clara",
-          "prompt no valido", "prompt no válido"),
+    "H": ("actividad inusual", "unusual activity", "actividad sospechosa",
+          "comportamiento inusual", "cuenta limitada",
+          "cuenta restringida"),
 }
-# Prioridad de clasificación cuando el texto tocara varias clases:
-_PRIORIDAD = ("C", "D", "E", "F")
+# Prioridad DETERMINISTA entre clases cuando el mismo texto tocara varias
+# (la más específica/estructural primero; C audio se evalúa aparte porque
+# exige su patrón regex propio — ver _AUDIO_FALLO_RE).
+_PRIORIDAD = ("D", "F", "G", "H", "E")
 
-# Patrones S2 (formulación de cámara/enfoque facial): solo se reescribe la
-# CLÁUSULA de enfoque, preservando sujeto/orientación/acción/composición.
-_S2_ENFOQUE_RE = re.compile(
-    r"(enfoqu\w*|enfoca\w*|primer plano (del|de la|de el|de)?\s*(rostro|cara)"
-    r"|close-?up|plano detalle|acerc\w+ (al|a el|hacia el|hacia la)\s*(rostro|cara))",
+# C) audio: SOLO cuando el texto menciona 'audio' con fallo EXPLÍCITO.
+#    "No se pudo generar el video" NO casa (no menciona audio) → ⑨.
+_AUDIO_WORD_RE = re.compile(r"\baudio\b", re.IGNORECASE)
+_AUDIO_FALLO_RE = re.compile(
+    r"(sin audio|audio fall\w*|fall\w+ de audio|error de audio|"
+    r"no se pudo generar el audio|no pudimos generar el audio|"
+    r"audio no disponible|audio omitid\w*|silencioso|mudo)",
     re.IGNORECASE)
-_S2_ROSTRO_RE = re.compile(r"(rostro|cara|semblante|facial)", re.IGNORECASE)
-_S2_REEMPLAZO = "Plano medio estable, cámara fija, sujeto encuadrado de forma natural"
 
-# Política de retry por clase (LÍMITES del mandato: ni DEAD inmediato ni
-# retry infinito). `max_extra` = reencolas OTORGADAS por esta capa por job
-# (en total, cualquier clase: el guardián es _grants_previos ≤ MAX_EXTRA_GRANTS).
+# ── parser de las CAPAS de evidencia (formato composeEvidence, ext 2.3.1) ────
+_HTTP_RE = re.compile(r"(?:^|\|\s*)http:\s*(\d{3})\s*([A-Za-z]{3,8})?", re.IGNORECASE)
+_HTTP_BODY_RE = re.compile(r"(?:^|\|\s*)http-body:\s*([^\|]+)", re.IGNORECASE)
+_NOTIF_RE = re.compile(r"(?:^|\|\s*)(?:notif|notificacion|notificación):\s*\"([^\"]*)\"",
+                       re.IGNORECASE)
+_TILE_RE = re.compile(r"(?:^|\|\s*)(?:flow-error-tile|tile):\s*([^\|]+)", re.IGNORECASE)
+_WATCHDOG_RE = re.compile(r"watchdog|timeout|lease|ventana", re.IGNORECASE)
+_EXPLICIT_FAIL_RE = re.compile(r"error|fallo|falló|no se pudo|no pudimos|fracas",
+                               re.IGNORECASE)
+_CFG_RE = re.compile(r"(?:^|\|\s*)cfg:\s*([^\|]+)", re.IGNORECASE)
+_AUDIO_SILENT_RE = re.compile(r"(?:^|\|\s*)audio=(\w+)", re.IGNORECASE)
+
+
+# Patrones S1 (reencuadre identidad→descripción visual existente, clase F).
+_S2_ELIMINADA = ("S2 eliminada en V1.1: la taxonomía A-I ya no tiene clase "
+                 "de 'interpretación de prompt'; sin clase con evidencia no "
+                 "hay estrategia (fail-closed → FLOW_ADAPTATION_REQUIRED)")
 RETRY_POLICY = {
-    "A": {"reintentar": True, "adaptar": None, "motivo":
-          "error transitorio de generación: reintento limitado con P1"},
-    "B": {"reintentar": False, "adaptar": None, "motivo":
-          "timeout de ventana: manda la ventana de video (el lease y "
-          "recover_expired gestionan el requeue; no se concede extra)"},
-    "C": {"reintentar": False, "adaptar": None, "motivo":
+    "A": {"reintentar": False, "adaptar": None, "motivo":
+          "ventana LOCAL agotada sin evidencia específica del proveedor: "
+          "no se asume causa, no se cambia el prompt; el requeue lo gobierna "
+          "el contrato de lease (recover_expired), esta capa no concede extra"},
+    "B": {"reintentar": True, "adaptar": None, "motivo":
+          "Flow reportó un error explícito sin causa determinable: no se "
+          "inventa adaptación; reintento limitado con P1"},
+    "C": {"reintentar": True, "adaptar": None, "motivo":
+          "fallo de audio: el prompt visual NO se toca; reintento limitado "
+          "con P1"},
+    "D": {"reintentar": False, "adaptar": None, "motivo":
           "rechazo de política de contenido: no existe estrategia segura y "
-          "determinista que no toque contenido creativo → reportar"},
-    "D": {"reintentar": True, "adaptar": "S1", "motivo":
+          "determinista → reportar (no reintento idéntico)"},
+    "E": {"reintentar": False, "adaptar": None, "motivo":
+          "créditos insuficientes: reintento no resuelve la causa "
+          "operacional → sin reintento"},
+    "F": {"reintentar": True, "adaptar": "S1", "motivo":
           "restricción de identidad/likeness: S1 reencuadra identidad → "
           "descripción visual del avatar (datos creativos existentes)"},
-    "E": {"reintentar": False, "adaptar": None, "motivo":
-          "restricción de copyright/contenido protegido: no existe "
-          "estrategia segura y determinista → reportar"},
-    "F": {"reintentar": True, "adaptar": "S2", "motivo":
-          "problema de interpretación de formulación: S2 reescribe SOLO la "
-          "cláusula de enfoque/cámara, preservando sujeto/orientación"},
-    "G": {"reintentar": True, "adaptar": None, "motivo":
-          "fallo desconocido: registrar + reintento limitado SIN inventar causa"},
+    "G": {"reintentar": False, "adaptar": None, "motivo":
+          "restricción de copyright/contenido protegido: sin estrategia "
+          "segura ni workaround inventado → reportar (S1 prohibido)"},
+    "H": {"reintentar": False, "adaptar": None, "motivo":
+          "actividad inusual señalada por Flow: causa operacional de "
+          "cuenta; pausar reintentos inmediatos"},
+    "I": {"reintentar": True, "adaptar": None, "motivo":
+          "fallo desconocido sin evidencia clasificable: registrar + "
+          "reintento limitado SIN inventar causa"},
 }
 MAX_EXTRA_GRANTS = 1  # total de reencolas concedidas por esta capa por job
 
@@ -182,48 +237,160 @@ def registrar_cierre(job_id: str, resultado: str, detalle: str = "") -> None:
 
 # ── OBSERVAR → CLASIFICAR (solo evidencia; nunca inventar causa) ─────────────
 
+def _causa_especifica(texto: str) -> tuple[str, str] | None:
+    """Detección de causa ESPECÍFICA (clases C-H) SOLO por texto claro.
+    Devuelve (clase, detalle_patron) o None. Orden determinista: C audio
+    (regex propia), luego _PRIORIDAD D>F>G>H>E. 'No se pudo generar el
+    video' NO es audio (no menciona audio) → ⑨."""
+    t = (texto or "").lower()
+    if not t:
+        return None
+    if _AUDIO_WORD_RE.search(texto) and _AUDIO_FALLO_RE.search(texto):
+        return ("C", "fallo de audio explícito")
+    for k in _PRIORIDAD:
+        for pat in _PATRONES[k]:
+            if pat in t:
+                return (k, pat)
+    return None
+
+
+def _parse_evidencia(evidencia: str, contexto: dict) -> dict:
+    """⑩ Capa ESTRUCTURAL: parsea las capas CRUDAS del veredicto de la
+    extensión (composeEvidence) SIN sustituirlas. El texto bruto viaja
+    siempre íntegro en 'bruto'."""
+    raw = evidencia or ""
+    estructura: dict = {
+        "http": None, "http_body": None,
+        "notificaciones": [], "tiles": [],
+        "configuracion": None, "audio_silencioso": None,
+        "watchdog_local": bool(_WATCHDOG_RE.search(raw))
+        or bool(contexto.get("ventana_agotada")),
+        "bruto": raw[:600],
+    }
+    m = _HTTP_RE.search(raw)
+    if m:
+        estructura["http"] = {"status": int(m.group(1)),
+                              "metodo": (m.group(2) or "?").upper()}
+    mb = _HTTP_BODY_RE.search(raw)
+    if mb:
+        estructura["http_body"] = mb.group(1).strip()[:300]
+    for mn in _NOTIF_RE.finditer(raw):
+        estructura["notificaciones"].append(
+            {"text": mn.group(1).strip()[:300], "source": "flow_notification"})
+    for mt in _TILE_RE.finditer(raw):
+        estructura["tiles"].append(
+            {"text": mt.group(1).strip()[:300], "source": "flow_error_tile"})
+    mc = _CFG_RE.search(raw)
+    if mc:
+        cfg: dict = {"source": "flow_generation_settings"}
+        for par in mc.group(1).split(","):
+            if "=" in par:
+                k, v = par.split("=", 1)
+                cfg[k.strip()[:12]] = v.strip()[:60]
+        estructura["configuracion"] = cfg
+    mas = _AUDIO_SILENT_RE.search(raw)
+    if mas:
+        estructura["audio_silencioso"] = mas.group(1).lower()
+    return estructura
+
+
 def clasificar(evidencia: str, kind: str = "video",
                contexto: dict | None = None) -> dict:
-    """Clasifica un fallo de Flow según la EVIDENCIA observada.
+    """Clasifica un fallo de Flow según la EVIDENCIA observada (V1.1).
 
     contexto: {transitorio: bool (intento fallido con generación aún activa),
                ventana_agotada: bool, resultado_valido: bool}.
-    Orden determinista: 1) texto explícito C/D/E/F por prioridad,
-    2) timeout (B), 3) transitorio genérico (A), 4) desconocido (G).
+
+    Prioridad de evidencia (④, fuerte→débil; la débil JAMÁS contradice a la
+    fuerte): 1) causa específica por capa: http-body > notificación >
+    error-tile > texto bruto (legado); 2) watchdog local → A
+    FLOW_WATCHDOG_TIMEOUT (NUNCA es un timeout del proveedor); 3) error
+    explícito de Flow sin causa → B FLOW_PROVIDER_ERROR; 4) nada → I
+    UNKNOWN_FLOW_FAILURE. Un status HTTP aislado NO infiere causa.
+
+    Confianza (⑪): HIGH = causa específica por respuesta de red o
+    notificación; MEDIUM = causa específica por tile, o error explícito de
+    Flow sin causa completa; LOW = solo estado local (A/I).
     Un resultado válido NO es un fallo: {clase: None}."""
     ctx = contexto or {}
-    texto = (evidencia or "").lower()
+    raw = evidencia or ""
+    texto = raw.lower()
     if ctx.get("resultado_valido"):
         return {"clase": None, "codigo": "SUCCESS",
                 "motivo": "hay resultado válido: no es un fallo",
-                "evidencia": (evidencia or "")[:300]}
-    for k in _PRIORIDAD:  # 1) evidencia textual explícita
-        if any(pat in texto for pat in _PATRONES[k]):
-            return {"clase": k, "codigo": CLASES[k],
-                    "motivo": f"evidencia textual de clase {k} ({CLASES[k]})",
-                    "evidencia": (evidencia or "")[:300]}
-    if "timeout" in texto or "watchdog" in texto or "lease" in texto \
-            or not texto:  # 2) tiempo agotado / sin texto
-        return {"clase": "B", "codigo": CLASES["B"],
-                "motivo": "ventana/tiempo agotado sin resultado y sin texto "
-                          "de rechazo específico",
-                "evidencia": (evidencia or "")[:300]}
-    if ctx.get("transitorio"):  # 3) intento aislado, generación aún activa
+                "evidencia": raw[:300],
+                "evidencia_estructura": _parse_evidencia(raw, ctx),
+                "classification_confidence": None,
+                "fuente_evidencia": None}
+    estructura = _parse_evidencia(raw, ctx)
+
+    # 1) causa específica por capa de evidencia (fuerte → débil)
+    capas = (
+        ("http_response", estructura.get("http_body"), "HIGH"),
+        ("flow_notification",
+         " ".join(n["text"] for n in estructura["notificaciones"]), "HIGH"),
+        ("flow_error_tile",
+         " ".join(t["text"] for t in estructura["tiles"]), "MEDIUM"),
+        ("texto_legado", raw, "MEDIUM"),
+    )
+    for fuente, capa_texto, conf in capas:
+        if not capa_texto:
+            continue
+        hit = _causa_especifica(capa_texto)
+        if hit:
+            clase, detalle = hit
+            return {"clase": clase, "codigo": CLASES[clase],
+                    "motivo": f"evidencia textual de clase {clase} "
+                              f"({CLASES[clase]}) vía {fuente}: {detalle}",
+                    "evidencia": raw[:300],
+                    "evidencia_estructura": estructura,
+                    "classification_confidence": conf,
+                    "fuente_evidencia": fuente}
+
+    # 2) watchdog local (⑤/evidencia local): NUNCA se interpreta como
+    #    timeout del proveedor (③); causalidad LOCAL, confianza LOW (⑪)
+    if estructura["watchdog_local"]:
         return {"clase": "A", "codigo": CLASES["A"],
-                "motivo": "tile de error aislado con generación en curso y "
-                          "sin texto clasificable",
-                "evidencia": (evidencia or "")[:300]}
-    # 4) hay texto pero no casa ningún patrón → jamás se inventa causa
-    return {"clase": "G", "codigo": CLASES["G"],
-            "motivo": "evidencia presente sin patrón conocido: causa "
-                      "desconocida (no se inventa)",
-            "evidencia": (evidencia or "")[:300]}
+                "motivo": "ventana LOCAL agotada sin evidencia específica "
+                          "del proveedor: no se asume causa (la causalidad "
+                          "de proveedor es LOCAL/LOW)",
+                "evidencia": raw[:300],
+                "evidencia_estructura": estructura,
+                "classification_confidence": "LOW",
+                "fuente_evidencia": "watchdog_local",
+                "alcance_causal": "LOCAL"}
+
+    # 3) error explícito de Flow sin causa determinable → B
+    if estructura.get("http") or estructura["tiles"] \
+            or estructura["notificaciones"] \
+            or _EXPLICIT_FAIL_RE.search(texto):
+        fuente = ("http_status" if estructura.get("http")
+                  else ("flow_notification" if estructura["notificaciones"]
+                        else ("flow_error_tile" if estructura["tiles"]
+                              else "texto_error")))
+        return {"clase": "B", "codigo": CLASES["B"],
+                "motivo": "Flow reportó un error explícito sin causa "
+                          "determinable: no se inventa (un status HTTP "
+                          "aislado no infiere causa)",
+                "evidencia": raw[:300],
+                "evidencia_estructura": estructura,
+                "classification_confidence": "MEDIUM",
+                "fuente_evidencia": fuente}
+
+    # 4) sin evidencia clasificable → I
+    return {"clase": "I", "codigo": CLASES["I"],
+            "motivo": "sin evidencia clasificable: causa desconocida "
+                      "(no se inventa)",
+            "evidencia": raw[:300],
+            "evidencia_estructura": estructura,
+            "classification_confidence": "LOW",
+            "fuente_evidencia": "sin_evidencia"}
 
 
 # ── ADAPTAR (mínima, determinista, trazable, reversible) ─────────────────────
 
 def _s1_identidad_a_visual(p1: str, contexto: dict) -> dict:
-    """S1 — restricción de identidad/likeness (clase D).
+    """S1 — restricción de identidad/likeness (clase F en V1.1).
 
     Reencuadre preservando la intención visual: IDENTIDAD CREATIVA →
     descripción visual del avatar (ya existente: avatars.appearance o el
@@ -259,48 +426,23 @@ def _s1_identidad_a_visual(p1: str, contexto: dict) -> dict:
 
 
 def _s2_camara_generica(p1: str, contexto: dict) -> dict:
-    """S2 — formulación de cámara/enfoque facial (clase F).
+    """S2 — ELIMINADA en V1.1.
 
-    Reescribe SOLO la cláusula de enfoque facial por una formulación
-    genérica de composición, preservando sujeto, acción, orientación y
-    continuidad (ej. mandato: 'enfoca directamente el rostro...' →
-    'plano medio, cámara estable' + el resto verbatim)."""
-    texto = (p1 or "").strip()
-    if not texto:
-        return {"aplicada": False, "motivo": "S2 sin P1 que adaptar"}
-    partes = re.split(r"(?<=[.;\n])\s+", texto)
-    salida, reemplazos = [], 0
-    for parte in partes:
-        if _S2_ENFOQUE_RE.search(parte) and _S2_ROSTRO_RE.search(parte):
-            nueva = _S2_ENFOQUE_RE.sub(
-                _S2_REEMPLAZO + " ", parte, count=1)
-            # la cola de la cláusula enfocada (hasta la 1ª coma/punto) se
-            # elimina; el resto de la frase (orientación, sujeto) queda.
-            nueva = re.sub(
-                _S2_REEMPLAZO + r" [^,.;]*", _S2_REEMPLAZO, nueva, count=1)
-            salida.append(nueva)
-            reemplazos += 1
-        else:
-            salida.append(parte)
-    if not reemplazos:
-        return {"aplicada": False, "motivo":
-                "S2 sin cláusula de enfoque facial reconocible en P1: no se "
-                "reescribe a ciegas (FLOW_ADAPTATION_REQUIRED)"}
-    return {"aplicada": True, "estrategia": "S2", "p2": " ".join(salida),
-            "transformacion": (f"{reemplazos} cláusula(s) de enfoque facial → "
-                               "formulación genérica de composición"),
-            "motivo": "preserva sujeto/orientación/composición/continuidad; "
-                      "solo reformula la instrucción de cámara"}
+    La taxonomía A-I ya no contiene la clase de 'interpretación de prompt'
+    (la V3 la mapeaba a F PROMPT_INTERPRETATION_PROBLEM → S2). Sin clase con
+    evidencia no hay estrategia segura: fail-closed → FLOW_ADAPTATION_REQUIRED.
+    Se conserva el símbolo con este docstring para trazabilidad histórica
+    (las baterías V3 documentaban su existencia)."""
+    return {"aplicada": False, "motivo": _S2_ELIMINADA}
 
 
 def adaptar_prompt(p1: str, clase: str, contexto: dict | None = None) -> dict:
     """Punto único de adaptación: SOLO si la clase tiene estrategia segura
-    (D→S1, F→S2). NUNCA preventiva: sin clase con evidencia → no aplica."""
+    (F→S1 en V1.1). NUNCA preventiva: sin clase con evidencia → no aplica.
+    C audio NUNCA toca el prompt visual (⑥); G copyright sin workaround (⑥)."""
     ctx = contexto or {}
-    if clase == "D":
-        return _s1_identidad_a_visual(p1 or "", ctx)
     if clase == "F":
-        return _s2_camara_generica(p1 or "", ctx)
+        return _s1_identidad_a_visual(p1 or "", ctx)
     return {"aplicada": False, "motivo":
             f"sin estrategia segura para la clase {clase}: "
             "no se toca el prompt creativo"}
@@ -316,11 +458,13 @@ def decidir_reintento(clase: str | None, intentos: int, kind: str,
     DEAD inmediato (eso lo decide fail() con max_attempts del contrato) ni
     retry infinito (esta capa no concede más allá de MAX_EXTRA_GRANTS).
 
-    Orden de evaluación (v1.1, auditoría v3-audit-backend): 1) clases sin
-    estrategia (C/E) emiten reporte FLOW_ADAPTATION_REQUIRED SIEMPRE —
-    independiente de los grants; 2) si P2 ya se usó y falló → reporte SIEMPRE
-    (la única adaptación se quemó); 3) recién entonces el límite de grants;
-    4) política de la clase."""
+    Orden de evaluación (v1.1): 1) clases sin estrategia segura (D política,
+    G copyright) emiten reporte FLOW_ADAPTATION_REQUIRED SIEMPRE —
+    independiente de los grants; E (créditos) y H (actividad inusual) no
+    reintentan (causa operacional, no de adaptación) sin reporte de
+    adaptación; 2) si P2 ya se usó y falló → reporte SIEMPRE (la única
+    adaptación se quemó); 3) recién entonces el límite de grants; 4)
+    política de la clase."""
     pol = RETRY_POLICY.get(clase) if clase else None
     base = {"clase": clase, "reintentar": False, "adaptar": None,
             "otorgado": False, "motivo": pol["motivo"] if pol else
@@ -332,12 +476,12 @@ def decidir_reintento(clase: str | None, intentos: int, kind: str,
         base["motivo"] = "la capa solo interviene en video (imagen conserva " \
                          "su contrato propio)"
         return base
-    if not pol.get("reintentar"):  # C/E: sin estrategia segura → reporte siempre
-        if clase in ("C", "E"):
+    if not pol.get("reintentar"):  # D/G: sin estrategia segura → reporte siempre
+        if clase in ("D", "G"):
             base["reporte"] = FLOW_ADAPTATION_REQUIRED
         return base
     if ya_adaptado and pol.get("adaptar"):
-        # D/F con P2 ya usado: la única adaptación se quemó → detener y
+        # F con P2 ya usado: la única adaptación se quemó → detener y
         # reportar (ANTES del límite de grants, para no perder la señal)
         base["motivo"] = (base["motivo"] + " — P2 ya se usó y falló: una "
                           "sola adaptación por job → reportar")
@@ -346,7 +490,7 @@ def decidir_reintento(clase: str | None, intentos: int, kind: str,
     if grants_previos >= MAX_EXTRA_GRANTS:
         base["motivo"] = (base["motivo"] + " — LÍMITE: ya se concedió el "
                           "reencolar extra permitido para este job")
-        if clase in ("C", "E", "G"):
+        if clase in ("D", "G", "I"):
             # fallo repetido sin más opciones: detenerse y reportar (mandato:
             # REPEATED FAILURE → detenerse y reportar)
             base["reporte"] = FLOW_ADAPTATION_REQUIRED
@@ -434,8 +578,9 @@ def _contexto_creativo(row) -> dict:
 def procesar_fallo_job(job_id: str) -> dict | None:
     """Ciclo operacional completo sobre un job de VIDEO que quedó dead.
 
-    OBSERVAR (evidencia del job) → CLASIFICAR (A-G solo con evidencia) →
-    ADAPTAR (S1/S2 solo si la clase lo permite Y hay datos) → REINTENTAR
+    OBSERVAR (evidencia del job) → CLASIFICAR (A-I V1.1 solo con evidencia,
+    prioridad ④) → ADAPTAR (S1 solo con F identidad Y datos existentes) →
+    REINTENTAR
     (única reencola extra) → REGISTRAR (ledger JSONL). Devuelve la decisión
     (o None si el job no es elegible). NUNCA lanza hacia la cola."""
     con = db.connect()
@@ -452,8 +597,13 @@ def procesar_fallo_job(job_id: str) -> dict | None:
     finally:
         con.close()
 
+    # [observability v1.1] ③④: la marca de ventana LOCAL viene del TEXTO del
+    # veredicto (watchdog:/timeout-local:/lease — composeEvidence), NO se
+    # asume para todo job dead: un error explícito de Flow sin causa es B
+    # (reintento limitado), no A. Sin texto → I (sin evidencia).
     cls = clasificar(evidencia, "video",
-                     {"transitorio": False, "ventana_agotada": True,
+                     {"transitorio": False,
+                      "ventana_agotada": bool(_WATCHDOG_RE.search(evidencia or "")),
                       "resultado_valido": False})
     decision = decidir_reintento(cls["clase"], intentos, "video",
                                  ya_adaptado=ya_adaptado,
@@ -461,9 +611,12 @@ def procesar_fallo_job(job_id: str) -> dict | None:
     registro = {
         "job_id": job_id, "kind": "video", "escena": escena,
         "prompt_original": p1,          # P1 queda registrado y intacto
-        "evidencia_observada": cls.get("evidencia"),
+        "evidencia_observada": cls.get("evidencia"),   # ⑩ capa CRUDA
+        "evidencia_estructura": cls.get("evidencia_estructura"),  # ⑩ capas
         "clasificacion": cls["clase"], "codigo": cls["codigo"],
         "motivo_clasificacion": cls["motivo"],
+        "classification_confidence": cls.get("classification_confidence"),
+        "fuente_evidencia": cls.get("fuente_evidencia"),
         "transformacion": None, "prompt_adaptado": None,
         "resultado": None, "retry": decision, "otorgado": False,
     }

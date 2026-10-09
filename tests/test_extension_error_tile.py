@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Batería determinista del tratamiento de error-tiles (ext 2.3.0, [attempt v3]).
+"""Batería determinista del tratamiento de error-tiles (ext 2.3.1, [attempt v3]+[observability v1.1]).
 
 Evolución del fix V1 ([error-tile v2], ext 2.2.4): la evidencia REAL_WORLD
 (proyecto 26b63daa9bdd: 4 MP4 H.264/AAC 720x1280 válidos con firma
@@ -126,8 +126,11 @@ def main() -> int:
     check("limpieza al reclamar job del bridge",
           "sceneAttempts.delete(sceneNumber)" in src)
     n_sem_null = src.count("resolveSemanticScene(null)")
-    check("resolución de escena semántica sin mediaId intacta (1 llamada)",
-          n_sem_null == 1, f"esperado 1, hay {n_sem_null}")
+    # [observability v1.1]: error-tiles + notificaciones + videos sin audio
+    # resuelven escena con la MISMA regla 1-a-1 (3 llamadas, sin regresión)
+    check("resolución de escena semántica sin mediaId intacta (3 llamadas: "
+          "tiles+notificaciones+videos)",
+          n_sem_null == 3, f"esperado 3, hay {n_sem_null}")
 
     print("── 1b. anclajes [video-window v3] (ventana de video operativa)")
     check("constante VIDEO_GENERATION_TIMEOUT_SECONDS (15*60)",
@@ -161,8 +164,8 @@ def main() -> int:
 
     print("── 3. versión y sintaxis")
     mf = json.loads((EXT / "manifest.json").read_text(encoding="utf-8"))
-    check("manifest 2.3.0 (bump menor: cambio conductual JOB vs ATTEMPT)",
-          mf.get("version") == "2.3.0", mf.get("version"))
+    check("manifest 2.3.1 (bump menor: FLOW OBSERVABILITY v1.1)",
+          mf.get("version") == "2.3.1", mf.get("version"))
     if node:
         for js in ("background.js", "bridge.js", "injector.js"):
             proc = subprocess.run([node, "--check", str(EXT / js)],

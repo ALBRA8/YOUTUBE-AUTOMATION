@@ -15,7 +15,15 @@
     try {
       if (event.source !== window) return;
       const d = event.data;
-      if (!d || d.type !== 'FLOW_BATCH_RESPONSE') return;
+      if (!d || d.source !== 'flow-ext-injector') return;
+      /* [observability v1.1] EVIDENCIA de red (4xx/5xx + fallos de red):
+       * reenvío read-only al Service Worker con su propio tipo. La aduana
+       * solo cambia el tipo del mensaje: jamás interpreta ni clasifica. */
+      if (d.type === 'FLOW_NETWORK_EVIDENCE') {
+        chrome.runtime.sendMessage({ type: 'FLOW_NETWORK_EVIDENCE', data: d.data }).catch(() => {});
+        return;
+      }
+      if (d.type !== 'FLOW_BATCH_RESPONSE') return;
       chrome.runtime.sendMessage({ type: 'BATCH_DETECTED', data: d.data }).catch(() => {});
     } catch (_) { /* silencioso */ }
   });

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Runner de las baterías canónicas de tests (fuente de verdad).
 
-Ejecuta las 4 baterías en orden, cada una en su PROPIO proceso python3
+Ejecuta las baterías canónicas en orden, cada una en su PROPIO proceso python3
 (aislamiento total de sys.modules), imprime un resumen por batería
 (X OK · Y fallos) y un total. Exit code != 0 si alguna batería falla
 o no puede ejecutarse.
@@ -67,11 +67,17 @@ BATERIAS = [
                                  # flow-error-tile solo es fatal SIN evidencia
                                  # de resultados; código REAL en SW simulado (54)
     "test_flow_video_v3.py",     # FLOW VIDEO v3 ([video-window v3]+[attempt v3]
-                                 # +[flow-adaptation v1], ext 2.3.0): ventana de
+                                 # +[flow-adaptation v1.1], ext 2.3.1): ventana de
                                  # video 15 min configurable, JOB vs ATTEMPT,
-                                 # P1/P2, taxonomía A-G, retry limitado,
+                                 # P1/P2, taxonomía V1.1 A-I, retry limitado,
                                  # FLOW_ADAPTATION_REQUIRED; código REAL en SW
-                                 # simulado + DB tmp (119)
+                                 # simulado + DB tmp (123)
+    "test_flow_observability_v11.py", # FLOW OBSERVABILITY V1.1 (ext 2.3.1):
+                                 # 4xx/5xx como evidencia cruda (fetch+XHR),
+                                 # notificaciones flow_notification, taxonomía
+                                 # A-I (watchdog ≠ proveedor), prioridad de
+                                 # evidencia ④, cfg/audio/capturas,
+                                 # P1/P2, byte-identidad del código creativo (59)
     "test_humos_infra.py",       # humos: lo declarado EXISTE en el repo (~50)
     "test_hands.py",             # HANDS V1.0 núcleo aislado: contratos,
                                  # permisos deny-by-default, workspace, sesiones,

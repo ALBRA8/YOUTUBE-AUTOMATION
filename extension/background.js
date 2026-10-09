@@ -119,6 +119,12 @@ let sceneMediaCounts = new Map();        // sceneNumber -> ultima imagen N guard
 let sceneAttempts = new Map();           // [attempt v3] sceneNumber -> {count, lastError, lastAt}
                                          // (intentos fallidos DENTRO de la ventana: un intento
                                          //  fallido NO es un veredicto — CAMBIOS 2/4/6 del mandato)
+/* [observability v1.1] Evidencia cruda por escena (JOB vs ATTEMPT, ⑤):
+ * tiles / red / notificaciones / audio — MISMA vida que sceneAttempts
+ * (limpieza al iniciar, reclamar, completar: cero contaminación). */
+let sceneEvidence = new Map();           // sceneNumber -> {tiles:[], network:[], notifications:[], seen:[], silent}
+let sceneSettings = new Map();           // sceneNumber -> {settings, source:'flow_generation_settings', ts} (⑦)
+let orphanNetwork = [];                  // red http sin escena resoluble (adjunta al veredicto local)
 let rateLimitCooldownUntil = 0;
 let lastInjectAt = 0;
 let pollTimer = null;
@@ -145,6 +151,9 @@ function serializeState() {
     mediaIdToScene: Array.from(mediaIdToScene.entries()),
     sceneMediaCounts: Array.from(sceneMediaCounts.entries()),
     sceneAttempts: Array.from(sceneAttempts.entries()),
+    sceneEvidence: Array.from(sceneEvidence.entries()),   // [observability v1.1]
+    sceneSettings: Array.from(sceneSettings.entries()),   // [observability v1.1]
+    orphanNetwork,                                        // [observability v1.1]
   };
 }
 
@@ -170,6 +179,10 @@ function hydrateState(o) {
   mediaIdToScene = new Map(Array.isArray(o.mediaIdToScene) ? o.mediaIdToScene : []);
   sceneMediaCounts = new Map(Array.isArray(o.sceneMediaCounts) ? o.sceneMediaCounts : []);
   sceneAttempts = new Map(Array.isArray(o.sceneAttempts) ? o.sceneAttempts : []);
+  /* [observability v1.1] hidratación defensiva (forma vieja → vacío) */
+  sceneEvidence = new Map(Array.isArray(o.sceneEvidence) ? o.sceneEvidence : []);
+  sceneSettings = new Map(Array.isArray(o.sceneSettings) ? o.sceneSettings : []);
+  orphanNetwork = Array.isArray(o.orphanNetwork) ? o.orphanNetwork : [];
 }
 
 async function loadState() {
@@ -761,9 +774,50 @@ function domScanFn() {
       const videos = [];
       document.querySelectorAll('video[src], video > source[src]').forEach((v) => {
         const s = v.tagName === 'VIDEO' ? v.src : v.getAttribute('src');
-        if (s) videos.push(s);
+        if (!s) return;
+        /* [observability v1.1] ⑧ indicio EXPLÍCITO de audio en el contenedor
+         * (aria-label/texto). Sin indicio → 'unknown': JAMÁS 'false' por
+         * defecto (no se fabrica evidencia). */
+        let audioExplicit = 'unknown';
+        try {
+          const cont = v.closest('[data-media-id], [data-tile-id]') || v.parentElement;
+          const hint = cont ? ((cont.getAttribute && cont.getAttribute('aria-label')) || cont.innerText || '') : '';
+          if (/sin audio|no audio|audio no disponible|silencioso|mudo/i.test(String(hint).slice(0, 400))) {
+            audioExplicit = 'ausente';
+          }
+        } catch (_) { /* best-effort */ }
+        videos.push({ src: s, audioExplicit });
       });
-      semantic = { pending, errorTiles, media, videos };
+      /* [observability v1.1] ② notificaciones del sistema de Flow (read-only,
+       * SIN selectores inventados: solo ARIA estándar + snackbar/toast/dialog
+       * genéricos + texto visible). El TIPO lo decide el backend con el
+       * texto; aquí solo se OBSERVA. */
+      let notifications = [];
+      try {
+        const nodos = document.querySelectorAll(
+          '[aria-live], [role="status"], [role="alert"], [role="alertdialog"], '
+          + 'dialog[open], snackbar, toast, .snackbar, .toast, '
+          + '[class*="snackbar" i], [class*="toast" i], [class*="notification" i]');
+        const vistas = new Set();
+        nodos.forEach((n) => {
+          try {
+            const text = String(n.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+            if (!text || text.length < 3) return;
+            const key = text.slice(0, 100);
+            if (vistas.has(key)) return;
+            vistas.add(key);
+            notifications.push({
+              text,
+              ariaLive: n.getAttribute('aria-live') || null,
+              role: n.getAttribute('role') || null,
+              tag: String(n.tagName || '').toLowerCase().slice(0, 40),
+              ts: Date.now(),
+            });
+          } catch (_) { /* nodo ilegible */ }
+        });
+        notifications = notifications.slice(0, 12);
+      } catch (_) { /* plan B best-effort */ }
+      semantic = { pending, errorTiles, media, videos, notifications };
     } catch (_) { /* plan B best-effort */ }
 
     return {
@@ -887,6 +941,29 @@ async function processDomSnapshot(data) {
         + (sem.errorTiles[0] || '').slice(0, 120));
     }
   }
+  /* [observability v1.1] ② notificaciones del sistema de Flow (read-only):
+   * se registran con source='flow_notification'; el TIPO solo se infiere
+   * con evidencia textual CLARA (genérico → FLOW_GENERATION_FAILURE causa
+   * UNKNOWN — JAMÁS se mapea a un error interno del proveedor). Sin escena
+   * resoluble → no se atribuye (honesto, sin inventar). */
+  if (sem && Array.isArray(sem.notifications) && sem.notifications.length) {
+    const sceneN = resolveSemanticScene(null);
+    if (sceneN != null) {
+      for (const n of sem.notifications) {
+        if (n && n.text) recordSceneNotification(sceneN, n);
+      }
+    }
+  }
+  /* [observability v1.1] ⑧ videos sin audio: SOLO evidencia explícita del
+   * DOM; sin marcador → 'unknown' (nunca 'false' por defecto). */
+  if (sem && Array.isArray(sem.videos) && sem.videos.length) {
+    const sceneV = resolveSemanticScene(null);
+    if (sceneV != null) {
+      for (const v of sem.videos) {
+        if (v && v.audioExplicit === 'ausente') recordSceneSilent(sceneV, 'ausente');
+      }
+    }
+  }
   if (sem && Array.isArray(sem.media) && sem.media.length) {
     for (const m of sem.media) {
       if (!m || !m.id || !m.src) continue;
@@ -974,19 +1051,131 @@ function recordSceneAttempt(sceneNumber, reason) {
     lastError: String(reason || '').slice(0, 200),
     lastAt: Date.now(),
   });
+  /* [observability v1.1] el texto crudo del tile es EVIDENCIA (capa tiles) */
+  try {
+    const ev = __evidencia(sceneNumber);
+    ev.tiles.push({ text: String(reason || '').slice(0, 200), ts: Date.now() });
+    if (ev.tiles.length > 5) ev.tiles.shift();
+  } catch (_) { /* la observacion jamas tumba el flujo */ }
   persistState();
 }
 
 function clearSceneAttempts(sceneNumber) {
   if (sceneNumber == null) return;
-  if (sceneAttempts.delete(sceneNumber)) persistState();
+  const d1 = sceneAttempts.delete(sceneNumber);
+  const d2 = sceneEvidence.delete(sceneNumber);  // [observability v1.1] sin residuos
+  const d3 = sceneSettings.delete(sceneNumber);  // [observability v1.1] sin residuos
+  if (d1 || d2 || d3) persistState();
 }
 
 function sceneAttemptsSummary(sceneNumber) {
   const a = sceneAttempts.get(sceneNumber);
   if (!a || !a.count) return 'sin intentos fallidos registrados';
-  return a.count + ' intento(s) fallido(s) · última evidencia: ' + (a.lastError || '?');
+  return a.count + ' intento(s) fallido(s) · última evidencia: '
+    + (a.lastError || '?').slice(0, 60);
 }
+
+/* ---- [observability v1.1] captura de evidencia por escena ---------------
+ * ② notificaciones (source='flow_notification') · red 4xx/5xx · ⑧ audio.
+ * Estructura CRUDA (⑩): la clasificación vive en el backend y NUNCA
+ * reemplaza lo observado. Dedupe por texto (el sondeo repite snapshots). */
+function __evidencia(sceneNumber) {
+  let ev = sceneEvidence.get(sceneNumber);
+  if (!ev) {
+    ev = { tiles: [], network: [], notifications: [], seen: [], silent: 'unknown' };
+    sceneEvidence.set(sceneNumber, ev);
+  }
+  return ev;
+}
+
+function recordSceneNotification(sceneNumber, notif) {
+  if (sceneNumber == null || !notif || !notif.text) return;
+  const ev = __evidencia(sceneNumber);
+  const text = String(notif.text).slice(0, 300);
+  const key = text.slice(0, 100);
+  if (ev.seen.indexOf(key) !== -1) return; // misma notificación en cada sondeo: no infla
+  ev.seen.push(key);
+  if (ev.seen.length > 30) ev.seen.shift();
+  /* ⑨: el tipo SOLO con evidencia textual clara. "No se pudo generar el
+   * video" NO es un fallo de audio (no menciona audio). Genérico →
+   * FLOW_GENERATION_FAILURE con causa UNKNOWN (nunca error del proveedor). */
+  let inferredType = null;
+  if (/audio/i.test(text) && /fall|error|no disponible|omitid|sin |mudo|silencio/i.test(text)) {
+    inferredType = 'VIDEO_GENERATED_AUDIO_FAILED';
+  } else if (/no se pudo generar|no pudimos generar|no se pudo completar|fall\u00f3 la generaci\u00f3n|fallo al generar|error al generar/i.test(text)) {
+    inferredType = 'FLOW_GENERATION_FAILURE';
+  }
+  ev.notifications.push({
+    text, ts: Number(notif.ts) || Date.now(),
+    source: 'flow_notification',
+    ariaLive: notif.ariaLive || null, role: notif.role || null, tag: notif.tag || null,
+    inferredType,
+    cause: inferredType === 'FLOW_GENERATION_FAILURE' ? 'UNKNOWN' : null,
+  });
+  if (ev.notifications.length > 10) ev.notifications.shift();
+  persistState();
+}
+
+function recordSceneNetwork(sceneNumber, reg) {
+  if (sceneNumber == null || !reg) return;
+  const ev = __evidencia(sceneNumber);
+  ev.network.push(reg);
+  if (ev.network.length > 3) ev.network.shift();
+  persistState();
+}
+
+function recordSceneSilent(sceneNumber, estado) {
+  if (sceneNumber == null) return;
+  const ev = __evidencia(sceneNumber);
+  ev.silent = estado === 'ausente' ? 'ausente' : 'unknown';
+  persistState();
+}
+
+/* Composición del VEREDICTO con las capas de evidencia (④ la prioridad la
+ * decide el backend; aquí todas las capas viajan CRUDAS en texto
+ * determinista ≤490 — cabe en el transporte existente: bridgeFail y
+ * flow_jobs.fail cortan a 500). Formato:
+ * <veredicto local> (intentos) | http: … | http-body: … | notif: "…" |
+ * tile: … | cfg: m=…,r=…,d=…,o=…,n=… | audio=…                          */
+function composeEvidence(sceneNumber, veredicto) {
+  const partes = [String(veredicto || '').slice(0, 120)];
+  partes.push('(' + sceneAttemptsSummary(sceneNumber) + ')');
+  try {
+    const ev = sceneEvidence.get(sceneNumber) || null;
+    const st = sceneSettings.get(sceneNumber) || null;
+    const orfa = (orphanNetwork && orphanNetwork.length)
+      ? orphanNetwork[orphanNetwork.length - 1] : null;
+    const net = (ev && ev.network && ev.network.length)
+      ? ev.network[ev.network.length - 1]
+      : ((orfa && orfa.kind === 'http_error') ? orfa : null);
+    if (net && net.kind === 'http_error' && net.status) {
+      partes.push('http: ' + net.status + ' ' + String(net.method || '?').toUpperCase());
+      const cuerpo = String(net.body || '').replace(/[|"\r\n]+/g, ' ').trim();
+      if (cuerpo) partes.push('http-body: ' + cuerpo.slice(0, 90));
+    }
+    const notif = (ev && ev.notifications && ev.notifications.length)
+      ? ev.notifications[ev.notifications.length - 1] : null;
+    if (notif && notif.text) {
+      partes.push('notif: "' + String(notif.text).replace(/[|"\r\n]+/g, ' ').trim().slice(0, 70) + '"');
+    }
+    const tile = (ev && ev.tiles && ev.tiles.length)
+      ? ev.tiles[ev.tiles.length - 1] : null;
+    if (tile && tile.text) {
+      partes.push('tile: ' + String(tile.text).replace(/[|"\r\n]+/g, ' ').trim().slice(0, 50));
+    }
+    /* ⑦ configuración de generación: SOLO si el interceptor la capturó de
+     * verdad (payloads tRPC); si no → unknown (JAMÁS se infiere de la URL). */
+    const cfg = (st && st.settings) || {};
+    partes.push('cfg: m=' + (cfg.model || 'unknown') + ',r=' + (cfg.resolution || 'unknown')
+      + ',d=' + (cfg.durationSec || 'unknown') + ',o=' + (cfg.orientation || 'unknown')
+      + ',n=' + (cfg.results || 'unknown'));
+    /* ⑧ audio del video generado: unknown salvo evidencia DOM explícita */
+    partes.push('audio=' + ((ev && ev.silent) || 'unknown'));
+  } catch (_) { /* la composición jamás tumba el veredicto */ }
+  return partes.join(' | ').slice(0, 490);
+}
+
+/* ---- fin [observability v1.1] ------------------------------------------- */
 
 /* ---------------- Watchdog por escena (chrome.alarms) --------------------- */
 /* Si una generacion se atasca (Flow colgado, tile sin resolver), la escena
@@ -1031,9 +1220,12 @@ function watchdogCheck() {
        * registrados + último texto). Un error-tile AISLADO nunca llega aquí
        * por sí solo: solo el agotamiento de la ventana emite el veredicto. */
       item.status = STATUS.ERROR;
-      item.error = 'watchdog: sin resultado válido en '
-        + Math.round(budget / 60000) + ' min ('
-        + sceneAttemptsSummary(item.scene_number) + ')';
+      /* [observability v1.1] el veredicto LOCAL (ventana agotada) viaja con
+       * TODAS las capas de evidencia cruda observada (red/notificación/tile
+       * /configuración/audio): el backend clasifica la causa con prioridad
+       * de evidencia — el watchdog NO es una causa del proveedor. */
+      item.error = composeEvidence(item.scene_number,
+        'watchdog: sin resultado válido en ' + Math.round(budget / 60000) + ' min');
       expired = true;
     }
   }
@@ -1113,6 +1305,9 @@ function onMessageStartQueue(msg) {
   sceneMediaCounts = new Map();
   lastStateSummary = '';
   sceneAttempts = new Map(); // [attempt v3] cola nueva: cero intentos residuales
+  sceneEvidence = new Map(); // [observability v1.1] cola nueva: cero evidencia residual
+  sceneSettings = new Map();
+  orphanNetwork = [];
   persistState();
   startPollingIfNeeded();
   ensureKeepalive();
@@ -1352,6 +1547,78 @@ function extractPromptText(node) {
   return dig(node, 0);
 }
 
+/* [observability v1.1] ⑦ Configuración de generación: SOLO campos realmente
+ * presentes en los payloads tRPC interceptados (fuente REAL, no selectores
+ * inventados ni inferencia desde la URL). Lo ausente NO se fabrica. */
+function extractGenerationSettings(node) {
+  const out = {};
+  function dig(n, depth) {
+    if (!n || typeof n !== 'object' || depth > 12) return;
+    for (const [k, v] of Object.entries(n)) {
+      const kl = String(k).toLowerCase();
+      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+        const sv = String(v);
+        if (!out.model && /^(model|modelname|model_name|modelkey|model_key|modelversion)$/.test(kl)) {
+          out.model = sv.slice(0, 60);
+        } else if (!out.resolution && /^(video)?resolution$/.test(kl)) {
+          out.resolution = sv.slice(0, 30);
+        } else if (!out.durationSec && /^(video)?duration(seconds|_seconds|_s|s)?$/.test(kl)
+                   && /^\d+(\.\d+)?$/.test(sv)) {
+          out.durationSec = sv.slice(0, 10);
+        } else if (!out.orientation && /^(orientation|aspect_?ratio)$/.test(kl)) {
+          out.orientation = sv.slice(0, 30);
+        } else if (!out.results && typeof v === 'number'
+                   && /^(num|results|sample|image|video)_?(count|results|requested|num|samples)$/.test(kl)) {
+          out.results = sv.slice(0, 10);
+        }
+      }
+      if (v && typeof v === 'object') dig(v, depth + 1);
+    }
+  }
+  dig(node, 0);
+  return out;
+}
+
+/* [observability v1.1] ① EVIDENCIA de red (4xx/5xx + fallos de red) que el
+ * interceptor captura: se atribuye a la escena en curso (prompt del cuerpo
+ * → única escena IN_PROGRESS → buffer huérfano) y queda como capa CRUDA de
+ * la evidencia. Read-only: jamás altera el flujo ni clasifica. */
+function handleNetworkEvidence(msg) {
+  try {
+    const ev = msg && msg.data;
+    if (!ev || typeof ev !== 'object') return;
+    const reg = {
+      kind: ev.kind === 'http_error' ? 'http_error' : 'network_failure',
+      status: (typeof ev.status === 'number') ? ev.status : null,
+      method: String(ev.method || '?').toUpperCase().slice(0, 10),
+      url: String(ev.url || '').slice(0, 140),
+      body: String(ev.body || '').slice(0, 300),
+      ts: Number(ev.ts) || Date.now(),
+    };
+    let scene = null;
+    if (reg.kind === 'http_error' && reg.body) {
+      try {
+        const parsed = JSON.parse(reg.body);
+        const p = parsed ? extractPromptText(parsed) : null;
+        const item = p ? findInProgressByPrompt(p) : null;
+        if (item) scene = item.scene_number;
+      } catch (_) { /* cuerpo no JSON: atribución por escena única */ }
+    }
+    if (scene == null) {
+      const inProgress = queue.filter((i) => i.status === STATUS.IN_PROGRESS);
+      if (inProgress.length === 1) scene = inProgress[0].scene_number;
+    }
+    if (scene == null) {
+      // sin escena resoluble: se conserva como huérfana (el veredicto local
+      // la adjunta si la ventana expira sin atribución posible)
+      orphanNetwork.push(reg);
+      if (orphanNetwork.length > 5) orphanNetwork.shift();
+      return;
+    }
+    recordSceneNetwork(scene, reg);
+  } catch (_) { /* observación read-only: jamás lanza */ }
+}
+
 function findInProgressByPrompt(promptText) {
   const norm = normalizeForMatch(promptText).slice(0, MAX_PROMPT_MATCH_LEN);
   if (!norm) return null;
@@ -1381,6 +1648,17 @@ function handleBatchResponse(raw) {
       });
       persistState();
     }
+    /* [observability v1.1] ⑦ settings REALES del payload (si llegaron);
+     * lo ausente queda unknown. source='flow_generation_settings'. */
+    if (sceneNumber != null) {
+      const cfg = extractGenerationSettings(p);
+      if (Object.keys(cfg).length) {
+        sceneSettings.set(sceneNumber, {
+          settings: cfg, source: 'flow_generation_settings', ts: Date.now(),
+        });
+        persistState();
+      }
+    }
   }
 }
 
@@ -1403,6 +1681,10 @@ function resetAll() {
   downloadedTileIds = new Set();
   mediaIdToScene = new Map();
   sceneMediaCounts = new Map();
+  sceneAttempts = new Map();
+  sceneEvidence = new Map(); // [observability v1.1] reset total: sin residuos
+  sceneSettings = new Map();
+  orphanNetwork = [];
   rateLimitCooldownUntil = 0;
   lastStateSummary = '';
   if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = null; }
@@ -1421,6 +1703,7 @@ function retryScene(id) {
   item.status = STATUS.PENDING;
   item.error = null;
   sceneMediaCounts.delete(item.scene_number);
+  clearSceneAttempts(item.scene_number); // [observability v1.1] reintento limpio (sin residuos)
   for (const [mid, m] of Array.from(mediaIdToScene.entries())) {
     if (m.sceneNumber === item.scene_number) mediaIdToScene.delete(mid);
   }
@@ -1460,6 +1743,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     switch (msg && msg.type) {
       case 'BATCH_DETECTED':
         handleBatchResponse(msg.data);
+        sendResponse({ ok: true });
+        break;
+      case 'FLOW_NETWORK_EVIDENCE': // [observability v1.1] evidencia cruda de red
+        handleNetworkEvidence(msg);
         sendResponse({ ok: true });
         break;
       case 'START_QUEUE':
@@ -1780,7 +2067,12 @@ function __bridgeHandleJob(job, sendResult) { // [bridge v1]
       let outcome = null;
       while (!outcome) {
         if (Date.now() - t0 > TIMEOUT_MS) {
-          outcome = { ok: false, error: 'timeout esperando la generación en Google Flow' };
+          /* [observability v1.1] techo LOCAL del handler: viaja como veredicto
+           * local (timeout-local) + capas de evidencia cruda; el backend
+           * clasifica — NO es un timeout del proveedor. */
+          outcome = { ok: false, error: composeEvidence(sceneNumber,
+            'timeout-local: techo del handler en '
+            + Math.round(TIMEOUT_MS / 60000) + ' min sin resultado') };
           break;
         }
         const cur = queue.find((i) => i.id === item.id);

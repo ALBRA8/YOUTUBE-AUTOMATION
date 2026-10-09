@@ -51,6 +51,10 @@ function makeCtx(opts) {
     mediaIdToScene: new Map(),
     sceneMediaCounts: new Map(),
     sceneAttempts: new Map(),
+    // [observability v1.1] evidencia cruda por escena (misma vida que attempts)
+    sceneEvidence: new Map(),
+    sceneSettings: new Map(),
+    orphanNetwork: [],
     // ---- stubs de dependencias fuera de la sección extraída ----
     persistState() { recorded.persisted += 1; },
     broadcastState() { recorded.broadcast += 1; },

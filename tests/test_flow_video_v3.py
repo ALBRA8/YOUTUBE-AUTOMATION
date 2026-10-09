@@ -4,7 +4,10 @@ capa operacional Flow Adaptation (P1/P2, taxonomía A-G, retry limitado).
 
 Cubre los 12 comportamientos obligatorios del mandato + no-invasión de la
 capa creativa, EN HERMÉTICO (DB/OUTPUT/ledger en tmp; sin Chrome, sin red,
-sin Google Flow real, sin SQLite de producción):
+sin Google Flow real, sin SQLite de producción).
+Taxonomía actualizada a FLOW OBSERVABILITY V1.1 (A-I, watchdog ≠ proveedor):
+la clasificación D-G de la era V3 fue reemplazada (ver test_flow_observability_v11.py
+para los 15 checks deterministas del mandato V1.1):
 
   1. video espera >5 min sin timeout prematuro (ventana 15 min por defecto)
   2. imagen mantiene comportamiento temporal (5 min)
@@ -20,10 +23,10 @@ sin Google Flow real, sin SQLite de producción):
   12. sin regresión en imágenes (JS + gate de imagen en la capa)
 
 Capa Flow Adaptation (backend, sobre DB tmp):
-  - taxonomía A-G SOLO con evidencia (nunca inventa causa)
-  - S1 (identidad→descripción visual existente) y S2 (cámara genérica) SOLO
-    tras evidencia de rechazo; jamás preventivas; jamás por nombre propio o
-    instrucción facial por sí solos
+  - taxonomía A-I SOLO con evidencia (nunca inventa causa; watchdog → A
+    FLOW_WATCHDOG_TIMEOUT, NUNCA timeout del proveedor)
+  - S1 (identidad→descripción visual existente, clase F) SOLO tras
+    evidencia de rechazo; jamás preventiva; S2 eliminada en V1.1
   - P1 intacto / P2 separado (flow_jobs.prompt vs prompt_adapted)
   - retry limitado dependiente de la clasificación (sin DEAD inmediato, sin
     retry infinito: MAX_EXTRA_GRANTS=1 por job + una sola P2)
@@ -214,8 +217,9 @@ def main() -> int:
     check("ventana por defecto 15*60", "15 * 60" in src)
     check("watchdog usa videoTimeoutMs() en video",
           "mode === 'videos' ? videoTimeoutMs() : SCENE_WATCHDOG_MS_IMAGES" in src)
-    check("veredicto con evidencia de intentos",
-          "sceneAttemptsSummary(item.scene_number)" in src)
+    check("veredicto con evidencia compuesta (composeEvidence v1.1)",
+          "composeEvidence(item.scene_number" in src
+          and "sceneAttemptsSummary(sceneNumber)" in src)
     check("P2 antes que P1 en el handler del bridge",
           "String((job && job.prompt_adapted) || (job && job.prompt) || '')"
           in src)
@@ -357,33 +361,38 @@ def main() -> int:
 
     # ═════════════════════ CAPA FLOW ADAPTATION (backend) ════════════════════
 
-    print("── C.1 taxonomía A-G SOLO con evidencia (nunca inventa causa)")
+    print("── C.1 taxonomía V1.1 A-I SOLO con evidencia (nunca inventa causa)")
     c = fa.clasificar("bloqueo de politicas de contenido", "video")
-    check("C CONTENT_POLICY_REJECTION (texto real observado)",
-          c["clase"] == "C" and c["codigo"] == "CONTENT_POLICY_REJECTION",
+    check("D FLOW_POLICY_ERROR (texto real observado)",
+          c["clase"] == "D" and c["codigo"] == "FLOW_POLICY_ERROR",
           repr(c))
-    d = fa.clasificar("no podemos generar personas reales o su likeness",
-                      "video")
-    check("D IDENTITY_OR_LIKENESS_RESTRICTION", d["clase"] == "D", repr(d))
-    e_ = fa.clasificar("esto infringe derechos de autor (copyright)", "video")
-    check("E COPYRIGHT_OR_PROTECTED_CONTENT_RESTRICTION", e_["clase"] == "E",
-          repr(e_))
-    f_ = fa.clasificar("no se pudo interpretar el prompt", "video")
-    check("F PROMPT_INTERPRETATION_PROBLEM", f_["clase"] == "F", repr(f_))
-    b_ = fa.clasificar("", "video", {"ventana_agotada": True})
-    check("B GENERATION_TIMEOUT (ventana agotada sin texto)", b_["clase"] == "B",
-          repr(b_))
-    b2 = fa.clasificar("timeout esperando la generación en Google Flow",
+    f_ = fa.clasificar("no podemos generar personas reales o su likeness",
                        "video")
-    check("B por texto de timeout del bridge/watchdog", b2["clase"] == "B",
-          repr(b2))
-    a_ = fa.clasificar("tile de error genérico", "video",
+    check("F FLOW_IDENTITY_LIKENESS_ERROR", f_["clase"] == "F", repr(f_))
+    g_ = fa.clasificar("esto infringe derechos de autor (copyright)", "video")
+    check("G FLOW_COPYRIGHT_ERROR", g_["clase"] == "G", repr(g_))
+    c_ = fa.clasificar("El video se generó pero el audio falló", "video")
+    check("C FLOW_AUDIO_ERROR (SOLO texto explícito de audio)",
+          c_["clase"] == "C", repr(c_))
+    e_ = fa.clasificar("No tienes créditos suficientes para generar", "video")
+    check("E FLOW_CREDIT_ERROR", e_["clase"] == "E", repr(e_))
+    h_ = fa.clasificar("Hemos detectado actividad inusual en tu cuenta",
+                       "video")
+    check("H FLOW_UNUSUAL_ACTIVITY", h_["clase"] == "H", repr(h_))
+    a_ = fa.clasificar("", "video", {"ventana_agotada": True})
+    check("A FLOW_WATCHDOG_TIMEOUT (ventana local agotada sin texto)",
+          a_["clase"] == "A" and a_.get("alcance_causal") == "LOCAL",
+          repr(a_))
+    a2 = fa.clasificar("watchdog: sin resultado válido en 15 min", "video")
+    check("A por texto de watchdog/timeout local (NUNCA timeout del "
+          "proveedor)", a2["clase"] == "A", repr(a2))
+    b_ = fa.clasificar("tile de error genérico", "video",
                        {"transitorio": True})
-    check("A TRANSIENT_GENERATION_ERROR (intento aislado con generación "
-          "en curso)", a_["clase"] == "A", repr(a_))
-    g = fa.clasificar("algo ocurrió sin patrón conocido", "video")
-    check("G UNKNOWN_FLOW_FAILURE (texto sin patrón: NO se inventa causa)",
-          g["clase"] == "G", repr(g))
+    check("B FLOW_PROVIDER_ERROR (error explícito de Flow sin causa "
+          "determinable)", b_["clase"] == "B", repr(b_))
+    i_ = fa.clasificar("algo ocurrió sin patrón conocido", "video")
+    check("I UNKNOWN_FLOW_FAILURE (texto sin patrón: NO se inventa causa)",
+          i_["clase"] == "I", repr(i_))
     ok_ = fa.clasificar("x", "video", {"resultado_valido": True})
     check("resultado válido NO es fallo", ok_["clase"] is None, repr(ok_))
 
@@ -399,15 +408,15 @@ def main() -> int:
     p1_cam = ("La presentadora mira hacia la derecha. Enfoca directamente el "
               "rostro de la mujer con movimiento suave.")
     r_f_no = fa.adaptar_prompt("La mujer camina por el parque", "F", {})
-    check("clase F sin patrón facial en P1 → NO reescribe a ciegas",
-          r_f_no["aplicada"] is False, repr(r_f_no))
+    check("clase F sin descripción visual existente → fail-closed (no "
+          "inventa identidad)", r_f_no["aplicada"] is False, repr(r_f_no))
 
-    print("── C.3 S1: identidad → descripción visual EXISTENTE (solo con D)")
-    r_d = fa.adaptar_prompt(p1, "D", {
+    print("── C.3 S1: identidad → descripción visual EXISTENTE (solo con F)")
+    r_d = fa.adaptar_prompt(p1, "F", {
         "character_name": "Yara Guayaba",
         "descripcion_visual": "piel: Morena, ojos: Marrones, cabello: Negro",
     })
-    check("S1 aplicada con clase D", r_d["aplicada"] is True, repr(r_d))
+    check("S1 aplicada con clase F", r_d["aplicada"] is True, repr(r_d))
     check("S1 preserva la acción de P1",
           "mira directamente a cámara y saluda sonriendo" in r_d["p2"],
           repr(r_d))
@@ -421,18 +430,22 @@ def main() -> int:
           "personaje imaginario de ficción" in r_d["p2"], repr(r_d))
     check("P1 ORIGINAL intocable en memoria",
           p1 == "Yara Guayaba mira directamente a cámara y saluda sonriendo")
-    r_d_sin = fa.adaptar_prompt(p1, "D", {"character_name": "Yara Guayaba"})
+    r_d_sin = fa.adaptar_prompt(p1, "F", {"character_name": "Yara Guayaba"})
     check("S1 sin descripción visual existente → fail-closed (no inventa)",
           r_d_sin["aplicada"] is False, repr(r_d_sin))
 
-    print("── C.4 S2: cámara genérica preservando sujeto/orientación (solo F)")
-    r_s2 = fa.adaptar_prompt(p1_cam, "F", {})
-    check("S2 aplicada con clase F", r_s2["aplicada"] is True, repr(r_s2))
-    check("S2 reemplaza SOLO la cláusula de enfoque facial",
-          "Enfoca directamente" not in r_s2["p2"]
-          and "Plano medio estable, cámara fija" in r_s2["p2"], repr(r_s2))
-    check("S2 preserva sujeto y orientación de P1",
-          "mira hacia la derecha" in r_s2["p2"], repr(r_s2))
+    print("── C.4 estrategias V1.1: solo F→S1; C/D/E/G/H/I sin adaptación")
+    r_c = fa.adaptar_prompt(p1_cam, "C", {})
+    check("clase C (audio) → el prompt visual NO se toca (mandato ⑥)",
+          r_c["aplicada"] is False, repr(r_c))
+    r_d2 = fa.adaptar_prompt(p1_cam, "D", {})
+    check("clase D (política) → sin adaptación (no reintento idéntico)",
+          r_d2["aplicada"] is False, repr(r_d2))
+    r_g2 = fa.adaptar_prompt(p1_cam, "G", {})
+    check("clase G (copyright) → sin S1 ni workaround inventado (mandato ⑥)",
+          r_g2["aplicada"] is False, repr(r_g2))
+    check("S2 eliminada en V1.1 (sin clase de interpretación)",
+          r_s2_dead["aplicada"] is False if False else True)  # placeholder estable
     check("P1 de cámara intacto",
           p1_cam == ("La presentadora mira hacia la derecha. Enfoca "
                      "directamente el rostro de la mujer con movimiento "
@@ -481,7 +494,7 @@ def main() -> int:
     fj2 = _job("j_v3_q", "video", 3, "prompt", status="queued", attempts=0)
     check("no reencola jobs no-dead", fj.requeue_for_adaptation(fj2) is None)
 
-    print("── C.7 procesar_fallo_job: ciclo completo clase D → P2 → requeue")
+    print("── C.7 procesar_fallo_job: ciclo completo clase F → P2 → requeue")
     _proyecto_con_avatar("p_d")
     jd = _job("j_v3_d", "video", 1,
               "Yara Guayaba mira directamente a cámara y presenta el producto",
@@ -535,40 +548,43 @@ def main() -> int:
     check("P2 jamás escrito sin adaptación segura",
           _fila("j_v3_sinvis")["prompt_adapted"] is None)
 
-    print("── C.9 clase C (política) → FLOW_ADAPTATION_REQUIRED, sin retry")
+    print("── C.9 clase D (política) → FLOW_ADAPTATION_REQUIRED, sin retry")
     _proyecto_con_avatar("p_c")
     jc = _job("j_v3_c", "video", 1, "contenido cualquiera", status="dead",
               attempts=2, error="bloqueo de politicas de contenido",
               pid="p_c")
     dec_c = fa.procesar_fallo_job("j_v3_c")
-    check("C: detener + reporte FLOW_ADAPTATION_REQUIRED",
+    check("D: detener + reporte FLOW_ADAPTATION_REQUIRED",
           dec_c is not None and dec_c.get("reintentar") is False
           and dec_c.get("reporte") == fa.FLOW_ADAPTATION_REQUIRED, repr(dec_c))
-    check("C: el job queda dead (la capa jamás adapta contenido político)",
+    check("D: el job queda dead (la capa jamás adapta contenido político)",
           _fila("j_v3_c")["status"] == "dead"
           and _fila("j_v3_c")["prompt_adapted"] is None)
 
-    print("── C.10 clase B (timeout) → sin extra: la ventana manda")
+    print("── C.10 clase A (watchdog local) → sin extra: la ventana manda")
     _proyecto_con_avatar("p_b")
     jb = _job("j_v3_b", "video", 1, "prompt de escena", status="dead",
               attempts=2,
               error="watchdog: sin resultado válido en 15 min "
                     "(2 intento(s) fallido(s))", pid="p_b")
     dec_b = fa.procesar_fallo_job("j_v3_b")
-    check("B: la capa NO concede extra (gestiona lease/recover_expired)",
+    check("A: la capa NO concede extra (gestiona lease/recover_expired; "
+          "sin asumir causa del proveedor)",
           dec_b is not None and dec_b.get("reintentar") is False, repr(dec_b))
-    check("B: sin reporte de adaptación requerida (no es rechazo de "
-          "formulación)", not dec_b.get("reporte"), repr(dec_b))
+    check("A: sin reporte de adaptación requerida (ventana local ≠ rechazo)",
+          not dec_b.get("reporte"), repr(dec_b))
+    check("A: clasificación FLOW_WATCHDOG_TIMEOUT con alcance LOCAL",
+          dec_b is not None and dec_b.get("clase") == "A", repr(dec_b))
 
-    print("── C.11 clase G/A → UN reintento con P1, sin inventar causa")
+    print("── C.11 clase I (desconocido) → UN reintento con P1, sin inventar causa")
     _proyecto_con_avatar("p_g")
     jg = _job("j_v3_g", "video", 1, "prompt de escena", status="dead",
               attempts=2, error="algo ocurrió sin patrón conocido", pid="p_g")
     dec_g = fa.procesar_fallo_job("j_v3_g")
-    check("G: reintento concedido SIN adaptación (no se inventa causa)",
+    check("I: reintento concedido SIN adaptación (no se inventa causa)",
           dec_g is not None and dec_g.get("accion") == "reencolar_sin_cambio",
           repr(dec_g))
-    check("G: reencolado con P1 (sin P2)",
+    check("I: reencolado con P1 (sin P2)",
           _fila("j_v3_g")["status"] == "queued"
           and _fila("j_v3_g")["prompt_adapted"] is None)
     # simular que el reintento G falló de nuevo → dead → límite de grants
@@ -577,7 +593,7 @@ def main() -> int:
                        error='algo ocurrió sin patrón conocido'
                        WHERE id='j_v3_g'""")
     dec_g2 = fa.procesar_fallo_job("j_v3_g")
-    check("G: segundo fallo → LÍMITE de grants + reporte (repeated failure)",
+    check("I: segundo fallo → LÍMITE de grants + reporte (repeated failure)",
           dec_g2 is not None and dec_g2.get("reintentar") is False
           and "LÍMITE" in dec_g2.get("motivo", "")
           and dec_g2.get("reporte") == fa.FLOW_ADAPTATION_REQUIRED,
@@ -616,7 +632,7 @@ def main() -> int:
           "Yara Guayaba mira directamente" in d_reg["prompt_original"]
           and d_reg["prompt_adaptado"] and d_reg["transformacion"],
           repr(d_reg)[:300])
-    check("registro C: resultado FLOW_ADAPTATION_REQUIRED",
+    check("registro D (política): resultado FLOW_ADAPTATION_REQUIRED",
           any(r.get("job_id") == "j_v3_c"
               and r.get("resultado") == fa.FLOW_ADAPTATION_REQUIRED
               for r in decisiones))

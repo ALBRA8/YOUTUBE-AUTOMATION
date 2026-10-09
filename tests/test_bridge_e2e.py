@@ -112,7 +112,7 @@ def main() -> int:
     mf = json.loads((EXT / "manifest.json").read_text(encoding="utf-8"))
     hp = mf.get("host_permissions", [])
     check("manifest.json es JSON válido con MV3", mf.get("manifest_version") == 3)
-    check("extensión continúa siendo v2.x (sin salto mayor; V3 = 2.3.0)",
+    check("extensión continúa siendo v2.x (sin salto mayor; V1.1 = 2.3.1)",
           str(mf.get("version", "")).startswith("2.3"), mf.get("version"))
     check("host_permissions incluye el dominio ACTUAL https://flow.google.com/*",
           "https://flow.google.com/*" in hp, repr(hp))
