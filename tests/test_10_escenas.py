@@ -75,13 +75,15 @@ def _png_bytes(n: int) -> bytes:
     return buf.getvalue()
 
 
-def _mp4_bytes(dur=1.0) -> bytes:
+def _mp4_bytes(dur=15.0) -> bytes:
     out = _TMP / "clip10.mp4"
+    # [execution-contract v1] clip CUMPLE el contrato (short → 9:16; sin
+    # production_unit → VIDEO_SECONDS=15): complete() valida con ffprobe.
     subprocess.run(
         ["ffmpeg", "-y", "-v", "error",
-         "-f", "lavfi", "-i", f"color=c=0xFF8C00:s=320x480:d={dur}",
+         "-f", "lavfi", "-i", f"color=c=0xFF8C00:s=720x1280:d={dur}",
          "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100",
-         "-shortest", "-c:v", "libx264", "-preset", "ultrafast",
+         "-t", str(dur), "-c:v", "libx264", "-preset", "ultrafast",
          "-pix_fmt", "yuv420p", "-c:a", "aac", str(out)],
         check=True, capture_output=True, timeout=60)
     return out.read_bytes()

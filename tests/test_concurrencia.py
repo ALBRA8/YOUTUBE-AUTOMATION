@@ -234,11 +234,14 @@ def _png() -> bytes:
 def _mp4() -> bytes:
     import subprocess
     out = _TMP / "conc_clip.mp4"
+    # [execution-contract v1] el clip CUMPLE el contrato del job (format
+    # short → 9:16; sin production_unit → VIDEO_SECONDS=15): complete()
+    # valida REQUESTED vs ACTUAL con ffprobe.
     subprocess.run(
         ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
-         "-i", "color=c=0xFF8C00:s=64x64:d=1.0",
+         "-i", "color=c=0xFF8C00:s=720x1280:d=15.0",
          "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100",
-         "-shortest",
+         "-t", "15.0",
          "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
          "-c:a", "aac", str(out)],
         check=True, capture_output=True, timeout=60)

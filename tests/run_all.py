@@ -93,6 +93,30 @@ BATERIAS = [
                                  # descarga fallida, locks muertos (33)
     "test_live_boot.py",         # BOOT VIVO: uvicorn real + ciclo completo del
                                  # Flow Bridge por HTTP (boot + cycle smoke)
+    "test_execution_contract.py",  # [execution-contract v1] spec schema 1.0
+                                 # (sin invención: null/unknown), gate de
+                                 # configuración CONFIG_* (§6), validación
+                                 # contractual ffprobe (§13), máquina de
+                                 # estados §9, ffprobe REAL de MP4s (69)
+    "test_execution_transport.py", # [execution-contract v1] transporte §17-A:
+                                 # Production JSON duration 8 → adapter 8 →
+                                 # export 8 → job 8 → execution_spec 8 →
+                                 # claim JSON; migración real de DB (54)
+    "test_flow_contract_states.py",  # [execution-contract v1] estados §9 +
+                                 # §17 C/D/E: progreso (sin rebobinar),
+                                 # complete 8s CONTRACT_OK vs 5s
+                                 # ASSET_INVALID terminal, CONFIG_* terminal
+                                 # sin adaptación, PROVIDER_FAILURE intacto,
+                                 # P1 inmutable (63)
+    "test_hands_contract.py",    # HANDS ↔ Execution Contract: descubrimiento
+                                 # honesto, control 5s→8s verificado, gate
+                                 # CONFIG_* REFUSA generar (sin submit),
+                                 # evidencia refs job_id, sin coordenadas,
+                                 # ExecutionContractHandAdapter (55)
+    "test_flow_config_gate.py",  # Extensión 2.4.0: flowConfigFn DOM-only
+                                 # (semántico/a11y/texto, sin coordenadas),
+                                 # gate espejo del backend (cross-check 7/7),
+                                 # prefijos CONFIG_* exactos (68)
 ]
 
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")

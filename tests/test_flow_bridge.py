@@ -60,15 +60,18 @@ def _png_bytes(w=32, h=32, color=(200, 30, 30)) -> bytes:
     return buf.getvalue()
 
 
-def _mp4_bytes(dur=1.0) -> bytes:
-    out = _TMP / f"clip_{dur}.mp4"
+def _mp4_bytes(dur=1.0, size="64x64") -> bytes:
+    # [execution-contract v1] los completions de VIDEO usan dur/size del
+    # contrato (15.0s · 720x1280 = 9:16) — complete() valida el asset contra
+    # el spec con ffprobe (§13); un MP4 fuera de contrato es ASSET_INVALID.
+    out = _TMP / f"clip_{dur}_{size.replace(':', 'x')}.mp4"
     subprocess.run(
         ["ffmpeg", "-y", "-v", "error",
-         "-f", "lavfi", "-i", f"color=c=0xFF8C00:s=64x64:d={dur}",
+         "-f", "lavfi", "-i", f"color=c=0xFF8C00:s={size}:d={dur}",
          "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100",
          "-shortest", "-c:v", "libx264", "-preset", "ultrafast",
          "-pix_fmt", "yuv420p", "-c:a", "aac", str(out)],
-        check=True, capture_output=True, timeout=60)
+        check=True, capture_output=True, timeout=120)
     return out.read_bytes()
 
 
@@ -178,7 +181,7 @@ def main() -> int:
     check("prompt de video == motion del Creative Engine (contrato P1)",
           jv["prompt"].startswith("CE_PROMPT_V1 :: slow dolly-in"),
           repr(jv["prompt"])[:80])
-    res_v = fj.complete(jv["id"], jv["job_token"], _mp4_bytes(1.0))
+    res_v = fj.complete(jv["id"], jv["job_token"], _mp4_bytes(15.0, size="720x1280"))
     vpath = fj.OUTPUT_DIR / pid / "flow" / "Escena_01_video_1.mp4"
     check("video guardado como Escena_01_video_1.mp4",
           bool(res_v) and Path(res_v["asset_path"]) == vpath,
@@ -228,7 +231,8 @@ def main() -> int:
 
     print("── 9. complete final del proyecto → mapea escenas (renderable)")
     jlast = fj.claim_next("w-A")
-    res_last = fj.complete(jlast["id"], jlast["job_token"], _mp4_bytes(1.0))
+    res_last = fj.complete(jlast["id"], jlast["job_token"],
+                           _mp4_bytes(15.0, size="720x1280"))
     check("project_done True al completar el último",
           res_last.get("project_done") is True, str(res_last)[:120])
     check("renderable True (todas las escenas tienen imagen)",
@@ -303,7 +307,7 @@ def main() -> int:
                     break
                 job = r.json()["job"]
                 payload = (_png_bytes() if job["kind"] == "image"
-                           else _mp4_bytes(1.0))
+                           else _mp4_bytes(15.0, size="720x1280"))
                 ctype = ("image/png" if job["kind"] == "image"
                          else "video/mp4")
                 r = await c.post(

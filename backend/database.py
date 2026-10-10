@@ -114,6 +114,18 @@ CREATE TABLE IF NOT EXISTS flow_jobs (    -- Flow Bridge: cola de assets para la
                                             -- para ejecución operacional en Flow; P1
                                             -- (prompt) NUNCA se sobrescribe ni se borra
     prompt_meta  TEXT,                      -- JSON (título de escena, etc.)
+    execution_spec TEXT,                    -- [execution-contract v1] JSON schema 1.0:
+                                            -- TERCERA CAPA del contrato (P1 prompt
+                                            -- inmutable / P2 adaptación / spec de
+                                            -- ejecución). Viaja verbatim al job y a
+                                            -- HANDS; NUNCA edita el prompt.
+    exec_state   TEXT,                      -- [execution-contract v1] estado fino del
+                                            -- pipeline (FLOW_TAB_READY...CONTRACT_VALIDATED
+                                            -- + terminales CONFIG_*/ASSET_INVALID);
+                                            -- `status` sigue mandando la cola.
+    contract_result TEXT,                   -- [execution-contract v1] JSON: validación
+                                            -- contractual del asset (requested vs
+                                            -- observed vs actual ffprobe)
     status       TEXT NOT NULL DEFAULT 'queued',  -- queued | claimed | done | dead
     attempts     INTEGER NOT NULL DEFAULT 0,
     max_attempts INTEGER NOT NULL DEFAULT 3,-- imagen 3 · video 2
@@ -157,6 +169,17 @@ def _migrate(con: sqlite3.Connection) -> None:
     # segundo Creative Engine (ver services/flow_adaptation.py).
     if fj and "prompt_adapted" not in fj:
         con.execute("ALTER TABLE flow_jobs ADD COLUMN prompt_adapted TEXT")
+    # [execution-contract v1] spec de ejecución + estado fino + resultado
+    # contractual (ver services/execution_contract.py). Tres columnas
+    # independientes: el spec (requested), el progreso mecánico (exec_state,
+    # máq. de estados FASE 7 §9) y la validación del asset (contract_result,
+    # §13). El spec es la tercera capa del contrato: jamás edita P1/P2.
+    if fj and "execution_spec" not in fj:
+        con.execute("ALTER TABLE flow_jobs ADD COLUMN execution_spec TEXT")
+    if fj and "exec_state" not in fj:
+        con.execute("ALTER TABLE flow_jobs ADD COLUMN exec_state TEXT")
+    if fj and "contract_result" not in fj:
+        con.execute("ALTER TABLE flow_jobs ADD COLUMN contract_result TEXT")
 
 
 # ── helpers genéricos ─────────────────────────────────────────────────────

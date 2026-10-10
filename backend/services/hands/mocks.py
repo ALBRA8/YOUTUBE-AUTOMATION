@@ -39,13 +39,23 @@ class MockEnvironment:
 
     def __init__(self, *, root: str | Path, allowlist: dict[str, Any] | None = None,
                  clock: FakeClock | None = None,
-                 allow_coordinate_fallback: bool = False):
+                 allow_coordinate_fallback: bool = False,
+                 controls_state: dict[str, Any] | None = None,
+                 controls_missing: tuple = (), controls_frozen: tuple = (),
+                 controls_stale: tuple = ()):
         self.clock = clock or FakeClock()
         self.workspace = HandsWorkspace(root)
         self.allowlist = dict(allowlist if allowlist is not None
                               else DEFAULT_ALLOWLIST)
         self.desktop_mock = MockDesktopBackend(self.clock, self.workspace.workspace)
-        self.flow_mock = MockFlowDriver(self.clock)
+        # Execution Contract V1.0 (FASE 7): los parámetros de controles se
+        # delegan en MockFlowDriver (que construye su MockFlowControlAdapter);
+        # el FlowOperator los hereda vía driver.controls_adapter. NADA más
+        # cambia: defaults ⇒ comportamiento idéntico al legacy.
+        self.flow_mock = MockFlowDriver(
+            self.clock, controls_state=controls_state,
+            controls_missing=controls_missing, controls_frozen=controls_frozen,
+            controls_stale=controls_stale)
         config = HandsConfig.from_dict({
             "workspace_root": str(self.workspace.root),
             "permissions": self.allowlist,

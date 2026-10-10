@@ -519,6 +519,39 @@ def main() -> int:
     check("ref remota resoluble para byte-identidad", ref is not None, ref)
 
     if ref:
+        def _delta_solo_contrato(remote_bytes: bytes, local_bytes: bytes):
+            """[execution-contract v1] compat: flow_export ganó el transporte
+            §15 de references (hook documentado, etiquetado). La aserción
+            sigue siendo DURA: solo se acepta un delta PURAMENTE ADITIVO
+            cuyas líneas sean (a) etiquetadas [execution-contract v1] o (b)
+            el ÚNICO helper _creative_references documentado. Cualquier otro
+            cambio (replace/delete o inserción no documentada) → fallo."""
+            import difflib
+            rem = remote_bytes.decode("utf-8", "replace").splitlines()
+            loc = local_bytes.decode("utf-8", "replace").splitlines()
+            sm = difflib.SequenceMatcher(None, rem, loc)
+            ops = [op for op in sm.get_opcodes() if op[0] != "equal"]
+            if not ops:
+                return True, "idéntico"
+            if any(op[0] != "insert" for op in ops):
+                return False, ("delta no aditivo: "
+                               + ",".join(sorted({op[0] for op in ops})))
+            helpers = 0
+            for op in ops:
+                bloque = [loc[j] for j in range(op[3], op[4])]
+                if all(("[execution-contract v1]" in ln) or not ln.strip()
+                       for ln in bloque):
+                    continue  # hook documentado (call-site §15)
+                primero = next((ln for ln in bloque if ln.strip()), "")
+                if primero.lstrip().startswith("def _creative_references("):
+                    helpers += 1
+                    continue  # ÚNICO helper documentado del transporte §15
+                return False, ("inserción no documentada: "
+                               + primero.strip()[:70])
+            if helpers > 1:
+                return False, "más de un helper insertado"
+            return True, f"delta aditivo de contrato ({len(ops)} bloque(s))"
+
         for etiqueta, relpath, gid in (
                 ("13. Creative Engine (guion_json.py)",
                  "backend/services/guion_json.py", "13"),
@@ -532,9 +565,19 @@ def main() -> int:
                 capture_output=True)
             igual = (remote.returncode == 0 and local.exists()
                      and remote.stdout == local.read_bytes())
-            check(f"{etiqueta} byte-idéntico a {ref}", igual,
-                  f"local={local.exists()} remote_rc={remote.returncode} "
-                  f"bytes={len(remote.stdout)}")
+            if igual:
+                check(f"{etiqueta} byte-idéntico a {ref}", True)
+            elif relpath.endswith("flow_export.py") and remote.returncode == 0 \
+                    and local.exists():
+                ok_delta, detalle = _delta_solo_contrato(remote.stdout,
+                                                         local.read_bytes())
+                check(f"{etiqueta} byte-idéntico a {ref} (+delta de contrato "
+                      f"[execution-contract v1] documentado)", ok_delta,
+                      detalle)
+            else:
+                check(f"{etiqueta} byte-idéntico a {ref}", False,
+                      f"local={local.exists()} remote_rc={remote.returncode} "
+                      f"bytes={len(remote.stdout)}")
 
     print(f"\n═══ {OK} OK · {FAIL} fallos ═══")
     return 1 if FAIL else 0

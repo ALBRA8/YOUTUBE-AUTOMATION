@@ -33,8 +33,13 @@ Image.new('RGB', (640, 360), (30, 120, 200)).save('$WORK/escena.png')
 "
 ffmpeg -loglevel error -f lavfi -i testsrc=duration=1:size=320x240:rate=10 \
        -pix_fmt yuv420p -y "$WORK/escena.mp4"
-[ -s "$WORK/escena.png" ] && [ -s "$WORK/escena.mp4" ] \
-    && ok "assets de prueba generados (PNG + MP4 reales)" \
+# [execution-contract v1] clip de video CUMPLE el contrato del job de la
+# escena 1 (duration 2.0 insertada en DB → spec requested=2.0; format short
+# → aspect 9:16): complete() valida REQUESTED vs ACTUAL con ffprobe.
+ffmpeg -loglevel error -f lavfi -i testsrc=duration=2:size=720x1280:rate=10 \
+       -pix_fmt yuv420p -y "$WORK/video.mp4"
+[ -s "$WORK/escena.png" ] && [ -s "$WORK/escena.mp4" ] && [ -s "$WORK/video.mp4" ] \
+    && ok "assets de prueba generados (PNG + MP4 reales + MP4 conforme al contrato)" \
     || { bad "no se pudieron generar assets"; exit 1; }
 
 echo "── 1. servidor vivo"
@@ -112,7 +117,7 @@ echo "── 7. último job (video escena 1) → project_done + auto-render"
 J=$(curl -s "$BASE/api/extension/flow/jobs/next?worker=w-ciclo" | jget job)
 ID=$(echo "$J" | jget id); TK=$(echo "$J" | jget job_token)
 echo "$J" | grep -q '"kind": *"video"' && ok "claim final: video escena 1" || bad "claim final: $J"
-LAST=$(curl -s -X POST "$BASE/api/extension/flow/jobs/$ID/complete?token=$TK" -H "Content-Type: video/mp4" --data-binary @"$WORK/escena.mp4")
+LAST=$(curl -s -X POST "$BASE/api/extension/flow/jobs/$ID/complete?token=$TK" -H "Content-Type: video/mp4" --data-binary @"$WORK/video.mp4")
 echo "$LAST" | grep -q '"project_done": *true' && ok "último complete → project_done=true" || bad "project_done: $LAST"
 echo "$LAST" | grep -q '"renderable": *true' && ok "assets mapeados a escenas → renderable=true" || bad "renderable: $LAST"
 echo "$LAST" | grep -q '"auto_render": *true' && ok "auto-render disparado (orchestrator)" || bad "auto_render: $LAST"

@@ -215,7 +215,15 @@ class Op(str, Enum):
 
 
 class FlowOp(str, Enum):
-    """Operaciones del especialista Google Flow (§14): HOW within Flow."""
+    """Operaciones del especialista Google Flow (§14): HOW within Flow.
+
+    Miembros de Execution Contract V1.0 (FASE 7) — controles por control:
+    DISCOVER_CAPABILITIES (descubrimiento honesto de la UI de Flow),
+    SET_MODEL/SET_DURATION/SET_ASPECT_RATIO/SET_OUTPUTS/SET_AUDIO/
+    SET_RESOLUTION (configuración mecánica por control, §8 del mandato) y
+    VERIFY_CONTROLS (gate de configuración sobre el execution_spec: generar
+    SOLO con controles required VERIFIED — §6). Nada inventa valores.
+    """
     OPEN_FLOW = "OPEN_FLOW"
     OPEN_PROJECT = "OPEN_PROJECT"
     SELECT_PROJECT = "SELECT_PROJECT"
@@ -227,6 +235,14 @@ class FlowOp(str, Enum):
     DOWNLOAD_RESULT = "DOWNLOAD_RESULT"
     VERIFY_RESULT = "VERIFY_RESULT"
     REPORT_RESULT = "REPORT_RESULT"
+    DISCOVER_CAPABILITIES = "DISCOVER_CAPABILITIES"
+    SET_MODEL = "SET_MODEL"
+    SET_DURATION = "SET_DURATION"
+    SET_ASPECT_RATIO = "SET_ASPECT_RATIO"
+    SET_OUTPUTS = "SET_OUTPUTS"
+    SET_AUDIO = "SET_AUDIO"
+    SET_RESOLUTION = "SET_RESOLUTION"
+    VERIFY_CONTROLS = "VERIFY_CONTROLS"
 
 
 # Categoría de permiso que consume cada operación (§16).
@@ -252,6 +268,15 @@ OP_PERMISSION_CATEGORY: dict[str, str] = {
     FlowOp.DOWNLOAD_RESULT.value: "filesystem",
     FlowOp.VERIFY_RESULT.value: "filesystem",
     FlowOp.REPORT_RESULT.value: "domain",
+    # Execution Contract V1.0 (FASE 7): controles del dominio Flow
+    FlowOp.DISCOVER_CAPABILITIES.value: "domain",
+    FlowOp.SET_MODEL.value: "domain",
+    FlowOp.SET_DURATION.value: "domain",
+    FlowOp.SET_ASPECT_RATIO.value: "domain",
+    FlowOp.SET_OUTPUTS.value: "domain",
+    FlowOp.SET_AUDIO.value: "domain",
+    FlowOp.SET_RESOLUTION.value: "domain",
+    FlowOp.VERIFY_CONTROLS.value: "domain",
 }
 
 

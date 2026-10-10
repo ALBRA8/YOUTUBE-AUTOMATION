@@ -85,6 +85,12 @@ from .verification import (VerificationEngine, Verdict, verify_file)  # noqa: E4
 from .recovery import RecoveryEngine, RecoveryPolicy        # noqa: E402,F401
 from .identify import TargetResolver                        # noqa: E402,F401
 
+# ── Execution Contract V1.0 (FASE 7): capa mecánica de controles ─────────
+from .flow_controls import (                                # noqa: E402,F401
+    Capabilities, ConfigGate, ControlResult, ControlVerdict,
+    FlowControlAdapter, MockFlowControlAdapter,
+)
+
 # ── operadores y runtime ─────────────────────────────────────────────────
 from .action_engine import ActionEngine                     # noqa: E402,F401
 from .desktop import (DesktopOperator, MockDesktopBackend,  # noqa: E402,F401
@@ -93,7 +99,8 @@ from .flow_operator import (ExtensionBridgeDriver, FlowJobSpec,  # noqa: E402,F4
                             FlowOperator, MockFlowDriver)
 from .runtime import HandsConfig, HandsRuntime, HANDS_VERSION  # noqa: E402,F401
 from .mocks import MockEnvironment                          # noqa: E402,F401
-from .future_integration import NotConnectedAdapter         # noqa: E402,F401
+from .future_integration import (ExecutionContractHandAdapter,   # noqa: E402,F401
+                                 NotConnectedAdapter)
 
 __all__ = [
     # metadatos
@@ -115,9 +122,12 @@ __all__ = [
     "WaitEngine", "WaitOutcome", "WaitSpec",
     "VerificationEngine", "Verdict", "verify_file",
     "RecoveryEngine", "RecoveryPolicy", "TargetResolver",
+    # Execution Contract V1.0 (FASE 7)
+    "Capabilities", "ConfigGate", "ControlResult", "ControlVerdict",
+    "FlowControlAdapter", "MockFlowControlAdapter",
     # operadores y runtime
     "ActionEngine", "DesktopOperator", "MockDesktopBackend",
     "PhysicalDesktopBackend", "ExtensionBridgeDriver", "FlowJobSpec",
     "FlowOperator", "MockFlowDriver", "HandsConfig", "HandsRuntime",
-    "MockEnvironment", "NotConnectedAdapter",
+    "MockEnvironment", "NotConnectedAdapter", "ExecutionContractHandAdapter",
 ]

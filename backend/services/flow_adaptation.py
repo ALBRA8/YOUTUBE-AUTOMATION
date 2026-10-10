@@ -82,6 +82,10 @@ import database as db
 FLOW_ADAPTATION_REQUIRED = "FLOW_ADAPTATION_REQUIRED"
 
 # Taxonomía V1.1 (③): SOLO con evidencia; sin evidencia → I.
+# [execution-contract v1] §10 — clases estructurales J-M: NO provienen de
+# texto de Flow sino de la MÁQUINA DE CONTRATO (prefijos generados por
+# execution_contract/flow_jobs). ERROR DE CONFIGURACIÓN != ADAPTACIÓN DE
+# PROMPT: jamás reintentan, jamás adaptan, jamás FLOW_ADAPTATION_REQUIRED.
 CLASES = {
     "A": "FLOW_WATCHDOG_TIMEOUT",
     "B": "FLOW_PROVIDER_ERROR",
@@ -92,7 +96,22 @@ CLASES = {
     "G": "FLOW_COPYRIGHT_ERROR",
     "H": "FLOW_UNUSUAL_ACTIVITY",
     "I": "UNKNOWN_FLOW_FAILURE",
+    "J": "CONFIG_UNSUPPORTED",
+    "K": "CONFIG_UNVERIFIABLE",
+    "L": "CONFIG_MISMATCH",
+    "M": "ASSET_CONTRACT_VIOLATION",
 }
+
+# Prefijos estructurales del Execution Contract (fuente: error estructurado
+# del gate/validador — la evidencia MÁS fuerte posible: la escribe el
+# contrato, no la prosa de Flow).
+_CLASES_CONTRACTO = ("J", "K", "L", "M")
+_PREFIJOS_CONTRACTO = (
+    ("CONFIG_UNSUPPORTED:", "J"),
+    ("CONFIG_UNVERIFIABLE:", "K"),
+    ("CONFIG_MISMATCH:", "L"),
+    ("ASSET_INVALID:", "M"),
+)
 
 # Patrones operacionales V1.1 (clases C-H: SOLO texto claro; sin patrón →
 # B/I, jamás se inventa causa). Matching case-insensitive por subcadena.
@@ -179,6 +198,25 @@ RETRY_POLICY = {
     "I": {"reintentar": True, "adaptar": None, "motivo":
           "fallo desconocido sin evidencia clasificable: registrar + "
           "reintento limitado SIN inventar causa"},
+    # [execution-contract v1] §10 — J/K/L/M: ERROR DE CONFIGURACIÓN !=
+    # ADAPTACIÓN DE PROMPT. Terminal: sin reintento, sin P2, sin reporte
+    # creativo (FLOW_ADAPTATION_REQUIRED es una señal CREATIVA; un problema
+    # de configuración no se resuelve reescribiendo prompts).
+    "J": {"reintentar": False, "adaptar": None, "motivo":
+          "CONFIG_UNSUPPORTED: Flow no expone (o no es editable) un control "
+          "requerido por el spec → terminal; la adaptación creativa no "
+          "resuelve configuración"},
+    "K": {"reintentar": False, "adaptar": None, "motivo":
+          "CONFIG_UNVERIFIABLE: el control no pudo re-leerse tras el cambio "
+          "→ terminal; generar sin verificación viola §6 (estado heredado "
+          "prohibido)"},
+    "L": {"reintentar": False, "adaptar": None, "motivo":
+          "CONFIG_MISMATCH: Flow quedó en un valor distinto al solicitado "
+          "tras configurar → terminal; NO SE GENERA con estado heredado"},
+    "M": {"reintentar": False, "adaptar": None, "motivo":
+          "ASSET_CONTRACT_VIOLATION: el asset real incumple el contrato "
+          "(requested vs observed vs actual ffprobe) → terminal; jamás DONE "
+          "con contrato incumplido"},
 }
 MAX_EXTRA_GRANTS = 1  # total de reencolas concedidas por esta capa por job
 
@@ -324,6 +362,25 @@ def clasificar(evidencia: str, kind: str = "video",
                 "fuente_evidencia": None}
     estructura = _parse_evidencia(raw, ctx)
 
+    # 0) [execution-contract v1] §10 — CLASIFICACIÓN ESTRUCTURAL del
+    #    Execution Contract (J/K/L/M): el prefijo lo escribe la máquina de
+    #    contrato (gate de configuración / validador de asset), no la prosa
+    #    de Flow. Prioridad máxima: ninguna capa textual puede "reclasificar"
+    #    un veredicto contractual (CONFIG ≠ ADAPTACIÓN; confianza HIGH por
+    #    ser evidencia estructural del propio pipeline).
+    for prefijo, clase in _PREFIJOS_CONTRACTO:
+        if raw.startswith(prefijo):
+            return {"clase": clase, "codigo": CLASES[clase],
+                    "motivo": f"veredicto estructural del Execution "
+                              f"Contract ({CLASES[clase]}): error de "
+                              f"configuración/contrato — la adaptación "
+                              f"creativa NO interviene",
+                    "evidencia": raw[:300],
+                    "evidencia_estructura": estructura,
+                    "classification_confidence": "HIGH",
+                    "fuente_evidencia": "execution_contract",
+                    "alcance_causal": "CONFIGURACION",
+                    "sin_adaptacion": True}
     # 1) causa específica por capa de evidencia (fuerte → débil)
     capas = (
         ("http_response", estructura.get("http_body"), "HIGH"),

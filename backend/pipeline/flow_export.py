@@ -667,6 +667,7 @@ def _build_script_json_artesano(project: dict, scenes: list[dict], ai: dict | No
             "narration": sc.get("narration") or "",
             "duration": (sc.get("duration") or _creative_duration_target(sc)
                          or VIDEO_SECONDS),
+            "references": _creative_references(sc),  # [execution-contract v1] §15
             "image_prompt": image_prompt,
             "imagePrompt": image_prompt,  # alias camelCase (interfaces TS)
         }
@@ -758,6 +759,15 @@ def _sanitize_flow_entry(entry: dict, brand: str) -> dict:
     return entry
 
 
+def _creative_references(sc: dict) -> list:
+    """references de la unidad de producción (§15 transportadas tal cual;
+    transportarlas NO implica que Flow las ejecute — la configuración y
+    observación reales viven en capabilities del execution contract)."""
+    pu = ((sc or {}).get("meta") or {}).get("production_unit") or {}
+    refs = pu.get("references")
+    return refs if isinstance(refs, list) else []
+
+
 def build_script_json(project: dict, scenes: list[dict], ai: dict | None = None,
                       fmt: str = "transformacion", brand: str = DEFAULT_BRAND,
                       character: str | None = None) -> dict:
@@ -784,6 +794,7 @@ def build_script_json(project: dict, scenes: list[dict], ai: dict | None = None,
             "narration": sc.get("narration") or "",
             "duration": (sc.get("duration") or _creative_duration_target(sc)
                          or VIDEO_SECONDS),
+            "references": _creative_references(sc),  # [execution-contract v1] §15
             "image_prompt": image_prompt,
             "imagePrompt": image_prompt,  # alias camelCase (interfaces TS)
         }

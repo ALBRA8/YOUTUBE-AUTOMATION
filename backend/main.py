@@ -1373,7 +1373,8 @@ async def flow_jobs_complete(job_id: str, request: Request, token: str = ""):
 @app.post("/api/extension/flow/jobs/{job_id}/fail")
 async def flow_jobs_fail(job_id: str, token: str = "", body: dict | None = None):
     """Marca error y reintenta (queued) o deja dead al agotar max_attempts
-    (imagen 3 · video 2)."""
+    (imagen 3 · video 2). [execution-contract v1]: errores con prefijo
+    CONFIG_* → terminal dead (sin reintento, sin adaptación)."""
     from services import flow_jobs
     res = flow_jobs.fail(job_id, token,
                          ((body or {}).get("error") or "")[:500])
@@ -1383,9 +1384,33 @@ async def flow_jobs_fail(job_id: str, token: str = "", body: dict | None = None)
     return res
 
 
+@app.post("/api/extension/flow/jobs/{job_id}/progress")
+async def flow_jobs_progress(job_id: str, token: str = "",
+                             body: dict | None = None):
+    """[execution-contract v1] §9 — progreso fino de la máquina de estados
+    (FLOW_TAB_READY → CAPABILITIES_CAPTURED → CONTROLS_CONFIGURED →
+    CONTROLS_VERIFIED → GENERATION_SUBMITTED → ...). Endpoint ADITIVO: no
+    forma parte del contrato de lease congelado (un 400/409 jamás rompe la
+    cola; la extensión lo trata fire-and-forget)."""
+    from services import flow_jobs
+    b = body or {}
+    res = flow_jobs.set_exec_state(job_id, token, (b.get("state") or "")[:40],
+                                   (b.get("detail") or "")[:300],
+                                   b.get("evidence")
+                                   if isinstance(b.get("evidence"), dict)
+                                   else None)
+    if res is None:
+        raise HTTPException(409, "job no reclamado por este worker "
+                                 "(token/lease inválido)")
+    if not res.get("ok") and res.get("error") == "invalid_state":
+        raise HTTPException(400, "estado no reportable")
+    return res
+
+
 @app.get("/api/extension/flow/jobs/status/{pid}")
 async def flow_jobs_status(pid: str):
-    """Estado de la cola del proyecto: counts por status + detalle de jobs."""
+    """Estado de la cola del proyecto: counts por status + exec_states
+    finos del Execution Contract + detalle de jobs."""
     from services import flow_jobs
     return flow_jobs.status_for_project(pid)
 

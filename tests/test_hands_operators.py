@@ -431,7 +431,11 @@ with tempfile.TemporaryDirectory() as tmp:
 
 # ══ 5. CONTRATO DE INTEGRACIÓN FUTURA — NOT CONNECTED (§36/§37) ══════════
 print("── 5. Integración futura: schemas + puerta cerrada")
-check("estado oficial NOT CONNECTED", INTEGRATION_STATUS == "NOT CONNECTED")
+check("estado oficial PARTIAL CONNECTED (capa contrato Execution Contract V1.0)",
+      INTEGRATION_STATUS.startswith("PARTIAL CONNECTED")
+      and "Execution Contract V1.0" in INTEGRATION_STATUS
+      and "ExtensionBridgeDriver enabled=False por defecto" in INTEGRATION_STATUS
+      and "E2E real pendiente" in INTEGRATION_STATUS)
 _ok_req, _errs = validate_hand_request({
     "request_id": "r1", "requested_by": "orquestador",
     "operations": [{"op": "OPEN", "operator": "desktop",

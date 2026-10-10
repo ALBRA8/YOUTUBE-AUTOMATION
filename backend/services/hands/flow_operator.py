@@ -42,8 +42,10 @@ from .clock import HandsClock
 from .contracts import (ActionFailedError, BlockedError,
                         FlowOp, HandsError, HandsTimeoutError,
                         OperationResult, PermissionDeniedError, State,
-                        StoppedError, ValidationError, new_id, now_iso)
+                        StoppedError, ValidationError, VerificationFailedError,
+                        new_id, now_iso)
 from .evidence import AuditTrail, EvidenceLayer
+from .flow_controls import ALLOW_GENERATE, ConfigGate   # Execution Contract V1.0
 from .killswitch import KillSwitch
 from .permissions import PermissionModel
 from .verification import Verdict, VerificationEngine, verify_file
@@ -62,6 +64,12 @@ class FlowJobSpec:
     """Job operacional de Flow (forma alineada con la cola real del repo).
 
     prompt: SIEMPRE proviene de fuera de HANDS (§15). Vacío ⇒ ValidationError.
+    execution_spec: TERCERA CAPA del Execution Contract V1.0 (dict schema
+    ``services.execution_contract.SCHEMA_VERSION`` construido por
+    ``build_execution_spec``): petición de controles (duration/model/
+    aspect_ratio/outputs/audio/resolution/references). NUNCA edita el prompt
+    (P1 intacto). No viaja en to_dict() (contrato de transporte congelado):
+    es metadata del operador para el GATE de start_generation (§6).
     """
     kind: str                      # "image" | "video"
     project_id: str
@@ -69,6 +77,7 @@ class FlowJobSpec:
     part: int = 1
     prompt: str = ""
     prompt_meta: dict[str, Any] = field(default_factory=dict)
+    execution_spec: dict[str, Any] | None = None   # Execution Contract V1.0
 
     def validate(self) -> None:
         if self.kind not in VALID_KINDS:
@@ -84,6 +93,11 @@ class FlowJobSpec:
             raise ValidationError(
                 "prompt vacío — HANDS nunca inventa prompts (§15): el prompt "
                 "debe llegar de la capa creativa")
+        if self.execution_spec is not None \
+                and not isinstance(self.execution_spec, dict):
+            raise ValidationError(
+                "execution_spec debe ser dict (schema Execution Contract "
+                "V1.0) o None — HANDS no inventa specs")
 
     def to_dict(self) -> dict[str, Any]:
         return {"kind": self.kind, "project_id": self.project_id,
@@ -111,7 +125,10 @@ class MockFlowDriver:
 
     def __init__(self, clock: HandsClock, *, generation_ticks: int = 3,
                  fail_submit: bool = False, rate_limit_after: int | None = None,
-                 corrupt_results: set[str] | None = None):
+                 corrupt_results: set[str] | None = None,
+                 controls_state: dict[str, Any] | None = None,
+                 controls_missing: tuple = (), controls_frozen: tuple = (),
+                 controls_stale: tuple = ()):
         self.clock = clock
         self.generation_ticks = generation_ticks
         self.fail_submit = fail_submit
@@ -123,6 +140,13 @@ class MockFlowDriver:
         self.projects_opened: list[str] = []
         self.configuration: dict[str, Any] = {}
         self.frozen = False                       # CAOS: generación congelada
+        # Execution Contract V1.0: superficie de controles de la UI Flow
+        # (MockFlowControlAdapter) — parámetros TODOS opcionales; el driver
+        # mock sigue siendo una cola headless salvo el gate del spec.
+        from .flow_controls import MockFlowControlAdapter
+        self.controls_adapter = MockFlowControlAdapter(
+            state=controls_state, missing=controls_missing,
+            frozen=controls_frozen, stale_read=controls_stale)
 
     # ── FlowDriver ───────────────────────────────────────────────────────
     def open_session(self) -> dict[str, Any]:
@@ -378,7 +402,8 @@ class FlowOperator:
                  verification: VerificationEngine, evidence: EvidenceLayer,
                  audit: AuditTrail, killswitch: KillSwitch, clock: HandsClock,
                  wait_timeout_s: float = 60.0, poll_interval_s: float = 0.5,
-                 on_result: Any = None):
+                 on_result: Any = None,
+                 controls_adapter: Any | None = None):
         self.driver = driver
         self.permissions = permissions
         self.workspace = workspace
@@ -393,6 +418,14 @@ class FlowOperator:
         self.on_result = on_result        # p.ej. session.add_action (§19)
         self.pending_job: FlowJobSpec | None = None
         self.configuration: dict[str, Any] = {}
+        # Execution Contract V1.0 (FASE 7): adaptador de controles de la UI
+        # de Flow (FlowControlAdapter). Si no se inyecta, se hereda del driver
+        # cuando este expone ``controls_adapter`` (p.ej. MockFlowDriver);
+        # None ⇒ comportamiento legacy sin gate (honesto: sin adaptador no
+        # hay configuración ni verificación de controles).
+        self.controls_adapter = controls_adapter if controls_adapter is not None \
+            else getattr(driver, "controls_adapter", None)
+        self.last_gate: dict[str, Any] | None = None      # última decisión del gate
 
     def _notify(self, result: OperationResult) -> None:
         if self.on_result is not None:
@@ -404,7 +437,8 @@ class FlowOperator:
     # ── núcleo de operación (mismo modelo §7 a nivel driver) ────────────
     def _op(self, op_name: str, action: Callable[[], dict[str, Any]],
             *, verify: Callable[[dict[str, Any]], Verdict] | None = None,
-            timeout_s: float | None = None) -> OperationResult:
+            timeout_s: float | None = None,
+            refs: dict[str, Any] | None = None) -> OperationResult:
         result = OperationResult(operation_id=new_id("flow"), name=op_name,
                                  operator=self.name, status=State.RUNNING,
                                  started_at=now_iso())
@@ -454,6 +488,7 @@ class FlowOperator:
             observed_state=result.result or None,
             result=result.status.value,
             error=(result.errors[0] if result.errors else None),
+            refs=refs,            # p.ej. {"job_id": ...} (§12 Execution Contract)
         )["evidence_id"])
         self._notify(result)
         return result
@@ -487,20 +522,148 @@ class FlowOperator:
         return self._op(FlowOp.SET_PROMPT.value, action)
 
     def set_configuration(self, params: dict[str, Any]) -> OperationResult:
+        # Execution Contract V1.0: si hay adaptador de controles y el params
+        # trae un execution_spec, el spec manda → gate mecánico (§6) con
+        # verificación por control; se conserva además el almacenamiento
+        # legacy (self.configuration) por compatibilidad. Sin adapter o sin
+        # spec ⇒ comportamiento legacy intacto (dict registrado sin efecto).
+        if self.controls_adapter is not None and isinstance(params, dict) \
+                and "execution_spec" in params:
+            result = self.configure_from_spec(
+                params.get("execution_spec") or {}, job_id=params.get("job_id"))
+            self.configuration = dict(params)      # compat legacy
+            return result
+
         def action() -> dict[str, Any]:
             self.configuration = dict(params)
             return {"configuration": dict(params)}
         return self._op(FlowOp.SET_CONFIGURATION.value, action)
 
+    # ── Execution Contract V1.0 (FASE 7): capacidades y gate §6/§7/§8 ────
+    def discover_capabilities(self) -> OperationResult:
+        """DISCOVER_CAPABILITIES: descubrimiento HONESTO de los controles que
+        la UI de Flow expone realmente (vía FlowControlAdapter).
+        Sin adaptador ⇒ FAILED con available=[] — HANDS no inventa
+        capacidades (§7 del mandato: null/unknown cuando no hay fuente)."""
+        has_adapter = self.controls_adapter is not None
+
+        def action() -> dict[str, Any]:
+            if not has_adapter:
+                return {"available": [], "capabilities": {},
+                        "detail": "sin controls_adapter: 0 capacidades "
+                                  "descubiertas (HANDS no inventa capacidades)"}
+            caps = self.controls_adapter.discover()
+            payload = caps.to_dict()
+            return {"available": sorted(payload), "capabilities": payload}
+
+        def verify(payload: dict[str, Any]) -> Verdict:
+            if not has_adapter:
+                return Verdict.FAIL      # honesto: la operación no está disponible
+            return Verdict.PASS if payload.get("capabilities") is not None \
+                else Verdict.UNKNOWN
+
+        return self._op(FlowOp.DISCOVER_CAPABILITIES.value, action, verify=verify)
+
+    def configure_from_spec(self, spec: dict[str, Any],
+                            job_id: str | None = None) -> OperationResult:
+        """VERIFY_CONTROLS: ejecuta el gate del Execution Contract (§6) sobre
+        el execution_spec con el adaptador de controles: por cada control
+        requerido intenta OBSERVE→CONTROL→VERIFY y decide
+        ALLOW_GENERATE | CONFIG_UNSUPPORTED | CONFIG_UNVERIFIABLE |
+        CONFIG_MISMATCH (decisión delegada en execution_contract.config_gate).
+        Cada SET_* y el CONFIG_GATE quedan en evidencia con refs job_id (§12).
+        El prompt JAMÁS se toca (CONFIG ≠ adaptación de prompt)."""
+        if self.controls_adapter is None:
+            # Honestidad: sin adaptador no hay configuración ni verificación.
+            result = self._op(
+                FlowOp.VERIFY_CONTROLS.value,
+                lambda: {"available": [], "decision": None,
+                         "detail": "sin controls_adapter — no se puede "
+                                   "configurar ni verificar el execution_spec "
+                                   "(HANDS no inventa controles)"},
+                verify=lambda p: Verdict.FAIL,
+                refs={"job_id": job_id} if job_id else None)
+            result.add_error(ValidationError(
+                "sin controls_adapter: configure_from_spec requiere un "
+                "FlowControlAdapter (no se inventan capacidades ni controles)"))
+            return result
+
+        def action() -> dict[str, Any]:
+            gate = ConfigGate(self.controls_adapter,
+                              evidence=self.evidence).evaluate(spec,
+                                                               job_id=job_id)
+            self.last_gate = gate
+            return {"decision": gate.get("decision"),
+                    "detail": gate.get("detail", ""),
+                    "capabilities": gate.get("capabilities", {}),
+                    "control_results": gate.get("control_results", {}),
+                    "job_id": job_id}
+
+        def verify(payload: dict[str, Any]) -> Verdict:
+            return Verdict.PASS \
+                if payload.get("decision") == ALLOW_GENERATE else Verdict.FAIL
+
+        result = self._op(FlowOp.VERIFY_CONTROLS.value, action, verify=verify,
+                          refs={"job_id": job_id} if job_id else None)
+        gate = self.last_gate or {}
+        decision = gate.get("decision")
+        result.verification = {
+            "expected": ALLOW_GENERATE,
+            "observed": decision,
+            "verdict": "PASS" if decision == ALLOW_GENERATE else "FAIL",
+        }
+        if decision is not None and decision != ALLOW_GENERATE:
+            result.add_error(VerificationFailedError(
+                f"gate de configuración: {decision} — {gate.get('detail', '')}",
+                details={"decision": decision, "job_id": job_id}))
+        return result
+
     def start_generation(self) -> OperationResult:
+        refusal: dict[str, Any] = {}
+
         def action() -> dict[str, Any]:
             if self.pending_job is None:
                 raise ValidationError("sin SET_PROMPT previo — nada que generar")
+            # ── GATE Execution Contract V1.0 (§6) — SIEMPRE fresco, ANTES de
+            # submit: con execution_spec + controls_adapter, generar SOLO si
+            # la decisión es ALLOW_GENERATE (jamás estado heredado de la UI).
+            spec = getattr(self.pending_job, "execution_spec", None)
+            if spec is not None and self.controls_adapter is not None:
+                gate = ConfigGate(self.controls_adapter,
+                                  evidence=self.evidence).evaluate(
+                    spec, job_id=self.pending_job.handle_key)
+                self.last_gate = gate
+                if gate.get("decision") != ALLOW_GENERATE:
+                    refusal["decision"] = gate.get("decision")
+                    refusal["detail"] = gate.get("detail", "")
+                    # NO SE GENERA: no hay submit ni reintentos (§6/§10)
+                    return {"gate": gate.get("decision"),
+                            "refusado_por": "execution_contract",
+                            "detail": gate.get("detail", ""),
+                            "job_id": self.pending_job.handle_key,
+                            "submitted": False}
             handle = self.driver.submit(self.pending_job)
             handle["_job"] = self.pending_job.to_dict()
             return {"handle": {k: v for k, v in handle.items() if k != "_job"},
                     "prompt_source": "external (§15)"}
-        return self._op(FlowOp.START_GENERATION.value, action)
+
+        def verify(payload: dict[str, Any]) -> Verdict:
+            # Legacy: PASS (como antes). Solo el REFUSO del gate ⇒ FAIL.
+            return Verdict.FAIL if refusal else Verdict.PASS
+
+        result = self._op(
+            FlowOp.START_GENERATION.value, action, verify=verify,
+            refs={"job_id": self.pending_job.handle_key}
+            if self.pending_job is not None else None)
+        if refusal:
+            result.add_error(VerificationFailedError(
+                f"START_GENERATION refusado por execution contract: "
+                f"{refusal['decision']} — {refusal['detail']}",
+                details={"decision": refusal["decision"],
+                         "refusado_por": "execution_contract",
+                         "job_id": self.pending_job.handle_key
+                         if self.pending_job else None}))
+        return result
 
     def wait_generation(self, handle: dict[str, Any], *,
                         timeout_s: float | None = None) -> OperationResult:

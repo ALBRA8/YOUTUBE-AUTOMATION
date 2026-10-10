@@ -19,6 +19,10 @@
  *   POST {BASE}/api/extension/flow/jobs/{id}/complete?token=   bytes crudos
  *   POST {BASE}/api/extension/flow/jobs/{id}/fail?token=       {error}
  *   GET  {BASE}/api/extension/flow/jobs/status/{pid}
+ *   [execution-contract v1] ADITIVO (fuera del lease congelado):
+ *   POST {BASE}/api/extension/flow/jobs/{id}/progress?token=   {state,detail,
+ *           evidence} → 200 {ok,exec_state} | {ok:false,illegal_transition}
+ *           | 409 | 400 — fire-and-forget: NUNCA bloquea la cola.
  * ========================================================================== */
 'use strict';
 
@@ -208,6 +212,31 @@ async function bridgeFail(job, errorMsg) {
   );
   if (!res.ok) throw new Error(await bridgeHttpError(res));
   return res.json().catch(() => ({}));
+}
+
+/* [execution-contract v1] §9 — progreso fino de la máquina de estados
+   (FLOW_TAB_READY → CAPABILITIES_CAPTURED → CONTROLS_CONFIGURED →
+   CONTROLS_VERIFIED → GENERATION_SUBMITTED → GENERATION_OBSERVED →
+   ASSET_DOWNLOADED → ASSET_VALIDATED, y terminales CONFIG_*). Endpoint
+   ADITIVO: NO forma parte del contrato de lease congelado
+   (claim/heartbeat/complete/fail intactos). CONTRATO FIRE-AND-FORGET:
+   devuelve el JSON del backend ({ok:true,exec_state} | {ok:false,error:
+   "illegal_transition",current}) o null en CUALQUIER error (409 token,
+   400, red, timeout) — JAMÁS lanza, JAMÁS bloquea la cola. */
+async function bridgeProgress(jobId, token, state, detail, evidence) { // [execution-contract v1]
+  try {
+    const cfg = await bridgeEnsureCfg();
+    const body = { state: String(state || ''), detail: String(detail || '').slice(0, 300) };
+    if (evidence && typeof evidence === 'object') body.evidence = evidence;
+    const res = await bridgeFetch(
+      bridgeUrl(cfg, '/' + encodeURIComponent(jobId) + '/progress?token=' + encodeURIComponent(token || '')),
+      { method: 'POST', headers: bridgeHeaders(), body: JSON.stringify(body) },
+      BRIDGE_HTTP_TIMEOUT_MS // control: 15s (mismo presupuesto que heartbeat/fail)
+    );
+    return await res.json().catch(() => null);
+  } catch (_) {
+    return null; // fire-and-forget: 409/400/red/timeout → null (sin throw)
+  }
 }
 
 /* Estado de la cola del proyecto (counts + jobs). */

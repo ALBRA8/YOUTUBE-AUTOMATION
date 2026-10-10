@@ -1,10 +1,14 @@
 # HANDS V1.0 — Capa de Ejecución Física (AISLADA)
 
-> **Estado de integración oficial: `YOUTUBE-AUTOMATION INTEGRATION: NOT CONNECTED`**
+> **Estado de integración oficial (FASE 7): `PARTIAL CONNECTED: Execution
+> Contract V1.0 contract layer (FlowOperator+ConfigGate+MockFlowControlAdapter
+> TESTED; ExtensionBridgeDriver enabled=False por defecto; E2E real pendiente)`**
 >
 > HANDS se construyó AL LADO del sistema actual, no ENCIMA de él (§3 del brief).
 > No importa nada del orquestador; nada del orquestador importa a HANDS.
-> La conexión futura está descrita (no ejecutada) en `future_integration.py`.
+> La conexión de la CAPA DE CONTRATO (Execution Contract V1.0) está hecha y
+> TESTED sobre mocks (§9); la ejecución física real con Flow sigue pendiente
+> (NOT_VERIFIED). La puerta completa está descrita en `future_integration.py`.
 
 ---
 
@@ -80,7 +84,7 @@ Mapa de módulos (paquete `backend/services/hands/`):
 | Evidence | `evidence.py` |
 | Kill Switch | `killswitch.py` |
 | Audit | `evidence.py` (`AuditTrail`) + `selfaudit.py` (§40) |
-| Tests | `tests/test_hands*.py` (3 baterías, 212 checks) |
+| Tests | `tests/test_hands*.py` (4 baterías, 267 checks) |
 | Mocks | `mocks.py` + backends mock |
 | Integración futura | `future_integration.py` |
 
@@ -238,6 +242,90 @@ simula desktop/browser/flow/files/processes sin PC real ni red.
 | Adaptador ExtensionBridgeDriver contra backend REAL | **NOT_VERIFIED** — requiere backend vivo |
 | PhysicalDesktopBackend sobre escritorio REAL | **NOT_VERIFIED** — requiere PC real + consentimiento + executor |
 | Capturas de pantalla reales | **NOT_VERIFIED** (protocolo preparado; mock genera PNG de prueba) |
-| Integración con YOUTUBE-AUTOMATION | **NOT CONNECTED** (por diseño, §36/§37) |
+| Integración con YOUTUBE-AUTOMATION | **PARTIAL CONNECTED** (capa contrato Execution Contract V1.0 TESTED en mock, §9; E2E real pendiente) |
 
 Nada se declara REAL_WORLD_VERIFIED: no ha habido ejecución física real.
+
+---
+
+## 9. Conexión Execution Contract V1.0 (FASE 7)
+
+HANDS está CONECTADO a la tercera capa del contrato de ejecución
+(`backend/services/execution_contract.py`, `schema_version="1.0"`) como su
+capa mecánica OBSERVE/CONTROL/VERIFY. Estado: **capa de contrato TESTED en
+mock; E2E con Flow real pendiente (NOT_VERIFIED)**.
+
+### 9.1 Qué está conectado (y probado)
+
+* **Contratos** (`contracts.py`): 8 `FlowOp` nuevos — `DISCOVER_CAPABILITIES`,
+  `SET_MODEL`, `SET_DURATION`, `SET_ASPECT_RATIO`, `SET_OUTPUTS`, `SET_AUDIO`,
+  `SET_RESOLUTION`, `VERIFY_CONTROLS` — todos categoría de permiso `domain`.
+  Los 11 miembros legacy quedan intactos (contrato congelado).
+* **Capa de controles** (`flow_controls.py`, ya existente): `ControlVerdict`,
+  `Capabilities`, `ControlResult`, `FlowControlAdapter` (Protocol),
+  `MockFlowControlAdapter` y `ConfigGate`. Veredictos únicos con el backend:
+  `SUPPORTED/UNSUPPORTED/UNVERIFIABLE/MISMATCH/VERIFIED` y decisiones
+  `ALLOW_GENERATE/CONFIG_UNSUPPORTED/CONFIG_UNVERIFIABLE/CONFIG_MISMATCH`.
+* **FlowOperator** (`flow_operator.py`):
+  - `controls_adapter` (kwarg opcional; si no, se hereda de
+    `driver.controls_adapter` — `MockFlowDriver` lo construye siempre con
+    parámetros todos opcionales `controls_state/missing/frozen/stale`);
+  - `FlowJobSpec.execution_spec` (tercera capa; NUNCA edita el prompt P1 y
+    NO viaja en `to_dict()` — transporte congelado);
+  - `discover_capabilities()` — descubrimiento HONESTO: sin adaptador ⇒
+    `FAILED` con `available=[]` (nada inventado);
+  - `configure_from_spec(spec, job_id)` — `FlowOp.VERIFY_CONTROLS`: gate
+    mecánico OBSERVE→CONTROL→VERIFY por control con
+    `verification={expected: ALLOW_GENERATE, observed: decisión, verdict}`;
+  - **GATE en `start_generation()`**: con `execution_spec` + adaptador el
+    gate se evalúa SIEMPRE fresco ANTES de `driver.submit`; decisión ≠
+    `ALLOW_GENERATE` ⇒ `FAILED` con `errors[0].code=VERIFICATION_FAILED`,
+    `result={gate: decisión, refusado_por: "execution_contract",
+    submitted: False}` y **sin submit** (la cola del driver queda intacta);
+  - `set_configuration(params)`: con adaptador y `params["execution_spec"]`
+    ejecuta el gate; sin spec o sin adaptador ⇒ comportamiento legacy exacto.
+* **Evidencia (§12/§21)**: cada `SET_*`, `CONFIG_GATE`, `VERIFY_CONTROLS` y
+  `START_GENERATION` queda registrado en la `EvidenceLayer` con
+  `refs={"job_id": handle_key}` (correlación por job, jamás mezclada entre
+  intentos). `CONFIG ≠ ADAPTACIÓN`: el gate jamás toca campos de prompt.
+* **Puerta** (`future_integration.py`): `ExecutionContractHandAdapter`
+  (HandAdapter real) ejecuta `flow.discover_capabilities`,
+  `flow.configure_from_spec` y `flow.start_generation` contra un
+  `FlowOperator` inyectado; devuelve un `HAND_RESULT` bien formado con
+  `results=[OperationResult.to_dict()]`; operación desconocida ⇒
+  `BlockedError` honesto. `NotConnectedAdapter` SIGUE siendo el default y su
+  puerta propia permanece `NOT CONNECTED`.
+
+`INTEGRATION_STATUS` (constante oficial única) pasó de `NOT CONNECTED` a:
+
+```text
+PARTIAL CONNECTED: Execution Contract V1.0 contract layer
+(FlowOperator+ConfigGate+MockFlowControlAdapter TESTED;
+ExtensionBridgeDriver enabled=False por defecto; E2E real pendiente)
+```
+
+### 9.2 Qué permanece honesto (NO verificado)
+
+* **E2E real con Flow: NO PROBADO** — todo lo anterior está TESTED sobre
+  `MockFlowControlAdapter`/`MockFlowDriver` (`tests/test_hands_contract.py`,
+  55 checks). Ninguna capacidad "Flow real" se declara probada.
+* `ExtensionBridgeDriver` sigue `enabled=False` POR DEFECTO (§37): hablar el
+  contrato HTTP en vivo sigue siendo un paso pendiente del checklist.
+* Sin adaptador de controles no hay gate ni configuración: se devuelve
+  `FAILED` honesto con `available=[]` — HANDS no inventa capacidades.
+
+### 9.3 Matriz de control (§21 del mandato — valores honestos)
+
+| Control | Discover (capacidad) | Configure (SET_*) | Verify (relectura/gate) |
+|---|---|---|---|
+| Duration | mock **TESTED** · Flow real **NO PROBADO** | mock **TESTED** (`SET_DURATION`, opciones 4/5/6/8s) · Flow real **NO PROBADO** | mock **TESTED** (VERIFIED/UNSUPPORTED/UNVERIFIABLE/MISMATCH) · Flow real **NO PROBADO** (post: ffprobe ±tolerancia) |
+| Model | mock **TESTED** · Flow real **NO PROBADO** | mock **TESTED** (`SET_MODEL`) · Flow real **NO PROBADO** | mock **TESTED** · Flow real **NO PROBADO** |
+| Aspect ratio | mock **TESTED** · Flow real **NO PROBADO** | mock **TESTED** (`SET_ASPECT_RATIO`) · Flow real **NO PROBADO** | mock **TESTED** · Flow real **NO PROBADO** (post: ffprobe rel 2%) |
+| Outputs | mock **TESTED** · Flow real **NO PROBADO** | registro por transporte (1 asset/job, §13) — el gate NO lo sondea | transporte: mock **TESTED** · Flow real **NO PROBADO** |
+| Audio | mock **TESTED** · Flow real **NO PROBADO** | registro only (§14: observable, no exigible) | `register_only`: se REGISTRA, no bloquea · Flow real **NO PROBADO** |
+| Resolution | mock **TESTED** · Flow real **NO PROBADO** | mock **TESTED** (`SET_RESOLUTION`) · Flow real **NO PROBADO** | mock **TESTED** · Flow real **NO PROBADO** |
+| References | NO es control de UI ⇒ no inventado (transportado en spec) | no aplica (transportar ≠ ejecutar) | no aplica en pre-gate · Flow real **NO PROBADO** |
+
+Vía de conexión real prevista: la capa DOM/a11y de la extensión implementa
+`FlowControlAdapter` (semántico/accesibilidad/texto, §16 sin coordenadas) —
+la mecanística ya está definida y probada en mock.

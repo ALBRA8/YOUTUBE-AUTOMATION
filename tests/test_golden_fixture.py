@@ -200,11 +200,15 @@ def main() -> int:
     print("── 6. complete del video → asset en convención canónica")
     import subprocess
     out_clip = _TMP / "golden_clip.mp4"
+    # [execution-contract v1] el clip CUMPLE el contrato de la escena 1
+    # (duration_target=8, aspect 9:16): complete() valida REQUESTED vs
+    # ACTUAL con ffprobe y un clip de 1.0s ahora es ASSET_INVALID
+    # (CONTRACT_VIOLATION) — comportamiento nuevo y correcto de FASE 7.
     subprocess.run(
         ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
-         "-i", "color=c=0xFF8C00:s=720x1280:d=1.0",
+         "-i", "color=c=0xFF8C00:s=720x1280:d=8.0",
          "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100",
-         "-shortest",
+         "-t", "8.0",
          "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
          "-c:a", "aac", str(out_clip)],
         check=True, capture_output=True, timeout=60)

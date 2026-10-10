@@ -831,6 +831,297 @@ function domScanFn() {
   }
 }
 
+/* ===========================================================================
+ * [execution-contract v1] CONFIG DOM + GATE — Execution Contract V1.0 (F7)
+ * ---------------------------------------------------------------------------
+ * Capa mecánica del contrato EN LA PÁGINA de Flow (tercera capa, junto a P1
+ * prompt y P2 adaptación; el spec JAMÁS edita el prompt).
+ *
+ * flowConfigFn(spec) — función AUTO-CONTENIDA que se serializa vía
+ * chrome.scripting.executeScript (mismo patrón que slateInjectFn: sin
+ * closures del service worker) y hace, en un solo viaje:
+ *   1. discover(): escanea el documento con señales 100% genéricas (§16 del
+ *      mandato: ARIA / roles / texto visible; CERO coordenadas, CERO
+ *      tabs[0], CERO selectores inventados de Flow):
+ *        - duración:  aria/texto /duración|duration|length/ + chips /^\d+s$/
+ *        - aspecto:   opciones /^(9:16|16:9|1:1)$/
+ *        - model/resolution/outputs/audio: patrones genéricos por nombre
+ *      Por control reporta capability {available, editable, verifiable,
+ *      observed, source:"flow_dom"} — observed = valor mostrado HOY; lo no
+ *      encontrado es HONESTO (null / available:false, JAMÁS se inventa).
+ *   2. configure+verify por control solicitado (requested != null): lee
+ *      observed_before; si difiere del pedido (normalización "8s" ≡ 8:
+ *      minúsculas, sin espacios, sin sufijo 's'), localiza la opción cuyo
+ *      texto/aria NORMALIZADO coincide y la pulsa con .click() nativo
+ *      (fallback teclado focus+Enter); luego RELEE el control →
+ *      observed_after. Veredictos:
+ *        VERIFIED     (releído == pedido, o ya estaba EN el valor pedido:
+ *                      §6 prohíbe generar con un valor DISTINTO del
+ *                      solicitado, no con el solicitado ya puesto)
+ *        UNSUPPORTED  (control no encontrado / no editable / valor ausente)
+ *        UNVERIFIABLE (no se pudo releer tras el click)
+ *        MISMATCH     (releído ≠ pedido)
+ *      outputs/audio (métodos transport/register_only del spec) se
+ *      REGISTRAN sin configurar por DOM (§13/§14: sin entrada en
+ *      control_results → el gate los deja en REGISTERED, no bloquean).
+ *   3. __flowGateDecision(spec, control_results) — espejo EXACTO de
+ *      execution_contract.config_gate del backend: ALLOW_GENERATE solo si
+ *      TODO control con required && requested != null está VERIFIED;
+ *      prioridad de la decisión: UNSUPPORTED > MISMATCH > UNVERIFIABLE.
+ * =========================================================================== */
+/* [execution-contract v1] config: inicio */
+function __flowNormVal(v) { // [execution-contract v1] '8s' ≡ 8 · ' 9:16 ' ≡ 9:16
+  return String(v == null ? '' : v).trim().toLowerCase()
+    .replace(/\s+/g, '').replace(/s$/, '');
+}
+
+function flowConfigFn(spec) { // [execution-contract v1] inyectable (auto-contenida)
+  const R = { capabilities: {}, control_results: {}, ts: Date.now() };
+  /* helpers PROPIOS: la función viaja sola a la página (nada del SW) */
+  const normText = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+  const normVal = (v) => normText(v).toLowerCase().replace(/\s+/g, '').replace(/s$/, '');
+  const CONTROLES = [
+    { name: 'duration',     labelRx: /duraci\u00f3n|duration|length/i, optRx: /^\d+\s*s$/i },
+    { name: 'aspect_ratio', labelRx: /aspect|relaci\u00f3n|ratio|formato/i, optRx: /^(9:16|16:9|1:1)$/ },
+    { name: 'model',        labelRx: /model|modelo/i, optRx: null },
+    { name: 'resolution',   labelRx: /resolution|resoluci/i, optRx: null },
+    { name: 'outputs',      labelRx: /outputs|results|n\u00famero de resultados|resultados/i, optRx: null },
+    { name: 'audio',        labelRx: /audio/i, optRx: null },
+  ];
+  try {
+    const specObj = (spec && typeof spec === 'object') ? spec : {};
+    /* ---- colección genérica de candidatos (ARIA/roles/texto) ----------- */
+    let nodes = [];
+    try {
+      nodes = Array.from(document.querySelectorAll(
+        'button, [role], [aria-label], [aria-pressed], [aria-selected], '
+        + '[aria-checked], [aria-disabled], select, option, input'));
+    } catch (_) { nodes = []; }
+    const textOf = (el) => { try { return normText(el.textContent); } catch (_) { return ''; } };
+    const ariaOf = (el) => {
+      try { return normText(el.getAttribute && el.getAttribute('aria-label')); }
+      catch (_) { return ''; }
+    };
+    const marked = (el) => { // marcador de selección: ARIA estándar o clase
+      try {
+        if (el.getAttribute('aria-pressed') === 'true') return true;
+        if (el.getAttribute('aria-selected') === 'true') return true;
+        if (el.getAttribute('aria-checked') === 'true') return true;
+        return /(^|\s)(selected|active|on)(\s|$)/i.test(String(el.getAttribute('class') || ''));
+      } catch (_) { return false; }
+    };
+    const disabled = (el) => {
+      try {
+        if (el.disabled === true) return true;
+        if (el.getAttribute('disabled') != null) return true;
+        if (el.getAttribute('aria-disabled') === 'true') return true;
+      } catch (_) {}
+      return false;
+    };
+    const visible = (el) => { // sin métricas de layout: visible (honesto)
+      try {
+        if (el.getAttribute && el.getAttribute('aria-hidden') === 'true') return false;
+        if (typeof el.getBoundingClientRect !== 'function') return true;
+        const r = el.getBoundingClientRect();
+        return !!(r && r.width > 0 && r.height > 0);
+      } catch (_) { return true; }
+    };
+    /* control: elemento cuyo aria-label o texto corto (≤120) matchea el
+       patrón del nombre (primero en orden de documento) */
+    const findControl = (cfg) => {
+      for (const el of nodes) {
+        const a = ariaOf(el);
+        const t = textOf(el);
+        if ((a && cfg.labelRx.test(a)) || (t && t.length <= 120 && cfg.labelRx.test(t))) return el;
+      }
+      return null;
+    };
+    /* opciones con forma de valor (chips "5s"/"8s", ratios "9:16"/...) */
+    const findOptions = (cfg) => {
+      const out = [];
+      if (!cfg.optRx) return out;
+      for (const el of nodes) {
+        const t = textOf(el);
+        const a = ariaOf(el);
+        if ((t && cfg.optRx.test(t)) || (a && cfg.optRx.test(a))) out.push(el);
+      }
+      return out;
+    };
+    /* valor mostrado HOY: opción marcada como seleccionada (null honesto) */
+    const readObserved = (cfg, opts) => {
+      for (const el of opts || []) {
+        if (marked(el) && visible(el)) return textOf(el) || ariaOf(el) || null;
+      }
+      try { // controles sin chips: marcado dentro del control encontrado
+        const ctrl = findControl(cfg);
+        if (ctrl && ctrl.querySelectorAll) {
+          const inner = Array.from(ctrl.querySelectorAll(
+            '[aria-pressed], [aria-selected], [aria-checked], [class]'));
+          for (const el of inner) {
+            if (marked(el) && visible(el)) return textOf(el) || null;
+          }
+        }
+      } catch (_) {}
+      return null;
+    };
+    /* opción a pulsar: texto/aria NORMALIZADO == valor pedido. Último
+       match = el más profundo (los contenedores preceden a sus hojas). */
+    const findOptionByValue = (cfg, requested) => {
+      const target = normVal(requested);
+      if (!target) return null;
+      let best = null;
+      for (const el of nodes) {
+        if (!visible(el) || disabled(el)) continue;
+        const t = normVal(textOf(el));
+        const a = normVal(ariaOf(el));
+        if ((t && t === target) || (a && a === target)) best = el;
+      }
+      return best;
+    };
+    /* ---- discover + configure/verify por control ----------------------- */
+    for (const cfg of CONTROLES) {
+      const c = specObj[cfg.name];
+      const requested = (c && typeof c === 'object') ? c.requested : null;
+      const opts = findOptions(cfg);
+      const ctrl = findControl(cfg);
+      const available = !!(ctrl || opts.length);
+      const editable = available
+        && (opts.length ? opts.some((el) => !disabled(el)) : !disabled(ctrl));
+      const observed = readObserved(cfg, opts);
+      R.capabilities[cfg.name] = {
+        available,
+        editable: !!editable,
+        verifiable: !!(available && editable && (observed != null || opts.length)),
+        observed: observed == null ? null : observed,
+        source: 'flow_dom',
+      };
+      if (requested == null) continue; // no solicitado: solo capacidades (§14/§15)
+      /* §13/§14: outputs/audio se REGISTRAN por transporte/observación, no
+       * se configuran por DOM (sin entrada en control_results → REGISTERED). */
+      const metodo = ((specObj.verification || {})[cfg.name] || {}).method;
+      if (metodo === 'transport' || metodo === 'register_only') continue;
+      const before = observed;
+      let verdict = null;
+      let after = null;
+      let detail = '';
+      const evidencia = [];
+      if (!available || !editable) {
+        verdict = 'UNSUPPORTED';
+        detail = 'control ' + cfg.name + ' no encontrado o no editable en el DOM';
+        evidencia.push('available=' + available + ', editable=' + editable);
+      } else if (normVal(before) === normVal(requested)) {
+        verdict = 'VERIFIED';
+        after = before;
+        detail = 'ya en el valor solicitado (heredado EN el valor pedido, §6)';
+        evidencia.push('observed="' + String(before).slice(0, 20) + '"');
+      } else {
+        const opt = findOptionByValue(cfg, requested);
+        if (!opt) {
+          verdict = 'UNSUPPORTED';
+          detail = 'no hay opción "' + String(requested).slice(0, 20) + '" para ' + cfg.name;
+          evidencia.push('opciones=' + opts.map((o) => textOf(o) || ariaOf(o)).slice(0, 6).join('|'));
+        } else {
+          let clicked = false;
+          try { // click NATIVO (§16: eventos reales, sin coordenadas)
+            opt.click();
+            clicked = true;
+            evidencia.push('click("' + (textOf(opt) || ariaOf(opt)).slice(0, 20) + '")');
+          } catch (_) {}
+          if (!clicked) { // fallback teclado: focus + Enter (sin posiciones)
+            try {
+              if (typeof opt.focus === 'function') opt.focus();
+              const KE = (typeof KeyboardEvent === 'function') ? KeyboardEvent : Event;
+              opt.dispatchEvent(new KE('keydown', { key: 'Enter', bubbles: true }));
+              clicked = true;
+              evidencia.push('enter("' + (textOf(opt) || ariaOf(opt)).slice(0, 20) + '")');
+            } catch (_) {}
+          }
+          after = readObserved(cfg, opts); // RE-LECTURA (verificación real)
+          if (!clicked) {
+            verdict = 'UNVERIFIABLE';
+            detail = 'no se pudo pulsar la opción para ' + cfg.name;
+          } else if (after == null) {
+            verdict = 'UNVERIFIABLE';
+            detail = 'no se pudo releer ' + cfg.name + ' tras el click';
+          } else if (normVal(after) === normVal(requested)) {
+            verdict = 'VERIFIED';
+            detail = 'releído "' + String(after).slice(0, 20) + '" == solicitado';
+          } else {
+            verdict = 'MISMATCH';
+            detail = 'releído "' + String(after).slice(0, 20) + '" != solicitado "'
+              + String(requested).slice(0, 20) + '"';
+          }
+        }
+      }
+      R.control_results[cfg.name] = {
+        control: cfg.name,
+        verdict,
+        requested,
+        observed_before: before == null ? null : before,
+        observed_after: after,
+        detail,
+        evidence: evidencia.join(' | ').slice(0, 200),
+      };
+    }
+    return R;
+  } catch (e) {
+    return {
+      capabilities: R.capabilities, control_results: R.control_results, ts: R.ts,
+      error: String((e && e.message) || e),
+    };
+  }
+}
+
+/* Gate en el service worker — espejo EXACTO de execution_contract.config_gate
+   (backend): ALLOW_GENERATE solo si TODO control required && requested!=null
+   está VERIFIED; decisión única con prioridad UNSUPPORTED > MISMATCH >
+   UNVERIFIABLE; transport/register_only no bloquean salvo MISMATCH/
+   UNSUPPORTED; VERIFIED con valor distinto al pedido → MISMATCH (defensa). */
+function __flowGateDecision(spec, controlResults) { // [execution-contract v1]
+  const ORDEN = ['duration', 'model', 'aspect_ratio', 'outputs', 'audio', 'resolution'];
+  const specObj = (spec && typeof spec === 'object') ? spec : {};
+  const results = (controlResults && typeof controlResults === 'object') ? controlResults : {};
+  const fallos = [];
+  for (const control of ORDEN) {
+    const c = specObj[control];
+    if (!c || typeof c !== 'object') continue;
+    const requested = c.requested;
+    const required = !!c.required;
+    if (requested == null) continue; // nada solicitado → nada que verificar
+    const r = (results[control] && typeof results[control] === 'object') ? results[control] : null;
+    const v = (r && typeof r.verdict === 'string') ? r.verdict : 'UNVERIFIABLE';
+    if (!required) continue; // se registra, no bloquea (§14/§15)
+    const metodo = ((specObj.verification || {})[control] || {}).method;
+    if ((metodo === 'transport' || metodo === 'register_only')
+        && v !== 'MISMATCH' && v !== 'UNSUPPORTED') continue; // REGISTERED
+    const observed = r ? (r.observed_after != null ? r.observed_after : r.observed_before) : null;
+    if (v === 'VERIFIED') {
+      if (observed != null && __flowNormVal(observed) !== __flowNormVal(requested)) {
+        fallos.push(control + ': CONFIG_MISMATCH (requested=' + requested
+          + ', observed=' + observed + ')');
+      }
+      continue;
+    }
+    if (v === 'UNSUPPORTED') {
+      fallos.push(control + ': CONFIG_UNSUPPORTED (requested=' + requested + ')');
+    } else if (v === 'MISMATCH') {
+      fallos.push(control + ': CONFIG_MISMATCH (requested=' + requested
+        + ', observed=' + observed + ')');
+    } else {
+      fallos.push(control + ': CONFIG_UNVERIFIABLE (requested=' + requested
+        + ', verdict=' + v + ')');
+    }
+  }
+  let decision = 'ALLOW_GENERATE';
+  if (fallos.length) {
+    if (fallos.some((f) => f.indexOf('CONFIG_UNSUPPORTED') !== -1)) decision = 'CONFIG_UNSUPPORTED';
+    else if (fallos.some((f) => f.indexOf('CONFIG_MISMATCH') !== -1)) decision = 'CONFIG_MISMATCH';
+    else decision = 'CONFIG_UNVERIFIABLE';
+  }
+  return { decision, detail: fallos.join('; '), control_results: results };
+}
+/* [execution-contract v1] config: fin */
+
 function startPollingIfNeeded() {
   if (pollTimer) return;
   pollTick();
@@ -907,6 +1198,13 @@ async function processDomSnapshot(data) {
     if (saved && saved.ok) {
       if (item && (sceneMediaCounts.get(scene) || 0) >= need) {
         item.status = STATUS.DOWNLOADED;
+        /* [execution-contract v1] progreso del contrato (solo jobs del bridge):
+         * ASSET_DOWNLOADED — fire-and-forget, jamás bloquea la descarga. */
+        if (typeof __bridgeReportProgress === 'function'
+            && item && typeof item.id === 'string' && item.id.indexOf('bridge_') === 0) {
+          __bridgeReportProgress(item.bridgeJobId, item.bridgeToken, 'ASSET_DOWNLOADED',
+            'asset guardado en disco', { path: (saved && saved.path) || null });
+        }
         clearSceneAttempts(scene); // [attempt v3] resultado válido → sin intentos residuales
         broadcastState();
         tickSoon(800);
@@ -985,6 +1283,13 @@ async function processDomSnapshot(data) {
       const need = isVideoMode ? 1 : imagesPerScene;
       if (saved && saved.ok && item && (sceneMediaCounts.get(scene) || 0) >= need) {
         item.status = STATUS.DOWNLOADED;
+        /* [execution-contract v1] progreso del contrato (solo jobs del bridge):
+         * ASSET_DOWNLOADED — fire-and-forget, jamás bloquea la descarga. */
+        if (typeof __bridgeReportProgress === 'function'
+            && typeof item.id === 'string' && item.id.indexOf('bridge_') === 0) {
+          __bridgeReportProgress(item.bridgeJobId, item.bridgeToken, 'ASSET_DOWNLOADED',
+            'asset guardado en disco (semántico)', { path: (saved && saved.path) || null });
+        }
         clearSceneAttempts(scene); // [attempt v3] resultado válido → sin intentos residuales
         rearmWatchdog();
         broadcastState();
@@ -1171,6 +1476,11 @@ function composeEvidence(sceneNumber, veredicto) {
       + ',n=' + (cfg.results || 'unknown'));
     /* ⑧ audio del video generado: unknown salvo evidencia DOM explícita */
     partes.push('audio=' + ((ev && ev.silent) || 'unknown'));
+    /* [execution-contract v1] capa spec (ÚLTIMA, tras las existentes): resumen
+     * del gate de configuración si esta escena pasó por él (bridge +
+     * execution_spec). Ej.: "spec: duration=VERIFIED(8s), aspect=VERIFIED(9:16)"
+     * o "spec: duration=MISMATCH(5s)". El corte global a 490 manda. */
+    if (ev && ev.spec) partes.push('spec: ' + String(ev.spec).slice(0, 80));
   } catch (_) { /* la composición jamás tumba el veredicto */ }
   return partes.join(' | ').slice(0, 490);
 }
@@ -1368,6 +1678,14 @@ async function injectScene(item) {
       const res = results && results[0] && results[0].result;
       if (!res || res.ok !== true) {
         throw new Error((res && res.error) || 'no se pudo inyectar el prompt');
+      }
+      /* [execution-contract v1] progreso: prompt inyectado + click de envío
+       * OK (slateInjectFn solo devuelve ok tras verificar el valor y pulsar
+       * enviar) → GENERATION_SUBMITTED (solo jobs del bridge; fire-and-forget). */
+      if (typeof __bridgeReportProgress === 'function'
+          && item && typeof item.id === 'string' && item.id.indexOf('bridge_') === 0) {
+        __bridgeReportProgress(item.bridgeJobId, item.bridgeToken, 'GENERATION_SUBMITTED',
+          'prompt inyectado y generación enviada', null);
       }
     }
   } catch (e) {
@@ -1970,6 +2288,76 @@ async function __bridgeResolveFlowTab(linkedTabId) {
 }
 /* [bridge v3] fin resolución de pestaña */
 
+/* ===========================================================================
+ * [execution-contract v1] PROGRESO + ESPEC — soporte del Execution Contract
+ * ---------------------------------------------------------------------------
+ *   __flowParseSpec:        job.execution_spec (claim_next lo entrega YA
+ *                           parseado a dict o null; string JSON aceptado por
+ *                           defensa; lo inválido → null honesto).
+ *   __flowSpecSummary:      capa "spec:" de composeEvidence
+ *                           (ej. "duration=VERIFIED(8s), aspect=VERIFIED(9:16)").
+ *   __bridgeReportProgress: informe de progreso fire-and-forget al endpoint
+ *                           NUEVO POST {BASE}/api/extension/flow/jobs/{id}/
+ *                           progress?token= (§9) — NUNCA bloquea la cola ni
+ *                           lanza (409/400/red → noop; bridgeProgress devuelve
+ *                           null en cualquier error).
+ *   __flowRunConfig:        inyección de flowConfigFn en la pestaña ya
+ *                           validada por la sonda (sin tabs[0]; tabId resuelto
+ *                           por __bridgeResolveFlowTab).
+ * =========================================================================== */
+/* [execution-contract v1] progreso: inicio */
+function __flowParseSpec(raw) { // [execution-contract v1]
+  if (raw && typeof raw === 'object') return raw;
+  if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const p = JSON.parse(raw);
+      return (p && typeof p === 'object') ? p : null;
+    } catch (_) { return null; }
+  }
+  return null;
+}
+
+function __flowSpecSummary(controlResults) { // [execution-contract v1]
+  try {
+    const res = (controlResults && typeof controlResults === 'object') ? controlResults : {};
+    const partes = [];
+    for (const c of ['duration', 'aspect_ratio', 'model', 'resolution', 'outputs', 'audio']) {
+      const r = res[c];
+      if (!r || typeof r !== 'object' || r.requested == null) continue;
+      const nombre = c === 'aspect_ratio' ? 'aspect' : c;
+      const val = (r.observed_after != null ? r.observed_after : r.requested);
+      partes.push(nombre + '=' + String(r.verdict || 'UNKNOWN') + '(' + String(val).slice(0, 12) + ')');
+    }
+    return partes.join(', ');
+  } catch (_) { return ''; }
+}
+
+function __bridgeReportProgress(jobId, token, state, detail, evidence) { // [execution-contract v1]
+  try {
+    if (jobId == null || !state) return;
+    const p = (typeof bridgeProgress === 'function')
+      ? bridgeProgress(jobId, token, String(state), String(detail || '').slice(0, 300),
+        (evidence && typeof evidence === 'object') ? evidence : null)
+      : null;
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  } catch (_) { /* fire-and-forget: jamás tumba el job */ }
+}
+
+async function __flowRunConfig(tabId, spec) { // [execution-contract v1]
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: flowConfigFn,
+      args: [spec],
+    });
+    const data = results && results[0] && results[0].result;
+    return (data && typeof data === 'object') ? data : null;
+  } catch (_) {
+    return null; // sin evidencia DOM → el gate decide UNVERIFIABLE (honesto)
+  }
+}
+/* [execution-contract v1] progreso: fin */
+
 /* Handler de jobs del Flow Bridge. Construye un QueueItem con el prompt del
    backend y el scene_number, lo encola con la maquinaria existente (tick →
    injectScene → pollTick → saveUrlToDisk) y cuando la escena llega a
@@ -1987,6 +2375,12 @@ function __bridgeHandleJob(job, sendResult) { // [bridge v1]
      * por defecto idéntico a 2.2.4). */
     const prompt = String((job && job.prompt_adapted) || (job && job.prompt) || '').trim();
     const isVideo = (job && job.kind) === 'video';
+    /* [execution-contract v1] spec del contrato de ejecución: claim_next lo
+     * entrega YA parseado (dict) o null. IMÁGENES y jobs SIN spec = compor-
+     * tamiento actual EXACTO (la imagen no se gatea; sin spec no hay capa 3). */
+    const execSpec = __flowParseSpec(job && job.execution_spec);
+    const jobToken = String((job && job.job_token) || '');
+    let gateFailed = false;
     let captureOn = false;
     try {
       if (!jobId) throw new Error('job sin id');
@@ -2027,6 +2421,12 @@ function __bridgeHandleJob(job, sendResult) { // [bridge v1]
       // Estado per-escena limpio (evita conteos/mapeos de ejecuciones viejas)
       sceneMediaCounts.delete(sceneNumber);
       sceneAttempts.delete(sceneNumber); // [attempt v3] CAMBIO 7: sin contaminación residual entre jobs
+      /* [execution-contract v1] el resumen "spec:" de un job anterior no
+       * contamina este (misma vida que sceneAttempts/sceneEvidence). */
+      try {
+        const ev0 = sceneEvidence.get(sceneNumber);
+        if (ev0) delete ev0.spec;
+      } catch (_) {}
       for (const [mid, m] of Array.from(mediaIdToScene.entries())) {
         if (m && m.sceneNumber === sceneNumber) mediaIdToScene.delete(mid);
       }
@@ -2038,6 +2438,13 @@ function __bridgeHandleJob(job, sendResult) { // [bridge v1]
         status: STATUS.PENDING,
         error: null,
       };
+      /* [execution-contract v1] el spec y la identidad del job viajan en el
+       * item: los hooks del ciclo de vida (GENERATION_SUBMITTED en
+       * injectScene, ASSET_DOWNLOADED en processDomSnapshot) los leen para
+       * reportar progreso fino. P1/prompt JAMÁS tocados (tercera capa). */
+      item.execSpec = execSpec;
+      item.bridgeJobId = jobId;
+      item.bridgeToken = jobToken;
       queue = queue.filter((i) => i.scene_number !== sceneNumber);
       queue.push(item);
       mode = isVideo ? 'videos' : 'images';
@@ -2050,7 +2457,48 @@ function __bridgeHandleJob(job, sendResult) { // [bridge v1]
       startPollingIfNeeded();
       ensureKeepalive();
       broadcastState();
-      tickSoon(800);
+      /* [execution-contract v1] progreso: pestaña Flow validada por la sonda
+       * real (§9; fire-and-forget, nunca bloquea). */
+      __bridgeReportProgress(jobId, jobToken, 'FLOW_TAB_READY',
+        'pestaña de Flow validada por sonda', { url: resolved.url || null });
+
+      /* [execution-contract v1] CONFIG+GATE — SOLO video con spec (§6/§7):
+       * discover → configure → verify → gate, TODO por DOM semántico. Si el
+       * gate no da ALLOW_GENERATE NO SE GENERA: item ERROR con el prefijo
+       * CONFIG_* EXACTO como primera cosa del error (fail() del backend lo
+       * clasifica terminal: sin retry, sin adaptación de prompt), evidencia
+       * en sceneAttempts/sceneEvidence, progreso del estado terminal y
+       * NUNCA injectScene/slateInjectFn. Imágenes y jobs sin spec: camino
+       * de siempre (tickSoon → injectScene intacto). */
+      if (isVideo && execSpec) {
+        const cfgDom = await __flowRunConfig(tabId, execSpec);
+        const caps = (cfgDom && cfgDom.capabilities) || {};
+        const ctrl = (cfgDom && cfgDom.control_results) || {};
+        __bridgeReportProgress(jobId, jobToken, 'CAPABILITIES_CAPTURED',
+          'descubrimiento DOM de controles Flow', { capabilities: caps });
+        const gate = __flowGateDecision(execSpec, ctrl);
+        try { __evidencia(sceneNumber).spec = __flowSpecSummary(ctrl); } catch (_) {}
+        if (gate.decision !== 'ALLOW_GENERATE') {
+          const error = (gate.decision + ': ' + (gate.detail || 'configuración no verificada')).slice(0, 490);
+          item.status = STATUS.ERROR;
+          item.error = error;
+          recordSceneAttempt(sceneNumber, error.slice(0, 200)); // evidencia del gate
+          __bridgeReportProgress(jobId, jobToken, gate.decision,
+            String(gate.detail || '').slice(0, 300), { control_results: ctrl });
+          persistState();
+          broadcastState();
+          gateFailed = true; // SIN tickSoon: nada que inyectar; el loop de abajo
+          // entrega el fallo por el camino ÚNICO existente (sendResult →
+          // bridgeTick → bridgeFail "CONFIG_*: detalle", ≤500) — un solo POST
+          // /fail, sin duplicar (un segundo fail daría 409 por token limpiado).
+        } else {
+          __bridgeReportProgress(jobId, jobToken, 'CONTROLS_CONFIGURED',
+            'controles configurados y releídos por DOM', { control_results: ctrl });
+          __bridgeReportProgress(jobId, jobToken, 'CONTROLS_VERIFIED',
+            'gate ALLOW_GENERATE (todo required VERIFIED)', { control_results: ctrl });
+        }
+      }
+      if (!gateFailed) tickSoon(800);
       // Captura activa mientras la maquinaria descarga el asset
       captureOn = true;
       __bridgeCapture.active = true;
