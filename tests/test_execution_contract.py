@@ -195,8 +195,10 @@ def main() -> int:
           "duration" in g.get("detail", "")
           and "CONFIG_UNVERIFIABLE" in g.get("detail", ""),
           repr(g.get("detail"))[:140])
-    ok_res = {"duration": {"verdict": "VERIFIED", "observed": "8s"},
-              "aspect_ratio": {"verdict": "VERIFIED", "observed": "9:16"}}
+    ok_res = {"duration": {"verdict": "VERIFIED", "observed": "8s",
+                           "configured": True},
+              "aspect_ratio": {"verdict": "VERIFIED", "observed": "9:16",
+                               "configured": True}}
     g2 = ec.config_gate(spec, {"duration": {"supported": True},
                                "aspect_ratio": {"supported": True}}, ok_res)
     check("VERIFIED '8s' + '9:16' → ALLOW_GENERATE (normalización '8s'==8)",
@@ -252,6 +254,47 @@ def main() -> int:
           repr((g9["decision"], g9["control_results"].get("aspect_ratio"))))
     check("verdicts por defecto: sin resultado → UNVERIFIABLE",
           ec.config_gate(spec, {}, {})["decision"] == ec.CONFIG_UNVERIFIABLE)
+
+    # ── §6.1 gate v1.1 — allow_inherited_state + required_gate_controls ──
+    print("── 2b. config_gate v1.1 (§7.1: heredado ≠ configuración propia)")
+    heredado = {"duration": {"verdict": "VERIFIED", "observed": 8},
+                "aspect_ratio": {"verdict": "VERIFIED", "observed": "9:16",
+                                 "configured": True}}
+    gi = ec.config_gate(spec, {}, heredado)
+    check("TEST 9: VERIFIED sin configured + policy false → "
+          "CONFIG_UNVERIFIABLE (heredado jamás aceptado)",
+          gi["decision"] == ec.CONFIG_UNVERIFIABLE
+          and "allow_inherited_state" in gi.get("detail", ""),
+          repr(gi)[:180])
+    propia = {"duration": {"verdict": "VERIFIED", "observed": 8,
+                           "configured": True},
+              "aspect_ratio": {"verdict": "VERIFIED", "observed": "9:16",
+                               "configured": True}}
+    gp = ec.config_gate(spec, {}, propia)
+    check("TEST 9: configured=True (set+relectura propios) → ALLOW_GENERATE",
+          gp["decision"] == ec.ALLOW_GENERATE, repr(gp["decision"]))
+    spec_pol = json.loads(json.dumps(spec))
+    spec_pol["compatibility_policy"]["allow_inherited_state"] = True
+    gh = ec.config_gate(spec_pol, {}, heredado)
+    check("allow_inherited_state=true: heredado EN el valor pedido → ALLOW "
+          "(política explícita, no silenciosa)",
+          gh["decision"] == ec.ALLOW_GENERATE, repr(gh["decision"]))
+    check("TEST 9: capa mecánica declara configured en el resultado "
+          "(trazabilidad heredado vs propio)",
+          gp["control_results"]["duration"].get("verdict") == "VERIFIED",
+          repr(gp["control_results"].get("duration")))
+    rgc = ec.required_gate_controls(spec)
+    check("required_gate_controls: duration+aspect ffprobe requeridos",
+          rgc == ["duration", "aspect_ratio"], repr(rgc))
+    check("required_gate_controls: outputs (transport) y audio "
+          "(register_only) NO exigen gate pre-generación",
+          "outputs" not in rgc and "audio" not in rgc, repr(rgc))
+    check("required_gate_controls: spec no-dict → [] (honesto)",
+          ec.required_gate_controls(None) == []
+          and ec.required_gate_controls("x") == [])
+    check("§7.1: EXEC_STATE_WATCHDOG existe y NO es terminal de máquina",
+          ec.EXEC_STATE_WATCHDOG == "FLOW_WATCHDOG_TIMEOUT"
+          and ec.EXEC_STATE_WATCHDOG not in ec.TERMINAL_EXEC_STATES)
 
     # ── §13 validación contractual (sintética) ────────────────────────────
     print("── 3. validate_asset_contract (sintético §13)")

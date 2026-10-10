@@ -239,6 +239,35 @@ async function bridgeProgress(jobId, token, state, detail, evidence) { // [execu
   }
 }
 
+/* [execution-contract v1.1] §7.1 — CONSENTIMIENTO DE GENERACIÓN (CF-E2E-01):
+   el backend (juez del contrato) re-evalúa execution_contract.config_gate con
+   capabilities/control_results ANTES de pulsar Generate. A diferencia del
+   progreso, este endpoint SÍ decide: la respuesta manda. Devuelve
+   {ok, allowed, decision, exec_state, detail} o null en CUALQUIER error
+   HTTP/red — el llamador falla CERRADO: sin consentimiento del servidor no
+   se genera (jamás ALLOW por defecto). */
+async function bridgeGenerateConsent(jobId, token, evidence) { // [execution-contract v1.1]
+  try {
+    const cfg = await bridgeEnsureCfg();
+    const body = {};
+    if (evidence && typeof evidence === 'object') {
+      if (evidence.capabilities && typeof evidence.capabilities === 'object') body.capabilities = evidence.capabilities;
+      if (evidence.control_results && typeof evidence.control_results === 'object') body.control_results = evidence.control_results;
+      if (evidence.client_decision) body.client_decision = String(evidence.client_decision).slice(0, 60);
+      if (evidence.client_detail) body.client_detail = String(evidence.client_detail).slice(0, 300);
+    }
+    const res = await bridgeFetch(
+      bridgeUrl(cfg, '/' + encodeURIComponent(jobId) + '/generate-consent?token=' + encodeURIComponent(token || '')),
+      { method: 'POST', headers: bridgeHeaders(), body: JSON.stringify(body) },
+      BRIDGE_HTTP_TIMEOUT_MS
+    );
+    if (!res.ok) return null; // 409/4xx/5xx → null → fail-closed en el llamador
+    return await res.json().catch(() => null);
+  } catch (_) {
+    return null; // red/timeout → null → fail-closed (jamás generar a ciegas)
+  }
+}
+
 /* Estado de la cola del proyecto (counts + jobs). */
 async function bridgeStatus(pid) {
   const cfg = await bridgeEnsureCfg();
@@ -354,6 +383,16 @@ async function bridgeTick() {
         bridgeLog('complete falló → fail: ' + msg);
         try { await bridgeFail(job, msg); } catch (e2) { bridgeLog('fail también falló: ' + String((e2 && e2.message) || e2)); }
       }
+    } else if (res && res.consentDenied) {
+      /* [execution-contract v1.1] §7.1 — el SERVIDOR ya marcó el job terminal
+       * en /generate-consent (dead + CONFIG_*): un bridgeFail extra daría 409
+       * por token limpiado. Solo se registra; la cola queda íntegra. */
+      bridgeLog('consentimiento denegado por el gate del servidor (' + ((res && res.error) || '') + ') — job ya terminal, sin fail duplicado');
+      self.__bridgeLastResult = {
+        at: Date.now(), jobId: job.id, ok: false,
+        consentDenied: true,
+        error: String((res && res.error) || 'CONFIG_*: gate del servidor denegó la generación').slice(0, 200),
+      };
     } else {
       const err = (res && res.error) || 'generación fallida sin detalle';
       bridgeLog('job falló → fail: ' + err);

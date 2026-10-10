@@ -123,15 +123,39 @@ def _job(jid: str, kind: str, escena: int, prompt: str,
          status: str = "dead", attempts: int = 2, error: str | None = None,
          prompt_adapted: str | None = None, pid: str = "p_v3",
          lease_cycles: int = 0) -> str:
+    # [execution-contract v1.1] §7.1: los jobs video sintéticos llevan un spec
+    # SIN controles required pre-generación (duración no especificada → sin
+    # gate) para ejercitar P2/adaptación/watchdog sin la barrera del
+    # consentimiento (esa barrera tiene batería propia: test_flow_contract
+    # _states §11b). Fila sin spec = legacy fail-closed en complete().
+    spec = None
+    if kind == "video":
+        spec = json.dumps({
+            "schema_version": "1.0",
+            "duration": {"requested": None, "required": False,
+                         "tolerance_seconds": 0},
+            "model": {"requested": None, "required": False},
+            "aspect_ratio": {"requested": None, "required": False},
+            "outputs": {"requested": 1, "required": True},
+            "audio": {"requested": None, "required": False},
+            "resolution": {"requested": None, "required": False},
+            "references": [], "start_frame": None, "end_frame": None,
+            "compatibility_policy": {"allow_inherited_state": False,
+                                     "generate_requires_verified": True,
+                                     "retry_on_config_error": False},
+            "verification": {"outputs": {"method": "transport"},
+                             "audio": {"method": "register_only"}},
+        })
     with db.connect() as con:
         con.execute(
             """INSERT INTO flow_jobs(id, project_id, kind, scene_number, part,
-               prompt, prompt_adapted, prompt_meta, status, attempts,
-               max_attempts, lease_cycles, worker, job_token, lease_until,
-               error, asset_path, created_at, updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               prompt, prompt_adapted, prompt_meta, execution_spec, status,
+               attempts, max_attempts, lease_cycles, worker, job_token,
+               lease_until, error, asset_path, created_at, updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (jid, pid, kind, escena, 1, prompt, prompt_adapted,
-             json.dumps({"title": ""}), status, attempts,
+             json.dumps({"title": ""}), spec, status,
+             attempts,
              3 if kind == "image" else 2, lease_cycles, None, None, None,
              error, None, "2026-01-01T00:00:00+00:00",
              "2026-01-01T00:00:00+00:00"))

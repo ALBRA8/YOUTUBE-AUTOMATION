@@ -198,6 +198,21 @@ def main() -> int:
           repr(got_video["prompt"])[:90] if got_video else "no video job")
 
     print("── 6. complete del video → asset en convención canónica")
+    # [execution-contract v1.1] §7.1 — el video sigue el flujo legítimo:
+    # consentimiento del servidor (capa mecánica configura y relee cada
+    # control required del spec) ANTES de generar/completar.
+    _spec_v = got_video["execution_spec"]
+    if isinstance(_spec_v, str):
+        _spec_v = json.loads(_spec_v)
+    _ctrl_v = {k: {"verdict": "VERIFIED", "observed": c.get("requested"),
+                   "configured": True}
+               for k, c in _spec_v.items()
+               if isinstance(c, dict) and c.get("required")
+               and c.get("requested") is not None}
+    _cons = fj.generation_consent(got_video["id"], got_video["job_token"],
+                                  {"control_results": _ctrl_v})
+    check("§7.1 consentimiento ALLOW antes de generar",
+          bool(_cons) and _cons.get("allowed") is True, repr(_cons)[:120])
     import subprocess
     out_clip = _TMP / "golden_clip.mp4"
     # [execution-contract v1] el clip CUMPLE el contrato de la escena 1

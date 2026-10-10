@@ -148,8 +148,9 @@ def main() -> int:
           "Math.max(18 * 60000, videoTimeoutMs() + 3 * 60000)" in src)
 
     print("── 2. redes de seguridad intactas (no forman parte del cambio)")
-    check("watchdog por escena con veredicto con evidencia",
-          "watchdog: sin resultado válido en" in src)
+    check("watchdog por escena con veredicto con evidencia "
+          "(prefijo estructural §7.1)",
+          "FLOW_WATCHDOG_TIMEOUT: sin resultado válido en" in src)
     check("rate limit tooQuick intacto", "triggerRateLimit()" in src)
     check("extracción semántica pending intacta",
           '\'flow-pending-tile, [data-testid="pending-tile"]\'' in src)
@@ -164,8 +165,8 @@ def main() -> int:
 
     print("── 3. versión y sintaxis")
     mf = json.loads((EXT / "manifest.json").read_text(encoding="utf-8"))
-    check("manifest 2.4.0 (bump menor: EXECUTION CONTRACT v1)",
-          mf.get("version") == "2.4.0", mf.get("version"))
+    check("manifest 2.4.1 (bump patch: CF-E2E-01 gate obligatorio §7.1)",
+          mf.get("version") == "2.4.1", mf.get("version"))
     if node:
         for js in ("background.js", "bridge.js", "injector.js"):
             proc = subprocess.run([node, "--check", str(EXT / js)],

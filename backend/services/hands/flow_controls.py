@@ -91,7 +91,13 @@ class ControlResult:
     """Resultado estructurado de intentar leer/configurar/verificar un control.
     requested (lo que el spec pide), observed_before/after (lo que Flow
     mostraba), verdict (ControlVerdict) y evidencia cruda. La evidencia NO se
-    interpreta aquí: viaja cruda para el ledger/contract_result."""
+    interpreta aquí: viaja cruda para el ledger/contract_result.
+
+    configured [execution-contract v1.1] §7.1: True SOLO si la configuración
+    la puso ESTA ejecución (set + relectura propios). Un valor heredado de la
+    sesión (ya seleccionado antes de llegar) NO cuenta con
+    allow_inherited_state=false — el gate de execution_contract lo trata como
+    UNVERIFIABLE (CF-E2E-01, TEST 9 del mandato)."""
     control: str
     verdict: str
     requested: Any = None
@@ -99,6 +105,7 @@ class ControlResult:
     observed_after: Any = None
     detail: str = ""
     evidence: dict = field(default_factory=dict)
+    configured: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -107,6 +114,7 @@ class ControlResult:
             "observed_before": self.observed_before,
             "observed_after": self.observed_after,
             "detail": self.detail, "evidence": self.evidence,
+            "configured": self.configured,
         }
 
 
@@ -215,31 +223,39 @@ class MockFlowControlAdapter:
             if control not in self.frozen:
                 self.state[control] = requested_txt
         after = self._read_back(control)
+        # [execution-contract v1.1] §7.1: TODO ControlResult que sale de _set
+        # lleva configured=True — el set (+ relectura) de ESTA ejecución ES
+        # configuración propia, aunque el valor ya estuviera seleccionado: el
+        # gate distingue heredado (sin set) de verificado por nosotros.
         if after == requested_txt and requested_txt == self._fmt(control,
                                                                  before):
-            # Ya estaba en el valor pedido antes del click: VERIFIED heredado
-            # NO vale para el gate si el spec exige cambio explícito… pero el
-            # §6 solo prohíbe generar con valor DISTINTO al pedido: si la UI
-            # ya muestra lo pedido, es VERIFIED (estado observado correcto).
+            # Ya estaba en el valor pedido y lo re-aplicamos/re-leyimos:
+            # VERIFIED por configuración propia (set + relectura de esta
+            # ejecución — §7.1; el heredado SIN set es cosa del gate).
             return ControlResult(control, VERIFIED, requested=value,
                                  observed_before=before, observed_after=after,
-                                 detail="ya configurado y verificado",
-                                 evidence={"re_read": True})
+                                 detail="re-aplicado y verificado por relectura "
+                                        "(configuración propia)",
+                                 evidence={"re_read": True},
+                                 configured=True)
         if after == requested_txt:
             return ControlResult(control, VERIFIED, requested=value,
                                  observed_before=before, observed_after=after,
                                  detail="cambiado y verificado por relectura",
-                                 evidence={"re_read": True})
+                                 evidence={"re_read": True},
+                                 configured=True)
         if control in self.stale_read or after is None:
             return ControlResult(control, UNVERIFIABLE, requested=value,
                                  observed_before=before, observed_after=after,
                                  detail="la relectura no devolvió el valor",
-                                 evidence={"scenario": "stale_read"})
+                                 evidence={"scenario": "stale_read"},
+                                 configured=True)
         return ControlResult(control, MISMATCH, requested=value,
                              observed_before=before, observed_after=after,
                              detail=f"relectura={after!r} != pedido="
                                     f"{requested_txt!r}",
-                             evidence={"scenario": "frozen_or_mismatch"})
+                             evidence={"scenario": "frozen_or_mismatch"},
+                             configured=True)
 
     def _fmt(self, control: str, value: Any) -> Any:
         if control == "duration" and isinstance(value, (int, float)):

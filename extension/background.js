@@ -192,7 +192,12 @@ async function loadState() {
     if (running) {
       startPollingIfNeeded();
       ensureKeepalive();
-      scheduleResume(1000);
+      /* [execution-contract v1.1] §7.1 — FIX: scheduleResume(1000) no existía
+       * en ningún archivo (ReferenceError tragado por el catch): el resume
+       * zombi del Service Worker nunca re-programaba el ciclo. Ahora pasa
+       * por tickSoon; injectScene re-ejecuta el gate+consentimiento para
+       * videos del bridge (§7.1), así que el resume no burla el contrato. */
+      tickSoon(1000);
     }
   } catch (_) { /* primera ejecucion */ }
 }
@@ -1004,21 +1009,40 @@ function flowConfigFn(spec) { // [execution-contract v1] inyectable (auto-conten
       let verdict = null;
       let after = null;
       let detail = '';
+      let configured = false; // [execution-contract v1.1] ¿la configuración la puso ESTA ejecución (set + relectura propios)?
       const evidencia = [];
+      /* [execution-contract v1.1] §7.1 TEST 9 — allow_inherited_state: el
+       * spec por defecto PROHÍBE aceptar el estado heredado de la sesión de
+       * Flow. Solo con allow_inherited_state != false un valor ya
+       * seleccionado cuenta como VERIFIED sin configuración propia. */
+      const policy = specObj.compatibility_policy || {};
+      const inheritedOK = policy.allow_inherited_state !== false;
       if (!available || !editable) {
         verdict = 'UNSUPPORTED';
         detail = 'control ' + cfg.name + ' no encontrado o no editable en el DOM';
         evidencia.push('available=' + available + ', editable=' + editable);
-      } else if (normVal(before) === normVal(requested)) {
+      } else if (normVal(before) === normVal(requested) && inheritedOK) {
         verdict = 'VERIFIED';
         after = before;
-        detail = 'ya en el valor solicitado (heredado EN el valor pedido, §6)';
+        configured = false; // heredado: NO lo puso esta ejecución
+        detail = 'ya en el valor solicitado (heredado; allow_inherited_state != false)';
         evidencia.push('observed="' + String(before).slice(0, 20) + '"');
       } else {
         const opt = findOptionByValue(cfg, requested);
         if (!opt) {
-          verdict = 'UNSUPPORTED';
-          detail = 'no hay opción "' + String(requested).slice(0, 20) + '" para ' + cfg.name;
+          if (normVal(before) === normVal(requested)) {
+            /* [execution-contract v1.1] §7.1: la UI MUESTRA el pedido pero no
+             * existe opción pulsable → no podemos configurar por nuestra
+             * cuenta ni verificar con relectura de un cambio: UNVERIFIABLE
+             * honesto (con allow_inherited_state=false el estado heredado no
+             * se acepta silenciosamente). */
+            verdict = 'UNVERIFIABLE';
+            detail = 'valor heredado "' + String(before).slice(0, 20)
+              + '" sin opción pulsable para configurar/verificar propio';
+          } else {
+            verdict = 'UNSUPPORTED';
+            detail = 'no hay opción "' + String(requested).slice(0, 20) + '" para ' + cfg.name;
+          }
           evidencia.push('opciones=' + opts.map((o) => textOf(o) || ariaOf(o)).slice(0, 6).join('|'));
         } else {
           let clicked = false;
@@ -1037,6 +1061,7 @@ function flowConfigFn(spec) { // [execution-contract v1] inyectable (auto-conten
             } catch (_) {}
           }
           after = readObserved(cfg, opts); // RE-LECTURA (verificación real)
+          configured = clicked; // [execution-contract v1.1] el veredicto solo vale si NOSOTROS pulsamos
           if (!clicked) {
             verdict = 'UNVERIFIABLE';
             detail = 'no se pudo pulsar la opción para ' + cfg.name;
@@ -1057,6 +1082,7 @@ function flowConfigFn(spec) { // [execution-contract v1] inyectable (auto-conten
         control: cfg.name,
         verdict,
         requested,
+        configured, // [execution-contract v1.1] §7.1: set+relectura propios
         observed_before: before == null ? null : before,
         observed_after: after,
         detail,
@@ -1099,6 +1125,19 @@ function __flowGateDecision(spec, controlResults) { // [execution-contract v1]
       if (observed != null && __flowNormVal(observed) !== __flowNormVal(requested)) {
         fallos.push(control + ': CONFIG_MISMATCH (requested=' + requested
           + ', observed=' + observed + ')');
+        continue;
+      }
+      /* [execution-contract v1.1] §7.1 TEST 9 — allow_inherited_state=false:
+       * el VERIFIED solo cuenta si la configuración la puso ESTA ejecución
+       * (control_results[control].configured === true: set + relectura
+       * propios). Un valor heredado de la sesión de Flow no se acepta
+       * silenciosamente (espejo EXACTO de execution_contract.config_gate). */
+      const policy = specObj.compatibility_policy || {};
+      if (policy.allow_inherited_state === false
+          && !(r && r.configured === true)) {
+        fallos.push(control + ': CONFIG_UNVERIFIABLE (valor heredado de la '
+          + 'sesión sin configuración propia verificada; '
+          + 'allow_inherited_state=false)');
       }
       continue;
     }
@@ -1533,9 +1572,14 @@ function watchdogCheck() {
       /* [observability v1.1] el veredicto LOCAL (ventana agotada) viaja con
        * TODAS las capas de evidencia cruda observada (red/notificación/tile
        * /configuración/audio): el backend clasifica la causa con prioridad
-       * de evidencia — el watchdog NO es una causa del proveedor. */
+       * de evidencia — el watchdog NO es una causa del proveedor.
+       * [execution-contract v1.1] §7.1: prefijo estructural
+       * FLOW_WATCHDOG_TIMEOUT — el backend lo etiqueta como agotamiento
+       * LOCAL (exec_state FLOW_WATCHDOG_TIMEOUT), JAMÁS PROVIDER_FAILURE
+       * sin evidencia específica del proveedor (CF-E2E-01/H). */
       item.error = composeEvidence(item.scene_number,
-        'watchdog: sin resultado válido en ' + Math.round(budget / 60000) + ' min');
+        'FLOW_WATCHDOG_TIMEOUT: sin resultado válido en '
+        + Math.round(budget / 60000) + ' min (watchdog local)');
       expired = true;
     }
   }
@@ -1658,6 +1702,21 @@ function tick(initial) {
 }
 
 async function injectScene(item) {
+  /* [execution-contract v1.1] §7.1 — RE-GATE en inyección: TODO camino que
+   * llegue aquí para un video del bridge (retry manual RETRY_SCENE, resume
+   * zombi del Service Worker, tick tras despertar) pasa OTRA VEZ por el
+   * gate + consentimiento del servidor. Sin ALLOW no se inyecta prompt ni
+   * se pulsa Generate (cierra las vías E5/E6 de la auditoría CF-E2E-01). */
+  if (provider === 'flow' && item && item.kind === 'video'
+      && item.execSpec && item.bridgeJobId) {
+    const gateOK = await __bridgeEnsureGateForItem(item);
+    if (!gateOK) {
+      persistState();
+      broadcastState();
+      tickSoon(injectDelayMs() + 500);
+      return; // el gate denegó: jamás inyectar
+    }
+  }
   item.status = STATUS.IN_PROGRESS;
   item.startedAt = Date.now();
   lastInjectAt = Date.now();
@@ -2356,6 +2415,51 @@ async function __flowRunConfig(tabId, spec) { // [execution-contract v1]
     return null; // sin evidencia DOM → el gate decide UNVERIFIABLE (honesto)
   }
 }
+
+/* [execution-contract v1.1] §7.1 — RE-GATE reutilizable para items de video
+ * del bridge en CUALQUIER punto de entrada a la inyección (handler nuevo,
+ * retry manual RETRY_SCENE, resume zombi del Service Worker). Repite
+ * discover/configure/verify (DOM) + consentimiento del SERVIDOR; su
+ * respuesta manda. Devuelve true SOLO con ALLOW del servidor; en otro caso
+ * marca el item ERROR (CONFIG_* exacto) y devuelve false — jamás inyecta. */
+async function __bridgeEnsureGateForItem(item) { // [execution-contract v1.1]
+  try {
+    const spec = __flowParseSpec(item && item.execSpec);
+    if (!spec) {
+      item.status = STATUS.ERROR;
+      item.error = 'CONFIG_UNVERIFIABLE: execution_spec ausente o inválido en el item — sin contrato no se genera (fail-closed §7.1)';
+      return false;
+    }
+    const cfgDom = await __flowRunConfig(labTabId, spec);
+    const caps = (cfgDom && cfgDom.capabilities) || {};
+    const ctrl = (cfgDom && cfgDom.control_results) || {};
+    const clientGate = __flowGateDecision(spec, ctrl);
+    const consent = await (typeof bridgeGenerateConsent === 'function'
+      ? bridgeGenerateConsent(item.bridgeJobId, item.bridgeToken, {
+          capabilities: caps,
+          control_results: ctrl,
+          client_decision: clientGate.decision,
+          client_detail: clientGate.detail || '',
+        }) : Promise.resolve(null));
+    if (!consent || consent.ok !== true) {
+      item.status = STATUS.ERROR;
+      item.error = 'CONFIG_UNVERIFIABLE: consentimiento de generación no disponible (sin /generate-consent ALLOW no se genera; §7.1)';
+      return false;
+    }
+    if (consent.allowed !== true) {
+      item.status = STATUS.ERROR;
+      item.error = (String(consent.decision || 'CONFIG_UNVERIFIABLE')
+        + ': ' + String(consent.detail || 'gate del servidor denegó la generación')).slice(0, 490);
+      item.consentDenied = true; // el servidor ya marcó terminal en el consent
+      return false;
+    }
+    return true; // ALLOW del servidor: se puede inyectar y generar
+  } catch (_) {
+    item.status = STATUS.ERROR;
+    item.error = 'CONFIG_UNVERIFIABLE: re-gate §7.1 falló (excepción) — fail-closed';
+    return false;
+  }
+}
 /* [execution-contract v1] progreso: fin */
 
 /* Handler de jobs del Flow Bridge. Construye un QueueItem con el prompt del
@@ -2443,6 +2547,7 @@ function __bridgeHandleJob(job, sendResult) { // [bridge v1]
        * injectScene, ASSET_DOWNLOADED en processDomSnapshot) los leen para
        * reportar progreso fino. P1/prompt JAMÁS tocados (tercera capa). */
       item.execSpec = execSpec;
+      item.kind = isVideo ? 'video' : 'image'; // [execution-contract v1.1]: re-gate en injectScene
       item.bridgeJobId = jobId;
       item.bridgeToken = jobToken;
       queue = queue.filter((i) => i.scene_number !== sceneNumber);
@@ -2462,40 +2567,76 @@ function __bridgeHandleJob(job, sendResult) { // [bridge v1]
       __bridgeReportProgress(jobId, jobToken, 'FLOW_TAB_READY',
         'pestaña de Flow validada por sonda', { url: resolved.url || null });
 
-      /* [execution-contract v1] CONFIG+GATE — SOLO video con spec (§6/§7):
-       * discover → configure → verify → gate, TODO por DOM semántico. Si el
-       * gate no da ALLOW_GENERATE NO SE GENERA: item ERROR con el prefijo
-       * CONFIG_* EXACTO como primera cosa del error (fail() del backend lo
-       * clasifica terminal: sin retry, sin adaptación de prompt), evidencia
-       * en sceneAttempts/sceneEvidence, progreso del estado terminal y
-       * NUNCA injectScene/slateInjectFn. Imágenes y jobs sin spec: camino
-       * de siempre (tickSoon → injectScene intacto). */
-      if (isVideo && execSpec) {
-        const cfgDom = await __flowRunConfig(tabId, execSpec);
-        const caps = (cfgDom && cfgDom.capabilities) || {};
-        const ctrl = (cfgDom && cfgDom.control_results) || {};
-        __bridgeReportProgress(jobId, jobToken, 'CAPABILITIES_CAPTURED',
-          'descubrimiento DOM de controles Flow', { capabilities: caps });
-        const gate = __flowGateDecision(execSpec, ctrl);
-        try { __evidencia(sceneNumber).spec = __flowSpecSummary(ctrl); } catch (_) {}
-        if (gate.decision !== 'ALLOW_GENERATE') {
-          const error = (gate.decision + ': ' + (gate.detail || 'configuración no verificada')).slice(0, 490);
+      /* [execution-contract v1.1] §7.1 — GATE + CONSENTIMIENTO OBLIGATORIO
+       * (corrige CF-E2E-01): para VIDEO, sin excepción:
+       *   video SIN spec          → CONFIG_UNVERIFIABLE fail-closed (sin
+       *                             contrato no hay generación).
+       *   video CON spec          → flowConfigFn (discover/configure/verify
+       *                             DOM) → /generate-consent: el SERVIDOR
+       *                             re-evalúa config_gate y su respuesta MANDA.
+       *     - ALLOW → exec_state CONTROLS_VERIFIED (servidor) → se inyecta
+       *               prompt y se pulsa Generate.
+       *     - DENY  → el servidor ya marcó el job TERMINAL (dead CONFIG_*,
+       *               sin retry, sin adaptación): item ERROR con el prefijo
+       *               exacto + consentDenied (sin fail duplicado — daría 409).
+       *     - consent no disponible (red/409) → fail-closed
+       *               CONFIG_UNVERIFIABLE: jamás generar a ciegas.
+       * Imágenes: camino de siempre (tickSoon → injectScene intacto). */
+      if (isVideo) {
+        if (!execSpec) {
+          const error = 'CONFIG_UNVERIFIABLE: execution_spec ausente o inválido en el job — sin contrato no se genera (fail-closed §7.1)';
           item.status = STATUS.ERROR;
           item.error = error;
-          recordSceneAttempt(sceneNumber, error.slice(0, 200)); // evidencia del gate
-          __bridgeReportProgress(jobId, jobToken, gate.decision,
-            String(gate.detail || '').slice(0, 300), { control_results: ctrl });
+          recordSceneAttempt(sceneNumber, error.slice(0, 200));
           persistState();
           broadcastState();
-          gateFailed = true; // SIN tickSoon: nada que inyectar; el loop de abajo
-          // entrega el fallo por el camino ÚNICO existente (sendResult →
-          // bridgeTick → bridgeFail "CONFIG_*: detalle", ≤500) — un solo POST
-          // /fail, sin duplicar (un segundo fail daría 409 por token limpiado).
+          gateFailed = true; // sendResult → bridgeFail → terminal en el backend
         } else {
-          __bridgeReportProgress(jobId, jobToken, 'CONTROLS_CONFIGURED',
-            'controles configurados y releídos por DOM', { control_results: ctrl });
-          __bridgeReportProgress(jobId, jobToken, 'CONTROLS_VERIFIED',
-            'gate ALLOW_GENERATE (todo required VERIFIED)', { control_results: ctrl });
+          const cfgDom = await __flowRunConfig(tabId, execSpec);
+          const caps = (cfgDom && cfgDom.capabilities) || {};
+          const ctrl = (cfgDom && cfgDom.control_results) || {};
+          __bridgeReportProgress(jobId, jobToken, 'CAPABILITIES_CAPTURED',
+            'descubrimiento DOM de controles Flow', { capabilities: caps });
+          const clientGate = __flowGateDecision(execSpec, ctrl);
+          try { __evidencia(sceneNumber).spec = __flowSpecSummary(ctrl); } catch (_) {}
+          /* CONSENTIMIENTO: el juez es el SERVIDOR (config_gate en Python); el
+           * gate JS es pre-filtro equivalente (cross-check en baterías). */
+          const consent = await (typeof bridgeGenerateConsent === 'function'
+            ? bridgeGenerateConsent(jobId, jobToken, {
+                capabilities: caps,
+                control_results: ctrl,
+                client_decision: clientGate.decision,
+                client_detail: clientGate.detail || '',
+              }) : Promise.resolve(null));
+          if (!consent || consent.ok !== true) {
+            const error = 'CONFIG_UNVERIFIABLE: consentimiento de generación no disponible (sin /generate-consent ALLOW no se genera; §7.1)';
+            item.status = STATUS.ERROR;
+            item.error = error;
+            recordSceneAttempt(sceneNumber, error.slice(0, 200));
+            persistState();
+            broadcastState();
+            gateFailed = true;
+          } else if (consent.allowed !== true) {
+            const error = (String(consent.decision || 'CONFIG_UNVERIFIABLE')
+              + ': ' + String(consent.detail || 'gate del servidor denegó la generación')).slice(0, 490);
+            item.status = STATUS.ERROR;
+            item.error = error;
+            recordSceneAttempt(sceneNumber, error.slice(0, 200)); // evidencia del gate
+            __bridgeReportProgress(jobId, jobToken,
+              String(consent.decision || 'CONFIG_UNVERIFIABLE'),
+              String(consent.detail || '').slice(0, 300),
+              { control_results: ctrl });
+            item.consentDenied = true; // el servidor YA lo marcó terminal
+            persistState();
+            broadcastState();
+            gateFailed = true; // SIN tickSoon: nada que inyectar; el bucle de
+            // abajo entrega el resultado con consentDenied → bridgeTick NO
+            // repite el fail (el backend ya marcó dead+CONFIG_*).
+          } else {
+            __bridgeReportProgress(jobId, jobToken, 'CONTROLS_VERIFIED',
+              'consentimiento del servidor: ALLOW_GENERATE (todo required VERIFIED)',
+              { control_results: ctrl });
+          }
         }
       }
       if (!gateFailed) tickSoon(800);
@@ -2526,7 +2667,11 @@ function __bridgeHandleJob(job, sendResult) { // [bridge v1]
         const cur = queue.find((i) => i.id === item.id);
         if (!cur) { outcome = { ok: false, error: 'el job del bridge desapareció de la cola local' }; break; }
         if (cur.status === STATUS.DOWNLOADED) { outcome = { ok: true }; break; }
-        if (cur.status === STATUS.ERROR) { outcome = { ok: false, error: cur.error || 'generación con error en Google Flow' }; break; }
+        if (cur.status === STATUS.ERROR) {
+          outcome = { ok: false, error: cur.error || 'generación con error en Google Flow',
+            consentDenied: !!cur.consentDenied }; // §7.1: servidor ya terminal
+          break;
+        }
         await new Promise((r) => setTimeout(r, 2000));
       }
       // Retirar el item del bridge (si stopQueue('completada') ya paró la cola, no pasa nada)
@@ -2538,7 +2683,8 @@ function __bridgeHandleJob(job, sendResult) { // [bridge v1]
         persistState();
         broadcastState();
       }
-      if (!outcome.ok) throw new Error(outcome.error);
+      if (!outcome.ok && !outcome.consentDenied) throw new Error(outcome.error);
+      if (outcome.ok) {
       // Obtener el Blob: 1) captura directa del wrapper de descarga
       let blob = (__bridgeCapture.blob && __bridgeCapture.url && /^https?:/i.test(__bridgeCapture.url))
         ? __bridgeCapture.blob : null;
@@ -2550,6 +2696,10 @@ function __bridgeHandleJob(job, sendResult) { // [bridge v1]
       }
       if (!blob || !blob.size) throw new Error('blob del asset vacío');
       sendResult({ jobId, ok: true, blob });
+      } else {
+        // §7.1: consent DENY — resultado estructurado SIN bridgeFail duplicado
+        sendResult({ jobId, ok: false, error: outcome.error, consentDenied: true });
+      }
     } catch (e) {
       sendResult({ jobId, ok: false, error: String((e && e.message) || e) });
     } finally {

@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 'use strict';
-/* Arnés determinista del EXECUTION CONTRACT V1.0 — lado EXTENSIÓN
- * ([execution-contract v1] flowConfigFn + __flowGateDecision de background.js).
+/* Arnés determinista del EXECUTION CONTRACT V1.1 — lado EXTENSIÓN
+ * ([execution-contract v1] flowConfigFn + __flowGateDecision de background.js,
+ * semántica §7.1: configured / allow_inherited_state / fail-closed).
  *
- * Extrae el CÓDIGO REAL de background.js por las anclas nuevas
+ * Extrae el CÓDIGO REAL de background.js por las anclas
  * ([execution-contract v1] config: inicio/fin — slice + balance de llaves,
  * patrón del arnés flow_video_v3_mock.js) y corre escenarios en sandboxes
  * `vm` con un MINI-DOM fake propio:
@@ -13,27 +14,51 @@
  *   - .click() NATIVO que registra CADA click en un LOG SEMÁNTICO
  *     ({tag, text, aria} — sin coordenadas, sin clientX/Y, sin posiciones),
  *   - estado de UI controlable: duración y aspecto actuales, chips
- *     congelados (el click no cambia nada) y lectura stale (tras el click
- *     el marcador de selección se pierde → re-lectura null).
+ *     congelados (el click no cambia nada), lectura stale (tras el click
+ *     el marcador de selección se pierde → re-lectura null) y chips
+ *     DESHABILITADOS (aria-disabled → valor visible pero NO pulsable).
  *
- * Escenarios (cada uno con sandbox FRESCO):
+ * Escenarios (cada uno con sandbox FRESCO; el spec base lleva
+ * compatibility_policy.allow_inherited_state=false — §6: PROHIBIDO generar
+ * con estado heredado):
  *   a) config_5s_a_8s_ok      UI 5s → click "8s" → re-lectura "8s" →
- *                             VERIFIED · gate ALLOW_GENERATE · sin error.
+ *                             VERIFIED · configured=true · ALLOW_GENERATE.
  *   b) unsupported            sin control de duración en el DOM →
  *                             UNSUPPORTED · CONFIG_UNSUPPORTED.
+ *   TEST 1) test1_unsupported_solo_5s
+ *                             UI solo chip "5s" (observed 5s) y pedido 8 →
+ *                             UNSUPPORTED con evidencia honesta
+ *                             'opciones=5s' · CONFIG_UNSUPPORTED.
  *   c) frozen_mismatch        el click en "8s" no cambia la UI (sigue 5s) →
  *                             MISMATCH · CONFIG_MISMATCH.
  *   d) stale_unverifiable     re-lectura null tras el click →
  *                             UNVERIFIABLE · CONFIG_UNVERIFIABLE.
- *   e) ya_configurado         UI ya en 8s → VERIFIED SIN click (heredado
- *                             EN el valor pedido, §6).
- *   f) sin_spec               job sin execution_spec → NO corre config
- *                             (comportamiento actual, camino de siempre).
+ *   e) ya_configurado         UI ya en 8s: con allow_inherited_state=false
+ *                             el valor heredado NO se acepta → click propio
+ *                             en el chip "8s" + re-lectura → VERIFIED ·
+ *                             configured=true · ALLOW_GENERATE.
+ *   TEST 9a) heredado_sin_opcion
+ *                             observed=8s pero chip "8s" NO pulsable
+ *                             (aria-disabled) → UNVERIFIABLE (NO
+ *                             UNSUPPORTED) · CONFIG_UNVERIFIABLE.
+ *   f) sin_spec               VIDEO sin execution_spec → el gate §7.1 SÍ
+ *                             corre (if (isVideo), sin excepción) y falla
+ *                             CERRADO: CONFIG_UNVERIFIABLE con el prefijo
+ *                             EXACTO del handler (item ERROR + gateFailed).
+ *   f2) imagen_sin_gate       kind=image (aunque traiga spec) → sin gate
+ *                             §7.1 (camino de siempre: tickSoon →
+ *                             injectScene intacto).
  *   g) aspect_requerido_ok    aspect 9:16 presente y correcto + duración
  *                             verificada → ALLOW_GENERATE.
  *      aspect_requerido_mismatch
  *                             aspect UI en 16:9 e inchangable → MISMATCH ·
  *                             CONFIG_MISMATCH.
+ *   TEST 9b) test9_gate_directo
+ *                             control_results a mano con la MISMA entrada
+ *                             para el espejo JS y el backend:
+ *                             VERIFIED+observed=8+configured=true → ALLOW;
+ *                             VERIFIED sin configured (policy false) →
+ *                             CONFIG_UNVERIFIABLE.
  *
  * Sin Chrome, sin red, sin Flow real, sin coordenadas.
  * Uso:    node tests/flow_config_mock.js
@@ -93,8 +118,9 @@ function matchToken(el, tok) {
 
 /* chip = botón [role=radio] cuyo valor seleccionado se lee DINÁMICAMENTE
    del estado de UI (aria-checked), y cuyo click muta ese estado (o no,
-   si el escenario lo congela / lo deja stale). */
-function makeChip(kind, value, ui, clicks) {
+   si el escenario lo congela / lo deja stale). disabled=true → aria-disabled
+   (TEST 9a: valor visible pero NO pulsable — findOptionByValue lo salta). */
+function makeChip(kind, value, ui, clicks, disabled) {
   const el = {
     tagName: 'BUTTON',
     attrs: { role: 'radio', 'aria-label': value },
@@ -102,11 +128,13 @@ function makeChip(kind, value, ui, clicks) {
     chipKind: kind,
     chipValue: value,
   };
+  if (disabled) el.attrs['aria-disabled'] = 'true';
   el.getAttribute = (name) => {
     if (name === 'aria-checked') return (ui.selected[kind] === value) ? 'true' : 'false';
     return (name in el.attrs) ? String(el.attrs[name]) : null;
   };
   el.click = () => {
+    if (el.attrs['aria-disabled'] === 'true') return; // deshabilitado: sin efecto
     clicks.push({ tag: 'button', text: value, aria: el.attrs['aria-label'] });
     if (kind === 'duration') {
       if (ui.staleRead) { ui.selected.duration = null; return; } // lectura stale
@@ -154,7 +182,9 @@ function textContentOf(el) {
 function buildDoc(opts) {
   const o = Object.assign({
     withDuration: true, duration: '5s',
+    durationChips: ['5s', '8s'], durationDisabled: [],
     withAspect: true, aspect: '9:16',
+    aspectChips: ['9:16', '16:9'], aspectDisabled: [],
   }, opts || {});
   const clicks = [];
   const ui = {
@@ -165,16 +195,12 @@ function buildDoc(opts) {
   };
   const kids = [];
   if (o.withDuration) {
-    kids.push(makeGroup('Duration', [
-      makeChip('duration', '5s', ui, clicks),
-      makeChip('duration', '8s', ui, clicks),
-    ]));
+    kids.push(makeGroup('Duration', o.durationChips.map((v) =>
+      makeChip('duration', v, ui, clicks, o.durationDisabled.indexOf(v) !== -1))));
   }
   if (o.withAspect) {
-    kids.push(makeGroup('Aspect ratio', [
-      makeChip('aspect', '9:16', ui, clicks),
-      makeChip('aspect', '16:9', ui, clicks),
-    ]));
+    kids.push(makeGroup('Aspect ratio', o.aspectChips.map((v) =>
+      makeChip('aspect', v, ui, clicks, o.aspectDisabled.indexOf(v) !== -1))));
   }
   const all = [];
   for (const k of kids) flatten(k, all);
@@ -208,7 +234,7 @@ function specBase(duration, aspect) {
     start_frame: null,
     end_frame: null,
     compatibility_policy: {
-      allow_inherited_state: false,
+      allow_inherited_state: false, // §6/§7.1: PROHIBIDO generar con heredado
       generate_requires_verified: true,
       retry_on_config_error: false,
     },
@@ -232,116 +258,149 @@ function runScenario(opts, spec) {
   const gate = ctx.__flowGateDecision(spec, ctrl);
   const verdicts = {};
   const observed = {};
+  const configured = {};
+  const evidence = {};
+  const details = {};
   for (const k of Object.keys(ctrl)) {
     verdicts[k] = ctrl[k].verdict;
     observed[k] = { before: ctrl[k].observed_before, after: ctrl[k].observed_after };
+    configured[k] = ctrl[k].configured === true; // [v1.1] §7.1 set+relectura propios
+    evidence[k] = ctrl[k].evidence || '';
+    details[k] = ctrl[k].detail || '';
   }
   const allow = gate.decision === 'ALLOW_GENERATE';
   return {
     ran: true,
     verdicts,
     observed,
+    configured,
+    evidence,
+    details,
     gate: { decision: gate.decision, detail: gate.detail || '' },
     gateDecision: gate.decision,
     errorPrefix: allow ? null : (gate.decision + ': ' + (gate.detail || '')),
     clicked: doc.clicks,
     capabilities: (result && result.capabilities) || {},
+    controlResults: ctrl, // TAL CUAL viaja a /generate-consent → config_gate
   };
+}
+
+/* salida uniforme de escena (los checks Python consumen estas claves) */
+function salida(r, extra) {
+  return Object.assign({
+    ran: r.ran,
+    isVideo: r.isVideo !== false,
+    verdicts: r.verdicts,
+    observed: r.observed,
+    configured: r.configured || {},
+    evidence: r.evidence || {},
+    details: r.details || {},
+    gate: r.gate,
+    gateDecision: r.gateDecision,
+    errorPrefix: r.errorPrefix,
+    clicked: r.clicked || [],
+    clickChips: (r.clicked || []).map((c) => c.text),
+    capabilities: r.capabilities || {},
+    controlResults: r.controlResults || {},
+  }, extra || {});
 }
 
 /* ──────────────────────────── escenarios ──────────────────────────────── */
 async function run() {
   const escenas = {};
 
-  /* a) UI 5s → click "8s" → re-lectura "8s" → VERIFIED → ALLOW */
+  /* a) UI 5s → click "8s" → re-lectura "8s" → VERIFIED configured → ALLOW */
   {
     const r = runScenario({ duration: '5s' }, specBase(8, '9:16'));
-    escenas.config_5s_a_8s_ok = {
-      ran: r.ran,
-      verdicts: r.verdicts,
-      observed: r.observed,
-      gate: r.gate,
-      gateDecision: r.gateDecision,
-      errorPrefix: r.errorPrefix,
-      clicked: r.clicked,
-      clickChips: r.clicked.map((c) => c.text),
-    };
+    escenas.config_5s_a_8s_ok = salida(r);
   }
 
   /* b) sin control de duración en el DOM → UNSUPPORTED */
   {
     const r = runScenario({ withDuration: false }, specBase(8, '9:16'));
-    escenas.unsupported = {
-      ran: r.ran, verdicts: r.verdicts, observed: r.observed, gate: r.gate,
-      gateDecision: r.gateDecision, errorPrefix: r.errorPrefix,
-      clicked: r.clicked, clickChips: r.clicked.map((c) => c.text),
-      capDuration: r.capabilities.duration,
-    };
+    escenas.unsupported = salida(r);
+  }
+
+  /* TEST 1 (§7.1): UI solo chip "5s" y pedido 8 → UNSUPPORTED honesto con
+   * evidencia 'opciones=5s' (la sesión muestra 5s: capacidad observada de
+   * ESA sesión, jamás conversión silenciosa). */
+  {
+    const r = runScenario({ duration: '5s', durationChips: ['5s'] }, specBase(8, '9:16'));
+    escenas.test1_unsupported_solo_5s = salida(r);
   }
 
   /* c) el click no cambia la UI (queda 5s) → MISMATCH */
   {
     const r = runScenario({ duration: '5s', frozenDuration: true }, specBase(8, '9:16'));
-    escenas.frozen_mismatch = {
-      ran: r.ran, verdicts: r.verdicts, observed: r.observed, gate: r.gate,
-      gateDecision: r.gateDecision, errorPrefix: r.errorPrefix,
-      clicked: r.clicked, clickChips: r.clicked.map((c) => c.text),
-    };
+    escenas.frozen_mismatch = salida(r);
   }
 
   /* d) re-lectura null tras el click → UNVERIFIABLE */
   {
     const r = runScenario({ duration: '5s', staleRead: true }, specBase(8, '9:16'));
-    escenas.stale_unverifiable = {
-      ran: r.ran, verdicts: r.verdicts, observed: r.observed, gate: r.gate,
-      gateDecision: r.gateDecision, errorPrefix: r.errorPrefix,
-      clicked: r.clicked, clickChips: r.clicked.map((c) => c.text),
-    };
+    escenas.stale_unverifiable = salida(r);
   }
 
-  /* e) UI ya en 8s → VERIFIED sin click (heredado EN el valor pedido) */
+  /* e) UI ya en 8s — allow_inherited_state=false (default): el valor
+   * heredado NO se acepta → click PROPIO en el chip "8s" + re-lectura →
+   * VERIFIED con configured=true (§7.1: set+relectura propios). */
   {
     const r = runScenario({ duration: '8s' }, specBase(8, '9:16'));
-    escenas.ya_configurado = {
-      ran: r.ran, verdicts: r.verdicts, observed: r.observed, gate: r.gate,
-      gateDecision: r.gateDecision, errorPrefix: r.errorPrefix,
-      clicked: r.clicked, clickChips: r.clicked.map((c) => c.text),
-    };
+    escenas.ya_configurado = salida(r);
   }
 
-  /* f) job SIN execution_spec → no corre config (comportamiento actual) */
+  /* TEST 9a (§7.1): observed=8s pero chip "8s" NO pulsable (aria-disabled)
+   * → UNVERIFIABLE honesto ("valor heredado ... sin opción pulsable"),
+   * NO UNSUPPORTED (el control SÍ existe y muestra el valor pedido). */
   {
-    // La condición del SW es `if (isVideo && execSpec)`: sin spec no hay
-    // flowConfigFn ni gate — camino de siempre (tickSoon → injectScene).
-    const execSpec = null;
-    const ran = !!(execSpec); // espejo literal de la condición del handler
-    escenas.sin_spec = {
-      ran,
-      verdicts: {},
-      gate: null,
-      gateDecision: null,
-      errorPrefix: null,
-      clicked: [],
-      clickChips: [],
-    };
+    const r = runScenario(
+      { duration: '8s', durationDisabled: ['8s'] }, specBase(8, '9:16'));
+    escenas.heredado_sin_opcion = salida(r);
   }
 
-  /* g) aspect requerido: ok (9:16 ya puesto) y mismatch (16:9 inchangable) */
+  /* f) VIDEO job SIN execution_spec → el gate §7.1 SÍ corre (if (isVideo),
+   * sin excepción) y falla CERRADO: item ERROR con el prefijo EXACTO del
+   * handler + gateFailed (sin tickSoon). Espejo literal del bloque §7.1 de
+   * __bridgeHandleJob. */
+  {
+    const job = { kind: 'video', execution_spec: null };
+    const isVideo = (job && job.kind) === 'video';
+    const execSpec = null; // __flowParseSpec(null) → null (sin contrato)
+    const ran = !!isVideo; // espejo literal: if (isVideo) { … }
+    const failClosed = ran && !execSpec;
+    const ERROR = 'CONFIG_UNVERIFIABLE: execution_spec ausente o inválido en el job'
+      + ' — sin contrato no se genera (fail-closed §7.1)';
+    escenas.sin_spec = salida({
+      ran, isVideo, clicked: [],
+      verdicts: {}, observed: {}, capabilities: {}, controlResults: {},
+      gate: failClosed ? { decision: 'CONFIG_UNVERIFIABLE', detail: 'execution_spec ausente o inválido' } : null,
+      gateDecision: failClosed ? 'CONFIG_UNVERIFIABLE' : null,
+      errorPrefix: failClosed ? ERROR : null,
+    }, { failClosed });
+  }
+
+  /* f2) IMAGEN (kind != video) → sin gate §7.1 aunque el job traiga spec:
+   * el gate es rama de video (if (isVideo)); imágenes = camino de siempre
+   * (tickSoon → injectScene intacto). Espejo literal de la condición. */
+  {
+    const job = { kind: 'image', execution_spec: specBase(8, '9:16') };
+    const isVideo = (job && job.kind) === 'video';
+    escenas.imagen_sin_gate = salida({
+      ran: !!isVideo, isVideo, clicked: [],
+      verdicts: {}, observed: {}, capabilities: {}, controlResults: {},
+      gate: null, gateDecision: null, errorPrefix: null,
+    });
+  }
+
+  /* g) aspect requerido: ok (9:16 ya puesto → click propio + relectura) y
+   * mismatch (16:9 inchangable) */
   {
     const r = runScenario({ duration: '5s', aspect: '9:16' }, specBase(8, '9:16'));
-    escenas.aspect_requerido_ok = {
-      ran: r.ran, verdicts: r.verdicts, observed: r.observed, gate: r.gate,
-      gateDecision: r.gateDecision, errorPrefix: r.errorPrefix,
-      clicked: r.clicked, clickChips: r.clicked.map((c) => c.text),
-    };
+    escenas.aspect_requerido_ok = salida(r);
   }
   {
     const r = runScenario({ duration: '5s', aspect: '16:9', frozenAspect: true }, specBase(8, '9:16'));
-    escenas.aspect_requerido_mismatch = {
-      ran: r.ran, verdicts: r.verdicts, observed: r.observed, gate: r.gate,
-      gateDecision: r.gateDecision, errorPrefix: r.errorPrefix,
-      clicked: r.clicked, clickChips: r.clicked.map((c) => c.text),
-    };
+    escenas.aspect_requerido_mismatch = salida(r);
   }
 
   /* normalización del spec ('8s' ≡ 8, ' 9:16 ' ≡ '9:16') con el código REAL */
@@ -354,6 +413,50 @@ async function run() {
     aspecto_espacios: normCtx.__flowNormVal(' 9:16 ') === normCtx.__flowNormVal('9:16'),
     cinco_s_neq_ocho: normCtx.__flowNormVal('5s') !== normCtx.__flowNormVal(8),
   };
+
+  /* TEST 9b (§7.1): control_results a mano con la MISMA entrada que consume
+   * el backend (execution_contract.config_gate vía /generate-consent):
+   *   - VERIFIED + observed=8 + configured=true  → ALLOW_GENERATE,
+   *   - VERIFIED + observed=8 SIN configured (policy false) →
+   *     CONFIG_UNVERIFIABLE ('valor heredado ... allow_inherited_state=false').
+   * El espejo JS __flowGateDecision debe decidir IGUAL con esos dictados. */
+  {
+    const spec9 = specBase(8, null); // solo duration es required+requested
+    const crOk = {
+      duration: {
+        control: 'duration', verdict: 'VERIFIED', requested: 8,
+        configured: true, // §7.1: set+relectura propios
+        observed: 8, observed_before: 8, observed_after: 8,
+        detail: 'releído "8" == solicitado',
+        evidence: 'click("8s") | releído 8',
+      },
+    };
+    const crHeredado = {
+      duration: {
+        control: 'duration', verdict: 'VERIFIED', requested: 8,
+        // SIN configured: valor heredado de la sesión (CF-E2E-01)
+        observed: 8, observed_before: 8, observed_after: 8,
+        detail: 'ya en el valor solicitado (heredado)',
+        evidence: 'observed="8"',
+      },
+    };
+    const gOk = normCtx.__flowGateDecision(spec9, crOk);
+    const gHeredado = normCtx.__flowGateDecision(spec9, crHeredado);
+    escenas.test9_gate_directo = {
+      ran: true,
+      isVideo: true,
+      spec: spec9,
+      crOk,
+      crHeredado,
+      allow: gOk.decision,
+      allowDetail: gOk.detail || '',
+      heredado: gHeredado.decision,
+      heredadoDetail: gHeredado.detail || '',
+      verdicts: {}, observed: {}, configured: {}, evidence: {}, details: {},
+      gate: null, gateDecision: null, errorPrefix: null,
+      clicked: [], clickChips: [], capabilities: {}, controlResults: {},
+    };
+  }
 
   return { escenas, normalizacion };
 }

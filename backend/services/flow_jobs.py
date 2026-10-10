@@ -329,6 +329,22 @@ def heartbeat(job_id: str, token: str) -> dict | None:
     return {"ok": True, "lease_until": lease_until}
 
 
+def _spec_of_row(row) -> dict | None:
+    """execution_spec parseado de la fila del job (None honesto si ausente
+    o inválido — jamás un spec inventado)."""
+    try:
+        raw = row["execution_spec"]
+    except (KeyError, IndexError):
+        return None
+    if not raw:
+        return None
+    try:
+        s = json.loads(raw)
+        return s if isinstance(s, dict) else None
+    except (TypeError, ValueError):
+        return None
+
+
 def complete(job_id: str, token: str, data: bytes) -> dict | None:
     """Valida y guarda el asset; valida el CONTRATO (§13) y marca done.
 
@@ -340,6 +356,7 @@ def complete(job_id: str, token: str, data: bytes) -> dict | None:
     if not data:
         raise ValueError("body vacío: envía el binario del asset")
     violation = None
+    barrier_error = None
     con = db.connect()
     try:
         con.execute("BEGIN IMMEDIATE")
@@ -354,74 +371,125 @@ def complete(job_id: str, token: str, data: bytes) -> dict | None:
         flow_dir = OUTPUT_DIR / pid / "flow"
         flow_dir.mkdir(parents=True, exist_ok=True)
 
-        if kind == "image":
-            asset_path = _save_image(flow_dir, no, data)
-        else:
-            asset_path = _save_video(flow_dir, no, part, data)
+        # [execution-contract v1.1] §7.1 — BARRERA PRE-GENERACIÓN (backstop
+        # server-side, corrige CF-E2E-01): un video cuyo spec exige
+        # verificación pre-generación (o una fila legacy sin spec) JAMÁS
+        # acepta un asset si su exec_state nunca alcanzó CONTROLS_VERIFIED
+        # (huella del consentimiento del servidor vía /generate-consent).
+        # Llegar aquí sin esa huella significa que la generación se disparó
+        # burlando el gate (extensión vieja, resume zombi, retry sin
+        # re-gate): fail-closed → dead CONFIG_UNVERIFIABLE, sin asset, sin
+        # DONE, sin reencolar (el ValueError posterior da 422 y un fail()
+        # extra da 409 por token limpiado).
+        if kind == "video":
+            bspec = _spec_of_row(row)
+            if bspec is None or ec.required_gate_controls(bspec):
+                _orden_post_gate = {ec.EXEC_STATE_VERIFIED,
+                                    ec.EXEC_STATE_SUBMITTED,
+                                    ec.EXEC_STATE_OBSERVED,
+                                    ec.EXEC_STATE_DOWNLOADED,
+                                    ec.EXEC_STATE_ASSET_OK,
+                                    ec.EXEC_STATE_CONTRACT_OK,
+                                    ec.EXEC_STATE_DONE}
+                if (row["exec_state"] or "") not in _orden_post_gate:
+                    razon = ("fila sin execution_spec (legacy): regenerar "
+                             "la cola con enqueue_project"
+                             if bspec is None else
+                             "controles required="
+                             + ",".join(ec.required_gate_controls(bspec)))
+                    registro = {"kind": "pre_generation_gate_barrier",
+                                "verdict": ec.CONFIG_UNVERIFIABLE,
+                                "exec_state_observed": row["exec_state"],
+                                "razon": razon}
+                    con.execute(
+                        """UPDATE flow_jobs SET status='dead',
+                           exec_state=?, contract_result=?, error=?,
+                           worker=NULL, job_token=NULL, lease_until=NULL,
+                           updated_at=? WHERE id=?""",
+                        (ec.EXEC_STATE_CONFIG_UNVERIFIABLE,
+                         json.dumps(registro, ensure_ascii=False),
+                         ("CONFIG_UNVERIFIABLE: asset entregado sin gate "
+                          "pre-generación verificado (§7.1) — " + razon)[:500],
+                         _iso(_now()), job_id))
+                    con.commit()
+                    barrier_error = ("CONFIG_UNVERIFIABLE: asset entregado "
+                                     "sin consentimiento contractual del "
+                                     "gate (§7.1) — " + razon)
 
-        # [execution-contract v1] §13 — REQUESTED vs OBSERVED FLOW vs ACTUAL
-        # ASSET. El spec viaja en la fila (columna execution_spec); la
-        # medición real del MP4 con ffprobe manda sobre cualquier promesa.
-        contract_result = None
-        spec = None
-        if kind == "video" and row["execution_spec"]:
-            try:
-                spec = json.loads(row["execution_spec"])
-            except (TypeError, ValueError):
-                spec = None
-        if spec is not None:
-            actual = ec.probe_asset(asset_path)
-            observed = None
-            try:
-                observed = json.loads(row["contract_result"] or "null") \
-                    if isinstance(row["contract_result"], str) else None
-            except (TypeError, ValueError):
+        if barrier_error is None:
+            if kind == "image":
+                asset_path = _save_image(flow_dir, no, data)
+            else:
+                asset_path = _save_video(flow_dir, no, part, data)
+
+            # [execution-contract v1] §13 — REQUESTED vs OBSERVED FLOW vs ACTUAL
+            # ASSET. El spec viaja en la fila (columna execution_spec); la
+            # medición real del MP4 con ffprobe manda sobre cualquier promesa.
+            contract_result = None
+            spec = None
+            if kind == "video" and row["execution_spec"]:
+                try:
+                    spec = json.loads(row["execution_spec"])
+                except (TypeError, ValueError):
+                    spec = None
+            if spec is not None:
+                actual = ec.probe_asset(asset_path)
                 observed = None
-            contract_result = ec.validate_asset_contract(
-                spec, actual=actual,
-                observed=(observed or {}).get("observed_flow")
-                if isinstance(observed, dict) else None,
-                outputs_count=1)
-            if contract_result["verdict"] == ec.CONTRACT_VIOLATION:
-                violation = contract_result
+                try:
+                    observed = json.loads(row["contract_result"] or "null") \
+                        if isinstance(row["contract_result"], str) else None
+                except (TypeError, ValueError):
+                    observed = None
+                contract_result = ec.validate_asset_contract(
+                    spec, actual=actual,
+                    observed=(observed or {}).get("observed_flow")
+                    if isinstance(observed, dict) else None,
+                    outputs_count=1)
+                if contract_result["verdict"] == ec.CONTRACT_VIOLATION:
+                    violation = contract_result
 
-        if violation is not None:
-            # §13: CONTRACT_VIOLATION → NO DONE. Terminal ASSET_INVALID:
-            # dead inmediato (fail() posterior con este token dará 409 y la
-            # extensión no reintentará), contract_result persistido, error
-            # estructurado que flow_adaptation clasifica sin adaptar prompt.
-            con.execute(
-                """UPDATE flow_jobs SET status='dead', exec_state=?,
-                   contract_result=?, error=?, worker=NULL, job_token=NULL,
-                   lease_until=NULL, updated_at=? WHERE id=?""",
-                (ec.EXEC_STATE_ASSET_INVALID,
-                 json.dumps(violation, ensure_ascii=False),
-                 ec.contract_error_prefix(violation)[:500], _iso(_now()),
-                 job_id))
-            con.commit()
-        else:
-            con.execute(
-                """UPDATE flow_jobs SET status='done', asset_path=?, error=NULL,
-                   exec_state=?, contract_result=?, lease_until=?, updated_at=?
-                   WHERE id=?""",
-                (str(asset_path), ec.EXEC_STATE_CONTRACT_OK,
-                 json.dumps(contract_result, ensure_ascii=False)
-                 if contract_result else None,
-                 None, _iso(_now()), job_id))
-            cierre_p2 = bool(row["prompt_adapted"])  # [flow-adaptation v1]
-            pending = con.execute(
-                """SELECT COUNT(*) c FROM flow_jobs WHERE project_id=?
-                   AND status != 'done'""", (pid,)).fetchone()["c"]
-            project_done = pending == 0
-            renderable = False
-            if project_done:
-                renderable = _apply_assets_to_scenes(con, pid)
-            con.commit()
+            if violation is not None:
+                # §13: CONTRACT_VIOLATION → NO DONE. Terminal ASSET_INVALID:
+                # dead inmediato (fail() posterior con este token dará 409 y la
+                # extensión no reintentará), contract_result persistido, error
+                # estructurado que flow_adaptation clasifica sin adaptar prompt.
+                con.execute(
+                    """UPDATE flow_jobs SET status='dead', exec_state=?,
+                       contract_result=?, error=?, worker=NULL, job_token=NULL,
+                       lease_until=NULL, updated_at=? WHERE id=?""",
+                    (ec.EXEC_STATE_ASSET_INVALID,
+                     json.dumps(violation, ensure_ascii=False),
+                     ec.contract_error_prefix(violation)[:500], _iso(_now()),
+                     job_id))
+                con.commit()
+            else:
+                con.execute(
+                    """UPDATE flow_jobs SET status='done', asset_path=?, error=NULL,
+                       exec_state=?, contract_result=?, lease_until=?, updated_at=?
+                       WHERE id=?""",
+                    (str(asset_path), ec.EXEC_STATE_CONTRACT_OK,
+                     json.dumps(contract_result, ensure_ascii=False)
+                     if contract_result else None,
+                     None, _iso(_now()), job_id))
+                cierre_p2 = bool(row["prompt_adapted"])  # [flow-adaptation v1]
+                pending = con.execute(
+                    """SELECT COUNT(*) c FROM flow_jobs WHERE project_id=?
+                       AND status != 'done'""", (pid,)).fetchone()["c"]
+                project_done = pending == 0
+                renderable = False
+                if project_done:
+                    renderable = _apply_assets_to_scenes(con, pid)
+                con.commit()
     except Exception:
         con.rollback()
         raise
     finally:
         con.close()
+    if barrier_error is not None:
+        _mem_obs(f"job flow video escena {no} BARRERA §7.1: "
+                 f"asset sin consentimiento del gate ({barrier_error[:120]})",
+                 job_id, scope="config")
+        raise ValueError(barrier_error)
     if violation is not None:
         _mem_obs(f"job flow video escena {no} ASSET_INVALID: "
                  f"{violation.get('summary', '')[:160]}", job_id)
@@ -509,20 +577,32 @@ def fail(job_id: str, token: str, error: str) -> dict | None:
     otro worker ya estaba generando → trabajo Flow duplicado).
 
     [execution-contract v1] §10 — clasificación del error:
-      - CONFIG_UNSUPPORTED/UNVERIFIABLE/MISMATCH (gate de configuración) →
-        TERMINAL dead inmediato (exec_state CONFIG_*): jamás reintentan
+      - CONFIG_UNSUPPORTED/UNVERIFIABLE/MISMATCH (gate de configuración) y
+        ASSET_INVALID (contrato del asset) → TERMINAL dead inmediato
+        (exec_state CONFIG_*/ASSET_INVALID): jamás reintentan
         (retry_on_config_error=false) y jamás entran a Flow Adaptation
         (CONFIG ERROR != PROMPT ADAPTATION).
-      - resto → PROVIDER_FAILURE con la semántica clásica (reintento por
-        attempts + capa de adaptación para video dead)."""
+      - [execution-contract v1.1] §7.1 — FLOW_WATCHDOG_TIMEOUT: el veredicto
+        LOCAL del watchdog de la extensión (prefijo explícito nuevo o
+        marcadores legacy "watchdog:"/"timeout-local:") se etiqueta como
+        agotamiento local, JAMÁS como PROVIDER_FAILURE (CF-E2E-01/H: un
+        watchdog no determina root cause del proveedor sin evidencia
+        externa). Semántica de cola intacta: reintenta por attempts.
+      - resto → PROVIDER_FAILURE: SOLO errores con evidencia de proveedor
+        tras una generación efectivamente disparada (el gate §7.1 garantiza
+        que llegar aquí implica controles required VERIFIED o ausentes)."""
     err = (error or "")
     config_terminal = None
     for st in (ec.EXEC_STATE_CONFIG_UNSUPPORTED,
                ec.EXEC_STATE_CONFIG_UNVERIFIABLE,
-               ec.EXEC_STATE_CONFIG_MISMATCH):
+               ec.EXEC_STATE_CONFIG_MISMATCH,
+               ec.EXEC_STATE_ASSET_INVALID):
         if err.startswith(f"{st}:"):
             config_terminal = st
             break
+    watchdog_local = (err.startswith(ec.EXEC_STATE_WATCHDOG + ":")
+                      or err.startswith("watchdog:")
+                      or err.startswith("timeout-local:"))
     con = db.connect()
     try:
         con.execute("BEGIN IMMEDIATE")
@@ -537,7 +617,8 @@ def fail(job_id: str, token: str, error: str) -> dict | None:
             exec_state = config_terminal
         else:
             status = "dead" if attempts >= max_attempts else "queued"
-            exec_state = ec.EXEC_STATE_PROVIDER_FAILURE
+            exec_state = (ec.EXEC_STATE_WATCHDOG if watchdog_local
+                          else ec.EXEC_STATE_PROVIDER_FAILURE)
         cur = con.execute(
             """UPDATE flow_jobs SET status=?, attempts=?, error=?,
                exec_state=?, worker=NULL, job_token=NULL, lease_until=NULL,
@@ -556,7 +637,9 @@ def fail(job_id: str, token: str, error: str) -> dict | None:
         con.close()
     _mem_obs(f"job flow {row['kind']} escena {row['scene_number']} falló "
              f"(intento {attempts}/{max_attempts}): {(error or '')[:120]}",
-             job_id)
+             job_id,
+             scope="config" if config_terminal
+             else ("local" if watchdog_local else "provider"))
     # [execution-contract v1] §10: los estados terminales de configuración
     # JAMÁS entran en Flow Adaptation (un error de configuración no se
     # resuelve adaptando el prompt ni reintentando idéntico).
@@ -584,14 +667,16 @@ def fail(job_id: str, token: str, error: str) -> dict | None:
     return out
 
 
-def _mem_obs(contenido: str, job_id: str) -> None:
-    """Gancho MemoryDV (episodio de proveedor): cada fallo de job es una
-    observación para la consolidación (patrón → aprendizaje). Jamás tumba
-    la operación de la cola si la memoria falla."""
+def _mem_obs(contenido: str, job_id: str, *, scope: str = "provider") -> None:
+    """Gancho MemoryDV (episodio de proveedor/config/local): cada fallo de
+    job es una observación para la consolidación (patrón → aprendizaje).
+    scope honesto (§7.1): "provider" SOLO para fallos con evidencia de
+    proveedor; "local" para watchdog; "config" para terminales del
+    contrato. Jamás tumba la operación de la cola si la memoria falla."""
     try:
         from services import memorydv
         memorydv.record_observation(contenido, source="flow_jobs.fail",
-                                    scope="provider",
+                                    scope=scope,
                                     evidence=[{"kind": "flow_job",
                                                "ref": job_id}],
                                     confidence=0.6)
@@ -705,6 +790,25 @@ def set_exec_state(job_id: str, token: str, state: str,
             con.rollback()
             return {"ok": False, "error": "illegal_transition",
                     "current": current, "requested": state}
+        # [execution-contract v1.1] §7.1 — GENERATION_SUBMITTED y
+        # CONTROLS_VERIFIED son estados del SERVIDOR para videos con
+        # controles required pre-generación (CF-E2E-01): VERIFIED solo se
+        # alcanza vía /generate-consent (el juez es el backend, jamás el
+        # cliente), y SUBMITTED solo desde VERIFIED. Cualquier salto desde
+        # QUEUED/CAPS/CONFIGURED (extensión vieja, resume zombi, retry sin
+        # re-gate) se rechaza: sin consentimiento no hay generación.
+        if row["kind"] == "video":
+            spec = _spec_of_row(row)
+            if ec.required_gate_controls(spec or {}) \
+                    and state in (ec.EXEC_STATE_VERIFIED,
+                                  ec.EXEC_STATE_SUBMITTED) \
+                    and current != ec.EXEC_STATE_VERIFIED:
+                con.rollback()
+                return {"ok": False, "error": "contract_gate_required",
+                        "current": current, "requested": state,
+                        "detail": ("CONTROLS_VERIFIED solo vía "
+                                   "/generate-consent; GENERATION_SUBMITTED "
+                                   "exige CONTROLS_VERIFIED (§7.1)")}
         con.execute(
             """UPDATE flow_jobs SET exec_state=?, updated_at=?
                WHERE id=? AND status='claimed' AND job_token=?""",
@@ -717,6 +821,120 @@ def set_exec_state(job_id: str, token: str, state: str,
         con.close()
     return {"ok": True, "exec_state": state, "detail": (detail or "")[:300],
             "evidence_registered": isinstance(evidence, dict)}
+
+
+# ── [execution-contract v1.1] §7.1 — consentimiento de generación ────────────
+
+def generation_consent(job_id: str, token: str,
+                       evidence: dict | None = None) -> dict | None:
+    """CONSENTIMIENTO DE GENERACIÓN — la corrección de CF-E2E-01
+    (PRE-GENERATION CONTRACT GATE NOT ENFORCED, P0).
+
+    Puerta OBLIGATORIA antes de GENERATION_SUBMITTED para jobs de VIDEO:
+    la capa mecánica (extensión vía bridge, o HANDS) envía capabilities +
+    control_results y el BACKEND re-evalúa el gate con
+    execution_contract.config_gate — el juez del contrato es el servidor,
+    no el cliente (el espejo JS es pre-filtro, jamás autoridad).
+
+    Flujo obligatorio (§7.1 del mandato):
+      DISCOVER → COMPARE → CONFIGURE → READ BACK → VERIFY
+        → SOLO SI los required están VERIFIED → GENERATION_SUBMITTED.
+
+    Comportamiento:
+      - ALLOW  → exec_state avanza a CONTROLS_VERIFIED (transición
+                 validada) y devuelve {ok, allowed: True, decision}.
+      - DENY   → TERMINAL inmediato: status dead + exec_state CONFIG_* +
+                 error con prefijo CONFIG_* (flow_adaptation lo clasifica
+                 J/K/L sin adaptar prompt ni reintentar) + contract_result
+                 con el registro completo del gate. Devuelve
+                 {ok, allowed: False, decision, detail}.
+      - Video sin execution_spec → DENY CONFIG_UNVERIFIABLE (fail-closed:
+                 sin contrato no hay verificación posible; toda fila
+                 encolada por esta versión lleva spec — una fila legacy
+                 sin spec debe regenerarse con enqueue_project).
+      - kind != video → ALLOW sin tocar exec_state (el gate de
+                 configuración es una rama de video; las imágenes se
+                 validan post-hoc con PIL).
+
+    allow_inherited_state=false (política del spec): un valor que YA estaba
+    seleccionado en la sesión de Flow solo cuenta si la capa mecánica lo
+    configuró y releyó en ESTA ejecución (control_results.configured).
+    Los 5s observados en una sesión son capacidad observada de ESA sesión,
+    jamás una regla universal del proveedor (no hay conversión silenciosa
+    de duración en ninguna capa).
+
+    Devuelve None si el token/claim no es válido (409). Jamás toca P1/P2."""
+    ev = evidence if isinstance(evidence, dict) else {}
+    caps = ev.get("capabilities") if isinstance(ev.get("capabilities"), dict) \
+        else {}
+    ctrl = ev.get("control_results") \
+        if isinstance(ev.get("control_results"), dict) else {}
+    con = db.connect()
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        row = _claimed_by_token(con, job_id, token)
+        if not row:
+            con.rollback()
+            return None
+        kind = row["kind"]
+        if kind != "video":
+            con.commit()
+            return {"ok": True, "allowed": True,
+                    "decision": ec.ALLOW_GENERATE,
+                    "exec_state": row["exec_state"],
+                    "detail": "rama no video: gate de configuración no aplica"}
+        spec = _spec_of_row(row)
+        if spec is None:
+            decision = {"decision": ec.CONFIG_UNVERIFIABLE,
+                        "detail": "execution_spec ausente o inválido en la "
+                                  "fila del job — sin contrato no se genera "
+                                  "(fail-closed §7.1)",
+                        "control_results": {}}
+        else:
+            decision = ec.config_gate(spec, caps, ctrl)
+        if decision["decision"] == ec.ALLOW_GENERATE:
+            current = row["exec_state"]
+            if current != ec.EXEC_STATE_VERIFIED and ec.progress_allowed(
+                    current, ec.EXEC_STATE_VERIFIED):
+                con.execute(
+                    """UPDATE flow_jobs SET exec_state=?, updated_at=?
+                       WHERE id=? AND status='claimed' AND job_token=?""",
+                    (ec.EXEC_STATE_VERIFIED, _iso(_now()), job_id, token))
+            con.commit()
+            return {"ok": True, "allowed": True,
+                    "decision": ec.ALLOW_GENERATE,
+                    "exec_state": ec.EXEC_STATE_VERIFIED,
+                    "detail": (decision.get("detail") or "")[:300]}
+        # DENY → terminal inmediato (mismo tratamiento que fail CONFIG_*):
+        # dead sin reencolar, sin adaptación, sin DONE (§6/§9/§10).
+        estado = decision["decision"]
+        detalle_txt = decision.get("detail") or "gate denegó la generación"
+        registro = {"kind": "pre_generation_gate",
+                    "decision": estado,
+                    "detail": detalle_txt,
+                    "capabilities": caps,
+                    "control_results": ctrl,
+                    "client_decision": ev.get("client_decision"),
+                    "schema_version": spec.get("schema_version")
+                    if isinstance(spec, dict) else None}
+        con.execute(
+            """UPDATE flow_jobs SET status='dead', exec_state=?,
+               contract_result=?, error=?, worker=NULL, job_token=NULL,
+               lease_until=NULL, updated_at=? WHERE id=?""",
+            (estado,
+             json.dumps(registro, ensure_ascii=False),
+             (f"{estado}: {detalle_txt}")[:500],
+             _iso(_now()), job_id))
+        con.commit()
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
+    _mem_obs(f"job flow video escena {row['scene_number']} CONSENT DENY: "
+             f"{estado} — {detalle_txt[:120]}", job_id, scope="config")
+    return {"ok": True, "allowed": False, "decision": estado,
+            "exec_state": estado, "detail": detalle_txt[:300]}
 
 
 def status_for_project(pid: str) -> dict:

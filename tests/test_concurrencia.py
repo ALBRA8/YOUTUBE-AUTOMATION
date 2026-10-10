@@ -19,6 +19,7 @@ Uso:  cd yt_automation_v2 && python3 tests/test_concurrencia.py
       python3 -m pytest tests/test_concurrencia.py -q
 """
 import io
+import json
 import shutil
 import sys
 import tempfile
@@ -79,6 +80,29 @@ def _drain(worker: str, pid: str | None = None) -> list[dict]:
             break
         out.append(j)
     return out
+
+
+def _consent_allow(job) -> dict | None:
+    """[execution-contract v1.1] §7.1 — simula la capa mecánica legítima:
+    configura y releyó CADA control required del spec del job (verdict
+    VERIFIED, observed=requested, configured=True) y pide el consentimiento
+    del servidor. Solo para el arnés de tests: el flujo REAL lo ejecuta
+    flowConfigFn + /generate-consent."""
+    spec = job.get("execution_spec")
+    if isinstance(spec, str):
+        try:
+            spec = json.loads(spec)
+        except (TypeError, ValueError):
+            spec = None
+    ctrl = {}
+    for control, c in (spec or {}).items():
+        if isinstance(c, dict) and c.get("required") \
+                and c.get("requested") is not None:
+            ctrl[control] = {"verdict": "VERIFIED",
+                             "observed": c.get("requested"),
+                             "configured": True}
+    return fj.generation_consent(job["id"], job["job_token"],
+                                 {"control_results": ctrl})
 
 
 def main() -> int:
@@ -178,6 +202,8 @@ def main() -> int:
 
     def _completa(j):
         try:
+            if j["kind"] == "video":
+                _consent_allow(j)  # [§7.1] gate pre-generación del video
             payload = _png() if j["kind"] == "image" else _mp4()
             r = fj.complete(j["id"], j["job_token"], payload)
             results.append((j["id"], bool(r)))

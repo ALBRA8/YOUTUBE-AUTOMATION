@@ -1407,6 +1407,31 @@ async def flow_jobs_progress(job_id: str, token: str = "",
     return res
 
 
+@app.post("/api/extension/flow/jobs/{job_id}/generate-consent")
+async def flow_jobs_generate_consent(job_id: str, token: str = "",
+                                     body: dict | None = None):
+    """[execution-contract v1.1] §7.1 — CONSENTIMIENTO DE GENERACIÓN
+    (corrige CF-E2E-01: PRE-GENERATION CONTRACT GATE NOT ENFORCED, P0).
+
+    Puerta OBLIGATORIA antes de pulsar Generate para jobs de video: la
+    extensión/HANDS envía capabilities + control_results y el backend
+    re-evalúa execution_contract.config_gate (el juez es el servidor).
+      - ALLOW → {ok: True, allowed: True, exec_state: CONTROLS_VERIFIED} —
+                solo entonces procede GENERATION_SUBMITTED.
+      - DENY  → {ok: True, allowed: False, decision: CONFIG_*} y el job ya
+                quedó TERMINAL (dead) en la misma transacción: sin retry,
+                sin adaptación de prompt, jamás DONE.
+    409 si el token/claim no es válido. Endpoint aditivo: no altera el
+    contrato de lease congelado (claim/heartbeat/complete/fail intactos)."""
+    from services import flow_jobs
+    b = body if isinstance(body, dict) else {}
+    res = flow_jobs.generation_consent(job_id, token, b)
+    if res is None:
+        raise HTTPException(409, "job no reclamado por este worker "
+                                 "(token/lease inválido)")
+    return res
+
+
 @app.get("/api/extension/flow/jobs/status/{pid}")
 async def flow_jobs_status(pid: str):
     """Estado de la cola del proyecto: counts por status + exec_states

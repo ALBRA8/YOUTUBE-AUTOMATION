@@ -271,6 +271,25 @@ def config_gate(spec: dict, capabilities: dict | None = None,
                                   f"observed={obs!r})")
                     detalle[control] = registro
                     continue
+                # [execution-contract v1.1] §7.1 — allow_inherited_state:
+                # VERIFIED solo cuenta si la configuración la puso ESTA
+                # ejecución (control_results[control].configured == true:
+                # set + relectura propios). Un valor heredado de la sesión
+                # de Flow (ya seleccionado antes de llegar) con
+                # allow_inherited_state=false es UNVERIFIABLE — jamás se
+                # acepta silenciosamente el estado heredado (CF-E2E-01,
+                # TEST 9 del mandato).
+                if (spec.get("compatibility_policy") or {}) \
+                        .get("allow_inherited_state") is False \
+                        and not (isinstance(results.get(control), dict)
+                                 and results[control].get("configured") is True):
+                    registro["verdict"] = UNVERIFIABLE
+                    fallos.append(f"{control}: CONFIG_UNVERIFIABLE "
+                                  f"(valor ya presente en la sesión sin "
+                                  f"configuración propia verificada; "
+                                  f"allow_inherited_state=false)")
+                    detalle[control] = registro
+                    continue
                 detalle[control] = registro
                 continue
             if v == UNSUPPORTED:
@@ -303,6 +322,32 @@ def gate_error_prefix(decision: str) -> str:
     """Prefijo de error estructurado para bridgeFail/fail() — el texto que
     flow_adaptation.clasificar() reconoce como clase J/K/L (§10)."""
     return f"{decision}: "
+
+
+def required_gate_controls(spec: dict | None) -> list[str]:
+    """[execution-contract v1.1] §7.1 — controles que EXIGEN gate pre-
+    generación: required=True, requested≠null y método de verificación
+    PRE-generación. Los controles transport/register_only (outputs, audio)
+    se validan DESPUÉS por transporte/ffprobe y NO exigen consentimiento
+    previo. Con esta lista deciden: la restricción de
+    GENERATION_SUBMITTED en set_exec_state, la barrera de complete() y si
+    /generate-consent exige control_results. Lista vacía = nada que
+    verificar antes de generar."""
+    if not isinstance(spec, dict):
+        return []
+    verif = spec.get("verification") or {}
+    out: list[str] = []
+    for control in CONTROLS:
+        c = spec.get(control)
+        if not isinstance(c, dict):
+            continue
+        if not c.get("required") or c.get("requested") is None:
+            continue
+        if (verif.get(control) or {}).get("method") in ("transport",
+                                                        "register_only"):
+            continue
+        out.append(control)
+    return out
 
 
 # ── validación contractual del asset (§13) ───────────────────────────────────
@@ -539,6 +584,15 @@ EXEC_STATE_CONFIG_MISMATCH = "CONFIG_MISMATCH"
 EXEC_STATE_PROVIDER_FAILURE = "PROVIDER_FAILURE"
 EXEC_STATE_ASSET_INVALID = "ASSET_INVALID"
 EXEC_STATE_DEAD = "DEAD"
+
+# [execution-contract v1.1] §7.1 — veredicto LOCAL del watchdog de la
+# extensión: agotamiento de la ventana local SIN evidencia específica del
+# proveedor (CF-E2E-01/H: la DB decía PROVIDER_FAILURE mientras el ledger
+# honestamente decía A/FLOW_WATCHDOG_TIMEOUT/LOCAL/LOW). NO es un terminal
+# de la máquina de estados: la cola decide el retry por attempts; lo que
+# JAMÁS vuelve a pasar es que un timeout local se etiquete como fallo del
+# proveedor sin evidencia externa (watchdog no determina root cause).
+EXEC_STATE_WATCHDOG = "FLOW_WATCHDOG_TIMEOUT"
 
 TERMINAL_EXEC_STATES = {
     EXEC_STATE_CONFIG_UNSUPPORTED, EXEC_STATE_CONFIG_UNVERIFIABLE,

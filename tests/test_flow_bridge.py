@@ -75,6 +75,29 @@ def _mp4_bytes(dur=1.0, size="64x64") -> bytes:
     return out.read_bytes()
 
 
+def _consent_allow(job) -> dict | None:
+    """[execution-contract v1.1] §7.1 — simula la capa mecánica legítima:
+    configura y releyó CADA control required del spec del job (verdict
+    VERIFIED, observed=requested, configured=True) y pide el consentimiento
+    del servidor. Solo para el arnés de tests: el flujo REAL lo ejecuta
+    flowConfigFn + /generate-consent."""
+    spec = job.get("execution_spec")
+    if isinstance(spec, str):
+        try:
+            spec = json.loads(spec)
+        except (TypeError, ValueError):
+            spec = None
+    ctrl = {}
+    for control, c in (spec or {}).items():
+        if isinstance(c, dict) and c.get("required") \
+                and c.get("requested") is not None:
+            ctrl[control] = {"verdict": "VERIFIED",
+                             "observed": c.get("requested"),
+                             "configured": True}
+    return fj.generation_consent(job["id"], job["job_token"],
+                                 {"control_results": ctrl})
+
+
 def _proyecto(pid: str, n: int = 3) -> str:
     db.create_project(id=pid, title="Bridge Test", status="draft",
                       mode="production_json", style="graphic-novel",
@@ -181,12 +204,14 @@ def main() -> int:
     check("prompt de video == motion del Creative Engine (contrato P1)",
           jv["prompt"].startswith("CE_PROMPT_V1 :: slow dolly-in"),
           repr(jv["prompt"])[:80])
+    _consent_allow(jv)  # [§7.1] consentimiento contractual ANTES de generar
     res_v = fj.complete(jv["id"], jv["job_token"], _mp4_bytes(15.0, size="720x1280"))
     vpath = fj.OUTPUT_DIR / pid / "flow" / "Escena_01_video_1.mp4"
     check("video guardado como Escena_01_video_1.mp4",
           bool(res_v) and Path(res_v["asset_path"]) == vpath,
           str(res_v)[:100])
     jv2 = fj.claim_next("w-A")
+    _consent_allow(jv2)  # [§7.1] el 422 de asset basura es POST-gate
     try:
         fj.complete(jv2["id"], jv2["job_token"], b"no es un mp4")
         check("basura NO pasa como video (422)", False)
@@ -199,6 +224,7 @@ def main() -> int:
     check("video escena 2 re-entregado (intento 2)",
           jv3 and jv3["kind"] == "video" and jv3["scene_number"] == 2
           and jv3["attempts"] == 1, str(jv3)[:100])
+    _consent_allow(jv3)  # [§7.1] re-gate del reintento (no bloquea el fail)
     # [flow-adaptation v1] el texto es el veredicto REAL de la extensión V3
     # al agotarse la ventana de video (clase B GENERATION_TIMEOUT): la capa
     # NO concede reintento extra (la ventana manda) → dead permanece dead.
@@ -231,6 +257,7 @@ def main() -> int:
 
     print("── 9. complete final del proyecto → mapea escenas (renderable)")
     jlast = fj.claim_next("w-A")
+    _consent_allow(jlast)  # [§7.1] consentimiento del video recreado
     res_last = fj.complete(jlast["id"], jlast["job_token"],
                            _mp4_bytes(15.0, size="720x1280"))
     check("project_done True al completar el último",
@@ -306,6 +333,22 @@ def main() -> int:
                 if r.status_code == 204:
                     break
                 job = r.json()["job"]
+                if job["kind"] == "video":
+                    # [§7.1] consentimiento vía HTTP ANTES de generar/completar
+                    spec_h = job.get("execution_spec") or {}
+                    ctrl_h = {c: {"verdict": "VERIFIED",
+                                  "observed": v.get("requested"),
+                                  "configured": True}
+                              for c, v in spec_h.items()
+                              if isinstance(v, dict) and v.get("required")
+                              and v.get("requested") is not None}
+                    r = await c.post(
+                        f"/api/extension/flow/jobs/{job['id']}/generate-consent",
+                        params={"token": job["job_token"]},
+                        json={"control_results": ctrl_h})
+                    check("POST generate-consent 200 → ALLOW (§7.1)",
+                          r.status_code == 200
+                          and r.json().get("allowed") is True, r.text[:120])
                 payload = (_png_bytes() if job["kind"] == "image"
                            else _mp4_bytes(15.0, size="720x1280"))
                 ctype = ("image/png" if job["kind"] == "image"

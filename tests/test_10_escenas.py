@@ -89,6 +89,29 @@ def _mp4_bytes(dur=15.0) -> bytes:
     return out.read_bytes()
 
 
+def _consent_allow(job) -> dict | None:
+    """[execution-contract v1.1] §7.1 — simula la capa mecánica legítima:
+    configura y releyó CADA control required del spec del job (verdict
+    VERIFIED, observed=requested, configured=True) y pide el consentimiento
+    del servidor. Solo para el arnés de tests: el flujo REAL lo ejecuta
+    flowConfigFn + /generate-consent."""
+    spec = job.get("execution_spec")
+    if isinstance(spec, str):
+        try:
+            spec = json.loads(spec)
+        except (TypeError, ValueError):
+            spec = None
+    ctrl = {}
+    for control, c in (spec or {}).items():
+        if isinstance(c, dict) and c.get("required") \
+                and c.get("requested") is not None:
+            ctrl[control] = {"verdict": "VERIFIED",
+                             "observed": c.get("requested"),
+                             "configured": True}
+    return fj.generation_consent(job["id"], job["job_token"],
+                                 {"control_results": ctrl})
+
+
 LONG_PROMPT = ("CE10_LARGO_V7 :: " + "movimiento lento de cámara sobre el "
                "valle, luz dorada rasante, polvo suspendido, sin texto, " * 120)
 
@@ -231,6 +254,7 @@ def main() -> int:
 
     print("── 9. completes de video restantes + doble complete")
     v1 = by_key[("video", 1)]
+    _consent_allow(v1)  # [§7.1] consentimiento contractual antes de generar
     c1 = fj.complete(v1["id"], v1["job_token"], _mp4_bytes())
     check("complete video escena 1 → ok", c1 is not None)
     v1_path = Path(c1["asset_path"])
@@ -241,14 +265,57 @@ def main() -> int:
           hashlib.sha256(v1_path.read_bytes()).hexdigest() == sha_before)
     for n in (2, 4, 6, 7, 8, 9):
         j = by_key[("video", n)]
+        _consent_allow(j)  # [§7.1] cada video pasa por el gate pre-generación
         check(f"complete video escena {n} → ok",
               fj.complete(j["id"], j["job_token"], _mp4_bytes()) is not None)
-    c3 = fj.complete(rc3["id"], rc3["job_token"], _mp4_bytes())
-    check("reintento de video escena 3 → complete ok", c3 is not None)
+    _consent_allow(rz)  # [§7.1] el zombie recuperado también pasa por el gate
     c5 = fj.complete(rz["id"], rz["job_token"], _mp4_bytes())
-    check("ÚLTIMO complete (escena 5 recuperada) → project_done + renderable",
-          c5 is not None and c5.get("project_done") is True
-          and c5.get("renderable") is True, str(c5))
+    check("complete escena 5 recuperada → ok (el proyecto AÚN no cierra: "
+          "el reintento de video 3 sigue en disputa)",
+          c5 is not None and c5.get("project_done") is False, str(c5)[:120])
+    # [execution-contract v1.1] §7.1 — el reintento de video 3 llega con
+    # exec_state PROVIDER_FAILURE (huella TERMINAL del intento 1): el
+    # re-gate (consent) es ALLOW pero JAMÁS reescribe estado desde un
+    # terminal (progress_allowed §9) → la barrera de complete() no ve
+    # huella post-gate → fail-closed CONFIG_UNVERIFIABLE (retry sin
+    # exec_state limpio no genera, ni siquiera con consent válido).
+    con_rc3 = _consent_allow(rc3)
+    check("re-gate del reintento (rc3) → consent ALLOW (evidencia válida)",
+          con_rc3 is not None and con_rc3.get("allowed") is True,
+          repr(con_rc3))
+    try:
+        fj.complete(rc3["id"], rc3["job_token"], _mp4_bytes())
+        c3_err = None
+    except ValueError as exc:
+        c3_err = str(exc)
+    check("reintento de video escena 3 → BARRERA §7.1: ValueError "
+          "CONFIG_UNVERIFIABLE (PROVIDER_FAILURE jamás post-gate)",
+          bool(c3_err) and c3_err.startswith("CONFIG_UNVERIFIABLE:"),
+          repr(c3_err)[:160])
+    with db.connect() as con:
+        f3 = dict(con.execute(
+            "SELECT status, exec_state, asset_path FROM flow_jobs "
+            "WHERE id=?", (rc3["id"],)).fetchone())
+    check("reintento barrado → dead CONFIG_UNVERIFIABLE, sin asset",
+          f3["status"] == "dead" and f3["exec_state"] == "CONFIG_UNVERIFIABLE"
+          and not f3["asset_path"], str(f3)[:140])
+    # recuperación por la vía legítima: con la cola sin NINGÚN claimed
+    # vigente, el re-enqueue recrea SOLO la fila dead del video 3 (fresca,
+    # exec_state QUEUED) → ciclo completo consent → complete → done.
+    res_v3 = fj.enqueue_project(pid)
+    check("re-enqueue recrea SOLO el video 3 barrado (1 video)",
+          res_v3["created"] == 1 and res_v3["videos"] == 1
+          and res_v3["images"] == 0, str(res_v3))
+    v3b = fj.claim_next("workerA")
+    check("video 3 recreado → claim fresco (escena 3 video)",
+          v3b is not None and v3b["kind"] == "video"
+          and v3b["scene_number"] == 3, str(v3b)[:90])
+    _consent_allow(v3b)
+    c3b = fj.complete(v3b["id"], v3b["job_token"], _mp4_bytes())
+    check("ÚLTIMO complete (video 3 recreado tras la barrera) → "
+          "project_done + renderable",
+          c3b is not None and c3b.get("project_done") is True
+          and c3b.get("renderable") is True, str(c3b)[:160])
     check("claim tras done → None", fj.claim_next("workerB") is None)
 
     print("── 10. estado final + auto-render una sola vez")

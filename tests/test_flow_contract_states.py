@@ -153,6 +153,29 @@ def _drenar_imagenes(pid: str) -> int:
         n += 1
 
 
+def _consent_allow(job) -> dict | None:
+    """[execution-contract v1.1] §7.1 — simula la capa mecánica legítima:
+    configura y releyó CADA control required del spec del job (verdict
+    VERIFIED, observed=requested, configured=True) y pide el consentimiento
+    del servidor. Solo para el arnés de tests: el flujo REAL lo ejecuta
+    flowConfigFn + /generate-consent."""
+    spec = job.get("execution_spec")
+    if isinstance(spec, str):
+        try:
+            spec = json.loads(spec)
+        except (TypeError, ValueError):
+            spec = None
+    ctrl = {}
+    for control, c in (spec or {}).items():
+        if isinstance(c, dict) and c.get("required") \
+                and c.get("requested") is not None:
+            ctrl[control] = {"verdict": "VERIFIED",
+                             "observed": c.get("requested"),
+                             "configured": True}
+    return fj.generation_consent(job["id"], job["job_token"],
+                                 {"control_results": ctrl})
+
+
 _PIDS: list[str] = []
 
 
@@ -179,10 +202,9 @@ def main() -> int:
           _fila(vid1["id"])["exec_state"] == ec.EXEC_STATE_CLAIMED,
           repr(_fila(vid1["id"]).get("exec_state")))
 
-    print("── 2. §9 progresión lineal del estado fino")
+    print("── 2. §9 progresión lineal (VERIFIED es estado del SERVIDOR §7.1)")
     secuencia = [ec.EXEC_STATE_TAB_READY, ec.EXEC_STATE_CAPS,
-                 ec.EXEC_STATE_CONFIGURED, ec.EXEC_STATE_VERIFIED,
-                 ec.EXEC_STATE_SUBMITTED]
+                 ec.EXEC_STATE_CONFIGURED]
     for st in secuencia:
         r = fj.set_exec_state(vid1["id"], vid1["job_token"], st,
                               detail=f"avance a {st}",
@@ -193,6 +215,31 @@ def main() -> int:
         ultimo = r
     check("evidencia registrada en la respuesta (opcional §9)",
           ultimo.get("evidence_registered") is True, repr(ultimo))
+    # [execution-contract v1.1] §7.1 — VERIFIED ya NO se auto-reporta: solo
+    # el servidor lo escribe vía /generate-consent (CF-E2E-01).
+    r_v = fj.set_exec_state(vid1["id"], vid1["job_token"],
+                            ec.EXEC_STATE_VERIFIED)
+    check("VERIFIED por progreso directo → contract_gate_required (§7.1)",
+          r_v and r_v.get("ok") is False
+          and r_v.get("error") == "contract_gate_required"
+          and r_v.get("requested") == ec.EXEC_STATE_VERIFIED, repr(r_v))
+    check("DB SIN VERIFIED espurio (sigue CONTROLS_CONFIGURED)",
+          _fila(vid1["id"])["exec_state"] == ec.EXEC_STATE_CONFIGURED)
+    consent1 = _consent_allow(vid1)
+    check("generation_consent ALLOW → exec_state CONTROLS_VERIFIED",
+          consent1 and consent1.get("ok") is True
+          and consent1.get("allowed") is True
+          and consent1.get("decision") == ec.ALLOW_GENERATE
+          and consent1.get("exec_state") == ec.EXEC_STATE_VERIFIED,
+          repr(consent1))
+    check("VERIFIED persistido en DB (huella del consentimiento)",
+          _fila(vid1["id"])["exec_state"] == ec.EXEC_STATE_VERIFIED)
+    r_sub = fj.set_exec_state(vid1["id"], vid1["job_token"],
+                              ec.EXEC_STATE_SUBMITTED,
+                              detail="generación enviada tras consentimiento")
+    check("set_exec_state SUBMITTED desde VERIFIED (post-consent) ok",
+          r_sub and r_sub.get("ok") is True
+          and r_sub.get("exec_state") == ec.EXEC_STATE_SUBMITTED, repr(r_sub))
     check("estado actual en DB = GENERATION_SUBMITTED",
           _fila(vid1["id"])["exec_state"] == ec.EXEC_STATE_SUBMITTED,
           repr(_fila(vid1["id"]).get("exec_state")))
@@ -247,6 +294,16 @@ def main() -> int:
           and res_ok.get("renderable") is False, repr(res_ok)[:120])
 
     print("── 5. §13/E complete VIOLACIÓN con MP4 REAL 5s vs spec 8s")
+    # §7.1: el video 2 sigue el flujo legítimo (consentimiento) ANTES de la
+    # generación que produce el asset violador — la violación contractual
+    # (§13) es POST-generación; la barrera pre-generación es otra capa.
+    consent2 = _consent_allow(vid2)
+    check("consent vid2 ALLOW (flujo legítimo antes de generar)",
+          consent2 and consent2.get("allowed") is True, repr(consent2))
+    check("vid2 en GENERATION_SUBMITTED (post-consent)",
+          _fila(vid2["id"])["exec_state"] == ec.EXEC_STATE_SUBMITTED
+          or fj.set_exec_state(vid2["id"], vid2["job_token"],
+                               ec.EXEC_STATE_SUBMITTED).get("ok") is True)
     try:
         fj.complete(vid2["id"], vid2["job_token"], _mp4_bytes(5.0))
         violacion = None
@@ -424,6 +481,150 @@ def main() -> int:
           repr(rD3.get("adaptacion"))[:200])
     check("el job queda dead definitivo (stays dead)",
           _fila(vidD["id"])["status"] == "dead")
+
+    print("── 11b. §7.1 gate OBLIGATORIO: consent, barrera, watchdog, TESTS")
+    # (a) TEST 1 vía consent: required 8s vs capabilities sin soporte →
+    #     CONFIG_UNSUPPORTED, dead terminal, sin adaptación, sin ledger.
+    #     6 escenas → 5 videos (T1, T9, T2, T4/T5, barrera).
+    _proyecto_video("p_gate", escenas=6, duracion=8)
+    _PIDS.append("p_gate")
+    fj.enqueue_project("p_gate")
+    _drenar_imagenes("p_gate")
+    vidG = fj.claim_next("w-states", pid="p_gate")
+    con_g = fj.generation_consent(vidG["id"], vidG["job_token"], {
+        "capabilities": {"duration": {"available": True, "editable": False}},
+        "control_results": {"duration": {"verdict": "UNSUPPORTED",
+                                         "requested": 8, "configured": False},
+                            "aspect_ratio": {"verdict": "VERIFIED",
+                                             "observed": "9:16",
+                                             "configured": True}},
+        "client_decision": "CONFIG_UNSUPPORTED"})
+    check("TEST 1: consent DENY CONFIG_UNSUPPORTED",
+          con_g and con_g.get("ok") is True
+          and con_g.get("allowed") is False
+          and con_g.get("decision") == ec.CONFIG_UNSUPPORTED, repr(con_g))
+    fG = _fila(vidG["id"])
+    check("TEST 1: job dead terminal + exec_state CONFIG_UNSUPPORTED",
+          fG["status"] == "dead"
+          and fG["exec_state"] == ec.EXEC_STATE_CONFIG_UNSUPPORTED
+          and fG["error"].startswith("CONFIG_UNSUPPORTED:"), repr(fG)[:140])
+    check("TEST 1: contract_result con registro pre_generation_gate",
+          (_contrato(vidG["id"]) or {}).get("kind")
+          == "pre_generation_gate", repr(_contrato(vidG["id"]))[:120])
+    check("TEST 1: sin retry (attempts==0, terminal por contrato)",
+          int(fG["attempts"] or 0) == 0)
+    check("TEST 1: fail() posterior con token → None (409)",
+          fj.fail(vidG["id"], vidG["job_token"], "tardío") is None)
+    dec_G = fa.procesar_fallo_job(vidG["id"])
+    check("TEST 7: CONFIG_* jamás entra a adaptación (clase J sin otorgar)",
+          dec_G and dec_G.get("clase") == "J"
+          and dec_G.get("reintentar") is False
+          and not dec_G.get("otorgado") and not dec_G.get("adaptar"),
+          repr(dec_G)[:160])
+    check("TEST 7: sin P2 (prompt_adapted NULL tras consent DENY)",
+          _fila(vidG["id"])["prompt_adapted"] is None)
+    # (b) TEST 9 vía consent: VERIFIED sin configured (heredado) → DENY.
+    vidG2 = fj.claim_next("w-states", pid="p_gate")
+    con_g2 = fj.generation_consent(vidG2["id"], vidG2["job_token"], {
+        "control_results": {"duration": {"verdict": "VERIFIED",
+                                         "observed": 8},
+                            "aspect_ratio": {"verdict": "VERIFIED",
+                                             "observed": "9:16",
+                                             "configured": True}}})
+    check("TEST 9: valor heredado sin configured → CONFIG_UNVERIFIABLE",
+          con_g2 and con_g2.get("allowed") is False
+          and con_g2.get("decision") == ec.CONFIG_UNVERIFIABLE
+          and "allow_inherited_state" in (con_g2.get("detail") or ""),
+          repr(con_g2))
+    check("TEST 9: job dead CONFIG_UNVERIFIABLE (heredado jamás aceptado)",
+          _fila(vidG2["id"])["exec_state"]
+          == ec.EXEC_STATE_CONFIG_UNVERIFIABLE)
+    # (c) TEST 2 vía consent: sin evidencia de control → DENY.
+    vidG3 = fj.claim_next("w-states", pid="p_gate")
+    con_g3 = fj.generation_consent(vidG3["id"], vidG3["job_token"], {})
+    check("TEST 2: capabilities vacías → CONFIG_UNVERIFIABLE",
+          con_g3 and con_g3.get("allowed") is False
+          and con_g3.get("decision") == ec.CONFIG_UNVERIFIABLE, repr(con_g3))
+    # (d) TEST 4 vía consent: configured VERIFIED → ALLOW + SUBMITTED legal.
+    vidG4 = fj.claim_next("w-states", pid="p_gate")
+    con_g4 = _consent_allow(vidG4)
+    check("TEST 4: configured VERIFIED → consent ALLOW",
+          con_g4 and con_g4.get("allowed") is True, repr(con_g4))
+    check("TEST 4: SUBMITTED legal desde VERIFIED del servidor",
+          fj.set_exec_state(vidG4["id"], vidG4["job_token"],
+                            ec.EXEC_STATE_SUBMITTED).get("ok") is True)
+    # (e) TEST 5: verificado → el proveedor falla después → PROVIDER_FAILURE.
+    rG4 = fj.fail(vidG4["id"], vidG4["job_token"], "tile: infringement")
+    check("TEST 5: post-consent fallo del proveedor → PROVIDER_FAILURE",
+          rG4 and _fila(vidG4["id"])["exec_state"]
+          == ec.EXEC_STATE_PROVIDER_FAILURE, repr(_fila(vidG4["id"]))[:120])
+    # (f) BARRERA: complete sin consentimiento (exec_state CLAIMED) →
+    #     dead CONFIG_UNVERIFIABLE + ValueError (fail-closed CF-E2E-01).
+    vidG5 = fj.claim_next("w-states", pid="p_gate")
+    try:
+        fj.complete(vidG5["id"], vidG5["job_token"], _mp4_bytes(8.0))
+        err_barrera = None
+    except ValueError as exc:
+        err_barrera = str(exc)
+    check("BARRERA: complete sin consent → ValueError CONFIG_UNVERIFIABLE",
+          bool(err_barrera)
+          and err_barrera.startswith("CONFIG_UNVERIFIABLE:"),
+          repr(err_barrera)[:160])
+    fG5 = _fila(vidG5["id"])
+    check("BARRERA: dead + exec_state CONFIG_UNVERIFIABLE + sin asset",
+          fG5["status"] == "dead"
+          and fG5["exec_state"] == ec.EXEC_STATE_CONFIG_UNVERIFIABLE
+          and not fG5["asset_path"], repr(fG5)[:140])
+    check("BARRERA: contract_result kind pre_generation_gate_barrier",
+          (_contrato(vidG5["id"]) or {}).get("kind")
+          == "pre_generation_gate_barrier")
+    # (g) TEST 6: watchdog local JAMÁS es PROVIDER_FAILURE.
+    _proyecto_video("p_wdog", escenas=2, duracion=8)
+    _PIDS.append("p_wdog")
+    fj.enqueue_project("p_wdog")
+    _drenar_imagenes("p_wdog")
+    vidW = fj.claim_next("w-states", pid="p_wdog")
+    rW = fj.fail(vidW["id"], vidW["job_token"],
+                 "FLOW_WATCHDOG_TIMEOUT: sin resultado válido en 15 min "
+                 "(watchdog local) | cfg: m=unknown,d=5s")
+    check("TEST 6: watchdog → exec_state FLOW_WATCHDOG_TIMEOUT",
+          rW and _fila(vidW["id"])["exec_state"]
+          == ec.EXEC_STATE_WATCHDOG, repr(rW))
+    check("TEST 6: JAMÁS PROVIDER_FAILURE sin evidencia externa",
+          _fila(vidW["id"])["exec_state"]
+          != ec.EXEC_STATE_PROVIDER_FAILURE)
+    check("TEST 6: semántica de cola intacta (1/2 → queued)",
+          rW.get("status") == "queued" and rW.get("attempts") == 1)
+    vidW2 = fj.claim_next("w-states", pid="p_wdog")
+    fj.fail(vidW2["id"], vidW2["job_token"],
+            "watchdog: sin resultado válido en 15 min")  # marcador legacy
+    check("TEST 6: marcador legacy 'watchdog:' → FLOW_WATCHDOG_TIMEOUT",
+          _fila(vidW2["id"])["exec_state"] == ec.EXEC_STATE_WATCHDOG)
+    decW = fa.procesar_fallo_job(vidW2["id"])
+    check("TEST 6: ledger clase A FLOW_WATCHDOG_TIMEOUT LOCAL/LOW intacta",
+          decW and decW.get("clase") == "A", repr(decW)[:140])
+    led_w = [json.loads(l) for l in fa.LEDGER_PATH.read_text(
+        encoding="utf-8").splitlines() if l.strip()] \
+        if fa.LEDGER_PATH.exists() else []
+    w_reg = next((r for r in led_w if r.get("job_id") == vidW2["id"]), None)
+    check("TEST 6: ledger A con confidence LOW (sin causa de proveedor)",
+          w_reg is not None and w_reg.get("clasificacion") == "A"
+          and w_reg.get("classification_confidence") == "LOW"
+          and w_reg.get("fuente_evidencia") != "execution_contract",
+          repr(w_reg)[:180])
+    check("TEST 6: clasificar() del watchdog → alcance_causal LOCAL",
+          fa.clasificar(_fila(vidW2["id"])["error"] or "", "video").get(
+              "alcance_causal") == "LOCAL")
+    # (h) TEST 10: sin conversión silenciosa 8→5 en ninguna capa.
+    spec_t10 = json.loads(_fila(vidG4["id"])["execution_spec"])
+    check("TEST 10: spec duration.requested sigue 8.0 (sin conversión 8→5)",
+          float(spec_t10["duration"]["requested"]) == 8.0
+          and spec_t10["duration"]["required"] is True
+          and spec_t10["duration"]["tolerance_seconds"] == 0,
+          repr(spec_t10["duration"]))
+    check("TEST 10: P1 del job intacto tras consent/fail/barrera",
+          _fila(vidG4["id"])["prompt"].startswith("P1 ")
+          and _fila(vidG4["id"])["prompt_adapted"] is None)
 
     print("── 12. P1 inmutable en TODO el circuito")
     ok_p1, detalle = True, ""
