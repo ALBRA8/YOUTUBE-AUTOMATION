@@ -171,7 +171,8 @@ async function bridgeClaimNext() {
 async function bridgeHeartbeat(job) {
   const cfg = await bridgeEnsureCfg();
   const res = await bridgeFetch(
-    bridgeUrl(cfg, '/' + encodeURIComponent(job.id) + '/heartbeat?token=' + encodeURIComponent(job.job_token || '')),
+    bridgeUrl(cfg, '/' + encodeURIComponent(job.id) + '/heartbeat?token=' + encodeURIComponent(job.job_token || '')
+      + '&worker=' + encodeURIComponent(cfg.workerId || '')), // [M7] identidad del worker
     { method: 'POST', headers: bridgeHeaders() },
     BRIDGE_HTTP_TIMEOUT_MS
   );
@@ -190,7 +191,8 @@ async function bridgeComplete(job, blob) {
   const headers = bridgeHeaders();
   headers['Content-Type'] = job.kind === 'video' ? 'video/mp4' : 'image/png';
   const res = await bridgeFetch(
-    bridgeUrl(cfg, '/' + encodeURIComponent(job.id) + '/complete?token=' + encodeURIComponent(job.job_token || '')),
+    bridgeUrl(cfg, '/' + encodeURIComponent(job.id) + '/complete?token=' + encodeURIComponent(job.job_token || '')
+      + '&worker=' + encodeURIComponent(cfg.workerId || '')), // [M7] identidad del worker
     { method: 'POST', headers, body: blob },
     BRIDGE_UPLOAD_TIMEOUT_MS
   );
@@ -206,7 +208,8 @@ async function bridgeComplete(job, blob) {
 async function bridgeFail(job, errorMsg) {
   const cfg = await bridgeEnsureCfg();
   const res = await bridgeFetch(
-    bridgeUrl(cfg, '/' + encodeURIComponent(job.id) + '/fail?token=' + encodeURIComponent(job.job_token || '')),
+    bridgeUrl(cfg, '/' + encodeURIComponent(job.id) + '/fail?token=' + encodeURIComponent(job.job_token || '')
+      + '&worker=' + encodeURIComponent(cfg.workerId || '')), // [M7] identidad del worker
     { method: 'POST', headers: bridgeHeaders(), body: JSON.stringify({ error: String(errorMsg || 'error desconocido').slice(0, 500) }) },
     BRIDGE_HTTP_TIMEOUT_MS
   );
@@ -229,7 +232,8 @@ async function bridgeProgress(jobId, token, state, detail, evidence) { // [execu
     const body = { state: String(state || ''), detail: String(detail || '').slice(0, 300) };
     if (evidence && typeof evidence === 'object') body.evidence = evidence;
     const res = await bridgeFetch(
-      bridgeUrl(cfg, '/' + encodeURIComponent(jobId) + '/progress?token=' + encodeURIComponent(token || '')),
+      bridgeUrl(cfg, '/' + encodeURIComponent(jobId) + '/progress?token=' + encodeURIComponent(token || '')
+        + '&worker=' + encodeURIComponent(cfg.workerId || '')), // [M7] verify-if-provided
       { method: 'POST', headers: bridgeHeaders(), body: JSON.stringify(body) },
       BRIDGE_HTTP_TIMEOUT_MS // control: 15s (mismo presupuesto que heartbeat/fail)
     );
@@ -257,7 +261,8 @@ async function bridgeGenerateConsent(jobId, token, evidence) { // [execution-con
       if (evidence.client_detail) body.client_detail = String(evidence.client_detail).slice(0, 300);
     }
     const res = await bridgeFetch(
-      bridgeUrl(cfg, '/' + encodeURIComponent(jobId) + '/generate-consent?token=' + encodeURIComponent(token || '')),
+      bridgeUrl(cfg, '/' + encodeURIComponent(jobId) + '/generate-consent?token=' + encodeURIComponent(token || '')
+        + '&worker=' + encodeURIComponent(cfg.workerId || '')), // [M7] verify-if-provided
       { method: 'POST', headers: bridgeHeaders(), body: JSON.stringify(body) },
       BRIDGE_HTTP_TIMEOUT_MS
     );

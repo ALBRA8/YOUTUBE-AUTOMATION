@@ -76,14 +76,14 @@ echo "── 4. claim + complete con PNG real"
 J1=$(curl -s "$BASE/api/extension/flow/jobs/next?worker=w-ciclo" | jget job)
 ID1=$(echo "$J1" | jget id); TK1=$(echo "$J1" | jget job_token); KIND1=$(echo "$J1" | jget kind); SN1=$(echo "$J1" | jget scene_number)
 [ "$KIND1" = "image" ] && [ "$SN1" = "1" ] && ok "claim 1: imagen escena 1 (orden correcto)" || bad "claim 1: $J1"
-C1=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/extension/flow/jobs/$ID1/complete?token=$TK1" \
+C1=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/extension/flow/jobs/$ID1/complete?token=$TK1&worker=w-ciclo" \
      -H "Content-Type: image/png" --data-binary @"$WORK/escena.png")
 echo "$C1" | tail -1 | grep -q 200 && echo "$C1" | head -1 | grep -q "Escena_01_flow.png" \
     && ok "complete imagen → 200, asset en convención canónica" \
     || bad "complete imagen: $C1"
 
 echo "── 5. doble complete → 409 (token de una sola era)"
-CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/extension/flow/jobs/$ID1/complete?token=$TK1" \
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/extension/flow/jobs/$ID1/complete?token=$TK1&worker=w-ciclo" \
        -H "Content-Type: image/png" --data-binary @"$WORK/escena.png")
 [ "$CODE" = "409" ] && ok "doble complete rechazado con 409" || bad "esperaba 409, llegó $CODE"
 
@@ -92,23 +92,23 @@ J2=$(curl -s "$BASE/api/extension/flow/jobs/next?worker=w-ciclo" | jget job)
 ID2=$(echo "$J2" | jget id); TK2=$(echo "$J2" | jget job_token)
 [ "$(echo "$J2" | jget kind)" = "image" ] && [ "$(echo "$J2" | jget scene_number)" = "2" ] \
     && ok "claim 2: imagen escena 2 (imagen antes que video)" || bad "claim 2: $J2"
-CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/extension/flow/jobs/$ID2/complete?token=$TK2" \
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/extension/flow/jobs/$ID2/complete?token=$TK2&worker=w-ciclo" \
        -H "Content-Type: text/html" --data-binary "<html>Error de Flow</html>")
 [ "$CODE" = "422" ] && ok "HTML basura rechazado con 422" || bad "esperaba 422, llegó $CODE"
-F=$(curl -s -X POST "$BASE/api/extension/flow/jobs/$ID2/fail?token=$TK2" -H "Content-Type: application/json" -d '{"error":"html no válido"}')
+F=$(curl -s -X POST "$BASE/api/extension/flow/jobs/$ID2/fail?token=$TK2&worker=w-ciclo" -H "Content-Type: application/json" -d '{"error":"html no válido"}')
 echo "$F" | grep -q '"status": *"queued"' && ok "fail 1/3 → vuelve a queued" || bad "fail: $F"
 J3=$(curl -s "$BASE/api/extension/flow/jobs/next?worker=w-ciclo" | jget job)
 ID3=$(echo "$J3" | jget id); TK3=$(echo "$J3" | jget job_token)
 [ "$ID3" = "$ID2" ] && ok "re-claim devuelve el MISMO job" || bad "re-claim distinto: $J3"
-CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/extension/flow/jobs/$ID3/complete?token=$TK3" \
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/extension/flow/jobs/$ID3/complete?token=$TK3&worker=w-ciclo" \
        -H "Content-Type: video/mp4" --data-binary @"$WORK/escena.mp4")
 [ "$CODE" = "422" ] && ok "guard de tipo: MP4 en job de imagen → 422" || bad "guard de tipo: esperaba 422, llegó $CODE"
-curl -s -X POST "$BASE/api/extension/flow/jobs/$ID3/fail?token=$TK3" -H "Content-Type: application/json" \
+curl -s -X POST "$BASE/api/extension/flow/jobs/$ID3/fail?token=$TK3&worker=w-ciclo" -H "Content-Type: application/json" \
      -d '{"error":"asset de otro tipo"}' | grep -q '"attempts": *2' \
     && ok "fail 2/3 → attempts=2, aún queued (imagen tolera 3)" || bad "fail 2 no acumuló attempts"
 J4=$(curl -s "$BASE/api/extension/flow/jobs/next?worker=w-ciclo" | jget job)
 ID4=$(echo "$J4" | jget id); TK4=$(echo "$J4" | jget job_token)
-C4=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/extension/flow/jobs/$ID4/complete?token=$TK4" \
+C4=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/extension/flow/jobs/$ID4/complete?token=$TK4&worker=w-ciclo" \
      -H "Content-Type: image/png" --data-binary @"$WORK/escena.png")
 echo "$C4" | tail -1 | grep -q 200 && echo "$C4" | head -1 | grep -q "Escena_02_flow.png" \
     && ok "complete imagen escena 2 → 200" || bad "complete imagen 2: $C4"
@@ -121,12 +121,12 @@ echo "$J" | grep -q '"kind": *"video"' && ok "claim final: video escena 1" || ba
 # el backend re-evalúa config_gate con la evidencia de la capa mecánica y
 # SOLO con ALLOW se genera. Sin ALLOW, el complete posterior daría 422
 # (barrera pre-generación: dead CONFIG_UNVERIFIABLE).
-CONS=$(curl -s -X POST "$BASE/api/extension/flow/jobs/$ID/generate-consent?token=$TK" \
+CONS=$(curl -s -X POST "$BASE/api/extension/flow/jobs/$ID/generate-consent?token=$TK&worker=w-ciclo" \
      -H "Content-Type: application/json" \
      -d '{"control_results":{"duration":{"verdict":"VERIFIED","observed":2.0,"configured":true},"aspect_ratio":{"verdict":"VERIFIED","observed":"9:16","configured":true}}}')
 echo "$CONS" | grep -q '"allowed": *true' \
     && ok "generate-consent → ALLOW (juez = servidor, §7.1)" || bad "consent: $CONS"
-LAST=$(curl -s -X POST "$BASE/api/extension/flow/jobs/$ID/complete?token=$TK" -H "Content-Type: video/mp4" --data-binary @"$WORK/video.mp4")
+LAST=$(curl -s -X POST "$BASE/api/extension/flow/jobs/$ID/complete?token=$TK&worker=w-ciclo" -H "Content-Type: video/mp4" --data-binary @"$WORK/video.mp4")
 echo "$LAST" | grep -q '"project_done": *true' && ok "último complete → project_done=true" || bad "project_done: $LAST"
 echo "$LAST" | grep -q '"renderable": *true' && ok "assets mapeados a escenas → renderable=true" || bad "renderable: $LAST"
 echo "$LAST" | grep -q '"auto_render": *true' && ok "auto-render disparado (orchestrator)" || bad "auto_render: $LAST"

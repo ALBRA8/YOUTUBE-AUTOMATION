@@ -49,10 +49,23 @@ def import_flow_zip(project_id: str, data: bytes, output_dir: Path,
     Devuelve: {imported, mapped, missing, videos_saved, ignored, total_files}
     """
     zf = zipfile.ZipFile(io.BytesIO(data))
+    # [PHASE 1 · A7] anti zip-bomb: nº de entradas y tamaño DESCOMPRIMIDO
+    # declarado se validan ANTES de leer un solo byte (el tamaño comprimido
+    # ya se topa en el endpoint con streaming). Un 42.zip agotaba RAM.
+    import config as _cfg
+    _lim = _cfg.LIMITS
+    infos = [i for i in zf.infolist() if not i.is_dir()]
+    if len(infos) > int(_lim.get("MAX_ZIP_FILES", 300)):
+        raise ValueError(f"ZIP con demasiadas entradas "
+                         f"({len(infos)} > {_lim.get('MAX_ZIP_FILES', 300)})")
+    _total = sum(i.file_size for i in infos)
+    if _total > int(_lim.get("MAX_ZIP_UNCOMPRESSED_BYTES", 600 * 1024 * 1024)):
+        raise ValueError("ZIP descomprimido demasiado grande "
+                         f"({_total // (1024 * 1024)} MB) — posible zip-bomb")
     # Escena_NN -> lista de (nombre_archivo, bytes)
     buckets: dict[int, list[tuple[str, bytes]]] = {}
     ignored = 0
-    for info in zf.infolist():
+    for info in infos:
         if info.is_dir():
             continue
         parts = [p for p in Path(info.filename).parts if p not in ("", "/")]

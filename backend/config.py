@@ -74,6 +74,32 @@ YT_TOKEN_FILE = str(DATA_DIR / "token.json")
 HOST = os.getenv("HOST", "127.0.0.1")
 PORT = int(os.getenv("PORT", "8000"))
 
+# ── PHASE 1 (security) · límites de entrada — configurables vía .env, ──────
+# seguros por defecto. Un input que exceda un límite produce SIEMPRE un
+# error controlado 4xx (nunca 500 ni consumo ilimitado). Se leen en el
+# momento de la llamada (no por valor en import) para que tests y operator
+# puedan ajustarlos en runtime.
+def _lim(name: str, default: int) -> int:
+    try:
+        v = int(os.getenv(name, str(default)))
+        return v if v > 0 else default
+    except ValueError:
+        return default
+
+
+LIMITS = {
+    "MAX_BODY_BYTES": _lim("MAX_BODY_BYTES", 64 * 1024 * 1024),          # body HTTP global
+    "MAX_UPLOAD_JSON_BYTES": _lim("MAX_UPLOAD_JSON_BYTES", 2 * 1024 * 1024),   # client_secret.json
+    "MAX_ZIP_COMPRESSED_BYTES": _lim("MAX_ZIP_COMPRESSED_BYTES", 150 * 1024 * 1024),  # A7
+    "MAX_ZIP_UNCOMPRESSED_BYTES": _lim("MAX_ZIP_UNCOMPRESSED_BYTES", 600 * 1024 * 1024),  # A7
+    "MAX_ZIP_FILES": _lim("MAX_ZIP_FILES", 300),                        # A7
+    "MAX_IMAGE_PIXELS": _lim("MAX_IMAGE_PIXELS", 40_000_000),           # M10 bomba descompresión
+    "MAX_PRODUCTION_UNITS": _lim("MAX_PRODUCTION_UNITS", 40),           # A9 (≈ guion_json MAX_ESCENAS)
+    "FLOW_JOB_BODY_BYTES": _lim("FLOW_JOB_BODY_BYTES", 64 * 1024 * 1024),      # complete binario
+    "FLOW_JOBS_RETENTION_DAYS": _lim("FLOW_JOBS_RETENTION_DAYS", 30),   # M11 done/dead
+    "LEDGER_MAX_LINES": _lim("LEDGER_MAX_LINES", 5000),                 # M11 ledger adaptación
+}
+
 
 def ffmpeg() -> str:
     return FFMPEG_BIN
@@ -124,13 +150,21 @@ def reload() -> None:
 
 def save_env(updates: dict) -> list[str]:
     """Escribe pares clave=valor en .env (conserva comentarios y orden) y
-    recarga la configuración en memoria. Devuelve la lista de claves guardadas."""
+    recarga la configuración en memoria. Devuelve la lista de claves guardadas.
+
+    PHASE 1 · A2: un valor con salto de línea permitiría INYECTAR variables
+    nuevas en .env («x\nMASTER_API_KEY=pwn\nNVIDIA_BASE_URL=http://atacante»
+    escribiría 3 entradas). La validación central vive en
+    security.validate_env_value y se rechaza de forma EXPLÍCITA (ValueError)
+    — nunca se sanitiza en silencio."""
+    import security as _sec
     lines = ENV_PATH.read_text(encoding="utf-8").splitlines() if ENV_PATH.exists() else [
         "# YOUTUBE AUTOMATION v2.0 — configuración (generada desde el dashboard)"]
     saved = []
     for key, value in updates.items():
         if key not in EDITABLE_KEYS:
             continue
+        _sec.validate_env_value(key, value)  # A2: rechaza \r / \n / NUL
         saved.append(key)
         found = False
         for i, line in enumerate(lines):

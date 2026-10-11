@@ -202,6 +202,9 @@ def parse_payload(payload) -> dict:
         data = json.loads(txt)
     except json.JSONDecodeError as e:
         raise ValueError(f"{ERR}: JSON inválido: {e}")
+    except RecursionError as e:
+        # [PHASE 1 · A9] JSON ultranidado → RecursionError no capturado era 500
+        raise ValueError(f"{ERR}: JSON inválido (demasiado anidado)") from e
     if not isinstance(data, dict):
         raise ValueError(f"{ERR}: el JSON debe ser un objeto (envelope)")
     return data
@@ -270,6 +273,14 @@ def validate(data: dict, estilos_validos: set[str],
                          "traer una lista de unidades (sequence[])")
     if not seq_raw:
         raise ValueError(f"{ERR}: sequence vacía — se requiere al menos 1 unidad")
+    # [PHASE 1 · A9] techo de unidades: sin límite, 10.000 unidades creaban
+    # 10.000 escenas + pipeline completo (DoS de cuota/coste). Alineado con
+    # guion_json.MAX_ESCENAS. Límite configurable (config.LIMITS en runtime).
+    import config as _cfg
+    _max_u = int(_cfg.LIMITS.get("MAX_PRODUCTION_UNITS", 40))
+    if len(seq_raw) > _max_u:
+        raise ValueError(f"{ERR}: demasiadas unidades de producción "
+                         f"({len(seq_raw)} > {_max_u}) — reduce la secuencia")
     if seq_key != "sequence":
         norm.append(f"sequence localizada en «{seq_key}» "
                     "(alias mecánico, contenido intacto)")
@@ -496,7 +507,7 @@ def validate(data: dict, estilos_validos: set[str],
         "project_extra": project_extra,
         "root_extra": root_extra,
         "production": {
-            "adapter": "production_json/v2.19.1",
+            "adapter": "production_json/v2.20.0",
             "production_id": production_id,
             "unidades": len(escenas),
             "sequence_key": seq_key,
@@ -765,7 +776,7 @@ def spec(estilos_ids: list[str]) -> dict:
     """Spec machine-readable del contrato (para el Creative Engine y humanos)."""
     camaras = ", ".join(sorted(camera_recipes.ids()))
     return {
-        "version": "2.19.1",
+        "version": "2.20.0",
         "uso": 'POST /api/projects con {"mode": "production_json", '
                '"production": <envelope>} (objeto, string JSON o fences). '
                'Dry-run: POST /api/production_json/validate. guion_json sigue '

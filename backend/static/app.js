@@ -796,7 +796,7 @@ function renderProject() {
 function getStyleName(id) { return S.styles.find(s => s.id === id)?.name || id; }
 
 function sceneCard(sc) {
-  const img = sc.image_path ? `/api/scenes/${sc.id}/image?v=${sc.idx}` : '';
+  const img = sc.image_path ? `/api/scenes/${sc.id}/image?project_id=${S.project.id}&v=${sc.idx}` : '';
   return `<div class="card scene-card" draggable="true" data-id="${sc.id}">
     <span class="drag">⠿</span>
     ${img ? `<img class="img" src="${img}" onclick="regenImage('${sc.id}')" title="Clic para regenerar imagen">`
@@ -827,7 +827,7 @@ async function regenImage(sid) {
 
 function playAudio(sid, btn) {
   if (btn._a) { btn._a.pause(); btn._a = null; btn.textContent = '🔊 Escuchar'; return; }
-  const a = new Audio(`/api/scenes/${sid}/audio`);
+  const a = new Audio(`/api/scenes/${sid}/audio?project_id=${S.project.id}`);
   a.onended = () => { btn.textContent = '🔊 Escuchar'; btn._a = null; };
   a.play(); btn._a = a; btn.textContent = '⏸ Parar';
 }

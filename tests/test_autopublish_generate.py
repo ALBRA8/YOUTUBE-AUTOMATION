@@ -39,6 +39,14 @@ import types
 from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parents[1] / "backend"
+import hashlib as _hl
+
+
+def _h(tag: str) -> str:
+    """[PHASE 1] ids con el formato canónico new_id(): 12 hex."""
+    return _hl.md5(tag.encode()).hexdigest()[:12]
+
+
 PIDS = []          # carpetas s2auto_* creadas bajo backend/data/output/
 DURS = [3.0, 2.5]  # duraciones devueltas por el TTS mockeado
 
@@ -332,7 +340,7 @@ def main() -> int:
         # ══ R. REPRODUCCIÓN del NameError (contrato production_json, ap=true) ═
         print(f"── R. REPRODUCCIÓN NameError (production_json, autopublish=true)"
               f" · parche integrador {'APLICADO' if PARCHE else 'NO aplicado'}")
-        r_pid = "s2auto_repro"
+        r_pid = _h("s2auto_repro")
         nuevo_proyecto(r_pid, title="Repro autopublish", mode="production_json",
                        meta={"production_json": {"project": {"titulo": "Repro"},
                                                  "sequence": []}})
@@ -370,7 +378,7 @@ def main() -> int:
 
         # ══ A. generate+autopublish EXITOSO (modo idea, publicador mock) ═════
         print("── A. autopublish EXITOSO (modo idea → rama con `result`)")
-        a_pid = "s2auto_idea_ok"
+        a_pid = _h("s2auto_idea_ok")
         nuevo_proyecto(a_pid, title="Idea A", mode="idea")
         UPLOAD_CALLS.clear()
         EVENTS.clear()
@@ -403,7 +411,7 @@ def main() -> int:
 
         # ══ B. fallo REAL de publicación (el publicador lanza excepción) ═════
         print("── B. fallo REAL de publicación (upload lanza RuntimeError)")
-        b_pid = "s2auto_pubfail"
+        b_pid = _h("s2auto_pubfail")
         nuevo_proyecto(b_pid, title="Idea B", mode="idea")
         UPLOAD_CALLS.clear()
         EVENTS.clear()
@@ -433,7 +441,7 @@ def main() -> int:
 
         # ══ C. proyecto production_json (meta.production_json + units) ═══════
         print("── C. production_json completo (production_unit en escenas, ap=true)")
-        c_pid = "s2auto_prodjson"
+        c_pid = _h("s2auto_prodjson")
         nuevo_proyecto(c_pid, title="Producción C", mode="production_json",
                        meta={"production_json": {
                            "project": {"titulo": "Producción C", "formato": "short"},
@@ -468,7 +476,7 @@ def main() -> int:
 
         # ══ D. legacy (rama lo permite) y guion_json (contrato) ══════════════
         print("── D1. legacy mode='script' + autopublish=true → SÍ publica")
-        d_pid = "s2auto_legacy"
+        d_pid = _h("s2auto_legacy")
         nuevo_proyecto(d_pid, title="Legacy D", mode="script",
                        meta={"script_text": "Guion heredado de la v1"})
         UPLOAD_CALLS.clear()
@@ -486,7 +494,7 @@ def main() -> int:
         check("legacy job done", job_d["status"] == "done")
 
         print("── D2. contrato guion_json + autopublish=true")
-        g_pid = "s2auto_guionjson"
+        g_pid = _h("s2auto_guionjson")
         nuevo_proyecto(g_pid, title="Guion JSON G", mode="guion_json")
         db.replace_scenes(g_pid, [
             {"id": "gs1", "duration": 3.0, "narration": "guion uno"},
@@ -512,13 +520,13 @@ def main() -> int:
         uploads_antes = len(UPLOAD_CALLS)
         pub_antes = len([e for e in EVENTS if e.get("type") == "published"])
         casos_e = [
-            ("s2auto_e_prod", "production_json",
+            (_h("s2auto_e_prod"), "production_json",
              {"production_json": {"project": {"titulo": "E"}, "sequence": []}},
              [_escena_prod("v1", 3.0), _escena_prod("v2", 2.5)]),
-            ("s2auto_e_guion", "guion_json", {},
+            (_h("s2auto_e_guion"), "guion_json", {},
              [{"id": "es1", "duration": 3.0}, {"id": "es2", "duration": 2.5}]),
-            ("s2auto_e_idea", "idea", {}, []),
-            ("s2auto_e_script", "script", {"script_text": "texto"}, []),
+            (_h("s2auto_e_idea"), "idea", {}, []),
+            (_h("s2auto_e_script"), "script", {"script_text": "texto"}, []),
         ]
         esperado_msg = f"Video listo · {sum(DURS):.0f}s"
         for pid_e, modo, meta_e, escenas_e in casos_e:

@@ -117,6 +117,22 @@ BATERIAS = [
                                  # (semántico/a11y/texto, sin coordenadas),
                                  # gate espejo del backend (cross-check 7/7),
                                  # prefijos CONFIG_* exactos (68)
+    # ── PHASE 1 · SECURITY HARDENING — runtime HTTP (httpx ASGI), Windows-safe:
+    # sin Node/bash; reproducen los exploits de la auditoría contra la app real ──
+    "security/test_project_path_security.py",  # C1/M5: exploit real %2e%2e del
+                                 # canario + superficie completa de pid (36)
+    "security/test_project_isolation.py",      # M3/M6/M9: IDOR padre/hijo, meta
+                                 # system-owned, chat destructivo exacto (26)
+    "security/test_csrf.py",     # M2: origen externo → 403; local/ext/sin-Origin ok (10)
+    "security/test_docs_auth.py",  # M1: /docs /redoc /openapi.json con y sin clave (12)
+    "security/test_ssrf.py",     # A1/A8: matriz SSRF completa + redirects
+                                 # revalidados + sonda HTTP real loopback (~25)
+    "security/test_job_identity.py",  # M7/M8/A6: worker+token+lease, binding
+                                 # de ejecución, recuperación idempotente (~21)
+    "security/test_input_limits.py",  # A7/A9/M10/M4/M11: zip bombs, techo de
+                                 # unidades, JSON anidado, PIL, ledger (17)
+    "security/test_config_security.py",  # A2/M6: .env newline injection +
+                                 # system-owned metadata (16)
 ]
 
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")

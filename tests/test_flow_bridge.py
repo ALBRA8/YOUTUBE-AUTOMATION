@@ -98,7 +98,16 @@ def _consent_allow(job) -> dict | None:
                                  {"control_results": ctrl})
 
 
-def _proyecto(pid: str, n: int = 3) -> str:
+import hashlib as _hl
+
+
+def _h(tag: str) -> str:
+    """[PHASE 1] ids con el formato canónico new_id(): 12 hex."""
+    return _hl.md5(tag.encode()).hexdigest()[:12]
+
+
+def _proyecto(tag: str, n: int = 3) -> str:
+    pid = _h(tag)
     db.create_project(id=pid, title="Bridge Test", status="draft",
                       mode="production_json", style="graphic-novel",
                       format="short")
@@ -300,11 +309,13 @@ def main() -> int:
             job = r.json()["job"]
 
             r = await c.post(f"/api/extension/flow/jobs/{job['id']}/heartbeat",
-                             params={"token": job["job_token"]})
+                             params={"token": job["job_token"],
+                                     "worker": "w-x"})  # [M7] worker exigido
             check("POST heartbeat 200", r.status_code == 200, r.text[:100])
 
             r = await c.post(f"/api/extension/flow/jobs/{job['id']}/complete",
-                             params={"token": job["job_token"]},
+                             params={"token": job["job_token"],
+                                     "worker": "w-x"},  # [M7] worker exigido
                              content=_png_bytes(),
                              headers={"Content-Type": "image/png"})
             check("POST complete 200 (PNG vía HTTP)",
@@ -318,7 +329,7 @@ def main() -> int:
                   r.text[:200])
 
             r = await c.post("/api/extension/flow/jobs/enqueue",
-                             json={"project_id": "proyecto_fantasma"})
+                             json={"project_id": "000000000000"})  # válido pero inexistente → 404
             check("enqueue proyecto inexistente → 404", r.status_code == 404)
 
             r = await c.get("/api/extension/flow/jobs/next", params={})
@@ -355,14 +366,15 @@ def main() -> int:
                          else "video/mp4")
                 r = await c.post(
                     f"/api/extension/flow/jobs/{job['id']}/complete",
-                    params={"token": job["job_token"]}, content=payload,
+                    params={"token": job["job_token"], "worker": "w-x"},
+                    content=payload,
                     headers={"Content-Type": ctype})
                 if r.status_code == 200 and r.json().get("project_done"):
                     done = True
             check("circuito HTTP completo del proyecto 2 → project_done",
                   done)
             check("auto-render disparado (orchestrator mockeado)",
-                  "proj_bridge_2" in _RENDER_CALLS, str(_RENDER_CALLS))
+                  _h("proj_bridge_2") in _RENDER_CALLS, str(_RENDER_CALLS))
 
     asyncio.new_event_loop().run_until_complete(_endpoints())
 

@@ -38,7 +38,7 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("main")
 
-app = FastAPI(title="YT Automation v2.0", version="2.19.1")
+app = FastAPI(title="YT Automation v2.0", version="2.20.0")
 
 # [flow-bridge v1.1] CORS endurecido (fusión con la línea 2.2 del repo):
 # solo la extensión Chrome (chrome-extension:// con ID válido de 32 chars a-p)
@@ -53,6 +53,9 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
+
+# PHASE 1 · M10 — techo global anti bomba de descompresión (Pillow)
+security.harden_pil(config.LIMITS["MAX_IMAGE_PIXELS"])
 
 
 @app.on_event("startup")
@@ -92,7 +95,12 @@ async def auth_guard(request, call_next):
     y doctor fix sin autenticación). En modo local (sin clave definida)
     no bloquea nada: cero ruptura."""
     _p = request.url.path
-    if security.enabled() and (_p.startswith("/api/") or _p.startswith("/mcp")) \
+    # PHASE 1 · M1: la documentación y el schema abierto también exigen
+    # clave (/docs, /redoc, /openapi.json — /mcp/* ya quedaba cubierto).
+    _is_docs = (_p in ("/docs", "/redoc", "/openapi.json")
+                or _p.startswith("/docs/") or _p.startswith("/redoc/"))
+    if security.enabled() and (_p.startswith("/api/") or _p.startswith("/mcp")
+                               or _is_docs) \
             and _p not in security.PUBLIC_PATHS:
         provided = request.headers.get("X-API-Key", "")
         if not provided:
@@ -109,10 +117,90 @@ async def auth_guard(request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def csrf_guard(request, call_next):
+    """PHASE 1 · M2 — política CSRF para mutaciones + tope de body.
+
+    POST/PUT/PATCH/DELETE con Origin o Referer PRESENTE deben pasar la
+    política security.origin_allowed (mismo host, cliente local o la
+    extensión Chrome); un origen externo (p. ej. https://evil.example que
+    lanza fetch no-cors/sendBeacon) → 403. Sin Origin/Referer (curl, API
+    clients, workers internos) se PERMITE: los navegadores siempre envían
+    Origin en mutaciones cross-site, así que la ausencia implica cliente
+    no-navegador. Además, Content-Length por encima del tope global → 413
+    (nunca consumir bodies ilimitados — A7/DoS)."""
+    m = request.method.upper()
+    if m in ("POST", "PUT", "PATCH", "DELETE"):
+        source = (request.headers.get("Origin")
+                  or request.headers.get("Referer") or "")
+        if source and not security.origin_allowed(
+                source, request.headers.get("Host", "")):
+            return JSONResponse(status_code=403,
+                                content={"detail": "origen no permitido para "
+                                                   "mutaciones (política CSRF)"})
+    cl = request.headers.get("content-length") or ""
+    if cl.isdigit() and int(cl) > config.LIMITS["MAX_BODY_BYTES"]:
+        return JSONResponse(status_code=413, content={"detail": "body demasiado grande"})
+    return await call_next(request)
+
+
+# ── PHASE 1 · helpers centralizados de seguridad de endpoints ──────────
+def _pid(pid: str) -> str:
+    """C1 · formato canónico del project_id (12 hex, política única en
+    security.validate_project_id). Todo endpoint que reciba pid pasa por
+    aquí: traversal («..», «%2e%2e»), rutas absolutas y caracteres
+    inesperados mueren con 400 ANTES de tocar filesystem/db."""
+    try:
+        return security.validate_project_id(pid)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+def _project_or_404(pid: str) -> dict:
+    """Formato válido (400) + proyecto existente (404) — sin filtrar nada."""
+    p = db.get_project(_pid(pid))
+    if not p:
+        raise HTTPException(404, "no existe")
+    return p
+
+
+async def _read_upload(file: UploadFile, max_bytes: int, what: str) -> bytes:
+    """Lee un UploadFile CON TOPE (antes file.read() volcaba el body entero
+    a RAM). Excede → 413 controlado, nunca 500 ni OOM."""
+    buf = bytearray()
+    while chunk := await file.read(1024 * 1024):
+        buf.extend(chunk)
+        if len(buf) > max_bytes:
+            raise HTTPException(413, f"{what} (> {max_bytes // (1024 * 1024)} MB)")
+    return bytes(buf)
+
+
+async def _read_body(request: Request, max_bytes: int) -> bytes:
+    """Lee el body crudo por stream con tope (flow jobs complete)."""
+    buf = bytearray()
+    async for chunk in request.stream():
+        buf.extend(chunk)
+        if len(buf) > max_bytes:
+            raise HTTPException(413, "body demasiado grande")
+    return bytes(buf)
+
+
+# M6 · estado interno propiedad del SISTEMA: el cliente NUNCA puede
+# falsificarlo vía meta_patch (qa_final = gate de publicación, estado de
+# publish, rutas de asset, estados del Execution Contract, binding). Todo lo
+# demás en meta sigue editable (transitions, subtitle_style, ideas…).
+_SYSTEM_META_KEYS = {
+    "qa_final", "publish_state", "publish_error", "youtube_id",
+    "audio_path", "video_url", "thumbnail_url",
+    "exec_state", "execution_state", "contract_result", "binding",
+    "asset_validity", "publishability",
+}
+
+
 # ──────────────────────────────────────────────────────── básicos ──
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "version": "2.19.1", "gemini": gemini_client.available(),
+    return {"ok": True, "version": "2.20.0", "gemini": gemini_client.available(),
             "nvidia": nvidia_client.available(),
             "nvidia_model": nvidia_client.last_model(),
             "whisper": whisper_service.available(),
@@ -272,7 +360,10 @@ async def save_config(body: dict):
         updates[key] = val
     if not updates:
         raise HTTPException(400, "nada que guardar")
-    saved = config.save_env(updates)
+    try:
+        saved = config.save_env(updates)
+    except ValueError as e:  # A2: valor con \r/\n — rechazo explícito, 400
+        raise HTTPException(400, str(e)) from e
     return {
         "ok": True, "saved": saved,
         "gemini": gemini_client.available(),
@@ -306,7 +397,8 @@ async def upload_client_secret(file: UploadFile = File(...)):
     name = (file.filename or "").lower()
     if not name.endswith(".json"):
         raise HTTPException(400, "El archivo debe ser client_secret.json")
-    raw = await file.read()
+    raw = await _read_upload(file, config.LIMITS["MAX_UPLOAD_JSON_BYTES"],
+                             "archivo demasiado grande")
     try:
         data = json.loads(raw)
     except Exception:  # noqa: BLE001
@@ -632,7 +724,7 @@ async def projects():
         scenes = db.get_scenes(p["id"])
         p["scenes_count"] = len(scenes)
         # v2.11.1 · portada para la tarjeta: 1ª imagen de escena en disco > miniatura > None
-        cover = next((f"/api/scenes/{s['id']}/image" for s in scenes
+        cover = next((f"/api/scenes/{s['id']}/image?project_id={p['id']}" for s in scenes
                       if s.get("image_path") and Path(s["image_path"]).exists()), None)
         if not cover and p.get("thumbnail_url") and Path(p["thumbnail_url"]).exists():
             cover = f"/api/projects/{p['id']}/thumbnail"
@@ -717,7 +809,10 @@ async def create_project(body: dict):
         if not url:
             raise HTTPException(400, "falta la URL")
         try:
+            security.validar_url(url)  # A8: SSRF — file://, LAN, metadatos…
             clean = url_mode.clean_url(url)
+        except ValueError as e:
+            raise HTTPException(400, f"URL no permitida: {e}")
         except Exception as e:  # noqa: BLE001
             raise HTTPException(400, f"URL inválida: {e}")
         meta["source_url"] = clean
@@ -795,9 +890,7 @@ async def create_project(body: dict):
 
 @app.get("/api/projects/{pid}")
 async def get_project(pid: str):
-    p = db.get_project(pid)
-    if not p:
-        raise HTTPException(404, "no existe")
+    p = _project_or_404(pid)  # C1: formato + existencia
     p["scenes"] = db.get_scenes(pid)
     job = db.active_job_for_project(pid)
     p["job"] = job
@@ -827,6 +920,12 @@ async def patch_project(pid: str, body: dict):
                                if isinstance(plats, list) else ["youtube"])
     meta_patch = body.get("meta_patch")
     if meta_patch:
+        if not isinstance(meta_patch, dict):
+            raise HTTPException(400, "meta_patch debe ser un objeto")
+        protegidas = sorted(set(map(str, meta_patch)) & _SYSTEM_META_KEYS)
+        if protegidas:  # M6: el estado interno no se falsifica
+            raise HTTPException(403, "campos del sistema no editables vía "
+                                     f"meta_patch: {', '.join(protegidas)}")
         fields["meta"] = {**(p.get("meta") or {}), **meta_patch}
     if fields:
         db.update_project(pid, **fields)
@@ -835,11 +934,17 @@ async def patch_project(pid: str, body: dict):
 
 @app.delete("/api/projects/{pid}")
 async def delete_project(pid: str):
+    # PHASE 1 · C1: formato canónico → existencia → ruta resuelta y
+    # CONTENIDA en OUTPUT_DIR; solo entonces rmtree (el exploit
+    # DELETE /api/projects/%2e%2e que borraba backend/data muere con 400).
+    _pid(pid)
+    if not db.get_project(pid):
+        raise HTTPException(404, "no existe")
     job = db.active_job_for_project(pid)
     if job:
         orchestrator.cancel_job(job["id"])
-    shutil.rmtree(OUTPUT_DIR / pid, ignore_errors=True)
-    db.delete_project(pid)
+    shutil.rmtree(security.safe_project_output_dir(pid), ignore_errors=True)
+    db.delete_project(pid)  # ahora también purga flow_jobs (integridad)
     return {"ok": True}
 
 
@@ -847,6 +952,7 @@ async def delete_project(pid: str):
 async def cleanup_project(pid: str):
     """Libera el disco: borra clips intermedios del proyecto (el MP4 final,
     imágenes, Flow y audio TTS se conservan). Útil si KEEP_INTERMEDIATES=1."""
+    _pid(pid)
     if not db.get_project(pid):
         raise HTTPException(404, "no existe")
     freed = video_pipeline.cleanup_intermediates(pid)
@@ -856,6 +962,7 @@ async def cleanup_project(pid: str):
 
 @app.post("/api/projects/{pid}/generate")
 async def generate(pid: str, body: dict | None = None):
+    _pid(pid)
     p = db.get_project(pid)
     if not p:
         raise HTTPException(404, "no existe")
@@ -946,6 +1053,7 @@ async def job_events(job_id: str):
 # ── media de proyectos ────────────────────────────────────────────────────
 @app.get("/api/projects/{pid}/video")
 async def project_video(pid: str):
+    _pid(pid)
     p = db.get_project(pid)
     if not p or not p.get("video_url") or not Path(p["video_url"]).exists():
         raise HTTPException(404, "video no disponible")
@@ -955,6 +1063,7 @@ async def project_video(pid: str):
 
 @app.get("/api/projects/{pid}/thumbnail")
 async def project_thumb(pid: str):
+    _pid(pid)
     p = db.get_project(pid)
     if not p or not p.get("thumbnail_url") or not Path(p["thumbnail_url"]).exists():
         raise HTTPException(404, "sin miniatura")
@@ -963,7 +1072,7 @@ async def project_thumb(pid: str):
 
 @app.get("/api/projects/{pid}/subtitles.srt")
 async def project_srt(pid: str):
-    words_file = OUTPUT_DIR / pid / "words.json"
+    words_file = security.safe_project_output_dir(_pid(pid)) / "words.json"  # M5
     if not words_file.exists():
         raise HTTPException(404, "sin subtítulos")
     words = json.loads(words_file.read_text())
@@ -982,6 +1091,7 @@ async def export_flow_json(pid: str, format: str = "transformacion",
     """ScriptData con el contrato exacto de la extensión.
     format=transformacion|generic|artesano (fabricación de personaje)."""
     from pipeline.flow_export import DEFAULT_BRAND, build_script_json
+    _pid(pid)
     p = db.get_project(pid)
     if not p:
         raise HTTPException(404, "no existe")
@@ -1005,6 +1115,7 @@ async def export_flow_zip(pid: str, idea: int = 1, format: str = "transformacion
     guion, metodo_chatgpt} + README. format=transformacion|generic|artesano · ai=1 usa
     Gemini free tier · character= nombre del héroe (modo artesano)."""
     from pipeline.flow_export import DEFAULT_BRAND, export_zip_bytes
+    _pid(pid)
     p = db.get_project(pid)
     if not p:
         raise HTTPException(404, "no existe")
@@ -1031,15 +1142,18 @@ async def import_flow(pid: str, file: UploadFile = File(...), overwrite: bool = 
     Mapea cada Escena_XX a la escena X del proyecto y actualiza image_path.
     """
     from pipeline import flow_import
+    _pid(pid)
     p = db.get_project(pid)
     if not p:
         raise HTTPException(404, "no existe")
     scenes = db.get_scenes(pid)
     if not scenes:
         raise HTTPException(400, "el proyecto no tiene escenas aún")
-    data = await file.read()
+    data = await _read_upload(file, config.LIMITS["MAX_ZIP_COMPRESSED_BYTES"],
+                              "ZIP demasiado grande")  # A7
     try:
-        result = flow_import.import_flow_zip(pid, data, OUTPUT_DIR / pid,
+        result = flow_import.import_flow_zip(pid, data,
+                                             security.safe_project_output_dir(pid),
                                              overwrite=overwrite)
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -1053,6 +1167,9 @@ async def import_flow(pid: str, file: UploadFile = File(...), overwrite: bool = 
 async def render_flow(pid: str):
     """Ensambla el MP4 final con las imágenes reales de Flow (sin regenerar guion/imágenes)."""
     from pipeline import orchestrator
+    _pid(pid)
+    if not db.get_project(pid):  # M4: antes ValueError→500
+        raise HTTPException(404, "no existe")
     scenes = db.get_scenes(pid)
     sin_img = [i + 1 for i, sc in enumerate(scenes)
                if not sc.get("image_path") or not Path(sc["image_path"]).exists()]
@@ -1065,15 +1182,19 @@ async def render_flow(pid: str):
 # ── editor de escenas ─────────────────────────────────────────────────────
 @app.patch("/api/scenes/{scene_id}")
 async def patch_scene(scene_id: str, body: dict):
-    allowed = {k: v for k, v in body.items()
+    # PHASE 1 · M3: la escena se verifica SIEMPRE contra su proyecto padre
+    # (id + project_id) — un scene_id de OTRO proyecto responde 404.
+    pid = _pid((body or {}).get("project_id") or "")
+    allowed = {k: v for k, v in (body or {}).items()
                if k in ("title", "narration", "image_prompt")}
-    if allowed:
-        db.update_scene(scene_id, **allowed)
-    return db.get_scenes(body["project_id"]) if body.get("project_id") else {"ok": True}
+    if allowed and db.update_scene(scene_id, project_id=pid, **allowed) == 0:
+        raise HTTPException(404, "escena no existe en ese proyecto")
+    return db.get_scenes(pid)
 
 
 @app.post("/api/projects/{pid}/reorder")
 async def reorder(pid: str, body: dict):
+    _pid(pid)
     ids: list[str] = body.get("scene_ids", [])
     db.reorder_scenes(pid, ids)
     return db.get_scenes(pid)
@@ -1081,28 +1202,34 @@ async def reorder(pid: str, body: dict):
 
 @app.post("/api/scenes/{scene_id}/regenerate-image")
 async def regen_image(scene_id: str, body: dict):
-    scene = next((s for s in db.get_scenes(body["project_id"]) if s["id"] == scene_id), None)
+    pid = _pid((body or {}).get("project_id") or "")  # M4: nunca KeyError→500
+    scene = db.get_scene_for_project(pid, scene_id)   # M3: scoped al proyecto
     if not scene:
         raise HTTPException(404, "escena no existe")
-    project = db.get_project(body["project_id"])
+    project = db.get_project(pid)
     path, method = await imgs_pipeline.generate_scene_image(scene, project, int(scene["idx"]))
     db.update_scene(scene_id, image_path=str(path))
-    return {"image": f"/api/scenes/{scene_id}/image?v={path}", "method": method}
+    return {"image": f"/api/scenes/{scene_id}/image?project_id={pid}&v={path}", "method": method}
 
 
 @app.get("/api/scenes/{scene_id}/image")
-async def scene_image(scene_id: str):
+async def scene_image(scene_id: str, project_id: str = ""):
+    # M3: el asset de una escena solo se sirve con el project_id correcto.
+    _pid(project_id)
     with db.connect() as con:
-        row = con.execute("SELECT image_path FROM scenes WHERE id=?", (scene_id,)).fetchone()
+        row = con.execute("SELECT image_path FROM scenes WHERE id=? AND project_id=?",
+                          (scene_id, project_id)).fetchone()
     if not row or not row["image_path"] or not Path(row["image_path"]).exists():
         raise HTTPException(404, "sin imagen")
     return FileResponse(row["image_path"])
 
 
 @app.get("/api/scenes/{scene_id}/audio")
-async def scene_audio(scene_id: str):
+async def scene_audio(scene_id: str, project_id: str = ""):
+    _pid(project_id)  # M3
     with db.connect() as con:
-        row = con.execute("SELECT audio_path FROM scenes WHERE id=?", (scene_id,)).fetchone()
+        row = con.execute("SELECT audio_path FROM scenes WHERE id=? AND project_id=?",
+                          (scene_id, project_id)).fetchone()
     if not row or not row["audio_path"] or not Path(row["audio_path"]).exists():
         raise HTTPException(404, "sin audio")
     return FileResponse(row["audio_path"], media_type="audio/wav")
@@ -1206,7 +1333,10 @@ async def publish_exchange(body: dict):
     code = (body.get("code") or "").strip()
     if not code:
         raise HTTPException(400, "falta el código")
-    ok = youtube_publish.exchange_code(code)
+    try:  # M4: un fallo OAuth jamás vuelve a ser un 500
+        ok = youtube_publish.exchange_code(code)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"intercambio OAuth falló: {str(e)[:200]}") from e
     return {"ok": ok}
 
 
@@ -1219,6 +1349,7 @@ async def publish_video(pid: str, body: dict):
       final, se rechaza 409 (nunca publicar un render fallido — §publishing).
     · publish_state en meta (DRAFT→PUBLISHING→PUBLISHED/FAILED) + cada
       intento queda como job kind=publish (historial auditable)."""
+    _pid(pid)
     p = db.get_project(pid)
     if not p or not p.get("video_url"):
         raise HTTPException(404, "video no disponible")
@@ -1280,7 +1411,12 @@ async def extension_images(body: dict):
     url = (body.get("url") or "").strip()
     if not url:
         raise HTTPException(400, "falta url")
-    eid = db.add_ext_image(url, body.get("project_id"), body.get("source", "imagefx"))
+    pid = ((body or {}).get("project_id") or "").strip() or None
+    if pid:  # M8/M3: no registrar imágenes contra proyectos inexistentes
+        _pid(pid)
+        if not db.get_project(pid):
+            raise HTTPException(404, "proyecto no existe")
+    eid = db.add_ext_image(url, pid, body.get("source", "imagefx"))
     return {"ok": True, "id": eid}
 
 
@@ -1303,6 +1439,7 @@ async def flow_jobs_enqueue(body: dict):
     pid = ((body or {}).get("project_id") or "").strip()
     if not pid:
         raise HTTPException(400, "falta project_id")
+    _pid(pid)  # C1
     fmt = (body or {}).get("format") or "transformacion"
     try:
         return flow_jobs.enqueue_project(pid, fmt=fmt,
@@ -1321,6 +1458,8 @@ async def flow_jobs_next(worker: str = "", project_id: str = ""):
     from services import flow_jobs
     if not (worker or "").strip():
         raise HTTPException(400, "falta worker")
+    if project_id.strip():
+        _pid(project_id.strip())  # C1
     job = flow_jobs.claim_next(worker.strip(),
                                pid=project_id.strip() or None)
     if not job:
@@ -1330,10 +1469,13 @@ async def flow_jobs_next(worker: str = "", project_id: str = ""):
 
 
 @app.post("/api/extension/flow/jobs/{job_id}/heartbeat")
-async def flow_jobs_heartbeat(job_id: str, token: str = ""):
-    """Renueva el lease del job reclamado (worker vivo)."""
+async def flow_jobs_heartbeat(job_id: str, token: str = "", worker: str = ""):
+    """Renueva el lease del job reclamado (worker vivo). PHASE 1 · M7:
+    exige worker + token + lease vigente — el token SOLO ya no autoriza."""
     from services import flow_jobs
-    res = flow_jobs.heartbeat(job_id, token)
+    if not (worker or "").strip():
+        raise HTTPException(400, "falta worker (identidad M7 obligatoria)")
+    res = flow_jobs.heartbeat(job_id, token, worker=worker.strip())
     if not res:
         raise HTTPException(409, "job no reclamado por este worker "
                                  "(token/lease inválido)")
@@ -1341,15 +1483,18 @@ async def flow_jobs_heartbeat(job_id: str, token: str = ""):
 
 
 @app.post("/api/extension/flow/jobs/{job_id}/complete")
-async def flow_jobs_complete(job_id: str, request: Request, token: str = ""):
+async def flow_jobs_complete(job_id: str, request: Request, token: str = "",
+                             worker: str = ""):
     """Sube el asset generado en Flow (binario crudo en el body). Valida
     PNG/JPEG/WEBP con PIL · MP4 con ffprobe. Si es el último job del proyecto
     mapea los assets a las escenas y, si están completas, lanza el render
     automáticamente (orchestrator.start_flow_render)."""
     from services import flow_jobs
-    data = await request.body()
+    if not (worker or "").strip():  # M7: identidad obligatoria
+        raise HTTPException(400, "falta worker (identidad M7 obligatoria)")
+    data = await _read_body(request, config.LIMITS["FLOW_JOB_BODY_BYTES"])  # M10/DoS
     try:
-        res = flow_jobs.complete(job_id, token, data)
+        res = flow_jobs.complete(job_id, token, data, worker=worker.strip())
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     if not res:
@@ -1371,13 +1516,17 @@ async def flow_jobs_complete(job_id: str, request: Request, token: str = ""):
 
 
 @app.post("/api/extension/flow/jobs/{job_id}/fail")
-async def flow_jobs_fail(job_id: str, token: str = "", body: dict | None = None):
+async def flow_jobs_fail(job_id: str, token: str = "", worker: str = "",
+                         body: dict | None = None):
     """Marca error y reintenta (queued) o deja dead al agotar max_attempts
     (imagen 3 · video 2). [execution-contract v1]: errores con prefijo
     CONFIG_* → terminal dead (sin reintento, sin adaptación)."""
     from services import flow_jobs
+    if not (worker or "").strip():  # M7: identidad obligatoria
+        raise HTTPException(400, "falta worker (identidad M7 obligatoria)")
     res = flow_jobs.fail(job_id, token,
-                         ((body or {}).get("error") or "")[:500])
+                         ((body or {}).get("error") or "")[:500],
+                         worker=worker.strip())
     if not res:
         raise HTTPException(409, "job no reclamado por este worker "
                                  "(token/lease inválido)")
@@ -1385,7 +1534,7 @@ async def flow_jobs_fail(job_id: str, token: str = "", body: dict | None = None)
 
 
 @app.post("/api/extension/flow/jobs/{job_id}/progress")
-async def flow_jobs_progress(job_id: str, token: str = "",
+async def flow_jobs_progress(job_id: str, token: str = "", worker: str = "",
                              body: dict | None = None):
     """[execution-contract v1] §9 — progreso fino de la máquina de estados
     (FLOW_TAB_READY → CAPABILITIES_CAPTURED → CONTROLS_CONFIGURED →
@@ -1398,7 +1547,8 @@ async def flow_jobs_progress(job_id: str, token: str = "",
                                    (b.get("detail") or "")[:300],
                                    b.get("evidence")
                                    if isinstance(b.get("evidence"), dict)
-                                   else None)
+                                   else None,
+                                   worker=(worker.strip() or None))  # M7 verify-if-provided
     if res is None:
         raise HTTPException(409, "job no reclamado por este worker "
                                  "(token/lease inválido)")
@@ -1408,7 +1558,7 @@ async def flow_jobs_progress(job_id: str, token: str = "",
 
 
 @app.post("/api/extension/flow/jobs/{job_id}/generate-consent")
-async def flow_jobs_generate_consent(job_id: str, token: str = "",
+async def flow_jobs_generate_consent(job_id: str, token: str = "", worker: str = "",
                                      body: dict | None = None):
     """[execution-contract v1.1] §7.1 — CONSENTIMIENTO DE GENERACIÓN
     (corrige CF-E2E-01: PRE-GENERATION CONTRACT GATE NOT ENFORCED, P0).
@@ -1425,7 +1575,8 @@ async def flow_jobs_generate_consent(job_id: str, token: str = "",
     contrato de lease congelado (claim/heartbeat/complete/fail intactos)."""
     from services import flow_jobs
     b = body if isinstance(body, dict) else {}
-    res = flow_jobs.generation_consent(job_id, token, b)
+    res = flow_jobs.generation_consent(job_id, token, b,
+                                       worker=(worker.strip() or None))  # M7 verify-if-provided
     if res is None:
         raise HTTPException(409, "job no reclamado por este worker "
                                  "(token/lease inválido)")
@@ -1435,8 +1586,11 @@ async def flow_jobs_generate_consent(job_id: str, token: str = "",
 @app.get("/api/extension/flow/jobs/status/{pid}")
 async def flow_jobs_status(pid: str):
     """Estado de la cola del proyecto: counts por status + exec_states
-    finos del Execution Contract + detalle de jobs."""
+    finos del Execution Contract + detalle de jobs. PHASE 1 · A6: la
+    consulta recupera leases vencidos (idempotente) — la extensión nunca
+    se estanca esperando un claim que no llega."""
     from services import flow_jobs
+    _pid(pid)
     return flow_jobs.status_for_project(pid)
 
 
@@ -1446,6 +1600,7 @@ async def video_qa_endpoint(pid: str):
     """QA REAL del proyecto con ffprobe/PIL: imágenes y clips de Flow por
     escena + render final (si existe). Reporta flags error/warn/ok; nunca
     lanza por assets malos (404 solo si el proyecto no existe)."""
+    _pid(pid)
     from services import video_qa
     try:
         return video_qa.qa_project(pid)
@@ -1605,6 +1760,8 @@ async def production_doctor_report():
 async def production_doctor_preflight(project_id: str | None = None):
     """REAL FLOW PREFLIGHT: barrera antes de una prueba real con Google
     Flow. Devuelve REAL FLOW PREFLIGHT PASS o REAL FLOW BLOCKED + motivos."""
+    if project_id:
+        _pid(project_id)  # C1
     from services.production_doctor import preflight as pdoc_preflight
     return await asyncio.to_thread(pdoc_preflight, project_id)
 

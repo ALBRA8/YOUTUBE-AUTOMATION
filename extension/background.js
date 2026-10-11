@@ -189,6 +189,15 @@ async function loadState() {
   try {
     const o = await chrome.storage.session.get(SESSION_KEY);
     hydrateState(o && o[SESSION_KEY]);
+    /* [PHASE 1 · A6] rateLimitRestoreTimer NO sobrevive al SW (no es
+     * persistido): si el SW durmió durante un cooldown, hydrate restaura los
+     * items RATE_LIMITED pero nadie re-arma el restore → zombies que
+     * estancan la cola y el bridge. Re-armar aquí (idempotente), CON o SIN
+     * cooldown vigente: si el SW durmió MÁS que el cooldown, cooldownUntil
+     * quedó en pasado y hay que restaurar igual (delay = max(0, ...)+1000). */
+    if (queue.some((i) => i.status === STATUS.RATE_LIMITED) && !rateLimitRestoreTimer) {
+      armRateLimitRestore();
+    }
     if (running) {
       startPollingIfNeeded();
       ensureKeepalive();
@@ -1593,6 +1602,26 @@ function watchdogCheck() {
 
 /* ------------- Rate limit + cooldown (manual 3.7 / 4.5) ------------------- */
 let rateLimitRestoreTimer = null;
+/* [PHASE 1 · A6] El setTimeout de restauración vive SOLO en memoria del
+ * Service Worker: si el SW muere durante el cooldown, el timer desaparece y
+ * los items RATE_LIMITED quedan zombies (bloquean __bridgeHandleJob con
+ * 'cola local ocupada' para siempre). Helper IDEMPOTENTE que arma (o re-arma)
+ * la restauración: RATE_LIMITED → PENDING, cooldown a 0, clear del timer y
+ * tick. Reutilizado por triggerRateLimit, loadState (tras hydrate) y tick. */
+function armRateLimitRestore() {
+  if (rateLimitRestoreTimer) return; // idempotente: ya hay un restore armado
+  rateLimitRestoreTimer = setTimeout(() => {
+    clearTimeout(rateLimitRestoreTimer);
+    rateLimitRestoreTimer = null;
+    for (const item of queue) {
+      if (item.status === STATUS.RATE_LIMITED) item.status = STATUS.PENDING;
+    }
+    rateLimitCooldownUntil = 0;
+    persistState();
+    broadcastState();
+    tickSoon(500);
+  }, Math.max(0, rateLimitCooldownUntil - Date.now()) + 1000);
+}
 function triggerRateLimit() {
   const now = Date.now();
   if (now < rateLimitCooldownUntil) return;
@@ -1603,16 +1632,8 @@ function triggerRateLimit() {
   }
   persistState();
   broadcastState();
-  if (rateLimitRestoreTimer) clearTimeout(rateLimitRestoreTimer);
-  rateLimitRestoreTimer = setTimeout(() => {
-    for (const item of queue) {
-      if (item.status === STATUS.RATE_LIMITED) item.status = STATUS.PENDING;
-    }
-    rateLimitCooldownUntil = 0;
-    persistState();
-    broadcastState();
-    tickSoon(500);
-  }, RATE_LIMIT_COOLDOWN_MS + 1000);
+  if (rateLimitRestoreTimer) clearTimeout(rateLimitRestoreTimer); // re-arma con el NUEVO cooldown
+  armRateLimitRestore();
 }
 
 /* ------------------- Cola: inicio / tick / inyeccion ---------------------- */
@@ -1654,6 +1675,7 @@ function onMessageStartQueue(msg) {
   running = true;
   lastInjectAt = 0;
   rateLimitCooldownUntil = 0;
+  clearTimeout(rateLimitRestoreTimer); rateLimitRestoreTimer = null; // [PHASE 1 · A6] sin timer huérfano
   downloadedTileIds = new Set();
   mediaIdToScene = new Map();
   sceneMediaCounts = new Map();
@@ -1679,6 +1701,14 @@ function tickSoon(ms) {
 function tick(initial) {
   if (!running) return;
   const now = Date.now();
+  /* [PHASE 1 · A6] Defensa en profundidad: si el SW durmió más que el
+   * cooldown, cooldownUntil quedó en pasado y este early-return NO se
+   * ejecuta, pero los RATE_LIMITED seguirían zombies (el tick solo elige
+   * PENDING). Misma condición que loadState, sin check temporal: si hay
+   * RATE_LIMITED y nadie armó el restore, armarlo (idempotente). */
+  if (queue.some((i) => i.status === STATUS.RATE_LIMITED) && !rateLimitRestoreTimer) {
+    armRateLimitRestore();
+  }
   if (now < rateLimitCooldownUntil) {
     tickSoon(rateLimitCooldownUntil - now + 250);
     return;
@@ -2063,6 +2093,7 @@ function resetAll() {
   sceneSettings = new Map();
   orphanNetwork = [];
   rateLimitCooldownUntil = 0;
+  clearTimeout(rateLimitRestoreTimer); rateLimitRestoreTimer = null; // [PHASE 1 · A6] sin timer huérfano
   lastStateSummary = '';
   if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = null; }
   stopPolling();
@@ -2558,6 +2589,7 @@ function __bridgeHandleJob(job, sendResult) { // [bridge v1]
       running = true;
       lastInjectAt = 0;
       rateLimitCooldownUntil = 0;
+      clearTimeout(rateLimitRestoreTimer); rateLimitRestoreTimer = null; // [PHASE 1 · A6] sin timer huérfano
       persistState();
       startPollingIfNeeded();
       ensureKeepalive();

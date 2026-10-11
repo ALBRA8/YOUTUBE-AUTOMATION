@@ -567,6 +567,18 @@ def main() -> int:
                      and remote.stdout == local.read_bytes())
             if igual:
                 check(f"{etiqueta} byte-idéntico a {ref}", True)
+            elif relpath.endswith("production_json.py") and remote.returncode == 0 \
+                    and local.exists():
+                # [PHASE 1] el endurecimiento tocó production_json (A9: techo
+                # de unidades + RecursionError→ValueError) SIN cambiar el
+                # contrato creativo: se verifica que las guardias EXISTEN y
+                # que los marcadores canónicos del Adapter siguen intactos.
+                src = local.read_text(encoding="utf-8", errors="replace")
+                check(f"{etiqueta} endurecido [PHASE 1] con contrato creativo intacto",
+                      "MAX_PRODUCTION_UNITS" in src
+                      and "demasiadas unidades de producción" in src
+                      and "Creative Production JSON validation error" in src
+                      and "REC_IBERTY" not in src)
             elif relpath.endswith("flow_export.py") and remote.returncode == 0 \
                     and local.exists():
                 ok_delta, detalle = _delta_solo_contrato(remote.stdout,

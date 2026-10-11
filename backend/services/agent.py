@@ -403,28 +403,72 @@ async def execute(plan_out: dict, db, orchestrator, avatars: list[dict]) -> dict
                 "action": "delete_niche", "deleted": name}
 
     if action == "delete_project":
-        name = (params.get("project_name") or "").lower().strip()
+        # PHASE 1 · M9: NUNCA fuzzy matching en acciones destructivas.
+        # Exige project_id exacto y validado; solo si NO viene, un match de
+        # título EXACTO único sirve de puente de compatibilidad. Cero o
+        # múltiples candidatos → NO se ejecuta (se listan para el usuario).
+        # La eliminación usa el MISMO pipeline seguro que DELETE REST:
+        # validate_project_id → safe_project_output_dir → rmtree → db.
+        import shutil as _shutil
+        import security as _sec
+        from config import OUTPUT_DIR as _OUT  # noqa: F401 (documental)
+        raw_pid = str(params.get("project_id") or "").strip()
+        name = (params.get("project_name") or params.get("name") or "").strip()
         projects = db.list_projects(limit=100)
         target = None
-        if name:
-            words = [w for w in re.split(r"\W+", name) if len(w) > 3][:3]
-            for p in projects:
-                if all(w in p["title"].lower() for w in words) and words:
-                    target = p
-                    break
-            target = target or next(
-                (p for p in projects
-                 if any(w in p["title"].lower() for w in words)), None)
-        if not target:
-            return {"reply": f"No encontré ningún proyecto «{name or '?'}».",
-                    "action": "none"}
-        db.delete_project(target["id"])
+        if raw_pid:
+            try:
+                _sec.validate_project_id(raw_pid)
+            except ValueError:
+                return {"reply": f"project_id inválido: «{raw_pid[:40]}».",
+                        "action": "none"}
+            target = next((p for p in projects if p["id"] == raw_pid), None)
+            if not target:
+                return {"reply": f"No existe ningún proyecto con id «{raw_pid}».",
+                        "action": "none"}
+        else:
+            exact = ([p for p in projects
+                      if p["title"].strip().lower() == name.lower()]
+                     if name else [])
+            if len(exact) == 1:
+                target = exact[0]
+            else:
+                if not name:
+                    return {"reply": "Para borrar necesito el proyecto EXACTO "
+                                     "(project_id o título completo).",
+                            "action": "none"}
+                cand = [p for p in projects
+                        if name.lower() in p["title"].lower()][:5]
+                lista = "\n".join(f"• {p['title']} — id {p['id']}"
+                                  for p in cand) or "(sin coincidencias)"
+                return {"reply": "No ejecuto borrados ambiguos. Coincidencias "
+                                 f"para «{name}»:\n{lista}\nConfirma con el "
+                                 "project_id exacto.",
+                        "action": "none"}
+        pid = target["id"]
+        try:
+            out_dir = _sec.safe_project_output_dir(pid)
+        except ValueError:
+            out_dir = None
+        if out_dir is not None:
+            _shutil.rmtree(out_dir, ignore_errors=True)
+        db.delete_project(pid)  # purga también flow_jobs (integridad)
         return {"reply": reply or f"Proyecto «{target['title']}» eliminado 🗑️",
-                "action": "delete_project", "deleted": target["title"]}
+                "action": "delete_project", "deleted": target["title"],
+                "deleted_id": pid}
 
     if action == "cleanup_failed":
+        # PHASE 1 · M9/C1: mismos ids exactos (por estado, no fuzzy) y MISMO
+        # pipeline seguro de borrado que DELETE REST.
+        import shutil as _shutil
+        import security as _sec
         failed = [p for p in db.list_projects(limit=100) if p.get("status") == "failed"]
         for p in failed:
+            try:
+                _shutil.rmtree(_sec.safe_project_output_dir(p["id"]),
+                               ignore_errors=True)
+            except ValueError:
+                pass  # id malformado: solo DB (fail-closed en filesystem)
             db.delete_project(p["id"])
         if not failed:
             return {"reply": "No había proyectos fallidos — todo limpio ✨",

@@ -56,6 +56,17 @@ def _run(cmd: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
 
+def _guard_ssrf(url: str) -> str:
+    """[PHASE 1 · A8] La política SSRF es de ALBRA, no de yt-dlp: TODA URL
+    que vaya a tocarse con yt-dlp pasa por la guardia central de security
+    (solo http/https hacia hosts públicos resueltos a IPs públicas).
+    file://, loopback, LAN privada, link-local/metadatos (169.254) y hosts
+    que resuelvan a redes internas se rechazan con ValueError — no se
+    confía en que una versión de yt-dlp bloquee file://."""
+    import security  # perezoso (evita ciclos en la importación de servicios)
+    return security.validar_url(url)
+
+
 def clean_url(url: str) -> str:
     """Quita parámetros de tracking para evitar contenido privado/roto.
     YouTube: normaliza a watch?v=ID. TikTok: conserva /@user/video/ID y
@@ -80,6 +91,7 @@ def _cookies_args(cookies: str | None) -> list[str]:
 
 
 async def fetch_metadata(url: str, cookies: str | None = None) -> dict:
+    url = _guard_ssrf(url)  # [PHASE 1 · A8]
     def _job():
         p = _run([*ytdlp_cmd(), "-j", "--no-warnings", "--skip-download",
                   *_cookies_args(cookies), url], timeout=60)
@@ -94,6 +106,7 @@ async def fetch_metadata(url: str, cookies: str | None = None) -> dict:
 async def download_audio(url: str, out_base: str,
                          cookies: str | None = None) -> Path:
     """Descarga solo el audio (mp3) del video origen."""
+    url = _guard_ssrf(url)  # [PHASE 1 · A8]
     dest = TMP_DIR / f"{out_base}.%(ext)s"
 
     def _job():
@@ -120,6 +133,7 @@ async def transcript_from_url(url: str, job_base: str,
     cookies: nombre del navegador ('chrome', 'firefox', 'edge', 'brave')
     para reutilizar su sesión — desbloquea el anti-bot sin coste."""
     url = clean_url(url)
+    url = _guard_ssrf(url)  # [PHASE 1 · A8] valida la URL YA limpia
     meta = await fetch_metadata(url, cookies)
     audio = await download_audio(url, job_base, cookies)
     words = await whisper_service.transcribe_words(str(audio))

@@ -169,6 +169,11 @@ def _migrate(con: sqlite3.Connection) -> None:
     # segundo Creative Engine (ver services/flow_adaptation.py).
     if fj and "prompt_adapted" not in fj:
         con.execute("ALTER TABLE flow_jobs ADD COLUMN prompt_adapted TEXT")
+    # PHASE 1 · M8: binding de la ejecución que produjo el asset (job_id,
+    # worker, sha256, estado de identidad Flow — «not_verifiable» mientras
+    # Flow no ofrezca identidad fuerte verificable; NO se inventa).
+    if fj and "binding_json" not in fj:
+        con.execute("ALTER TABLE flow_jobs ADD COLUMN binding_json TEXT")
     # [execution-contract v1] spec de ejecución + estado fino + resultado
     # contractual (ver services/execution_contract.py). Tres columnas
     # independientes: el spec (requested), el progreso mecánico (exec_state,
@@ -301,7 +306,11 @@ def list_projects(limit: int = 100) -> list[dict]:
 
 
 def delete_project(pid: str) -> None:
+    """PHASE 1 · integridad: además de scenes/jobs/projects elimina las
+    filas de flow_jobs del proyecto (antes quedaban huérfanas y seguían
+    reclamables por la extensión — hallazgo de la auditoría de jobs)."""
     with connect() as con:
+        con.execute("DELETE FROM flow_jobs WHERE project_id=?", (pid,))
         con.execute("DELETE FROM scenes WHERE project_id=?", (pid,))
         con.execute("DELETE FROM jobs WHERE project_id=?", (pid,))
         con.execute("DELETE FROM projects WHERE id=?", (pid,))
@@ -330,13 +339,38 @@ def get_scenes(pid: str) -> list[dict]:
     return [row_to_dict(r) for r in rows]
 
 
-def update_scene(scene_id: str, **fields) -> None:
+def get_scene_for_project(project_id: str, scene_id: str) -> dict | None:
+    """PHASE 1 · M3: único acceso legítimo a una escena desde el API —
+    SIEMPRE scoped a su proyecto padre (scene.project_id == project_id).
+    Devuelve None si no existe O si pertenece a otro proyecto (404 sin
+    filtrar existencia). Nunca usar un getter solo por scene_id."""
+    with connect() as con:
+        row = con.execute(
+            "SELECT * FROM scenes WHERE id=? AND project_id=?",
+            (scene_id, project_id)).fetchone()
+    return row_to_dict(row) if row else None
+
+
+def update_scene(scene_id: str, project_id: str | None = None, **fields) -> int:
+    """Actualiza una escena. PHASE 1 · M3: si se pasa project_id el UPDATE
+    queda scoping id+project (patrón reorder_scenes) y devuelve el rowcount
+    (0 = escena inexistente o de OTRO proyecto → el caller responde 404).
+    Compat: sin project_id conserva el comportamiento histórico."""
     fields = {k: (json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v)
               for k, v in fields.items()}
     fields = _whitelist(fields, _SCENE_COLS)
+    if not fields:
+        return 0
     sets = ", ".join(f"{k}=?" for k in fields)
+    if project_id is None:
+        sql = f"UPDATE scenes SET {sets} WHERE id=?"
+        args = (*fields.values(), scene_id)
+    else:
+        sql = f"UPDATE scenes SET {sets} WHERE id=? AND project_id=?"
+        args = (*fields.values(), scene_id, project_id)
     with connect() as con:
-        con.execute(f"UPDATE scenes SET {sets} WHERE id=?", (*fields.values(), scene_id))
+        cur = con.execute(sql, args)
+    return cur.rowcount
 
 
 def reorder_scenes(pid: str, scene_ids: list[str]) -> None:

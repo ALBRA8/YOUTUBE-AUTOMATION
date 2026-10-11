@@ -547,7 +547,10 @@ def _http_probe(url: str, timeout: float = 2.5,
     except ValueError as e:
         return False, f"URL rechazada (guardia SSRF): {e}"[:160]
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
+        # [PHASE 1 · A1] opener con redirects revalidados: antes urlopen
+        # seguía hasta 10 saltos SIN re-chequear (público→privado pasaba).
+        with _sec.safe_urlopen(url, timeout=timeout,
+                               allow_private=trusted_private) as resp:
             body = resp.read(300).decode("utf-8", "replace")
             return resp.status == 200, f"HTTP {resp.status}: {body[:120]}"
     except Exception as e:  # noqa: BLE001

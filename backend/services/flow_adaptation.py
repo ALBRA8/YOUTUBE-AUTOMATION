@@ -230,8 +230,33 @@ def _ledger() -> Path:
     return Path(LEDGER_PATH)
 
 
+def _rotate_ledger_if_needed() -> int:
+    """[PHASE 1 · M11] Retención del ledger operacional: si supera
+    LEDGER_MAX_LINES líneas, reescribe conservando la cola (60% del límite)
+    con escritura atómica (tmp + os.replace). Idempotente; jamás tumba la
+    operación (un fallo de rotación solo loguea). Devuelve líneas finales."""
+    import os as _os
+    import config as _cfg
+    try:
+        p = _ledger()
+        if not p.exists():
+            return 0
+        max_lines = int(_cfg.LIMITS.get("LEDGER_MAX_LINES", 5000))
+        lines = p.read_text(encoding="utf-8").splitlines()
+        if len(lines) <= max_lines:
+            return len(lines)
+        keep = max(1, int(max_lines * 0.6))
+        tmp = p.with_suffix(".jsonl.tmp")
+        tmp.write_text("\n".join(lines[-keep:]) + "\n", encoding="utf-8")
+        _os.replace(tmp, p)
+        return keep
+    except Exception:  # noqa: BLE001 — observabilidad, nunca crítico
+        return -1
+
+
 def _registrar(registro: dict) -> None:
-    """Append-only al ledger operacional. Jamás tumba la operación."""
+    """Append-only al ledger operacional. Jamás tumba la operación.
+    [PHASE 1 · M11] tras el append aplica retención (rotación por tamaño)."""
     try:
         p = _ledger()
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -239,6 +264,7 @@ def _registrar(registro: dict) -> None:
         reg.setdefault("ts", datetime.now(timezone.utc).isoformat(timespec="seconds"))
         with p.open("a", encoding="utf-8") as f:
             f.write(json.dumps(reg, ensure_ascii=False) + "\n")
+        _rotate_ledger_if_needed()
     except Exception:  # noqa: BLE001 — observabilidad, nunca crítico
         pass
 

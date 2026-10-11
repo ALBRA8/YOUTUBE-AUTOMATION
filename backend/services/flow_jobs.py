@@ -30,6 +30,7 @@ worker reclamó el job ya no puede robarle el claim (TOCTOU cerrado).
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import uuid
@@ -227,15 +228,31 @@ def _recover_en_con(con, cutoff: str) -> int:
     return cur.rowcount
 
 
+def _purge_retencion_en_con(con) -> int:
+    """[PHASE 1 · M11] Purga con retención de flow_jobs terminales: done/dead
+    con updated_at anterior a now − FLOW_JOBS_RETENTION_DAYS días se borran.
+    Idempotente (DELETE por cutoff). config se lee EN RUNTIME (import config)
+    para que tests y operator puedan ajustar el límite sin reiniciar."""
+    import config  # en runtime (límite ajustable por .env/tests)
+    dias = int(config.LIMITS.get("FLOW_JOBS_RETENTION_DAYS", 30) or 30)
+    cutoff = _iso(_now() - timedelta(days=dias))
+    cur = con.execute(
+        """DELETE FROM flow_jobs WHERE status IN ('done','dead')
+           AND updated_at < ?""", (cutoff,))
+    return cur.rowcount
+
+
 def recover_expired() -> int:
     """Jobs claimed con lease vencido → queued (worker muerto) o dead si
-    agotó MAX_LEASE_CYCLES. Devuelve cuántos se recuperaron. Atomic:
+    agotó MAX_LEASE_CYCLES; además [PHASE 1 · M11] purga done/dead con
+    retención. Devuelve cuántos se recuperaron (la purga no cuenta). Atomic:
     BEGIN IMMEDIATE (mismo lock que claim_next)."""
     cutoff = _iso(_now())
     con = db.connect()
     try:
         con.execute("BEGIN IMMEDIATE")
         n = _recover_en_con(con, cutoff)
+        _purge_retencion_en_con(con)  # [PHASE 1 · M11] misma tx, idempotente
         con.commit()
         return n
     except Exception:
@@ -291,24 +308,47 @@ def claim_next(worker: str, pid: str | None = None) -> dict | None:
 
 # ── heartbeat / complete / fail ───────────────────────────────────────────────
 
-def _claimed_by_token(con, job_id: str, token: str):
-    """Fila del job si está claimed con ESE token (nonce del claim). Si no, None."""
+def _claimed_by_token(con, job_id: str, token: str, worker=None,
+                      require_lease: bool = False):
+    """Fila del job si está claimed con ESE token (nonce del claim). Si no, None.
+
+    [PHASE 1 · M7] Identidad del worker en capas, fail-closed:
+      - SIEMPRE: status='claimed' AND job_token=? (nonce del claim, como hoy).
+      - worker is not None (INCLUYendo ""): AND worker=? — verify-if-provided.
+        Un worker "" jamás coincide con un worker real (los claims siempre
+        escriben worker no vacío: main.py exige worker en /next), así que
+        "" niega el acceso; None (llamada histórica sin worker) NO filtra —
+        compatibilidad con ~60 llamadas posicionales de tests.
+      - require_lease=True: AND lease_until IS NOT NULL AND vigente (comparación
+        ISO lexicográfica, mismo formato que escribe claim/heartbeat) — una
+        lease vencida es rechazo aunque el token siga en la fila.
+    """
     if not token:
         return None
-    row = con.execute(
-        "SELECT * FROM flow_jobs WHERE id=? AND status='claimed' AND job_token=?",
-        (job_id, token)).fetchone()
-    return row
+    q = ("SELECT * FROM flow_jobs WHERE id=? AND status='claimed' "
+         "AND job_token=?")
+    params: list = [job_id, token]
+    if worker is not None:
+        q += " AND worker=?"
+        params.append(worker)
+    if require_lease:
+        q += " AND lease_until IS NOT NULL AND lease_until >= ?"
+        params.append(_iso(_now()))
+    return con.execute(q, params).fetchone()
 
 
-def heartbeat(job_id: str, token: str) -> dict | None:
+def heartbeat(job_id: str, token: str, worker=None) -> dict | None:
     """Renueva el lease SOLO si el job sigue claimed con ESE token. BEGIN
     IMMEDIATE + UPDATE condicional: sin TOCTOU (un heartbeat antiguo que
-    compite contra un re-claim ya no puede robar el lease del nuevo worker)."""
+    compite contra un re-claim ya no puede robar el lease del nuevo worker).
+
+    [PHASE 1 · M7] worker (verify-if-provided) + lease vigente exigidos en la
+    guardia: un heartbeat de otro worker o con lease vencida → None (409)."""
     con = db.connect()
     try:
         con.execute("BEGIN IMMEDIATE")
-        row = _claimed_by_token(con, job_id, token)
+        row = _claimed_by_token(con, job_id, token, worker=worker,
+                                require_lease=True)
         if not row:
             con.rollback()
             return None
@@ -345,14 +385,21 @@ def _spec_of_row(row) -> dict | None:
         return None
 
 
-def complete(job_id: str, token: str, data: bytes) -> dict | None:
+def complete(job_id: str, token: str, data: bytes,
+             worker=None) -> dict | None:
     """Valida y guarda el asset; valida el CONTRATO (§13) y marca done.
 
     Devuelve {ok, asset_path, project_done, renderable, contract} o None si
     el token/estado no es válido (409). Lanza ValueError si el asset no pasa
     validación (422) o si INCUMPLE EL CONTRATO (CONTRACT_VIOLATION →
     ASSET_INVALID terminal: el job queda dead, jamás reencola, jamás DONE —
-    un asset de 5s con spec de 8s no puede terminar en done)."""
+    un asset de 5s con spec de 8s no puede terminar en done).
+
+    [PHASE 1 · M7] worker (verify-if-provided) + lease vigente exigidos en la
+    guardia. [PHASE 1 · M8] el UPDATE final a done persiste binding_json: el
+    binding v1 verificable de la ejecución (job_id + worker + token + lease +
+    sha256 del asset); Flow NO expone hoy identidad de proyecto verificable,
+    así que flow_identity_state queda "not_verifiable" SIEMPRE (no se inventa)."""
     if not data:
         raise ValueError("body vacío: envía el binario del asset")
     violation = None
@@ -360,7 +407,8 @@ def complete(job_id: str, token: str, data: bytes) -> dict | None:
     con = db.connect()
     try:
         con.execute("BEGIN IMMEDIATE")
-        row = _claimed_by_token(con, job_id, token)
+        row = _claimed_by_token(con, job_id, token, worker=worker,
+                                require_lease=True)
         if not row:
             con.rollback()
             return None
@@ -463,14 +511,32 @@ def complete(job_id: str, token: str, data: bytes) -> dict | None:
                      job_id))
                 con.commit()
             else:
+                # [PHASE 1 · M8] binding de ejecución (dentro de la tx, antes
+                # del UPDATE a done). Identidad verificable v1 = job_id +
+                # worker (el que entrega el endpoint o el del claim) + token +
+                # lease (ya verificadas por la guardia) + sha256 del asset.
+                # flow_identity: Flow no expone identidad de proyecto
+                # verificable hoy → "not_verifiable" SIEMPRE, jamás inventado.
+                binding = {
+                    "albra_project_id": pid,
+                    "job_id": job_id,
+                    "scene_number": no,
+                    "worker": worker or row["worker"],
+                    "asset_sha256": hashlib.sha256(data).hexdigest(),
+                    "flow_identity_state": "not_verifiable",
+                    "flow_identity": None,
+                    "recorded_at": _iso(_now()),
+                }
                 con.execute(
                     """UPDATE flow_jobs SET status='done', asset_path=?, error=NULL,
-                       exec_state=?, contract_result=?, lease_until=?, updated_at=?
+                       exec_state=?, contract_result=?, lease_until=?,
+                       binding_json=?, updated_at=?
                        WHERE id=?""",
                     (str(asset_path), ec.EXEC_STATE_CONTRACT_OK,
                      json.dumps(contract_result, ensure_ascii=False)
                      if contract_result else None,
-                     None, _iso(_now()), job_id))
+                     None, json.dumps(binding, ensure_ascii=False),
+                     _iso(_now()), job_id))
                 cierre_p2 = bool(row["prompt_adapted"])  # [flow-adaptation v1]
                 pending = con.execute(
                     """SELECT COUNT(*) c FROM flow_jobs WHERE project_id=?
@@ -569,7 +635,7 @@ def _apply_assets_to_scenes(con, pid: str) -> bool:
     return all_have
 
 
-def fail(job_id: str, token: str, error: str) -> dict | None:
+def fail(job_id: str, token: str, error: str, worker=None) -> dict | None:
     """Reintenta (queued) o marca dead al agotar max_attempts. BEGIN
     IMMEDIATE + UPDATE condicional por token: un fail antiguo que compite
     contra un re-claim no puede tumbar el claim del nuevo worker (TOCTOU
@@ -590,7 +656,10 @@ def fail(job_id: str, token: str, error: str) -> dict | None:
         externa). Semántica de cola intacta: reintenta por attempts.
       - resto → PROVIDER_FAILURE: SOLO errores con evidencia de proveedor
         tras una generación efectivamente disparada (el gate §7.1 garantiza
-        que llegar aquí implica controles required VERIFIED o ausentes)."""
+        que llegar aquí implica controles required VERIFIED o ausentes).
+
+    [PHASE 1 · M7] worker (verify-if-provided) + lease vigente exigidos en la
+    guardia: un fail de otro worker o con lease vencida → None (409)."""
     err = (error or "")
     config_terminal = None
     for st in (ec.EXEC_STATE_CONFIG_UNSUPPORTED,
@@ -606,7 +675,8 @@ def fail(job_id: str, token: str, error: str) -> dict | None:
     con = db.connect()
     try:
         con.execute("BEGIN IMMEDIATE")
-        row = _claimed_by_token(con, job_id, token)
+        row = _claimed_by_token(con, job_id, token, worker=worker,
+                                require_lease=True)
         if not row:
             con.rollback()
             return None
@@ -765,7 +835,8 @@ def requeue_for_adaptation(job_id: str) -> dict | None:
 # ── estado ────────────────────────────────────────────────────────────────────
 
 def set_exec_state(job_id: str, token: str, state: str,
-                   detail: str = "", evidence: dict | None = None) -> dict | None:
+                   detail: str = "", evidence: dict | None = None,
+                   worker=None) -> dict | None:
     """[execution-contract v1] §9 — progreso fino de la máquina de estados,
     reportado por la extensión/HANDS durante la ejecución mecánica.
 
@@ -775,13 +846,20 @@ def set_exec_state(job_id: str, token: str, state: str,
     el estado de otro). El estado de la COLA (status) sigue mandando: este
     progreso es observabilidad contractual, no control de lease.
     Devuelve {ok, exec_state} / {ok: False, error: illegal_transition} /
-    None (token inválido, 409)."""
+    None (token inválido, 409).
+
+    [PHASE 1 · M7] worker (verify-if-provided): si el endpoint entrega un
+    worker, la guardia exige que coincida con el del claim. SIN exigencia de
+    lease: el progreso es fire-and-forget y observabilidad (no control de
+    lease); el lease lo controlan heartbeat/complete/fail — endurecerlo aquí
+    podría 409-ear progresos legítimos de un worker vivo con lease recién
+    vencida antes de su primer heartbeat."""
     if not state or not isinstance(state, str):
         return {"ok": False, "error": "invalid_state"}
     con = db.connect()
     try:
         con.execute("BEGIN IMMEDIATE")
-        row = _claimed_by_token(con, job_id, token)
+        row = _claimed_by_token(con, job_id, token, worker=worker)
         if not row:
             con.rollback()
             return None
@@ -826,7 +904,8 @@ def set_exec_state(job_id: str, token: str, state: str,
 # ── [execution-contract v1.1] §7.1 — consentimiento de generación ────────────
 
 def generation_consent(job_id: str, token: str,
-                       evidence: dict | None = None) -> dict | None:
+                       evidence: dict | None = None,
+                       worker=None) -> dict | None:
     """CONSENTIMIENTO DE GENERACIÓN — la corrección de CF-E2E-01
     (PRE-GENERATION CONTRACT GATE NOT ENFORCED, P0).
 
@@ -863,6 +942,15 @@ def generation_consent(job_id: str, token: str,
     jamás una regla universal del proveedor (no hay conversión silenciosa
     de duración en ninguna capa).
 
+    [PHASE 1 · M7] worker (verify-if-provided): si el llamador entrega un
+    worker, la guardia exige que coincida con el del claim. SIN exigencia de
+    lease a propósito (decisión documentada): el consentimiento es el juez de
+    la barrera §7.1 y ocurre inmediatamente antes de disparar la generación —
+    exigir lease vigente aquí añadiría una vía de fallo (lease vencida en el
+    hueco entre heartbeat y consent) que no fortalece el gate (el token sigue
+    siendo el nonce del claim y DENY/ALLOW no cambian) y arriesga DENY-falso
+    por motivo de transporte, no contractual.
+
     Devuelve None si el token/claim no es válido (409). Jamás toca P1/P2."""
     ev = evidence if isinstance(evidence, dict) else {}
     caps = ev.get("capabilities") if isinstance(ev.get("capabilities"), dict) \
@@ -872,7 +960,7 @@ def generation_consent(job_id: str, token: str,
     con = db.connect()
     try:
         con.execute("BEGIN IMMEDIATE")
-        row = _claimed_by_token(con, job_id, token)
+        row = _claimed_by_token(con, job_id, token, worker=worker)
         if not row:
             con.rollback()
             return None
@@ -938,11 +1026,18 @@ def generation_consent(job_id: str, token: str,
 
 
 def status_for_project(pid: str) -> dict:
+    # [PHASE 1 · A6/M11] la consulta de estado desatasca leases vencidas y
+    # purga done/dead con retención — sin esperar al próximo claim. Jamás
+    # tumba la respuesta si la recuperación falla (lock ocupado, etc.).
+    try:
+        recover_expired()
+    except Exception:  # noqa: BLE001 — observabilidad, nunca crítico
+        pass
     with db.connect() as con:
         rows = con.execute(
             """SELECT id, kind, scene_number, part, status, attempts,
                max_attempts, lease_cycles, worker, error, asset_path,
-               lease_until, exec_state, created_at, updated_at
+               lease_until, exec_state, binding_json, created_at, updated_at
                FROM flow_jobs WHERE project_id=? ORDER BY
                CASE kind WHEN 'image' THEN 0 ELSE 1 END, scene_number, part""",
             (pid,)).fetchall()
