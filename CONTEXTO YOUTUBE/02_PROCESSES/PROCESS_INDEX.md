@@ -18,3 +18,5 @@
 ## PROC-004 — Corrección mínima basada en evidencia
 - **Estado:** PLANNED; no iniciar antes de PROC-003.
 - **Pasos:** hipótesis + criterio de aceptación; prueba aislada; cambio mínimo; regresión; tests pertinentes; actualizar ESTADO_REAL y memoria; prueba E2E real.
+
+- **Runbook operativo:** [`PROC-003_GOOGLE_FLOW_START_FRAME_CAPTURE.md`](./PROC-003_GOOGLE_FLOW_START_FRAME_CAPTURE.md) — captura real, correlación de mediaId y saneamiento de evidencia.
