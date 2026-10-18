@@ -133,6 +133,10 @@ BATERIAS = [
                                  # unidades, JSON anidado, PIL, ledger (17)
     "security/test_config_security.py",  # A2/M6: .env newline injection +
                                  # system-owned metadata (16)
+    "test_harness.py",           # YOUTUBE HARNESS CONTRACT V1: contrato
+                                 # estricto, permisos, libro idempotente,
+                                 # estados §9, legacy VÓRTICE, auth/CSRF
+                                 # heredados sin bypass (~55)
 ]
 
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")
