@@ -8,7 +8,8 @@
 YOUTUBE-AUTOMATION es la especialización audiovisual de ALBRA. `ALBRA8/AGENTE-GENERAL` es el cuerpo central y mantiene infraestructura transversal; la lógica de producción audiovisual y Google Flow permanece en YOUTUBE-AUTOMATION. No se justifica rediseñar ni duplicar el bridge/orquestador.
 
 ## Referencias Git revisadas
-- YOUTUBE-AUTOMATION `main` comparado con `f23ce558b1dffe5570199db48a9bda7909e4d956`: 4 commits por delante; la comparación devolvió solo cuatro archivos de documentación dentro de `CONTEXTO YOUTUBE/`, sin cambios de código en esa comparación.
+- Comparación inicial de YOUTUBE-AUTOMATION `main` contra `f23ce558b1dffe5570199db48a9bda7909e4d956`: inicialmente 4 commits posteriores, solo documentación de contexto.
+- Después se poblaron 14 archivos de `CONTEXTO YOUTUBE/` mediante commits de documentación. La comparación final con ese baseline informa 18 commits por delante; los archivos cambiados son exclusivamente documentos dentro de `CONTEXTO YOUTUBE/`, sin cambios de código en la comparación.
 - AGENTE-GENERAL `main` comparado con `9b28990df26d25f4137d9e8810637c0ac0df49ed`: idéntico en esa comparación.
 - Revalidar HEADs antes de futuras modificaciones.
 
@@ -17,8 +18,9 @@ YOUTUBE-AUTOMATION es la especialización audiovisual de ALBRA. `ALBRA8/AGENTE-G
 2. Inspeccionados `injectScene(item)`, `__bridgeHandleJob(job, sendResult)`, `readStartFrame(sceneNumber)` en `extension/background.js` y la observabilidad de `extension/injector.js`.
 3. El camino Flow de `injectScene` pasa el gate/consent cuando aplica, inyecta el prompt mediante `slateInjectFn`, verifica el resultado de UI y reporta `GENERATION_SUBMITTED`. No se encontró ahí selección o binding de imagen de entrada como Start Frame.
 4. `readStartFrame` corresponde al proveedor Meta AI, no demuestra Start Frame en Google Flow.
-5. El interceptor observa red/respuestas, pero el código revisado no demuestra captura estructurada del body de la request de generación ni cuál mediaId de entrada se envió.
+5. El interceptor observa red/respuestas, pero el código revisado no demuestra captura estructurada del body de la solicitud real de generación ni cuál mediaId de entrada se envió.
 6. No se ejecutó generación real en Chrome durante esta sesión. E2E con Flow sigue NOT_DEMONSTRATED.
+7. Se inicializó la memoria documental CONTEXTO YOUTUBE con estado, arquitectura, glosario, decisiones, procesos, hallazgos, auditorías, pruebas reportadas, integraciones, fallos/riesgos, sesión y conocimiento.
 
 ## Estado del sistema
 La base tiene infraestructura de Production JSON/P1, cola Flow Bridge con jobs/leases/heartbeat/retries, validación de assets, QA, métricas, Doctor/preflight, seguridad, MemoryDV, skills/autonomía y HANDS aislado según `ESTADO_REAL.md`. Los tests declarados allí prueban sus respectivos alcances; no equivalen a proveedor real.
