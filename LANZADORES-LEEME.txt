@@ -1,50 +1,51 @@
-LANZADORES ALBRA — DOBLE CLICK Y LISTO
-========================================
+LANZADORES ALBRA — DOBLE CLICK, CERO TERMINALES
+================================================
 
-QUE ES ESTO
------------
-Tres archivos para que ya no tengas que abrir terminal ni escribir
-comandos. Todo lo que hace falta ahora es doble click.
+COMO FUNCIONA AHORA (modo silencioso)
+-------------------------------------
+SOLO NECESITAS 2 ARCHIVOS:
 
-ARCHIVOS
---------
-1) INICIAR-ALBRA.bat   <- EL QUE VAS A USAR A DIARIO
-   Doble click y se encarga de todo:
-   - Si el servidor ya esta corriendo -> solo abre el dashboard (no duplica nada)
-   - Primera vez: crea el entorno virtual e instala dependencias (tarda mas, es normal)
-   - Siguientes veces: arranca en segundos (no reinstala nada)
-   - Abre el navegador SOLO cuando el servidor ya responde (adios al error
-     "no se puede acceder a este sitio")
-   - El servidor corre en su propia ventana: "ALBRA SERVER - NO CERRAR"
-     (ahi ves los logs; cerrar esa ventana = apagar el servidor)
+1) INICIAR-ALBRA.vbs        <- TU DOBLE CLICK DE CADA DIA
+   - No abre ninguna ventana negra, ni PowerShell, ni terminal.
+   - Lanza el servidor OCULTO en segundo plano.
+   - Abre el navegador SOLO cuando el servidor ya responde.
+   - Si ya estaba corriendo: solo abre el dashboard (nunca duplica).
+   - Unica excepcion: la PRIMERA vez abre un asistente visible
+     una sola vez (crea el entorno virtual e instala dependencias).
+     A partir de ahi, todo silencioso para siempre.
 
-2) DETENER-ALBRA.bat
-   Doble click y apaga el servidor del puerto 8000 de forma limpia.
-   Solo mata procesos de Python, no toca nada mas de tu PC.
+2) DETENER-ALBRA.vbs        <- PARA APAGARLO
+   - Doble click -> el servidor se apaga.
+   - Aparece solo un mensajito de confirmacion (no es una terminal).
 
-3) start.bat
-   Se conservo por compatibilidad, pero ahora solo delega en
-   INICIAR-ALBRA.bat (mismo resultado).
+ARCHIVOS DE APOYO (no los toques)
+--------------------------------
+- lanzador_albra.py           el cerebro del arranque silencioso
+- INICIAR-DEBUG-con-ventana.bat   modo con ventanas, SOLO para depurar
+- DETENER-con-ventana.bat         detencion visible, SOLO para depurar
+- start.bat                   compatibilidad con versiones anteriores
+
+SI ALGO SALE MAL
+----------------
+- El servidor guarda su registro en .server_log.txt (en la raiz del
+  proyecto). Si en 2 minutos no arranca, el propio lanzador te abre
+  ese archivo en el Bloc de notas para que veas el error.
+- Modo depuracion: doble click en INICIAR-DEBUG-con-ventana.bat
+  (ahi SI ves la ventana del servidor con los logs en vivo).
+- Si Windows bloquea el .vbs al descargarlo: click derecho >
+  Propiedades > "Desbloquear" > Aceptar (solo se hace una vez).
 
 PRIMERA VEZ — CHECKLIST
 -----------------------
 [ ] Python 3.11+ instalado con "Add Python to PATH" marcado
-    (si INICIAR te dice "Python no encontrado", es esto)
-[ ] Carpeta backend\.env configurada:
-    copia backend\.env.example como backend\.env y pon tus claves
+[ ] backend\.env creado (copia backend\.env.example y pon tus claves)
 [ ] Extension "Flow Script Processor" cargada en chrome://extensions
-    (carpeta extension/ del proyecto, modo desarrollador)
 
-SI WINDOWS MUESTRA "Proteccion contra virus" AL HACER DOBLE CLICK
------------------------------------------------------------------
-Es el SmartScreen por ser un .bat descargado. Click derecho sobre el
-archivo > Propiedades > marca "Desbloquear" > Aceptar. Solo se hace una vez.
-
-PROBLEMAS FRECUENTES
---------------------
-- "El servidor no respondio en 120s" -> mira la ventana ALBRA SERVER,
-  ahi esta el error real (casi siempre es el .env o un puerto ocupado).
-- Ya habia un servidor viejo colgado -> doble click en DETENER-ALBRA.bat
-  y vuelve a dar doble click en INICIAR-ALBRA.bat.
-- La extension "no ve" el backend -> con el dashboard abierto en el
-  navegador, recarga la extension en chrome://extensions.
+DETALLES
+--------
+- El puerto por defecto es 8000. Si cambiaste PORT en backend\.env,
+  edita DETENER-ALBRA.vbs con el Bloc de notas y cambia el numero.
+- Al arrancar por primera vez, Windows puede preguntar si permites
+  que Python acceda a la red: dale "Permitir" (es el servidor local).
+- Para que quede a un click: click derecho sobre INICIAR-ALBRA.vbs >
+  "Enviar a" > "Escritorio (crear acceso directo)".

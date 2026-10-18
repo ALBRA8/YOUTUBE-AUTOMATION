@@ -1,4 +1,3 @@
 @echo off
-REM Arranque rapido - Windows
-REM (delega en el lanzador robusto: health check + navegador automatico)
-call "%~dp0INICIAR-ALBRA.bat"
+REM Arranque rapido - Windows (delega en el asistente con ventana)
+call "%~dp0INICIAR-DEBUG-con-ventana.bat"
