@@ -125,6 +125,11 @@ let sceneAttempts = new Map();           // [attempt v3] sceneNumber -> {count, 
 let sceneEvidence = new Map();           // sceneNumber -> {tiles:[], network:[], notifications:[], seen:[], silent}
 let sceneSettings = new Map();           // sceneNumber -> {settings, source:'flow_generation_settings', ts} (⑦)
 let orphanNetwork = [];                  // red http sin escena resoluble (adjunta al veredicto local)
+/* [flow-start-frame F1] observación PASIVA de batchexecute (rpcids
+ * eb1hJf/WuwhI/jwpduf/as29s): anillo acotado independiente de la cola.
+ * NUNCA viaja al backend ni al bridge; sin mediaId crudos (solo huellas fp). */
+const RPC_OBS_MAX = 50;                  // techo del anillo de observaciones
+let rpcObservations = [];
 let rateLimitCooldownUntil = 0;
 let lastInjectAt = 0;
 let pollTimer = null;
@@ -154,6 +159,7 @@ function serializeState() {
     sceneEvidence: Array.from(sceneEvidence.entries()),   // [observability v1.1]
     sceneSettings: Array.from(sceneSettings.entries()),   // [observability v1.1]
     orphanNetwork,                                        // [observability v1.1]
+    rpcObservations,                                      // [flow-start-frame F1]
   };
 }
 
@@ -183,6 +189,7 @@ function hydrateState(o) {
   sceneEvidence = new Map(Array.isArray(o.sceneEvidence) ? o.sceneEvidence : []);
   sceneSettings = new Map(Array.isArray(o.sceneSettings) ? o.sceneSettings : []);
   orphanNetwork = Array.isArray(o.orphanNetwork) ? o.orphanNetwork : [];
+  rpcObservations = Array.isArray(o.rpcObservations) ? o.rpcObservations.slice(0, RPC_OBS_MAX) : []; // [F1] defensivo
 }
 
 async function loadState() {
@@ -228,6 +235,17 @@ function snapshot() {
     cooldownUntil: rateLimitCooldownUntil,
     fallbackRoot,
     progress: { done, total: totalItems },
+    /* [flow-start-frame F1] resumen compacto de observación batchexecute
+     * (solo lectura; el popup lo ignora si no lo renderiza) */
+    rpcObs: {
+      count: rpcObservations.length,
+      last: rpcObservations.slice(-3).map((r) => ({
+        kind: r.kind, rpcid: r.rpcid, op: r.operation,
+        scene: r.scene, ts: r.ts,
+        startFrame: !!(r.startFrame && (r.startFrame.inputFrames_firstFrame_mediaId || r.startFrame.firstFrame_mediaId)),
+        correlates: r.correlatesWithPrior || 0,
+      })),
+    },
     queue: queue.map((i) => ({
       id: i.id,
       scene_number: i.scene_number,
@@ -2069,6 +2087,98 @@ function handleBatchResponse(raw) {
   }
 }
 
+/* [flow-start-frame F1] ③ Recepción PASIVA de la observación batchexecute
+ * (page → content → aquí, canal existente). Reglas:
+ *  - valida forma y rpcid (eb1hJf/WuwhI/jwpduf/as29s); lo demás se descarta.
+ *  - NUNCA almacena mediaId crudos: solo huellas fp (12 hex).
+ *  - anillo acotado (50), independiente de la cola: la observación manual
+ *    NO requiere running=true y sobrevive a ciclos de cola.
+ *  - correlación: cuenta cruces de huella con observaciones previas.
+ *  - atribución de escena SOLO si hay exactamente una IN_PROGRESS (misma
+ *    filosofía handleNetworkEvidence); jamás modifica la cola.
+ *  - NUNCA se envía al backend ni al bridge (fase 1 = observación local). */
+const RPC_ID_KEYS_BG = ['workflowId', 'batchId', 'videoId', 'jobId', 'projectId', 'toolId'];
+const RPC_STATE_KEYS_BG = ['status', 'state', 'generationStatus'];
+
+function __rpcSanitizeMap(raw, keys) {
+  const out = {};
+  try {
+    if (!raw || typeof raw !== 'object') return out;
+    for (const k of keys) {
+      if (typeof raw[k] === 'string' && raw[k]) out[k] = raw[k].slice(0, 80);
+    }
+  } catch (_) {}
+  return out;
+}
+
+function __rpcCollectFps(reg) {
+  const fps = [];
+  try {
+    const sf = reg.startFrame;
+    if (sf && typeof sf === 'object') {
+      for (const k of ['inputFrames_firstFrame_mediaId', 'firstFrame_mediaId']) {
+        const v = sf[k];
+        if (v && typeof v === 'object' && typeof v.fp === 'string' && fps.indexOf(v.fp) === -1) fps.push(v.fp);
+      }
+    }
+    if (Array.isArray(reg.mediaFps)) {
+      for (const f of reg.mediaFps) {
+        if (typeof f === 'string' && f && fps.indexOf(f) === -1) fps.push(f);
+      }
+    }
+  } catch (_) {}
+  return fps;
+}
+
+function handleRpcEvidence(msg) {
+  try {
+    const ev = msg && msg.data;
+    if (!ev || typeof ev !== 'object') return;
+    if (ev.kind !== 'rpc_request' && ev.kind !== 'rpc_response') return;
+    const rpcid = String(ev.rpcid || '');
+    if (!/^(eb1hJf|WuwhI|jwpduf|as29s)$/.test(rpcid)) return;
+    const sfRaw = (ev.startFrame && typeof ev.startFrame === 'object') ? ev.startFrame : null;
+    const sf = sfRaw ? {
+      inputFrames_firstFrame_mediaId:
+        (sfRaw.inputFrames_firstFrame_mediaId && typeof sfRaw.inputFrames_firstFrame_mediaId.fp === 'string')
+          ? { present: true, fp: sfRaw.inputFrames_firstFrame_mediaId.fp.slice(0, 32) } : null,
+      firstFrame_mediaId:
+        (sfRaw.firstFrame_mediaId && typeof sfRaw.firstFrame_mediaId.fp === 'string')
+          ? { present: true, fp: sfRaw.firstFrame_mediaId.fp.slice(0, 32) } : null,
+    } : null;
+    const reg = {
+      kind: ev.kind,
+      rpcid,
+      operation: ev.operation ? String(ev.operation).slice(0, 40) : null,
+      url: String(ev.url || '').slice(0, 140),
+      ts: Number(ev.ts) || Date.now(),
+      scene: null,
+      videoModelKey: ev.videoModelKey ? String(ev.videoModelKey).slice(0, 60) : null,
+      aspectRatio: ev.aspectRatio ? String(ev.aspectRatio).slice(0, 30) : null,
+      count: (typeof ev.count === 'number' && isFinite(ev.count)) ? ev.count : null,
+      startFrame: sf,
+      ids: __rpcSanitizeMap(ev.ids, RPC_ID_KEYS_BG),
+      states: __rpcSanitizeMap(ev.states, RPC_STATE_KEYS_BG),
+      mediaFps: Array.isArray(ev.mediaFps)
+        ? ev.mediaFps.filter((x) => typeof x === 'string' && x).slice(0, 8) : [],
+    };
+    /* correlación por huella de mediaId (criterio F1-6): cruces con previas */
+    const fps = __rpcCollectFps(reg);
+    let correlates = 0;
+    if (fps.length) {
+      for (const prev of rpcObservations) {
+        if (__rpcCollectFps(prev).some((f) => fps.indexOf(f) !== -1)) correlates++;
+      }
+    }
+    reg.correlatesWithPrior = correlates;
+    const inProgress = queue.filter((i) => i.status === STATUS.IN_PROGRESS);
+    if (running && inProgress.length === 1) reg.scene = inProgress[0].scene_number;
+    rpcObservations.push(reg);
+    while (rpcObservations.length > RPC_OBS_MAX) rpcObservations.shift();
+    persistState();
+  } catch (_) { /* observación read-only: jamás lanza */ }
+}
+
 /* ----------------------- Control de la cola ----------------------------- */
 function stopQueue(reason) {
   running = false;
@@ -2092,6 +2202,7 @@ function resetAll() {
   sceneEvidence = new Map(); // [observability v1.1] reset total: sin residuos
   sceneSettings = new Map();
   orphanNetwork = [];
+  rpcObservations = [];      // [flow-start-frame F1] reset total del usuario
   rateLimitCooldownUntil = 0;
   clearTimeout(rateLimitRestoreTimer); rateLimitRestoreTimer = null; // [PHASE 1 · A6] sin timer huérfano
   lastStateSummary = '';
@@ -2155,6 +2266,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         break;
       case 'FLOW_NETWORK_EVIDENCE': // [observability v1.1] evidencia cruda de red
         handleNetworkEvidence(msg);
+        sendResponse({ ok: true });
+        break;
+      case 'FLOW_RPC_EVIDENCE': // [flow-start-frame F1] observación pasiva batchexecute
+        handleRpcEvidence(msg);
         sendResponse({ ok: true });
         break;
       case 'START_QUEUE':

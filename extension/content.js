@@ -23,6 +23,12 @@
         chrome.runtime.sendMessage({ type: 'FLOW_NETWORK_EVIDENCE', data: d.data }).catch(() => {});
         return;
       }
+      /* [flow-start-frame F1] observación PASIVA de batchexecute (rpcids
+       * eb1hJf/WuwhI/jwpduf/as29s): reenvío read-only, misma aduana. */
+      if (d.type === 'FLOW_RPC_EVIDENCE') {
+        chrome.runtime.sendMessage({ type: 'FLOW_RPC_EVIDENCE', data: d.data }).catch(() => {});
+        return;
+      }
       if (d.type !== 'FLOW_BATCH_RESPONSE') return;
       chrome.runtime.sendMessage({ type: 'BATCH_DETECTED', data: d.data }).catch(() => {});
     } catch (_) { /* silencioso */ }

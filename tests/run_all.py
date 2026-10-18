@@ -137,6 +137,11 @@ BATERIAS = [
                                  # estricto, permisos, libro idempotente,
                                  # estados §9, legacy VÓRTICE, auth/CSRF
                                  # heredados sin bypass (~55)
+    "test_flow_batchexecute.py", # FLOW START FRAME F1 (ext 2.5.0): observación
+                                 # PASIVA de batchexecute (WuwhI/eb1hJf/
+                                 # jwpduf/as29s), Start Frame como huella fp,
+                                 # pasividad init/stream, secretos jamás,
+                                 # canales tRPC intactos, alcance git (64)
 ]
 
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")
