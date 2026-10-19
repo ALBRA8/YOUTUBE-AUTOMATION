@@ -32,3 +32,9 @@
 ## F-008 — CONTEXTO YOUTUBE estaba vacío/incompleto
 - **Estado:** VERIFIED al revisar plantillas y 404 de índices anunciados.
 - **Acción:** poblar memoria documental con trazabilidad y estados honestos.
+
+## F-009 — Google Flow UI real separa Fotogramas de Ingredientes y expone slot Iniciar
+- **Estado:** VERIFIED EN UI REAL; payload pendiente.
+- **Evidencia:** sesión manual real del 2026-10-18 con extensión v2.5.0. Al seleccionar `Fotogramas`, Flow mostró `Iniciar` y `Finalizar`; la imagen conocida se colocó en `Iniciar` y la generación produjo un vídeo.
+- **Límite:** todavía no se ha leído de forma concluyente el `WuwhI` de esta generación para demostrar el `mediaId` de Start Frame.
+- **Referencia:** `08_SESSIONS/SES-2026-10-18-02_GOOGLE_FLOW_START_FRAME_LIVE_CAPTURE.md`.
