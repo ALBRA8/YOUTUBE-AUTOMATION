@@ -22,9 +22,33 @@ Los conteos son los declarados por el inventario del repo; no se reejecutaron du
 - `test_flow_video_v3.py`: 123.
 - `test_extension_error_tile.py`: 65.
 - `test_flow_observability_v11.py`: 59.
+- Harness de observabilidad Start Frame: 15/15 escenarios y F1 64/64, según reporte del commit `2d0a99b85fa8c7f224b5c8660708411b1617e32a`.
 
 ## Límite de evidencia
-Estos conteos no se volvieron a ejecutar en esta sesión. Tests simulados/HTTP validan sus capas, no Google Flow real.
+Estos conteos no se volvieron a ejecutar en esta sesión. Tests simulados/HTTP/harness validan sus capas, no Google Flow real.
 
-## Prueba pendiente
-**TEST-FLOW-START-FRAME-REAL — BLOCKED / NOT RUN.** Imagen conocida → job ALBRA → request capturado → mediaId de entrada correlacionado → vídeo resultante comprobado. PASS requiere request real sanitizada y correlación de la imagen correcta.
+## TEST-FLOW-START-FRAME-REAL
+**Estado:** IN_PROGRESS / CAPTURA MANUAL REAL PARCIAL.
+
+Se realizó una generación real en Google Flow usando el modo `Fotogramas`, con una imagen conocida colocada en `Iniciar` y `Finalizar` vacío. La generación produjo vídeo y la extensión observó tráfico `batchexecute` real.
+
+La captura actual contiene 4 observaciones `WuwhI`, pero todavía no se ha extraído de forma concluyente cuál corresponde a la generación ni si su estructura contiene el `mediaId` de Start Frame. Por tanto, **no es PASS todavía**.
+
+### Siguiente lectura
+Usar únicamente las observaciones ya almacenadas:
+
+```js
+window.__FLOW_RPC_OBS__
+  .filter(x => x.rpcid === "WuwhI")
+  .map((x,i) => ({
+    n: i,
+    operation: x.operation,
+    videoModelKey: x.videoModelKey,
+    aspectRatio: x.aspectRatio,
+    count: x.count,
+    startFrame: x.startFrame,
+    ids: x.ids
+  }))
+```
+
+No generar otro vídeo hasta clasificar esta captura.
