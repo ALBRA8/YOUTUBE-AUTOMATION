@@ -28,7 +28,7 @@ Cubre, EN HERMÉTICO (sin Chrome, sin red, sin Google Flow real):
   ⑨  Confidencialidad estructural: bridge.js SIN referencia al canal nuevo;
      backend SIN referencia (la observación NO sale de la extensión).
   ⑩  ALCANCE FASE 1: el diff toca SOLO extension/ y tests/ (guardía git);
-     manifest 2.5.0; sintaxis JS OK.
+     manifest >= 2.5.0 (2.6.0 desde F2); sintaxis JS OK.
 
 Uso:  cd yt_automation_v2 && python3 tests/test_flow_batchexecute.py
       python3 -m pytest tests/test_flow_batchexecute.py -q
@@ -196,8 +196,8 @@ def main() -> int:
 
     print("── L. ⑩ alcance FASE 1 (guardías de prohibiciones)")
     mf = json.loads((EXT / "manifest.json").read_text(encoding="utf-8"))
-    check("L1. manifest 2.5.0 (bump minor [flow-start-frame F1])",
-          mf.get("version") == "2.5.0", mf.get("version"))
+    check("L1. manifest 2.6.0 (bump minor [flow-start-frame F2] parser anidado)",
+          mf.get("version") == "2.6.0", mf.get("version"))
     forbidden = ("execution_contract", "flow_jobs", "production_json",
                  "hands", "agent.py", "harness")
     changed = subprocess.run(["git", "diff", "--name-only", "HEAD"],

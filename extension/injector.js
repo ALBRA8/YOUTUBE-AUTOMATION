@@ -25,6 +25,15 @@
  *      request solo se LEEN si son string/URLSearchParams/FormData (un
  *      ReadableStream jamás se consume); se emite FLOW_RPC_EVIDENCE por el
  *      mismo canal postMessage existente. NO persiste en backend.
+ *   8. [flow-start-frame F2] parser ANIDADO de MEDIA_GENERATION_SETTINGS:
+ *      cadena real body → f.req → JSON externo → envelope RPC → MEDIA_
+ *      GENERATION_SETTINGS cuyo VAL es un STRING con JSON dentro (se
+ *      requiere JSON.parse de segundo nivel; F1 leía solo la externa →
+ *      nulls). Extracción: videoModelKey, aspectRatio (string O número),
+ *      count, structuredPrompt (solo presencia), Start Frame por estructura
+ *      (inputFrames.firstFrame / firstFrame / startImage histórico) y
+ *      cropCoordinates (whitelist numérica). VAL malformado → evidencia
+ *      parcial diagnóstica (settingsParseError); observer JAMÁS roto.
  * La pagina NO se ve afectada: siempre se lee desde resp.clone(); el
  * interceptor es silencioso y jamás altera la respuesta ni lanza.
  * ========================================================================== */
@@ -195,19 +204,159 @@
    * SETTINGS.firstFrame). Aunque ambas traigan el MISMO id, ambas se
    * reportan. Sin match → undefined (lo ausente no se fabrica). */
   function findFirstFrameMediaIds(root) {
-    const res = { inputFrames: undefined, standalone: undefined };
+    const res = { inputFrames: undefined, standalone: undefined, startImage: undefined }; /* [F2] +startImage (histórico, solo si existe) */
     let nodes = 0;
     (function dig(node, path, depth) {
       if (!node || typeof node !== 'object' || depth > RPC_DFS_DEPTH || nodes++ > RPC_DFS_NODES) return;
       for (const k of Object.keys(node)) {
         const v = node[k];
         const np = path.concat(k);
-        if (k === 'mediaId' && typeof v === 'string' && np.length >= 2
-            && np[np.length - 2] === 'firstFrame') {
-          if (np.length >= 3 && np[np.length - 3] === 'inputFrames') {
-            if (res.inputFrames === undefined) res.inputFrames = v;
-          } else if (res.standalone === undefined) {
-            res.standalone = v;
+        if (k === 'mediaId' && typeof v === 'string' && np.length >= 2) {
+          if (np[np.length - 2] === 'firstFrame') {
+            if (np.length >= 3 && np[np.length - 3] === 'inputFrames') {
+              if (res.inputFrames === undefined) res.inputFrames = v;
+            } else if (res.standalone === undefined) {
+              res.standalone = v;
+            }
+          } else if (np[np.length - 2] === 'startImage' && res.startImage === undefined) {
+            /* [F2] variante histórica: NO se asume que startImage existe */
+            res.startImage = v;
+          }
+        }
+        if (v && typeof v === 'object') dig(v, np, depth + 1);
+      }
+    })(root, [], 0);
+    return res;
+  }
+
+  /* ========================================================================
+   * [flow-start-frame F2] parser ANIDADO de MEDIA_GENERATION_SETTINGS.
+   * El payload real (captura LIVE) trae MEDIA_GENERATION_SETTINGS cuyo VAL
+   * es un STRING con JSON dentro: hay que JSON.parse de segundo nivel.
+   * Todo defensivo: lo ausente no se fabrica; lo no parseable no rompe.
+   * ====================================================================== */
+
+  /* Localiza el VAL de MEDIA_GENERATION_SETTINGS en el payload ya
+   * desenrollado: por llave de objeto O por par protobuf-ish
+   * ['MEDIA_GENERATION_SETTINGS', <VAL>, ...]. DFS acotado. */
+  function locateMediaGenSettingsValue(root) {
+    let found;
+    let nodes = 0;
+    (function dig(node, depth) {
+      if (found !== undefined || !node || typeof node !== 'object'
+          || depth > RPC_DFS_DEPTH || nodes++ > RPC_DFS_NODES) return;
+      if (Array.isArray(node)) {
+        if (node.length >= 2 && node[0] === 'MEDIA_GENERATION_SETTINGS') {
+          found = node[1];
+          return;
+        }
+        for (const el of node) {
+          if (found !== undefined) return;
+          dig(el, depth + 1);
+        }
+        return;
+      }
+      for (const k of Object.keys(node)) {
+        if (found !== undefined) return;
+        if (k === 'MEDIA_GENERATION_SETTINGS') { found = node[k]; return; }
+        const v = node[k];
+        if (v && typeof v === 'object') dig(v, depth + 1);
+      }
+    })(root, 0);
+    return found;
+  }
+
+  /* ¿El objeto tiene la forma del objeto real de settings? Solo marcadores
+   * CONOCIDOS del protocolo observado (sin inventar campos). */
+  function hasSettingsMarkers(o) {
+    if (!o || typeof o !== 'object') return false;
+    return findKeyFirst(o, 'videoModelKey') !== undefined
+        || findKeyFirst(o, 'aspectRatio') !== undefined
+        || findKeyFirst(o, 'count') !== undefined
+        || findKeyFirst(o, 'inputFrames') !== undefined
+        || findKeyFirst(o, 'firstFrame') !== undefined
+        || findKeyFirst(o, 'startImage') !== undefined
+        || findKeyFirst(o, 'structuredPrompt') !== undefined;
+  }
+
+  /* Busca DENTRO de un objeto el primer string que al parsear produce un
+   * objeto con marcadores de settings (cubre VAL envuelto en sub-objeto). */
+  function embeddedSettingsFromString(obj) {
+    let found = null;
+    let nodes = 0;
+    (function dig(node, depth) {
+      if (found || !node || typeof node !== 'object'
+          || depth > RPC_DFS_DEPTH || nodes++ > RPC_DFS_NODES) return;
+      for (const k of Object.keys(node)) {
+        if (found) return;
+        const v = node[k];
+        if (typeof v === 'string' && v.length > 1 && v.length <= RPC_BODY_MAX
+            && (v.charAt(0) === '{' || v.charAt(0) === '[')) {
+          const cand = unwrapPayloadString(v);
+          if (cand && hasSettingsMarkers(cand)) { found = cand; return; }
+        }
+        if (v && typeof v === 'object') dig(v, depth + 1);
+      }
+    })(obj, 0);
+    return found;
+  }
+
+  /* Resuelve el objeto REAL de settings a partir del VAL localizado:
+   *  - string  → JSON.parse (hasta 2 niveles, vía unwrapPayloadString)
+   *  - objeto con marcadores → tal cual (formato F1/histórico)
+   *  - objeto sin marcadores → busca string JSON embebido (VAL envuelto)
+   *  - si nada funciona → parseError=true (evidencia parcial diagnóstica) */
+  function resolveMediaGenSettings(payload, val) {
+    if (val === undefined) return { settings: null, parseError: false };
+    if (typeof val === 'string') {
+      const parsed = unwrapPayloadString(val);
+      if (parsed && hasSettingsMarkers(parsed)) return { settings: parsed, parseError: false };
+      return { settings: null, parseError: true };
+    }
+    if (val && typeof val === 'object') {
+      if (hasSettingsMarkers(val)) return { settings: val, parseError: false };
+      const embedded = embeddedSettingsFromString(val);
+      if (embedded) return { settings: embedded, parseError: false };
+      return { settings: null, parseError: true };
+    }
+    return { settings: null, parseError: true };
+  }
+
+  /* [F2] cropCoordinates: whitelist estricta de números finitos top/left/
+   * bottom/right (la captura LIVE muestra exactamente esas llaves; no es
+   * secreto). Cualquier otra llave se ignora. */
+  function sanitizeCrop(cc) {
+    if (!cc || typeof cc !== 'object' || Array.isArray(cc)) return null;
+    const out = {};
+    for (const k of ['top', 'left', 'bottom', 'right']) {
+      const v = cc[k];
+      if (typeof v === 'number' && isFinite(v)) out[k] = v;
+    }
+    return Object.keys(out).length ? out : null;
+  }
+
+  /* [F2] cropCoordinates por ESTRUCTURA de ruta, igual que los mediaId:
+   * inputFrames.firstFrame / firstFrame (standalone) / startImage (hist. */
+  function findCropCoordinates(root) {
+    const res = { inputFrames_firstFrame: undefined, firstFrame: undefined, startImage: undefined };
+    let nodes = 0;
+    (function dig(node, path, depth) {
+      if (!node || typeof node !== 'object' || depth > RPC_DFS_DEPTH || nodes++ > RPC_DFS_NODES) return;
+      for (const k of Object.keys(node)) {
+        const v = node[k];
+        const np = path.concat(k);
+        if (k === 'cropCoordinates' && np.length >= 2) {
+          const parent = np[np.length - 2];
+          let cat = null;
+          if (parent === 'firstFrame') {
+            cat = (np.length >= 3 && np[np.length - 3] === 'inputFrames')
+              ? 'inputFrames_firstFrame' : 'firstFrame';
+          } else if (parent === 'startImage') {
+            cat = 'startImage';
+          }
+          if (cat && res[cat] === undefined) {
+            const s = sanitizeCrop(v);
+            if (s) res[cat] = s;
           }
         }
         if (v && typeof v === 'object') dig(v, np, depth + 1);
@@ -301,30 +450,54 @@
         };
         const payload = e.payload ? unwrapPayloadString(e.payload) : null;
         if (payload) {
-          /* operación SOLO si el marcador estructural existe (sin inventar) */
-          if (findKeyFirst(payload, 'MEDIA_GENERATION_SETTINGS') !== undefined
+          /* operación SOLO si el marcador estructural existe (sin inventar);
+           * [F2] localiza el VAL aunque venga como par protobuf-ish */
+          const settingsVal = locateMediaGenSettingsValue(payload);
+          if (settingsVal !== undefined
               || /MEDIA_GENERATION/.test(String(e.payload || '').slice(0, RPC_BODY_MAX))) {
             obs.operation = 'MEDIA_GENERATION';
           }
-          const vmk = findKeyFirst(payload, 'videoModelKey');
-          if (typeof vmk === 'string') obs.videoModelKey = redactSecrets(vmk).slice(0, 60);
-          const ar = findKeyFirst(payload, 'aspectRatio');
-          if (typeof ar === 'string') obs.aspectRatio = redactSecrets(ar).slice(0, 30);
-          const cnt = findKeyFirst(payload, 'count');
+          /* [F2] VAL anidado: MEDIA_GENERATION_SETTINGS puede ser un STRING
+           * con JSON (formato LIVE) u objeto directo (formato F1). */
+          const r = resolveMediaGenSettings(payload, settingsVal);
+          const src = r.settings || payload;
+          const vmk = findKeyFirst(src, 'videoModelKey');
+          if (typeof vmk === 'string' && vmk) obs.videoModelKey = redactSecrets(vmk).slice(0, 60);
+          else if (typeof vmk === 'number' && isFinite(vmk)) obs.videoModelKey = String(vmk);
+          const ar = findKeyFirst(src, 'aspectRatio');
+          if (typeof ar === 'string' && ar) obs.aspectRatio = redactSecrets(ar).slice(0, 30);
+          else if (typeof ar === 'number' && isFinite(ar)) obs.aspectRatio = ar; /* LIVE: 1 */
+          const cnt = findKeyFirst(src, 'count');
           if (typeof cnt === 'number' && isFinite(cnt)) obs.count = cnt;
-          /* Start Frame: dos campos DISTINTOS del contrato forense,
-           * clasificados por estructura (no por valor) */
-          const ff = findFirstFrameMediaIds(payload);
+          else if (typeof cnt === 'string' && /^\d{1,4}$/.test(cnt)) obs.count = parseInt(cnt, 10);
+          /* [F2] structuredPrompt: SOLO presencia (el contenido no se emite) */
+          if (findKeyFirst(src, 'structuredPrompt') !== undefined) obs.structuredPromptPresent = true;
+          /* Start Frame: campos del contrato forense clasificados por
+           * ESTRUCTURA (no por valor). [F1] dos rutas; [F2] +startImage y
+           * representación plana {mediaIdPresent, fingerprint}. */
+          const ff = findFirstFrameMediaIds(src);
           const inFp = mediaFp(ff.inputFrames);
           const stFp = mediaFp(ff.standalone);
-          if (inFp || stFp) {
+          const siFp = mediaFp(ff.startImage);
+          if (inFp || stFp || siFp) {
             obs.startFrame = {
-              inputFrames_firstFrame_mediaId: inFp,
-              firstFrame_mediaId: stFp,
+              mediaIdPresent: true,
+              fingerprint: (inFp || stFp || siFp).fp,
             };
+            if (inFp) obs.startFrame.inputFrames_firstFrame_mediaId = inFp;
+            if (stFp) obs.startFrame.firstFrame_mediaId = stFp;
+            if (siFp) obs.startFrame.startImage_mediaId = siFp;
+            if (inFp) obs.ids.inputFramesFirstFrame = inFp.fp;
+            if (stFp) obs.ids.firstFrame = stFp.fp;
+            if (siFp) obs.ids.startImage = siFp.fp;
           }
+          /* [F2] cropCoordinates (no es secreto; whitelist numérica) */
+          const cc = findCropCoordinates(src);
+          if (cc.inputFrames_firstFrame || cc.firstFrame || cc.startImage) obs.cropCoordinates = cc;
           const w = scanWhitelisted(payload);
-          obs.ids = w.ids;
+          obs.ids = Object.assign(w.ids, obs.ids); /* ids F1 + huellas F2 */
+          /* [F2] JSON anidado no parseable → evidencia parcial diagnóstica */
+          if (r.parseError) obs.settingsParseError = true;
         }
         recordRpcObs(obs);
       }
