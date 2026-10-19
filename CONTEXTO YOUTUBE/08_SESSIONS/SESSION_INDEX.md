@@ -7,3 +7,12 @@
 - **Decisiones:** no implementar aún; no mover lógica a AGENTE-GENERAL; preservar P1 y capas existentes.
 - **Pendiente:** una generación real desde ALBRA con imagen conocida y captura sanitizada.
 - **Límite:** esta sesión no abrió Chrome ni generó vídeo real; conclusiones externas previas se registran como contexto histórico, no como nueva prueba.
+
+## SES-2026-10-18-02 — Google Flow Start Frame: captura manual en vivo
+- **Estado:** IN_PROGRESS / CAPTURA PARCIALMENTE COMPLETADA.
+- **Hecho:** se instaló/cargó la extensión instrumentada v2.5.0; se comprobó `window.__FLOW_RPC_OBS__`; en Flow se seleccionó `Fotogramas`, se colocó una imagen conocida en `Iniciar`, se dejó `Finalizar` vacío y se generó un vídeo real.
+- **Hallazgo:** Flow separa `Fotogramas` de `Ingredientes` y presenta slots `Iniciar`/`Finalizar`; la instrumentación observó tráfico `WuwhI` real.
+- **Evidencia actual:** 4 observaciones `WuwhI` en `window.__FLOW_RPC_OBS__` después de la generación.
+- **Límite:** la tabla de DevTools ocultó campos; aún no se ha identificado de forma concluyente el `WuwhI` de generación ni su `mediaId` de Start Frame.
+- **Decisión:** no generar otra vez ni implementar binding todavía; leer los cuatro registros almacenados y clasificar.
+- **Referencia:** `SES-2026-10-18-02_GOOGLE_FLOW_START_FRAME_LIVE_CAPTURE.md`.
