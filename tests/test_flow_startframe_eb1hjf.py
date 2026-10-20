@@ -123,6 +123,63 @@ def main() -> int:
     e6 = data.get("e6_f1_direct_regression", {})
     check("H2. F1 objeto directo WuwhI -> MEDIA_GENERATION intacto", e6.get("operation") == "MEDIA_GENERATION" and e6.get("mediaIdPresent") is True)
 
+    print("\n-- H2. Ingestión polimórfica de request bodies (Fix Post-Autopsia)")
+    tb = data.get("test_b_request_object", {})
+    check("H2.1. fetch(Request) observado", tb.get("observed") is True)
+    check("H2.2. fetch(Request) operation MEDIA_GENERATION", tb.get("operation") is True)
+    check("H2.3. fetch(Request) videoModelKey extraído", tb.get("videoModelKey") is True)
+    check("H2.4. fetch(Request) startFrame y fingerprint presentes", tb.get("startFrame") is True and tb.get("fingerprint") is True)
+    check("H2.5. fetch(Request) cropCoordinates normalizado", tb.get("cropNormalized") is True)
+    check("H2.6. fetch(Request) preserva objeto Request original pasado a fetch nativo", tb.get("originalPassedToFetch") is True)
+    check("H2.7. fetch(Request) sin fuga de raw mediaId", tb.get("noRawMediaId") is True)
+
+    tc = data.get("test_c_urlsearchparams", {})
+    check("H2.8. fetch(URLSearchParams) observado y extraído", tc.get("observed") is True and tc.get("operation") is True and tc.get("videoModelKey") is True)
+
+    td = data.get("test_d_cross_realm_duck_typing", {})
+    check("H2.9. fetch(duck-typed URLSearchParams / QueryData) cross-realm extraído", td.get("observed") is True and td.get("operation") is True)
+
+    te = data.get("test_e_uninspectable_stream", {})
+    check("H2.10. fetch(ReadableStream) no es consumido (non-destructive)", te.get("notConsumed") is True)
+    check("H2.11. fetch(ReadableStream) emite observación con atributos null sin fallar", te.get("observed") is True and te.get("operationNull") is True)
+
+    print("\n-- H3. Fix Complementario F5: Precedencia estricta de init.body y Orden Causal")
+    f5_c1 = data.get("test_f5_case1_empty_string_override", {})
+    check("H3.1. fetch(req, {body: ''}) anula Request y emite payload null", f5_c1.get("operationNull") is True and f5_c1.get("noLeakRawMediaId") is True)
+
+    f5_c2 = data.get("test_f5_case2_null_body_override", {})
+    check("H3.2. fetch(req, {body: null}) anula Request y emite payload null", f5_c2.get("operationNull") is True and f5_c2.get("noLeakRawMediaId") is True)
+
+    f5_c3 = data.get("test_f5_case3_empty_init_preserves_request", {})
+    check("H3.3. fetch(req, {}) sin 'body' preserva e inspecciona el Request", f5_c3.get("operation") is True and f5_c3.get("videoModelKey") is True)
+
+    f5_c4 = data.get("test_f5_case4_undefined_body_preserves_request", {})
+    check("H3.4. fetch(req, {body: undefined}) preserva e inspecciona el Request", f5_c4.get("operation") is True and f5_c4.get("startFramePresent") is True)
+
+    f5_c5 = data.get("test_f5_case5_url_empty_body", {})
+    check("H3.5. fetch(url, {method: 'POST', body: ''}) emite payload null sin error", f5_c5.get("operationNull") is True)
+
+    f5_order = data.get("test_f5_causal_telemetry_ordering", {})
+    check("H3.6. Orden causal garantizado: rpc_request precede a rpc_response", f5_order.get("requestPrecedesResponse") is True)
+    check("H3.7. Metadatos de request y response extraídos ordenadamente", f5_order.get("requestExtracted") is True and f5_order.get("responseExtracted") is True)
+
+    f5_err = data.get("test_f5_clone_error_resilience", {})
+    check("H3.8. Error de clonación/lectura no bloquea el fetch nativo", f5_err.get("nativeFetchNotBlocked") is True and f5_err.get("nativeResultPreserved") is True)
+    check("H3.9. Error de clonación preserva orden causal y emite fallback seguro", f5_err.get("fallbackRequestEmitted") is True and f5_err.get("orderStillPreserved") is True)
+
+    print("\n-- H4. Validación de Payload Real Live de Google Flow (F5.1)")
+    live = data.get("test_live_eb1hjf_exact_payload", {})
+    check("H4.1. fetch(Request) con payload real observado", live.get("req_observed") is True)
+    check("H4.2. operation es MEDIA_GENERATION con payload real", live.get("req_operation") is True)
+    check("H4.3. videoModelKey extraído correctamente (abra_i2v_10s)", live.get("req_videoModelKey") is True)
+    check("H4.4. aspectRatio es numérico 1 (1:1 square)", live.get("req_aspectRatio") is True)
+    check("H4.5. structuredPromptPresent es true (prompt presente)", live.get("req_promptPresent") is True)
+    check("H4.6. Start Frame mediaIdPresent es true", live.get("req_mediaIdPresent") is True)
+    check("H4.7. Start Frame fingerprint 12 hex presente", live.get("req_fingerprint") is True)
+    check("H4.8. cropCoordinates normalizado exacto con top numérico", live.get("req_cropTop") is True)
+    check("H4.9. Ingestión de Uint8Array (binary / TextEncoder) observada", live.get("uint8_observed") is True and live.get("uint8_videoModelKey") is True)
+    check("H4.10. Cero fuga de UUID crudo (433d7c19-...) en telemetría", live.get("noRawUuid") is True)
+
     print("\n-- I. Ejecución de suite de no-regresión F2 completa")
     env = dict(os.environ)
     env["PYTHONIOENCODING"] = "utf-8"

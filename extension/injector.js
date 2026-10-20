@@ -134,52 +134,166 @@
     } catch (_) { return []; }
   }
 
+  /* ---- [flow-start-frame F4] Helpers de detección polimórfica no destructiva ---- */
+  function isUrlSearchParams(b) {
+    if (!b || typeof b !== 'object') return false;
+    try {
+      if (typeof URLSearchParams !== 'undefined' && b instanceof URLSearchParams) return true;
+      if (Object.prototype.toString.call(b) === '[object URLSearchParams]') return true;
+      if (b.constructor && b.constructor.name === 'URLSearchParams') return true;
+      return typeof b.get === 'function' && typeof b.has === 'function' && typeof b.append === 'function';
+    } catch (_) { return false; }
+  }
+
+  function isFormData(b) {
+    if (!b || typeof b !== 'object') return false;
+    try {
+      if (typeof FormData !== 'undefined' && b instanceof FormData) return true;
+      if (Object.prototype.toString.call(b) === '[object FormData]') return true;
+      if (b.constructor && b.constructor.name === 'FormData') return true;
+      return typeof b.get === 'function' && typeof b.entries === 'function' && typeof b.append === 'function';
+    } catch (_) { return false; }
+  }
+
+  function isBlob(b) {
+    if (!b || typeof b !== 'object') return false;
+    try {
+      if (typeof Blob !== 'undefined' && b instanceof Blob) return true;
+      if (Object.prototype.toString.call(b) === '[object Blob]') return true;
+      if (b.constructor && b.constructor.name === 'Blob') return true;
+      return typeof b.slice === 'function' && typeof b.text === 'function' && typeof b.size === 'number';
+    } catch (_) { return false; }
+  }
+
+  function isRequest(b) {
+    if (!b || typeof b !== 'object') return false;
+    try {
+      if (typeof Request !== 'undefined' && b instanceof Request) return true;
+      if (Object.prototype.toString.call(b) === '[object Request]') return true;
+      if (b.constructor && b.constructor.name === 'Request') return true;
+      return typeof b.clone === 'function' && ('url' in b || 'method' in b);
+    } catch (_) { return false; }
+  }
+
+  /* Decodificación segura de percent-encoding tolerante a fallos URIError */
+  function safeDecodeUriComponent(s) {
+    if (!s || typeof s !== 'string') return '';
+    try {
+      return decodeURIComponent(s.replace(/\+/g, ' '));
+    } catch (_) {
+      try {
+        return s.replace(/\+/g, ' ').replace(/%([0-9a-fA-F]{2})/g, (_, hex) => {
+          try { return String.fromCharCode(parseInt(hex, 16)); } catch (_) { return '%' + hex; }
+        });
+      } catch (_) { return s; }
+    }
+  }
+
   /* Lectura SEGURA del cuerpo de request: solo tipos inmutables/síncronos.
-   * Un ReadableStream (o cualquier otro tipo) NUNCA se consume: la pasividad
-   * manda — si el cuerpo no se puede leer sin riesgo, no se lee. */
+   * Un ReadableStream (o cualquier otro tipo destructivo) NUNCA se consume: la pasividad
+   * manda — si el cuerpo no se puede leer sin riesgo, devuelve null. */
   function rpcBodyText(body) {
     try {
       if (typeof body === 'string') return body.slice(0, RPC_BODY_MAX);
       if (!body || typeof body !== 'object') return null;
-      if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) {
-        return body.toString().slice(0, RPC_BODY_MAX);
+      /* Streams y objetos destructivos: NUNCA consumir */
+      if (typeof body.getReader === 'function') return null;
+
+      /* ArrayBuffer y vistas tipadas (Uint8Array, etc.) sin consumo destructivo */
+      if (typeof ArrayBuffer !== 'undefined' && (body instanceof ArrayBuffer || (ArrayBuffer.isView && ArrayBuffer.isView(body)))) {
+        try {
+          if (typeof TextDecoder !== 'undefined') {
+            const dec = new TextDecoder().decode(body);
+            if (dec && typeof dec === 'string') return dec.slice(0, RPC_BODY_MAX);
+          }
+        } catch (_) {}
       }
-      if (typeof FormData !== 'undefined' && typeof body.get === 'function' && typeof body.entries === 'function') {
+
+      /* URLSearchParams polimórfico (same-realm, cross-realm, duck-typing) */
+      if (isUrlSearchParams(body)) {
+        try {
+          const s = body.toString();
+          if (typeof s === 'string' && s.length > 0 && s !== '[object Object]') {
+            return s.slice(0, RPC_BODY_MAX);
+          }
+        } catch (_) {}
+      }
+
+      /* FormData polimórfico: extracción segura de f.req */
+      if (isFormData(body)) {
         try {
           const v = body.get('f.req');
           if (typeof v === 'string') return v.slice(0, RPC_BODY_MAX);
-        } catch (_) { /* FormData sin f.req */ }
-        return null;
+        } catch (_) {}
+        try {
+          if (typeof body.entries === 'function') {
+            for (const [k, v] of body.entries()) {
+              if (k === 'f.req' && typeof v === 'string') return v.slice(0, RPC_BODY_MAX);
+            }
+          }
+        } catch (_) {}
       }
+
+      /* Contenedores de parámetros Closure/Angular (QueryData, HttpParams, o minificados) */
+      try {
+        if (typeof body.toString === 'function') {
+          const s = body.toString();
+          if (typeof s === 'string' && s !== '[object Object]' && s.length > 0) {
+            if (s.indexOf('f.req=') !== -1 || /^\s*\[/.test(s) || /^\s*%5B/i.test(s)) {
+              return s.slice(0, RPC_BODY_MAX);
+            }
+          }
+        }
+      } catch (_) {}
+
       return null;
     } catch (_) { return null; }
   }
 
   /* Extrae del cuerpo los envelopes f.req: [["<rpcid>","<payload>",...],...]
-   * Acepta cuerpo urlencoded (f.req=...) o el JSON crudo del envelope. */
+   * Acepta cuerpo urlencoded (f.req=...), JSON crudo del envelope, o %5B... */
   function parseFreqEntries(bodyText) {
     const out = [];
     try {
       const t = String(bodyText || '');
       if (!t) return out;
-      let freqJson = null;
+      let rawVal = null;
       const eq = t.indexOf('f.req=');
       if (eq !== -1) {
-        let seg = '';
-        for (const piece of t.slice(eq + 6).split('&')) { seg = piece; break; }
-        try { freqJson = decodeURIComponent(seg.replace(/\+/g, ' ')); } catch (_) { freqJson = seg; }
+        let seg = t.slice(eq + 6);
+        const nextAmp = seg.indexOf('&');
+        if (nextAmp !== -1) seg = seg.slice(0, nextAmp);
+        rawVal = seg;
       } else if (/^\s*\[/.test(t)) {
-        freqJson = t;
+        rawVal = t;
+      } else if (/^\s*%5B/i.test(t)) {
+        rawVal = t;
       }
-      if (!freqJson) return out;
-      const parsed = JSON.parse(freqJson);
+      if (!rawVal) return out;
+
+      let parsed = null;
+      const decoded = safeDecodeUriComponent(rawVal);
+      try { parsed = JSON.parse(decoded); } catch (_) {}
+      if (!parsed) {
+        try { parsed = JSON.parse(rawVal); } catch (_) {}
+      }
+      if (!parsed && typeof decoded === 'string' && /%5B/i.test(decoded)) {
+        try { parsed = JSON.parse(safeDecodeUriComponent(decoded)); } catch (_) {}
+      }
+      if (!parsed) return out;
+
       /* DFS acotado: cualquier array cuyo [0] sea un rpcid conocido es una
-       * entrada; el payload (si existe) es [1] como STRING doble-codificada. */
+       * entrada; el payload (si existe) es [1] como STRING doble-codificada o array. */
       let nodes = 0;
       (function dig(node, depth) {
-        if (!Array.isArray(node) || depth > 6 || nodes++ > RPC_DFS_NODES) return;
+        if (!Array.isArray(node) || depth > 8 || nodes++ > RPC_DFS_NODES) return;
         if (typeof node[0] === 'string' && RPC_IDS_RE.test(node[0])) {
-          out.push({ rpcid: node[0], payload: typeof node[1] === 'string' ? node[1] : null });
+          out.push({
+            rpcid: node[0],
+            payload: typeof node[1] === 'string'
+              ? node[1]
+              : (node[1] && typeof node[1] === 'object' ? JSON.stringify(node[1]) : null),
+          });
           return;
         }
         for (const el of node) dig(el, depth + 1);
@@ -346,69 +460,114 @@
     return null;
   }
 
+  /* [flow-start-frame F3/LIVE] Extracción posicional de un bloque de especificación */
+  function extractPositionalBlock(block) {
+    if (!block || !Array.isArray(block) || block.length < 5) return null;
+    const modelCandidate = typeof block[1] === 'string' ? block[1] : null;
+    if (!modelCandidate || (!/^(abra_|veo_)/i.test(modelCandidate) && !/_(i2v|t2v)_/i.test(modelCandidate))) return null;
+
+    const modelKey = modelCandidate;
+    // Operación / Aspect ratio: en Google Flow block[2] es 1 (MEDIA_GENERATION) o aspect numérico
+    const aspect = (typeof block[2] === 'number' && isFinite(block[2])) ? block[2] : (typeof block[2] === 'string' ? block[2] : 1);
+    const cnt = (typeof block[3] === 'number' && isFinite(block[3])) ? block[3] : 1;
+
+    let mediaId = null;
+    let cropRaw = null;
+    const sfEnv = block[4];
+    if (Array.isArray(sfEnv)) {
+      // Puntero exacto confirmado: block[4][1]
+      if (typeof sfEnv[1] === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sfEnv[1])) {
+        mediaId = sfEnv[1];
+      } else {
+        for (let i = 0; i < sfEnv.length; i++) {
+          const item = sfEnv[i];
+          if (typeof item === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item)) {
+            mediaId = item;
+            break;
+          }
+        }
+      }
+      // Puntero exacto confirmado: block[4][5]
+      if (Array.isArray(sfEnv[5]) || (sfEnv[5] && typeof sfEnv[5] === 'object')) {
+        cropRaw = sfEnv[5];
+      } else {
+        for (let i = 0; i < sfEnv.length; i++) {
+          if (Array.isArray(sfEnv[i]) && sfEnv[i].length === 4) {
+            cropRaw = sfEnv[i];
+            break;
+          }
+        }
+      }
+    }
+
+    // Puntero exacto confirmado de prompt: block[0][2][0][0]
+    let hasPrompt = false;
+    try {
+      if (block[0] && Array.isArray(block[0])) {
+        const pCand = block[0][2] && block[0][2][0] && block[0][2][0][0];
+        if (typeof pCand === 'string' && pCand.trim().length > 0) {
+          hasPrompt = true;
+        } else if (Array.isArray(pCand) && typeof pCand[0] === 'string' && pCand[0].trim().length > 0) {
+          hasPrompt = true;
+        }
+      }
+    } catch (_) {}
+    if (!hasPrompt && block[0]) {
+      let pNodes = 0;
+      (function checkPrompt(pNode, pDepth) {
+        if (hasPrompt || !pNode || pDepth > 6 || pNodes++ > 50) return;
+        if (typeof pNode === 'string' && pNode.trim().length > 0) {
+          hasPrompt = true;
+          return;
+        }
+        if (Array.isArray(pNode)) {
+          for (const el of pNode) checkPrompt(el, pDepth + 1);
+        }
+      })(block[0], 0);
+    }
+
+    return {
+      videoModelKey: modelKey,
+      aspectRatio: aspect,
+      count: cnt,
+      mediaId: mediaId,
+      cropRaw: cropRaw,
+      hasPrompt: hasPrompt,
+    };
+  }
+
   /* [flow-start-frame F3] Reconocimiento posicional de la mutación real
    * observada en eb1hJf (y variantes Protobuf puras):
-   * [ [ [prompt_env] ], videoModelKey, aspectRatio, count_or_null,
+   * Estructura confirmada: innerData[0][0] = block:
+   * [ [ [prompt_env] ], videoModelKey, aspectRatio/op, count_or_null,
    *   [null, mediaId, null, null, null, cropCoordinates], [ingredients] ]
    * No depende de strings de diccionario ni de claves inventadas.
    * Valida estructuralmente la signatura antes de extraer valores. */
   function resolvePositionalSpec(root) {
     if (!root || typeof root !== 'object') return null;
+
+    // 1. Acceso directo por puntero posicional exacto confirmado: innerData[0][0]
+    if (Array.isArray(root)) {
+      if (root.length > 0 && Array.isArray(root[0]) && root[0].length > 0 && Array.isArray(root[0][0])) {
+        const direct = extractPositionalBlock(root[0][0]);
+        if (direct) return direct;
+      }
+      if (root.length > 0 && Array.isArray(root[0])) {
+        const direct = extractPositionalBlock(root[0]);
+        if (direct) return direct;
+      }
+      const direct = extractPositionalBlock(root);
+      if (direct) return direct;
+    }
+
+    // 2. Búsqueda DFS como fallback seguro
     let found = null;
     let nodes = 0;
     (function dig(node, depth) {
       if (found || !node || !Array.isArray(node) || depth > RPC_DFS_DEPTH || nodes++ > RPC_DFS_NODES) return;
-      if (node.length >= 5
-          && typeof node[1] === 'string'
-          && node[1].length >= 3 && node[1].length <= 60
-          && (/^(abra_|veo_)/i.test(node[1]) || /_(i2v|t2v)_/i.test(node[1]))
-          && Array.isArray(node[0])) {
-        const modelKey = node[1];
-        const aspect = (typeof node[2] === 'number' && isFinite(node[2])) ? node[2] : null;
-        const cnt = (typeof node[3] === 'number' && isFinite(node[3])) ? node[3] : 1;
-        let mediaId = null;
-        let cropRaw = null;
-        const sfEnv = node[4];
-        if (Array.isArray(sfEnv)) {
-          for (let i = 0; i < sfEnv.length; i++) {
-            const item = sfEnv[i];
-            if (typeof item === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item)) {
-              mediaId = item;
-              break;
-            }
-          }
-          if (Array.isArray(sfEnv[5]) || (sfEnv[5] && typeof sfEnv[5] === 'object')) {
-            cropRaw = sfEnv[5];
-          } else {
-            for (let i = 0; i < sfEnv.length; i++) {
-              if (Array.isArray(sfEnv[i]) && sfEnv[i].length === 4) {
-                cropRaw = sfEnv[i];
-                break;
-              }
-            }
-          }
-        }
-        let hasPrompt = false;
-        let pNodes = 0;
-        (function checkPrompt(pNode, pDepth) {
-          if (hasPrompt || !pNode || pDepth > 6 || pNodes++ > 50) return;
-          if (typeof pNode === 'string' && pNode.trim().length > 0) {
-            hasPrompt = true;
-            return;
-          }
-          if (Array.isArray(pNode)) {
-            for (const el of pNode) checkPrompt(el, pDepth + 1);
-          }
-        })(node[0], 0);
-
-        found = {
-          videoModelKey: modelKey,
-          aspectRatio: aspect,
-          count: cnt,
-          mediaId: mediaId,
-          cropRaw: cropRaw,
-          hasPrompt: hasPrompt,
-        };
+      const spec = extractPositionalBlock(node);
+      if (spec) {
+        found = spec;
         return;
       }
       for (const el of node) {
@@ -770,18 +929,87 @@
   const originalFetch = window.fetch;
   if (typeof originalFetch === 'function') {
     window.fetch = function (input, init) {
-      const url = typeof input === 'string' ? input : (input && input.url) || '';
-      const method = ((init && init.method) || (input && input.method) || 'GET');
+      const url = typeof input === 'string' ? input : (input && (input.url || input.href)) || '';
+      const method = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
       const relevant = relevantUrl(url);
+
+      let reqObsPromise = null;
       if (relevant) {
-        /* [flow-start-frame F1] lectura PASIVA del cuerpo (init.body) sin
-         * mutarlo jamás: se pasa la referencia original, solo se lee. */
-        try { observeRpcRequestBody(url, method, init ? init.body : null); } catch (_) {}
+        /* [flow-start-frame F4/F5] Ingestión polimórfica, precedencia estricta y orden causal:
+         * 1. init.body tiene precedencia absoluta sobre Request.body si 'body' está en init y no es undefined.
+         * 2. Si init.body es null o "" explícito, se observa payload null (sin inspeccionar el Request superseded).
+         * 3. Si init.body está ausente o es undefined, y el input es un Request, se clona e inspecciona.
+         * 4. Para cuerpos asíncronos (clone.text() / blob.text()), captureResponse se encadena detrás de reqObsPromise
+         *    para garantizar que rpc_request siempre precede a rpc_response sin demorar el fetch nativo. */
+        const hasExplicitBody = !!(init && typeof init === 'object' && 'body' in init && init.body !== undefined);
+
+        if (hasExplicitBody) {
+          const explicitBody = init.body;
+          if (explicitBody === null || explicitBody === '') {
+            try { observeRpcRequestBody(url, method, null); } catch (_) {}
+          } else {
+            const syncBody = rpcBodyText(explicitBody);
+            if (syncBody !== null) {
+              try { observeRpcRequestBody(url, method, syncBody); } catch (_) {}
+            } else if (isBlob(explicitBody)) {
+              try {
+                reqObsPromise = explicitBody.text().then((text) => {
+                  try { observeRpcRequestBody(url, method, text || null); } catch (_) {}
+                }).catch(() => {
+                  try { observeRpcRequestBody(url, method, null); } catch (_) {}
+                });
+              } catch (_) {
+                try { observeRpcRequestBody(url, method, null); } catch (_) {}
+              }
+            } else {
+              try { observeRpcRequestBody(url, method, null); } catch (_) {}
+            }
+          }
+        } else if (isRequest(input)) {
+          let clone = null;
+          try {
+            if (typeof input.clone === 'function') {
+              clone = input.clone();
+            }
+          } catch (_) {}
+
+          if (clone && typeof clone.text === 'function') {
+            try {
+              reqObsPromise = clone.text().then((text) => {
+                try { observeRpcRequestBody(url, method, text || null); } catch (_) {}
+              }).catch(() => {
+                try { observeRpcRequestBody(url, method, null); } catch (_) {}
+              });
+            } catch (_) {
+              try { observeRpcRequestBody(url, method, null); } catch (_) {}
+            }
+          } else {
+            try { observeRpcRequestBody(url, method, null); } catch (_) {}
+          }
+        } else {
+          try { observeRpcRequestBody(url, method, null); } catch (_) {}
+        }
       }
+
       const promise = originalFetch.apply(this, arguments);
       if (relevant) {
-        promise.then((resp) => { captureResponse(url, resp, method); })
-               .catch((err) => { emitNetworkFailure(url, method, err); });
+        const onSettled = (fn) => {
+          if (reqObsPromise && typeof reqObsPromise.then === 'function') {
+            reqObsPromise.then(fn).catch(fn);
+          } else {
+            fn();
+          }
+        };
+
+        promise.then((resp) => {
+          onSettled(() => {
+            try { captureResponse(url, resp, method); } catch (_) {}
+          });
+        }).catch((err) => {
+          onSettled(() => {
+            try { emitNetworkFailure(url, method, err); } catch (_) {}
+          });
+        });
       }
       return promise;
     };
@@ -803,9 +1031,25 @@
 
     XHR.prototype.send = function () {
       if (this.__flowExtUrl) {
-        /* [flow-start-frame F1] cuerpo de request XHR (solo lectura; la
+        /* [flow-start-frame F1/F4] cuerpo de request XHR (solo lectura; la
          * referencia original pasa intacta a originalSend). */
-        try { observeRpcRequestBody(this.__flowExtUrl, this.__flowExtMethod, arguments[0]); } catch (_) {}
+        const arg0 = arguments[0];
+        const syncBody = rpcBodyText(arg0);
+        if (syncBody !== null) {
+          try { observeRpcRequestBody(this.__flowExtUrl, this.__flowExtMethod, syncBody); } catch (_) {}
+        } else if (isBlob(arg0)) {
+          try {
+            arg0.text().then((text) => {
+              try { observeRpcRequestBody(this.__flowExtUrl, this.__flowExtMethod, text || null); } catch (_) {}
+            }).catch(() => {
+              try { observeRpcRequestBody(this.__flowExtUrl, this.__flowExtMethod, null); } catch (_) {}
+            });
+          } catch (_) {
+            try { observeRpcRequestBody(this.__flowExtUrl, this.__flowExtMethod, null); } catch (_) {}
+          }
+        } else {
+          try { observeRpcRequestBody(this.__flowExtUrl, this.__flowExtMethod, arg0 || null); } catch (_) {}
+        }
         this.addEventListener('load', () => {
           try {
             if (this.readyState !== 4) return;

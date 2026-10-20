@@ -37,10 +37,12 @@ function makeSandbox(fetchImpl) {
     setTimeout, clearTimeout,
     Date, JSON, Math, String, Number, Object, Array, RegExp, Promise, Error,
     URLSearchParams, FormData, isFinite, decodeURIComponent, encodeURIComponent,
+    Request, Blob, ReadableStream, TextEncoder, TextDecoder, Uint8Array, ArrayBuffer,
   };
   sandbox.window = {
     __FLOW_EXT_INJECTOR__: false,
     postMessage(msg) { emitted.push(msg); },
+    Request, Blob, ReadableStream, URLSearchParams, FormData, TextEncoder, TextDecoder, Uint8Array, ArrayBuffer,
   };
   sandbox.window.fetch = fetchImpl || function () { return Promise.resolve(makeResp({})); };
   sandbox.window.XMLHttpRequest = makeXHRClass();
@@ -298,6 +300,294 @@ async function main() {
       videoModelKey: ev.videoModelKey,
       aspectRatio: ev.aspectRatio,
       count: ev.count,
+    };
+  }
+
+  /* ---- TEST B: fetch(Request) sin init.body ------------------------- */
+  {
+    let reqReceived = null;
+    const f = makeFetch((input) => {
+      reqReceived = input;
+      return makeResp({});
+    });
+    const sb = makeSandbox(f.fn);
+    const bodyStr = 'f.req=' + encodeURIComponent(envelopeOf('eb1hJf', eb1hJfPositionalPayload()));
+    const req = new Request(EB1HJF_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+      body: bodyStr,
+    });
+    await sb.sandbox.window.fetch(req);
+    await wait(25);
+    const evs = rpcEvents(sb.emitted);
+    const ev = evs.find((e) => e.rpcid === 'eb1hJf') || {};
+    checks.test_b_request_object = {
+      observed: evs.length === 1,
+      operation: ev.operation === 'MEDIA_GENERATION',
+      videoModelKey: ev.videoModelKey === 'abra_i2v_10s',
+      startFrame: !!(ev.startFrame && ev.startFrame.mediaIdPresent),
+      fingerprint: !!(ev.startFrame && ev.startFrame.fingerprint === '2b9d0650a000'),
+      cropNormalized: !!(ev.cropCoordinates && ev.cropCoordinates.positional && ev.cropCoordinates.positional.top === 0.10081230055120394),
+      originalPassedToFetch: reqReceived === req,
+      noRawMediaId: JSON.stringify(sb.emitted).indexOf(RAW_MEDIA_ID) === -1,
+    };
+  }
+
+  /* ---- TEST C: fetch con body URLSearchParams ----------------------- */
+  {
+    const f = makeFetch();
+    const sb = makeSandbox(f.fn);
+    const params = new URLSearchParams();
+    params.set('f.req', envelopeOf('eb1hJf', eb1hJfPositionalPayload()));
+    await sb.sandbox.window.fetch(EB1HJF_URL, { method: 'POST', body: params });
+    await wait(20);
+    const evs = rpcEvents(sb.emitted);
+    const ev = evs.find((e) => e.rpcid === 'eb1hJf') || {};
+    checks.test_c_urlsearchparams = {
+      observed: evs.length === 1,
+      operation: ev.operation === 'MEDIA_GENERATION',
+      videoModelKey: ev.videoModelKey === 'abra_i2v_10s',
+      startFrame: !!(ev.startFrame && ev.startFrame.mediaIdPresent),
+      noRawMediaId: JSON.stringify(sb.emitted).indexOf(RAW_MEDIA_ID) === -1,
+    };
+  }
+
+  /* ---- TEST D: cross-realm / duck-typing de URLSearchParams --------- */
+  {
+    const f = makeFetch();
+    const sb = makeSandbox(f.fn);
+    const bodyStr = 'f.req=' + encodeURIComponent(envelopeOf('eb1hJf', eb1hJfPositionalPayload()));
+    /* Objeto sin prototipo URLSearchParams pero con interfaz get/has/append y toString */
+    const crossRealmParams = {
+      get(k) { return k === 'f.req' ? envelopeOf('eb1hJf', eb1hJfPositionalPayload()) : null; },
+      has(k) { return k === 'f.req'; },
+      append() {},
+      toString() { return bodyStr; },
+    };
+    await sb.sandbox.window.fetch(EB1HJF_URL, { method: 'POST', body: crossRealmParams });
+    await wait(20);
+    const evs = rpcEvents(sb.emitted);
+    const ev = evs.find((e) => e.rpcid === 'eb1hJf') || {};
+    checks.test_d_cross_realm_duck_typing = {
+      observed: evs.length === 1,
+      operation: ev.operation === 'MEDIA_GENERATION',
+      videoModelKey: ev.videoModelKey === 'abra_i2v_10s',
+      startFrame: !!(ev.startFrame && ev.startFrame.mediaIdPresent),
+      noRawMediaId: JSON.stringify(sb.emitted).indexOf(RAW_MEDIA_ID) === -1,
+    };
+  }
+
+  /* ---- TEST E: ReadableStream no inspeccionable --------------------- */
+  {
+    let streamConsumed = false;
+    const fakeStream = {
+      getReader() { streamConsumed = true; return { read() { return Promise.resolve({ done: true }); } }; },
+    };
+    const f = makeFetch();
+    const sb = makeSandbox(f.fn);
+    await sb.sandbox.window.fetch(EB1HJF_URL, { method: 'POST', body: fakeStream });
+    await wait(20);
+    const evs = rpcEvents(sb.emitted);
+    const ev = evs[0] || {};
+    checks.test_e_uninspectable_stream = {
+      notConsumed: streamConsumed === false,
+      observed: evs.length === 1,
+      operationNull: ev.operation === null,
+      videoModelKeyNull: ev.videoModelKey === null,
+      startFrameNull: ev.startFrame === null,
+    };
+  }
+
+  /* ---- TEST F5.1: Precedencia explícita de init.body ("", null, undefined, {}, POST "") ---- */
+  {
+    const bodyStr = 'f.req=' + encodeURIComponent(envelopeOf('eb1hJf', eb1hJfPositionalPayload()));
+
+    // Caso 1: fetch(req, { body: "" }) -> cuerpo vacío explícito anula el Request anterior
+    {
+      const f = makeFetch();
+      const sb = makeSandbox(f.fn);
+      const req = new Request(EB1HJF_URL, { method: 'POST', body: bodyStr });
+      await sb.sandbox.window.fetch(req, { body: '' });
+      await wait(25);
+      const evs = rpcEvents(sb.emitted);
+      const ev = evs[0] || {};
+      checks.test_f5_case1_empty_string_override = {
+        observed: evs.length === 1,
+        operationNull: ev.operation === null,
+        videoModelKeyNull: ev.videoModelKey === null,
+        startFrameNull: ev.startFrame === null,
+        noLeakRawMediaId: JSON.stringify(sb.emitted).indexOf(RAW_MEDIA_ID) === -1,
+      };
+    }
+
+    // Caso 2: fetch(req, { body: null }) -> cuerpo nulo explícito anula el Request anterior
+    {
+      const f = makeFetch();
+      const sb = makeSandbox(f.fn);
+      const req = new Request(EB1HJF_URL, { method: 'POST', body: bodyStr });
+      await sb.sandbox.window.fetch(req, { body: null });
+      await wait(25);
+      const evs = rpcEvents(sb.emitted);
+      const ev = evs[0] || {};
+      checks.test_f5_case2_null_body_override = {
+        observed: evs.length === 1,
+        operationNull: ev.operation === null,
+        videoModelKeyNull: ev.videoModelKey === null,
+        startFrameNull: ev.startFrame === null,
+        noLeakRawMediaId: JSON.stringify(sb.emitted).indexOf(RAW_MEDIA_ID) === -1,
+      };
+    }
+
+    // Caso 3: fetch(req, {}) -> init sin 'body', preserva e inspecciona el Request original
+    {
+      const f = makeFetch();
+      const sb = makeSandbox(f.fn);
+      const req = new Request(EB1HJF_URL, { method: 'POST', body: bodyStr });
+      await sb.sandbox.window.fetch(req, {});
+      await wait(25);
+      const evs = rpcEvents(sb.emitted);
+      const ev = evs[0] || {};
+      checks.test_f5_case3_empty_init_preserves_request = {
+        observed: evs.length === 1,
+        operation: ev.operation === 'MEDIA_GENERATION',
+        videoModelKey: ev.videoModelKey === 'abra_i2v_10s',
+        startFramePresent: !!(ev.startFrame && ev.startFrame.mediaIdPresent),
+      };
+    }
+
+    // Caso 4: fetch(req, { body: undefined }) -> 'body' undefined, preserva e inspecciona el Request
+    {
+      const f = makeFetch();
+      const sb = makeSandbox(f.fn);
+      const req = new Request(EB1HJF_URL, { method: 'POST', body: bodyStr });
+      await sb.sandbox.window.fetch(req, { body: undefined });
+      await wait(25);
+      const evs = rpcEvents(sb.emitted);
+      const ev = evs[0] || {};
+      checks.test_f5_case4_undefined_body_preserves_request = {
+        observed: evs.length === 1,
+        operation: ev.operation === 'MEDIA_GENERATION',
+        videoModelKey: ev.videoModelKey === 'abra_i2v_10s',
+        startFramePresent: !!(ev.startFrame && ev.startFrame.mediaIdPresent),
+      };
+    }
+
+    // Caso 5: fetch(url, { method: "POST", body: "" }) -> url string con body vacío
+    {
+      const f = makeFetch();
+      const sb = makeSandbox(f.fn);
+      await sb.sandbox.window.fetch(EB1HJF_URL, { method: 'POST', body: '' });
+      await wait(25);
+      const evs = rpcEvents(sb.emitted);
+      const ev = evs[0] || {};
+      checks.test_f5_case5_url_empty_body = {
+        observed: evs.length === 1,
+        operationNull: ev.operation === null,
+        videoModelKeyNull: ev.videoModelKey === null,
+        startFrameNull: ev.startFrame === null,
+      };
+    }
+  }
+
+  /* ---- TEST F5.2: Orden causal garantizado de rpc_request antes de rpc_response ---- */
+  {
+    // Responder con estructura batchexecute wrb.fr de resolución inmediata
+    const respPayload = [['wrb.fr', 'eb1hJf', JSON.stringify({ status: 'DONE', videoId: 'v123' })]];
+    const f = makeFetch(() => Promise.resolve(makeResp(respPayload)));
+    const sb = makeSandbox(f.fn);
+    const bodyStr = 'f.req=' + encodeURIComponent(envelopeOf('eb1hJf', eb1hJfPositionalPayload()));
+    const req = new Request(EB1HJF_URL, { method: 'POST', body: bodyStr });
+    await sb.sandbox.window.fetch(req);
+    await wait(25);
+
+    const allEvents = sb.emitted
+      .filter((e) => e.type === 'FLOW_RPC_EVIDENCE' && e.data && (e.data.kind === 'rpc_request' || e.data.kind === 'rpc_response'))
+      .map((e) => e.data);
+
+    const reqIdx = allEvents.findIndex((e) => e.kind === 'rpc_request');
+    const respIdx = allEvents.findIndex((e) => e.kind === 'rpc_response');
+
+    checks.test_f5_causal_telemetry_ordering = {
+      hasRequest: reqIdx !== -1,
+      hasResponse: respIdx !== -1,
+      requestPrecedesResponse: reqIdx !== -1 && respIdx !== -1 && reqIdx < respIdx,
+      requestExtracted: reqIdx !== -1 && allEvents[reqIdx].operation === 'MEDIA_GENERATION',
+      responseExtracted: respIdx !== -1 && allEvents[respIdx].states && allEvents[respIdx].states.status === 'DONE',
+    };
+  }
+
+  /* ---- TEST F5.3: Error de lectura no bloquea ni altera el resultado nativo ---- */
+  {
+    let nativeCompleted = false;
+    let nativeResultText = null;
+    const respPayload = [['wrb.fr', 'eb1hJf', JSON.stringify({ status: 'DONE', videoId: 'v_resilient' })]];
+    const f = makeFetch(() => Promise.resolve(makeResp(respPayload)));
+    const sb = makeSandbox(f.fn);
+
+    const badReq = new Request(EB1HJF_URL, { method: 'POST', body: 'some_body' });
+    badReq.clone = function () {
+      return {
+        text() { return Promise.reject(new Error('Simulated clone read error')); },
+      };
+    };
+
+    try {
+      const resp = await sb.sandbox.window.fetch(badReq);
+      nativeCompleted = true;
+      nativeResultText = await resp.text();
+    } catch (_) {}
+    await wait(25);
+
+    const allEvents = sb.emitted
+      .filter((e) => e.type === 'FLOW_RPC_EVIDENCE' && e.data && (e.data.kind === 'rpc_request' || e.data.kind === 'rpc_response'))
+      .map((e) => e.data);
+
+    const reqIdx = allEvents.findIndex((e) => e.kind === 'rpc_request');
+    const respIdx = allEvents.findIndex((e) => e.kind === 'rpc_response');
+
+    checks.test_f5_clone_error_resilience = {
+      nativeFetchNotBlocked: nativeCompleted === true,
+      nativeResultPreserved: typeof nativeResultText === 'string' && nativeResultText.indexOf('v_resilient') !== -1,
+      fallbackRequestEmitted: reqIdx !== -1 && allEvents[reqIdx].operation === null,
+      responseStillCaptured: respIdx !== -1,
+      orderStillPreserved: reqIdx !== -1 && respIdx !== -1 && reqIdx < respIdx,
+    };
+  }
+
+  /* ---- TEST LIVE REAL: Payload real capturado en Google Flow --------- */
+  {
+    const LIVE_PAYLOAD_RAW = '[[[\"eb1hJf\",\"[[[[null,null,[[[\\\"la mujer esta tomando cafe \\\"]]]],\\\"abra_i2v_10s\\\",1,null,[null,\\\"433d7c19-a8e5-402e-bdf0-1f53970a35c4\\\",null,null,null,[0.10081230055120394,null,0.8991876994487961,1]],[null,null,null,null,\\\"1DBC7B08-29CE-4C3F-9311-4F451258A9B8\\\",\\\"0E161840-4B9F-424C-8865-A9AF79F18F97\\\"]]],[null,22,null,null,null,\\\"6738ddd3-5521-43b8-b430-d0472014c384\\\",null,null,null,null,[\\\"0cAFcWeA4M2D0dA9RGRtLj680Dz6mX7PQ7YzRW_jcj8FEC2Cy5C3wKylVgJShOug...\\\",1]],[\\\"22D8EECA-1F90-46DE-B113-01DDC1F50132\\\",2]]\",null,\"generic\"]]]';
+    const bodyStr = 'f.req=' + encodeURIComponent(LIVE_PAYLOAD_RAW);
+
+    // Case 1: fetch(req) con Request object
+    const f1 = makeFetch();
+    const sb1 = makeSandbox(f1.fn);
+    const req1 = new Request(EB1HJF_URL, { method: 'POST', body: bodyStr });
+    await sb1.sandbox.window.fetch(req1);
+    await wait(25);
+    const ev1 = rpcEvents(sb1.emitted, 'rpc_request').find((e) => e.rpcid === 'eb1hJf') || {};
+
+    // Case 2: fetch con Uint8Array body
+    const f2 = makeFetch();
+    const sb2 = makeSandbox(f2.fn);
+    const uint8Body = new TextEncoder().encode(bodyStr);
+    await sb2.sandbox.window.fetch(EB1HJF_URL, { method: 'POST', body: uint8Body });
+    await wait(25);
+    const ev2 = rpcEvents(sb2.emitted, 'rpc_request').find((e) => e.rpcid === 'eb1hJf') || {};
+
+    checks.test_live_eb1hjf_exact_payload = {
+      req_observed: !!ev1.rpcid,
+      req_operation: ev1.operation === 'MEDIA_GENERATION',
+      req_videoModelKey: ev1.videoModelKey === 'abra_i2v_10s',
+      req_aspectRatio: ev1.aspectRatio === 1,
+      req_promptPresent: ev1.structuredPromptPresent === true,
+      req_mediaIdPresent: !!(ev1.startFrame && ev1.startFrame.mediaIdPresent),
+      req_fingerprint: !!(ev1.startFrame && typeof ev1.startFrame.fingerprint === 'string' && ev1.startFrame.fingerprint.length === 12),
+      req_cropTop: !!(ev1.cropCoordinates && ev1.cropCoordinates.positional && ev1.cropCoordinates.positional.top === 0.10081230055120394),
+      uint8_observed: !!ev2.rpcid,
+      uint8_videoModelKey: ev2.videoModelKey === 'abra_i2v_10s',
+      uint8_mediaIdPresent: !!(ev2.startFrame && ev2.startFrame.mediaIdPresent),
+      noRawUuid: JSON.stringify(sb1.emitted).indexOf('433d7c19-a8e5-402e-bdf0-1f53970a35c4') === -1,
     };
   }
 
