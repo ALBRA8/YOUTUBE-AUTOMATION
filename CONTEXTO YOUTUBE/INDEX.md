@@ -1,12 +1,12 @@
 # CONTEXTO YOUTUBE — INDEX
 
 **Estado:** POPULATED BASELINE / IN_PROGRESS  
-**Última actualización:** 2026-10-18
+**Última actualización:** 2026-10-20
 
 | Área | Archivo | Estado | Propósito |
 |---|---|---|---|
 | Master | `00_MASTER/PROJECT_STATE.md` | IN_PROGRESS | estado actual, bloqueo y plan inmediato |
-| Master | `00_MASTER/ARCHITECTURE.md` | VERIFIED / IN_PROGRESS | capas, frontera y límites de evidencia |
+| Master | `00_MASTER/ARCHITECTURE.md` | VERIFIED / IN_PROGRESS | capas, frontera y límites de evidencia; incorpora la referencia conceptual del video base |
 | Master | `00_MASTER/GLOSSARY.md` | VERIFIED | términos del proyecto |
 | Decisions | `01_DECISIONS/DECISION_LOG.md` | POPULATED | decisiones arquitectónicas y Start Frame |
 | Processes | `02_PROCESSES/PROCESS_INDEX.md` | POPULATED | procedimientos de auditoría y prueba real |
@@ -16,7 +16,10 @@
 | Integrations | `06_INTEGRATIONS/INTEGRATION_INDEX.md` | POPULATED | AGENTE-GENERAL, Bridge, Flow, Meta, HANDS |
 | Failures | `07_FAILURES/FAILURE_INDEX.md` | POPULATED | incidente histórico, gaps y riesgos |
 | Sessions | `08_SESSIONS/SESSION_INDEX.md` | POPULATED | resumen de continuidad de la sesión |
-| Knowledge | `09_KNOWLEDGE/KNOWLEDGE_INDEX.md` | POPULATED | reglas técnicas y jerarquía de evidencia |
+| Knowledge | `09_KNOWLEDGE/KNOWLEDGE_INDEX.md` | POPULATED | reglas técnicas, jerarquía de evidencia y referencia conceptual del video base |
+
+## Referencia conceptual incorporada
+`09_KNOWLEDGE/K-007_VIDEO_BASE_REFERENCIA_2026-10-17.md` conserva el video que sirvió como origen conceptual del pipeline audiovisual. Se incorpora como **conocimiento de referencia**, no como evidencia técnica ni como especificación de implementación.
 
 ## Hito vigente
-La auditoría estática del Start Frame de Google Flow encontró que no existe un binding verificable en el camino Flow inspeccionado. El E2E real sigue NOT_DEMONSTRATED. No implementar aún; primero capturar una generación real de ALBRA con imagen conocida.
+La auditoría estática y la captura live documentada de Google Flow/Start Frame forman parte del historial técnico del contexto. No elevar evidencia parcial a VERIFIED fuera de su alcance. La memoria documental debe conservar la diferencia entre referencia conceptual, evidencia de ejecución y estado real del código.
