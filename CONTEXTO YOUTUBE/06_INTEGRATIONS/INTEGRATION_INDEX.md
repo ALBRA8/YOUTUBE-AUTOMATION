@@ -23,3 +23,11 @@
 
 ## INT-005 — HANDS / Flow Operator
 - **Estado:** HANDS estructuralmente implementado según inventario; conexión física/Flow real marcada OFF/NOT CONNECTED según configuración.
+
+## INT-006 — YOUTUBE-AUTOMATION ↔ GoogleFlowMCP
+- **Estado:** PUENTE LOCAL IMPLEMENTADO / PRUEBAS AISLADAS REPORTADAS PASS / LIVE PENDIENTE.
+- **Componentes reportados:** `backend/services/flow_mcp_client.py`, configuración en `backend/config.py`, integración condicional en `backend/pipeline/images.py`.
+- **Seguridad operacional:** `FLOW_MCP_ENABLED=0` por defecto; si está desactivado o falla, el pipeline continúa por los proveedores de fallback existentes.
+- **Preflight:** el perfil dedicado `FlowImageChrome` no existía; puede requerir login manual en una ventana aislada.
+- **Validación pendiente:** generación real de una imagen a través del pipeline y MCP, verificación binaria y comprobación del fallback.
+- **Límite de evidencia:** el informe local no demuestra que el código esté committeado/pusheado ni que la generación LIVE haya ocurrido.
