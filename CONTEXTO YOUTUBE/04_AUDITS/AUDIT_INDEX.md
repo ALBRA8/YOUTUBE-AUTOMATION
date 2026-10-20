@@ -25,3 +25,12 @@
 - **Referencia:** commit `2d0a99b85fa8c7f224b5c8660708411b1617e32a`.
 - **Resultado:** la extensión puede observar `batchexecute` y registrar `WuwhI`, `eb1hJf`, `jwpduf` y `as29s` sin alterar el tráfico; harness reportado 15/15 y F1 64/64.
 - **Límite:** el harness no sustituye la correlación con el proveedor real.
+
+## AUD-005 — Puente GoogleFlowMCP YOUTUBE-AUTOMATION
+- **Estado:** IMPLEMENTACIÓN Y PRUEBAS AISLADAS REPORTADAS PASS; LIVE TEST PENDIENTE.
+- **Fuente:** informe de Antigravity del 2026-10-20; no se reejecutaron aquí las pruebas ni se verificó que los cambios locales estén en el remoto.
+- **Resultado reportado:** 21/21 pruebas del puente, regresión mock F5.1 PASS, harness backend 55 OK y pruebas del paquete MCP 3/3 PASS.
+- **Diseño:** `FLOW_MCP_ENABLED=0` por defecto; generación condicional; validación del archivo y fallback a proveedores existentes.
+- **Bloqueo LIVE:** el perfil dedicado `%LOCALAPPDATA%\\FlowImageChrome` no existía en el preflight. Debe prepararse y autenticarse de forma interactiva si Google lo exige.
+- **Próximo hito:** una imagen real a través de pipeline → MCP → Google Flow → archivo validado, en carpeta aislada y con autorización explícita.
+- **Límite:** no equivale a evidencia de Start Frame; no modifica el estado del AUD-002.
