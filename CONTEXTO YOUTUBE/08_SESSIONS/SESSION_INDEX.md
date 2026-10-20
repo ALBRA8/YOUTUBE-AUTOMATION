@@ -16,3 +16,10 @@
 - **Límite:** la tabla de DevTools ocultó campos; aún no se ha identificado de forma concluyente el `WuwhI` de generación ni su `mediaId` de Start Frame.
 - **Decisión:** no generar otra vez ni implementar binding todavía; leer los cuatro registros almacenados y clasificar.
 - **Referencia:** `SES-2026-10-18-02_GOOGLE_FLOW_START_FRAME_LIVE_CAPTURE.md`.
+
+## SES-2026-10-20-03 — GoogleFlowMCP: puente implementado, LIVE pendiente
+- **Estado:** implementación local reportada; LIVE TEST 1 bloqueado por preparación/autenticación del perfil dedicado.
+- **Hecho:** Antigravity reportó 21/21 pruebas del puente, 55 OK del harness, 3/3 del paquete MCP y regresión F5.1 mock PASS.
+- **Protecciones:** `FLOW_MCP_ENABLED=0` por defecto; no activar permanentemente, no alterar F5.1 ni la configuración MCP activa de Antigravity.
+- **Pendiente:** preparar `FlowImageChrome`; si requiere login, el usuario lo realiza manualmente; después autorizar una única generación real.
+- **Límite:** no se ha demostrado E2E LIVE ni Start Frame. Ver también `SES-2026-10-20-03_GOOGLEFLOWMCP_BRIDGE_IMPLEMENTATION.md`.
