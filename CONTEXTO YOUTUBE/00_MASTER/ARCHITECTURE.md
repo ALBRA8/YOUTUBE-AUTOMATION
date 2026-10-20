@@ -1,7 +1,7 @@
 # ARCHITECTURE — YOUTUBE-AUTOMATION
 
 **Estado:** arquitectura conceptual confirmada; ejecución externa real de Flow sigue IN_PROGRESS / NOT_DEMONSTRATED.  
-**Revisión:** 2026-10-18.
+**Revisión:** 2026-10-20.
 
 ## Principios
 - AGENTE-GENERAL es el cuerpo central de ALBRA; YOUTUBE-AUTOMATION es la especialización audiovisual.
@@ -10,6 +10,7 @@
 - Transportar datos, configurar UI, observar respuesta y demostrar efecto real son niveles de evidencia diferentes.
 - Fail-closed: control requerido no verificable no debe convertirse en autorización.
 - Código y tests del repo son fuente de verdad de implementación; memoria documental conserva decisiones, contexto y trazabilidad.
+- El **video base de referencia 2026-10-17** es origen conceptual del pipeline, no especificación técnica. Sus principios transferibles son proyecto → escenas → assets → generación → validación → composición/render. Ver `09_KNOWLEDGE/K-007_VIDEO_BASE_REFERENCIA_2026-10-17.md`.
 
 ## Capas
 1. Creative Engine / Production JSON: intención creativa y datos por escena.
@@ -27,11 +28,37 @@
 AGENTE-GENERAL (identidad, coordinación, infraestructura transversal)
         │ A2A / Handoff / MCP
         ▼
-YOUTUBE-AUTOMATION (dominio audiovisual)
+YOUTUBE-AUTOMATION (dominio audiovisual / orquestador)
  Creative Engine → Production JSON → export/execution_spec
  → backend jobs/leases → extension bridge → Chrome / Google Flow
  → assets → import/QA/render/publicación
 ```
+
+## Referencia conceptual del video base
+
+El video de 2026-10-17 aporta el origen conceptual del pipeline que se está construyendo, pero no dicta la implementación.
+
+La transferencia válida es:
+
+```text
+IDEA / PROYECTO
+      ↓
+NARRATIVA
+      ↓
+ESCENAS
+      ↓
+ASSETS / REFERENCIAS
+      ↓
+PROVEEDOR DE GENERACIÓN
+      ↓
+VALIDACIÓN / SELECCIÓN
+      ↓
+COMPOSICIÓN / EDICIÓN
+      ↓
+RENDER / OUTPUT
+```
+
+Esto refuerza una frontera clave: **Google Flow es una capacidad/proveedor dentro de YOUTUBE-AUTOMATION, no YOUTUBE-AUTOMATION completo.** GoogleFlowMCP es un puente/herramienta especializada para acceder a capacidades de Flow; el orquestador conserva la responsabilidad del proyecto, escenas, assets, validación y continuación del pipeline.
 
 ## Camino Flow auditado
 Para vídeos bridge con spec, `injectScene(item)` vuelve a ejecutar gate/consent. Después inyecta el prompt por `slateInjectFn`, verifica resultado de UI y reporta `GENERATION_SUBMITTED`. Esto prueba el paso de envío según el código, no que la imagen prevista esté ligada al request ni que Flow haya generado el resultado esperado.
