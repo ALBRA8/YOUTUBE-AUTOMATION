@@ -322,17 +322,101 @@
     return { settings: null, parseError: true };
   }
 
-  /* [F2] cropCoordinates: whitelist estricta de números finitos top/left/
+  /* [F2/F3] cropCoordinates: whitelist estricta de números finitos top/left/
    * bottom/right (la captura LIVE muestra exactamente esas llaves; no es
-   * secreto). Cualquier otra llave se ignora. */
+   * secreto). Cualquier otra llave se ignora. Acepta objeto O array de 4. */
   function sanitizeCrop(cc) {
-    if (!cc || typeof cc !== 'object' || Array.isArray(cc)) return null;
+    if (!cc) return null;
     const out = {};
-    for (const k of ['top', 'left', 'bottom', 'right']) {
-      const v = cc[k];
-      if (typeof v === 'number' && isFinite(v)) out[k] = v;
+    if (Array.isArray(cc) && cc.length >= 4) {
+      const keys = ['top', 'left', 'bottom', 'right'];
+      for (let i = 0; i < 4; i++) {
+        const v = cc[i];
+        if (typeof v === 'number' && isFinite(v)) out[keys[i]] = v;
+      }
+      return Object.keys(out).length ? out : null;
     }
-    return Object.keys(out).length ? out : null;
+    if (typeof cc === 'object' && !Array.isArray(cc)) {
+      for (const k of ['top', 'left', 'bottom', 'right']) {
+        const v = cc[k];
+        if (typeof v === 'number' && isFinite(v)) out[k] = v;
+      }
+      return Object.keys(out).length ? out : null;
+    }
+    return null;
+  }
+
+  /* [flow-start-frame F3] Reconocimiento posicional de la mutación real
+   * observada en eb1hJf (y variantes Protobuf puras):
+   * [ [ [prompt_env] ], videoModelKey, aspectRatio, count_or_null,
+   *   [null, mediaId, null, null, null, cropCoordinates], [ingredients] ]
+   * No depende de strings de diccionario ni de claves inventadas.
+   * Valida estructuralmente la signatura antes de extraer valores. */
+  function resolvePositionalSpec(root) {
+    if (!root || typeof root !== 'object') return null;
+    let found = null;
+    let nodes = 0;
+    (function dig(node, depth) {
+      if (found || !node || !Array.isArray(node) || depth > RPC_DFS_DEPTH || nodes++ > RPC_DFS_NODES) return;
+      if (node.length >= 5
+          && typeof node[1] === 'string'
+          && node[1].length >= 3 && node[1].length <= 60
+          && (/^(abra_|veo_)/i.test(node[1]) || /_(i2v|t2v)_/i.test(node[1]))
+          && Array.isArray(node[0])) {
+        const modelKey = node[1];
+        const aspect = (typeof node[2] === 'number' && isFinite(node[2])) ? node[2] : null;
+        const cnt = (typeof node[3] === 'number' && isFinite(node[3])) ? node[3] : 1;
+        let mediaId = null;
+        let cropRaw = null;
+        const sfEnv = node[4];
+        if (Array.isArray(sfEnv)) {
+          for (let i = 0; i < sfEnv.length; i++) {
+            const item = sfEnv[i];
+            if (typeof item === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item)) {
+              mediaId = item;
+              break;
+            }
+          }
+          if (Array.isArray(sfEnv[5]) || (sfEnv[5] && typeof sfEnv[5] === 'object')) {
+            cropRaw = sfEnv[5];
+          } else {
+            for (let i = 0; i < sfEnv.length; i++) {
+              if (Array.isArray(sfEnv[i]) && sfEnv[i].length === 4) {
+                cropRaw = sfEnv[i];
+                break;
+              }
+            }
+          }
+        }
+        let hasPrompt = false;
+        let pNodes = 0;
+        (function checkPrompt(pNode, pDepth) {
+          if (hasPrompt || !pNode || pDepth > 6 || pNodes++ > 50) return;
+          if (typeof pNode === 'string' && pNode.trim().length > 0) {
+            hasPrompt = true;
+            return;
+          }
+          if (Array.isArray(pNode)) {
+            for (const el of pNode) checkPrompt(el, pDepth + 1);
+          }
+        })(node[0], 0);
+
+        found = {
+          videoModelKey: modelKey,
+          aspectRatio: aspect,
+          count: cnt,
+          mediaId: mediaId,
+          cropRaw: cropRaw,
+          hasPrompt: hasPrompt,
+        };
+        return;
+      }
+      for (const el of node) {
+        if (found) return;
+        if (Array.isArray(el)) dig(el, depth + 1);
+      }
+    })(root, 0);
+    return found;
   }
 
   /* [F2] cropCoordinates por ESTRUCTURA de ruta, igual que los mediaId:
@@ -450,54 +534,90 @@
         };
         const payload = e.payload ? unwrapPayloadString(e.payload) : null;
         if (payload) {
-          /* operación SOLO si el marcador estructural existe (sin inventar);
-           * [F2] localiza el VAL aunque venga como par protobuf-ish */
-          const settingsVal = locateMediaGenSettingsValue(payload);
-          if (settingsVal !== undefined
-              || /MEDIA_GENERATION/.test(String(e.payload || '').slice(0, RPC_BODY_MAX))) {
+          /* [flow-start-frame F3] 1. Detección posicional estructural (eb1hJf / Protobuf puro) */
+          const posSpec = resolvePositionalSpec(payload);
+          if (posSpec) {
             obs.operation = 'MEDIA_GENERATION';
+            obs.videoModelKey = redactSecrets(posSpec.videoModelKey).slice(0, 60);
+            if (typeof posSpec.aspectRatio === 'number' && isFinite(posSpec.aspectRatio)) {
+              obs.aspectRatio = posSpec.aspectRatio;
+            } else if (typeof posSpec.aspectRatio === 'string' && posSpec.aspectRatio) {
+              obs.aspectRatio = redactSecrets(posSpec.aspectRatio).slice(0, 30);
+            }
+            obs.count = (typeof posSpec.count === 'number' && isFinite(posSpec.count)) ? posSpec.count : 1;
+            if (posSpec.hasPrompt) obs.structuredPromptPresent = true;
+            if (posSpec.mediaId) {
+              const fpObj = mediaFp(posSpec.mediaId);
+              if (fpObj) {
+                obs.startFrame = {
+                  mediaIdPresent: true,
+                  fingerprint: fpObj.fp,
+                  firstFrame_mediaId: fpObj,
+                  positional_mediaId: fpObj,
+                };
+                obs.ids.firstFrame = fpObj.fp;
+                obs.ids.positionalFirstFrame = fpObj.fp;
+              }
+            }
+            const normalizedCrop = sanitizeCrop(posSpec.cropRaw);
+            if (normalizedCrop) {
+              obs.cropCoordinates = {
+                firstFrame: normalizedCrop,
+                positional: normalizedCrop,
+              };
+              if (obs.startFrame) obs.startFrame.cropCoordinates = normalizedCrop;
+            }
+            const w = scanWhitelisted(payload);
+            obs.ids = Object.assign(w.ids, obs.ids);
+          } else {
+            /* 2. Detección nominal existente F1/F2 (WuwhI / MEDIA_GENERATION_SETTINGS) */
+            const settingsVal = locateMediaGenSettingsValue(payload);
+            if (settingsVal !== undefined
+                || /(?:^|[^A-Z0-9_])MEDIA_GENERATION(?:$|[^A-Z0-9_])/.test(String(e.payload || '').slice(0, RPC_BODY_MAX))) {
+              obs.operation = 'MEDIA_GENERATION';
+            }
+            /* [F2] VAL anidado: MEDIA_GENERATION_SETTINGS puede ser un STRING
+             * con JSON (formato LIVE) u objeto directo (formato F1). */
+            const r = resolveMediaGenSettings(payload, settingsVal);
+            const src = r.settings || payload;
+            const vmk = findKeyFirst(src, 'videoModelKey');
+            if (typeof vmk === 'string' && vmk) obs.videoModelKey = redactSecrets(vmk).slice(0, 60);
+            else if (typeof vmk === 'number' && isFinite(vmk)) obs.videoModelKey = String(vmk);
+            const ar = findKeyFirst(src, 'aspectRatio');
+            if (typeof ar === 'string' && ar) obs.aspectRatio = redactSecrets(ar).slice(0, 30);
+            else if (typeof ar === 'number' && isFinite(ar)) obs.aspectRatio = ar; /* LIVE: 1 */
+            const cnt = findKeyFirst(src, 'count');
+            if (typeof cnt === 'number' && isFinite(cnt)) obs.count = cnt;
+            else if (typeof cnt === 'string' && /^\d{1,4}$/.test(cnt)) obs.count = parseInt(cnt, 10);
+            /* [F2] structuredPrompt: SOLO presencia (el contenido no se emite) */
+            if (findKeyFirst(src, 'structuredPrompt') !== undefined) obs.structuredPromptPresent = true;
+            /* Start Frame: campos del contrato forense clasificados por
+             * ESTRUCTURA (no por valor). [F1] dos rutas; [F2] +startImage y
+             * representación plana {mediaIdPresent, fingerprint}. */
+            const ff = findFirstFrameMediaIds(src);
+            const inFp = mediaFp(ff.inputFrames);
+            const stFp = mediaFp(ff.standalone);
+            const siFp = mediaFp(ff.startImage);
+            if (inFp || stFp || siFp) {
+              obs.startFrame = {
+                mediaIdPresent: true,
+                fingerprint: (inFp || stFp || siFp).fp,
+              };
+              if (inFp) obs.startFrame.inputFrames_firstFrame_mediaId = inFp;
+              if (stFp) obs.startFrame.firstFrame_mediaId = stFp;
+              if (siFp) obs.startFrame.startImage_mediaId = siFp;
+              if (inFp) obs.ids.inputFramesFirstFrame = inFp.fp;
+              if (stFp) obs.ids.firstFrame = stFp.fp;
+              if (siFp) obs.ids.startImage = siFp.fp;
+            }
+            /* [F2] cropCoordinates (no es secreto; whitelist numérica) */
+            const cc = findCropCoordinates(src);
+            if (cc.inputFrames_firstFrame || cc.firstFrame || cc.startImage) obs.cropCoordinates = cc;
+            const w = scanWhitelisted(payload);
+            obs.ids = Object.assign(w.ids, obs.ids); /* ids F1 + huellas F2 */
+            /* [F2] JSON anidado no parseable → evidencia parcial diagnóstica */
+            if (r.parseError) obs.settingsParseError = true;
           }
-          /* [F2] VAL anidado: MEDIA_GENERATION_SETTINGS puede ser un STRING
-           * con JSON (formato LIVE) u objeto directo (formato F1). */
-          const r = resolveMediaGenSettings(payload, settingsVal);
-          const src = r.settings || payload;
-          const vmk = findKeyFirst(src, 'videoModelKey');
-          if (typeof vmk === 'string' && vmk) obs.videoModelKey = redactSecrets(vmk).slice(0, 60);
-          else if (typeof vmk === 'number' && isFinite(vmk)) obs.videoModelKey = String(vmk);
-          const ar = findKeyFirst(src, 'aspectRatio');
-          if (typeof ar === 'string' && ar) obs.aspectRatio = redactSecrets(ar).slice(0, 30);
-          else if (typeof ar === 'number' && isFinite(ar)) obs.aspectRatio = ar; /* LIVE: 1 */
-          const cnt = findKeyFirst(src, 'count');
-          if (typeof cnt === 'number' && isFinite(cnt)) obs.count = cnt;
-          else if (typeof cnt === 'string' && /^\d{1,4}$/.test(cnt)) obs.count = parseInt(cnt, 10);
-          /* [F2] structuredPrompt: SOLO presencia (el contenido no se emite) */
-          if (findKeyFirst(src, 'structuredPrompt') !== undefined) obs.structuredPromptPresent = true;
-          /* Start Frame: campos del contrato forense clasificados por
-           * ESTRUCTURA (no por valor). [F1] dos rutas; [F2] +startImage y
-           * representación plana {mediaIdPresent, fingerprint}. */
-          const ff = findFirstFrameMediaIds(src);
-          const inFp = mediaFp(ff.inputFrames);
-          const stFp = mediaFp(ff.standalone);
-          const siFp = mediaFp(ff.startImage);
-          if (inFp || stFp || siFp) {
-            obs.startFrame = {
-              mediaIdPresent: true,
-              fingerprint: (inFp || stFp || siFp).fp,
-            };
-            if (inFp) obs.startFrame.inputFrames_firstFrame_mediaId = inFp;
-            if (stFp) obs.startFrame.firstFrame_mediaId = stFp;
-            if (siFp) obs.startFrame.startImage_mediaId = siFp;
-            if (inFp) obs.ids.inputFramesFirstFrame = inFp.fp;
-            if (stFp) obs.ids.firstFrame = stFp.fp;
-            if (siFp) obs.ids.startImage = siFp.fp;
-          }
-          /* [F2] cropCoordinates (no es secreto; whitelist numérica) */
-          const cc = findCropCoordinates(src);
-          if (cc.inputFrames_firstFrame || cc.firstFrame || cc.startImage) obs.cropCoordinates = cc;
-          const w = scanWhitelisted(payload);
-          obs.ids = Object.assign(w.ids, obs.ids); /* ids F1 + huellas F2 */
-          /* [F2] JSON anidado no parseable → evidencia parcial diagnóstica */
-          if (r.parseError) obs.settingsParseError = true;
         }
         recordRpcObs(obs);
       }
