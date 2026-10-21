@@ -1,0 +1,3 @@
+Image 1 -> Product: @{product}
+
+Professional product photo of the product from @Image 1 on a white marble kitchen countertop, soft morning light from a window on the left, shallow depth of field, a few fresh green leaves blurred in the background. Keep the product EXACTLY as in @Image 1: same shape, colors, materials and details. Clean, premium e-commerce look, no text, no watermark.

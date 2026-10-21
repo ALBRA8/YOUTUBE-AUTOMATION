@@ -1,0 +1,20 @@
+{
+  "name": "srz-google-flow-mcp",
+  "version": "1.0.1",
+  "description": "Google Flow image generation (Nano Banana) for Claude Code and Codex: generate images and use local photos as references with @{name}. Drives your own Chrome (macOS + Windows).",
+  "type": "module",
+  "scripts": {
+    "chrome": "node src/cli.js chrome",
+    "mcp": "node src/mcp.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "playwright-core": "^1.63.0",
+    "zod": "^4.6.5"
+  }
+}

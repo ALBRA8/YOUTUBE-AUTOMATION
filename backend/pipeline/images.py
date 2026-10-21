@@ -12,6 +12,7 @@ from pathlib import Path
 import database as db
 from config import OUTPUT_DIR
 from services import gemini_client
+from services import flow_mcp_client
 from services import avatar_schema
 from services import camera_recipes
 from services.themes import get_style
@@ -169,6 +170,28 @@ async def generate_scene_image(scene: dict, project: dict, idx: int,
     prompt = full_prompt(scene, project)
     if ref_image:
         prompt += STYLE_REF_SUFFIX
+
+    # 0) Google Flow MCP (Nano Banana — coste $0, alta calidad)
+    if flow_mcp_client.available():
+        try:
+            aspect = "9:16" if project.get("format") == "short" else "16:9"
+            mcp_files = await flow_mcp_client.generate_image(
+                prompt=prompt,
+                aspect=aspect,
+                count=1,
+                out_dir=scene_dir(project["id"]),
+            )
+            if mcp_files:
+                cand = mcp_files[0]
+                if flow_mcp_client.verify_image_file(cand):
+                    import shutil
+                    shutil.copy2(cand, out)
+                    _save_style_method(str(out), "flow_mcp")
+                    return out, "flow_mcp"
+                else:
+                    log.warning("GoogleFlowMCP produjo archivo no verificable: %s", cand)
+        except Exception as e:  # noqa: BLE001
+            log.warning("GoogleFlowMCP falló escena %d: %s (degradando a planes siguientes)", idx, e)
 
     # 1) Gemini 2.5 Flash Image
     if gemini_client.available():
