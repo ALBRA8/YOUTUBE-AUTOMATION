@@ -142,7 +142,9 @@ async function renameTile(page, mediaId, name) {
   await input.pressSequentially(name, { delay: 30 });
   await input.press('Enter');
   await page.waitForTimeout(2500);
-  const shown = (await tile.locator('span.footer-title').innerText()).trim();
+  await tile.hover().catch(() => {});
+  const titleEl = tile.locator('span.footer-title');
+  const shown = ((await titleEl.textContent().catch(() => '')) || (await titleEl.innerText().catch(() => ''))).trim();
   if (shown !== name) throw new Error(`Rename did not apply (tile shows "${shown}")`);
 }
 

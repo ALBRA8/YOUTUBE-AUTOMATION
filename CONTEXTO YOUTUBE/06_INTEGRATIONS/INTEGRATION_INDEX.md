@@ -25,9 +25,15 @@
 - **Estado:** HANDS estructuralmente implementado según inventario; conexión física/Flow real marcada OFF/NOT CONNECTED según configuración.
 
 ## INT-006 — GoogleFlowMCP (Browser Automation vía Playwright/CDP y Puente Local)
-- **Estado:** PUENTE LOCAL IMPLEMENTADO / PRUEBAS AISLADAS PASS / LIVE TEST PENDIENTE.
-- **Ubicación:** `tools/GoogleFlowMCP`
-- **Componentes:** `backend/services/flow_mcp_client.py`, `backend/config.py`, `backend/pipeline/images.py`.
+- **Estado:** PUENTE LOCAL IMPLEMENTADO / PRUEBAS AISLADAS PASS / LIVE TEST 1 PASS.
+- **Ubicación:** 	ools/GoogleFlowMCP
+- **Componentes:** ackend/services/flow_mcp_client.py, ackend/config.py, ackend/pipeline/images.py.
 - **Mecanismo:** MCP Server stdio JSON-RPC 2.0 + Playwright-core conectándose a Chrome dedicado vía CDP (puerto 9333).
-- **Herramientas expuestas:** `flow_generate_image`, `flow_upload_file`, `flow_list_assets`, `flow_new_project`.
-- **Seguridad operacional:** `FLOW_MCP_ENABLED=0` por defecto; degradación limpia a fallback ante cualquier error.
+- **Herramientas expuestas:** low_generate_image, low_upload_file, low_list_assets, low_new_project.
+- **Seguridad operacional:** FLOW_MCP_ENABLED=0 por defecto; degradación limpia a fallback ante cualquier error.
+
+## INT-007 — Reference / Asset Lineage & Scene Asset Resolver (Gate B / B.2 / B.2R)
+- **Estado:** IMPLEMENTADO / PRUEBAS UNITARIAS Y REGRESIÓN PASS / LIVE TEST 2R PASS.
+- **Componentes:** ackend/pipeline/asset_resolver.py, ackend/pipeline/images.py, 	ools/GoogleFlowMCP/src/flow.js.
+- **Mecanismo:** Resolución determinista de referencias de escena (scene.references / meta.production_unit.references) → subida vía upload_file() → desambiguación y fix de rename en Google Flow → inyección de @mention → consumo interactivo (mention-chip) en ProseMirror → generación real en Flow.
+- **Dictamen:** REFERENCE CONSUMPTION PASS.

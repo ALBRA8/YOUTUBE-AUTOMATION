@@ -14,6 +14,7 @@ from config import OUTPUT_DIR
 from services import gemini_client
 from services import flow_mcp_client
 from pipeline import sanitizer
+from pipeline.asset_resolver import resolve_scene_references, inject_flow_asset_mentions
 from services import avatar_schema
 from services import camera_recipes
 from services.themes import get_style
@@ -177,8 +178,48 @@ async def generate_scene_image(scene: dict, project: dict, idx: int,
         try:
             aspect = "9:16" if project.get("format") == "short" else "16:9"
             clean_prompt = sanitizer.normalize_flow_prompt(prompt)
+
+            # Resolucion determinista y subida de referencias de escena
+            resolved_refs = resolve_scene_references(scene, project)
+            ready_asset_names: list[str] = []
+            for ref in resolved_refs:
+                if not ref.is_valid or not ref.local_path:
+                    if ref.is_required:
+                        raise RuntimeError(
+                            f"Referencia obligatoria invalida o no encontrada: {ref.raw_reference} ({ref.skip_reason})"
+                        )
+                    log.warning(
+                        "Referencia opcional omitida en escena %d (%s): %s",
+                        idx,
+                        ref.skip_reason,
+                        ref.raw_reference,
+                    )
+                    continue
+
+                try:
+                    upload_res = await flow_mcp_client.upload_file(
+                        file_path=ref.local_path,
+                        name=ref.asset_name,
+                        replace=False,
+                    )
+                    if upload_res.get("ok"):
+                        ready_asset_names.append(ref.asset_name)
+                except Exception as e:
+                    if ref.is_required:
+                        raise RuntimeError(
+                            f"Fallo al subir referencia obligatoria '{ref.asset_name}': {e}"
+                        ) from e
+                    log.warning(
+                        "Fallo al subir referencia opcional '%s' en escena %d: %s",
+                        ref.asset_name,
+                        idx,
+                        e,
+                    )
+
+            final_prompt = inject_flow_asset_mentions(clean_prompt, ready_asset_names)
+
             mcp_files = await flow_mcp_client.generate_image(
-                prompt=clean_prompt,
+                prompt=final_prompt,
                 aspect=aspect,
                 count=1,
                 out_dir=scene_dir(project["id"]),
