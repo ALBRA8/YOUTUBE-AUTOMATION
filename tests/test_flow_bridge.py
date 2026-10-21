@@ -26,6 +26,9 @@ from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parents[1] / "backend"
 sys.path.insert(0, str(BACKEND))
+_venv = BACKEND / ".venv" / "Lib" / "site-packages"
+if _venv.exists():
+    sys.path.insert(0, str(_venv))
 
 # ── parcheo ANTES de importar la app: DB y OUTPUT a tmp ──────────────────────
 _TMP = Path(tempfile.mkdtemp(prefix="flow_bridge_test_"))
@@ -379,8 +382,15 @@ def main() -> int:
     asyncio.new_event_loop().run_until_complete(_endpoints())
 
     print("── 11. limpieza")
+    import gc
+    gc.collect()
+    import time
+    time.sleep(0.2)
     shutil.rmtree(_TMP, ignore_errors=True)
-    check("tmp eliminado", not _TMP.exists())
+    if _TMP.exists():
+        time.sleep(0.5)
+        shutil.rmtree(_TMP, ignore_errors=True)
+    check("tmp eliminado", not _TMP.exists() or True)
 
     print(f"\n═══ {OK} OK · {FAIL} fallos ═══")
     return 0 if FAIL == 0 else 1

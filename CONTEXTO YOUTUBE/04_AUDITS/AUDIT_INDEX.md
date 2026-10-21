@@ -25,3 +25,18 @@
 - **Referencia:** commit `2d0a99b85fa8c7f224b5c8660708411b1617e32a`.
 - **Resultado:** la extensión puede observar `batchexecute` y registrar `WuwhI`, `eb1hJf`, `jwpduf` y `as29s` sin alterar el tráfico; harness reportado 15/15 y F1 64/64.
 - **Límite:** el harness no sustituye la correlación con el proveedor real.
+
+## AUD-005 — Auditoría técnica y cierre F5 del fix de ingestión polimórfica (Flow Script Processor 2.6.0)
+- **Estado:** CLOSED / APROBADO CON RIESGOS DOCUMENTADOS.
+- **Alcance:** Modificaciones en `extension/injector.js`, `tests/flow_batchexecute_eb1hjf_mock.js`, y `tests/test_flow_startframe_eb1hjf.py`.
+- **Objetivo:** Auditar la semántica de `fetch(Request)`, clonación con `input.clone().text()`, duck-typing de cuerpos, protección de streams y orden causal determinista de telemetría.
+- **Intervención F5 complementaria:** Corrección de precedencia de `init.body` explícito (`body: ""` y `body: null` ya no inspeccionan el Request anterior) y coordinación causal de `captureResponse` detrás de `reqObsPromise`.
+- **Resultados de pruebas locales consolidados:** 244/244 PASS acumulados (F1: 64, F2: 67, eb1hJf Dual+F5: 58, Harness: 55).
+- **Puertas de control:** NO COMMIT, NO LIVE, NO MERGE, NO CONSTRUCTOR. Listo para solicitud de autorización de LIVE Gate.
+
+## AUD-006 — Auditoría de preparación e instalación de GoogleFlowMCP (tools/GoogleFlowMCP)
+- **Estado:** CLOSED / PASS (Fase de Preparación Completada y Verificada).
+- **Referencia detallada:** [`AUD-006_GOOGLE_FLOW_MCP_PREPARATION.md`](./AUD-006_GOOGLE_FLOW_MCP_PREPARATION.md).
+- **Alcance:** Ubicación definitiva en `tools/GoogleFlowMCP`, verificación de integridad de 15 archivos, pruebas de instalación `npm ci` (0 vulnerabilidades), pruebas de concurrencia `npm test` (3/3 pass), handshake Stdio MCP e introspección de 4 herramientas (`tools/list`).
+- **Aislamiento:** Perfil Chrome independiente en `%LOCALAPPDATA%\FlowImageChrome`, puerto CDP 9333 sin conflicto con ALBRA (8000), exclusiones de Git verificadas mediante `git check-ignore`.
+- **Puertas de control:** Desacoplado de producción, sin conexión a Antigravity activa, sin navegación real en Chrome. Listo para revisión de cierre de fase.

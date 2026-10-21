@@ -1,7 +1,7 @@
 # CONTEXTO YOUTUBE — INDEX
 
-**Estado:** POPULATED BASELINE / IN_PROGRESS  
-**Última actualización:** 2026-10-18
+**Estado:** CLOSED F5 / READY FOR LIVE GATE AUTHORIZATION  
+**Última actualización:** 2026-10-20
 
 | Área | Archivo | Estado | Propósito |
 |---|---|---|---|
@@ -19,4 +19,4 @@
 | Knowledge | `09_KNOWLEDGE/KNOWLEDGE_INDEX.md` | POPULATED | reglas técnicas y jerarquía de evidencia |
 
 ## Hito vigente
-La auditoría estática del Start Frame de Google Flow encontró que no existe un binding verificable en el camino Flow inspeccionado. El E2E real sigue NOT_DEMONSTRATED. No implementar aún; primero capturar una generación real de ALBRA con imagen conocida.
+Cierre integral F5 del Flow Script Processor 2.6.0. Se corrigió la precedencia estricta de `init.body` ('body' in init) y se garantizó el orden causal determinista de telemetría mediante encadenamiento `onSettled`. Batería consolidada: 244/244 PASS (F1: 64, F2: 67, eb1hJf Dual+F5: 58, Harness: 55). Puertas vigentes: NO COMMIT, NO LIVE, NO MERGE, NO CONSTRUCTOR hasta autorización explícita.

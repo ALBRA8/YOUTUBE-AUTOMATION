@@ -282,3 +282,33 @@ def sanitize_script_scenes(scenes: list[dict], brand_name: str | None = None,
                 if isinstance(subj, list) and subj and isinstance(subj[0], str):
                     subj[0] = inject_clothing_brand(subj[0], clothing_brand)
     return scenes
+
+
+def normalize_flow_prompt(prompt: str, max_length: int = 1000) -> str:
+    """Normaliza el prompt de la escena para Google Flow:
+    - Elimina saltos de línea irregulares (\r\n, \r, \n, \v, \f reemplazados por espacio simple)
+    - Normaliza comillas anidadas y tipográficas
+    - Compacta espacios múltiples
+    - Limita la longitud máxima admitida por el input de Google Flow (por defecto 1000 chars)
+    """
+    if not isinstance(prompt, str):
+        return ""
+    # 1. Reemplazar saltos de línea irregulares y caracteres de control por espacio
+    text = re.sub(r"[\r\n\v\f\t]+", " ", prompt)
+
+    # 2. Normalizar comillas tipográficas y anidadas
+    text = text.replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
+
+    # 3. Compactar espacios consecutivos
+    text = re.sub(r"\s+", " ", text).strip()
+
+    # 4. Truncar al máximo soportado respetando límites de palabras si es posible
+    if len(text) > max_length:
+        truncated = text[:max_length]
+        last_space = truncated.rfind(" ")
+        if last_space > max_length - 50:
+            text = truncated[:last_space].rstrip(" ,.;:")
+        else:
+            text = truncated.rstrip(" ,.;:")
+
+    return text

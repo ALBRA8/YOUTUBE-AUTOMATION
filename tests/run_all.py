@@ -133,6 +133,22 @@ BATERIAS = [
                                  # unidades, JSON anidado, PIL, ledger (17)
     "security/test_config_security.py",  # A2/M6: .env newline injection +
                                  # system-owned metadata (16)
+    "test_harness.py",           # YOUTUBE HARNESS CONTRACT V1: contrato
+                                 # estricto, permisos, libro idempotente,
+                                 # estados §9, legacy VÓRTICE, auth/CSRF
+                                 # heredados sin bypass (~55)
+    "test_flow_batchexecute.py", # FLOW START FRAME F1 (ext 2.6.0): observación
+                                 # PASIVA de batchexecute (WuwhI/eb1hJf/
+                                 # jwpduf/as29s), Start Frame como huella fp,
+                                 # pasividad init/stream, secretos jamás,
+                                 # canales tRPC intactos, alcance git (64)
+    "test_flow_startframe_fase2.py", # FLOW START FRAME F2 (ext 2.6.0): parser
+                                 # ANIDADO — MEDIA_GENERATION_SETTINGS con VAL
+                                 # como JSON string (JSON.parse 2º nivel),
+                                 # aspectRatio numérico, startFrame plano
+                                 # {mediaIdPresent, fingerprint}, ids por
+                                 # huella, cropCoordinates, startImage hist.,
+                                 # VAL malformado diagnóstico, T1..T10 (67)
 ]
 
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")

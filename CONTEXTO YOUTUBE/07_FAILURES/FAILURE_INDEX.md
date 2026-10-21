@@ -18,3 +18,11 @@
 ## RISK-004 — Confundir respuesta con request
 - **Estado:** regla de auditoría.
 - **Descripción:** mediaId en respuesta no demuestra mediaId enviado como input.
+
+## FAIL-005 — Telemetría nula en LIVE Gate por ingestión restrictiva de fetch(Request)
+- **Estado:** RESOLVED LOCALLY & VERIFIED (PENDING LIVE GATE).
+- **Incidencia:** En el LIVE Gate del commit `85ab666bc283509c1617feabefc98aee3bac5ed4`, Google Flow renderizó el video real con Start Frame, pero `window.__FLOW_RPC_OBS__` emitió valores `null` en todos sus campos de telemetría (`LIVE FAIL`).
+- **Causa Raíz Forense:** Google Flow invoca `window.fetch` pasando una instancia de `Request` (`fetch(new Request(url, ...))`) sin proveer un objeto `init`. El interceptor de `extension/injector.js` leía únicamente `init ? init.body : null`, provocando que `parseFreqEntries(null)` devolviera `[]` y el parser posicional nunca fuera alcanzado.
+- **Solución implementada:** Ingestión polimórfica en `extension/injector.js` mediante clonación segura preventiva `input.clone().text()`, duck-typing cross-realm para `URLSearchParams`/`FormData`, aislamiento pasivo de `ReadableStream`, corrección F5 de precedencia explícita (`hasExplicitBody`) y coordinación causal de eventos de telemetría (`onSettled`).
+- **Mitigación verificada:** 244/244 tests aprobados en laboratorio (F1: 64, F2: 67, eb1hJf Dual+F5: 58, Harness: 55).
+- **Acción pendiente:** Solicitud de autorización de LIVE Gate para verificación en producción.

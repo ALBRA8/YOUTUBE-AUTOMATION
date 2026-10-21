@@ -198,6 +198,31 @@ class EvidenceLayer:
             "sha256": sha256_file(self.path),
         }
 
+    def record_element_not_found(self, selector: str, *, timeout_s: float = 10.0,
+                                 diagnostics: dict[str, Any] | None = None,
+                                 screenshot_bytes: bytes | None = None) -> dict[str, Any]:
+        """Captura diagnóstica y registro de fallo cuando un selector DOM no es encontrado tras timeout."""
+        screenshot_path = None
+        if screenshot_bytes:
+            shot_file = self.dir / f"fail_{new_id('shot')}.png"
+            shot_file.write_bytes(screenshot_bytes)
+            screenshot_path = str(shot_file)
+
+        refs = {"screenshot": screenshot_path} if screenshot_path else {}
+        if diagnostics:
+            refs.update(diagnostics)
+
+        return self.record(
+            "ELEMENT_NOT_FOUND",
+            target=selector,
+            expected_state="ELEMENT_VISIBLE",
+            observed_state="TIMEOUT_EXCEEDED",
+            result="FAIL",
+            refs=refs,
+            error=f"Element '{selector}' not found within {timeout_s}s timeout"
+        )
+
+
 
 def _count_by(records: list[dict[str, Any]], key: str) -> dict[str, int]:
     out: dict[str, int] = {}

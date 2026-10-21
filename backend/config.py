@@ -21,6 +21,11 @@ load_dotenv(ENV_PATH)
 # ── Claves API (todas opcionales: el sistema degrada con gracia) ──────────
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
+FLOW_MCP_ENABLED = os.getenv("FLOW_MCP_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+FLOW_MCP_DIR = Path(os.getenv("FLOW_MCP_DIR", str(BASE_DIR.parent / "tools" / "GoogleFlowMCP"))).resolve()
+FLOW_MCP_MODEL = os.getenv("FLOW_MCP_MODEL", "2").strip()
+FLOW_MCP_TIMEOUT = float(os.getenv("FLOW_MCP_TIMEOUT", "120.0"))
+
 # ── NVIDIA NIM (agente VÓRTICE · OpenAI-compatible) ───────────────────────
 # kimi-k3: planificación del agente, entiende el proyecto y ejecuta acciones
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()
@@ -123,8 +128,14 @@ def reload() -> None:
     global GEMINI_TTS_MODEL, GEMINI_TTS_VOICE, TTS_PROVIDER, EDGE_TTS_VOICE
     global TTS_RATE, WHISPER_MODEL, WHISPER_DEVICE, FPS
     global NVIDIA_API_KEY, NVIDIA_MODEL, NVIDIA_BASE_URL
+    global FLOW_MCP_ENABLED, FLOW_MCP_DIR, FLOW_MCP_MODEL, FLOW_MCP_TIMEOUT
     load_dotenv(ENV_PATH, override=True)
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+
+    FLOW_MCP_ENABLED = os.getenv("FLOW_MCP_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+    FLOW_MCP_DIR = Path(os.getenv("FLOW_MCP_DIR", str(BASE_DIR.parent / "tools" / "GoogleFlowMCP"))).resolve()
+    FLOW_MCP_MODEL = os.getenv("FLOW_MCP_MODEL", "2").strip()
+    FLOW_MCP_TIMEOUT = float(os.getenv("FLOW_MCP_TIMEOUT", "120.0"))
     NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()
     NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "moonshotai/kimi-k3").strip()
     NVIDIA_BASE_URL = os.getenv(

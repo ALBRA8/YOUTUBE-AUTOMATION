@@ -23,3 +23,12 @@
 
 ## INT-005 — HANDS / Flow Operator
 - **Estado:** HANDS estructuralmente implementado según inventario; conexión física/Flow real marcada OFF/NOT CONNECTED según configuración.
+
+## INT-006 — GoogleFlowMCP (Browser Automation vía Playwright/CDP)
+- **Estado:** FASE DE PREPARACIÓN CERRADA Y VERIFICADA (No conectado a producción).
+- **Ubicación:** `tools/GoogleFlowMCP`
+- **Mecanismo:** MCP Server stdio + Playwright-core conectándose a Chrome dedicado vía CDP (puerto 9333).
+- **Herramientas expuestas:** `flow_generate_image`, `flow_upload_file`, `flow_list_assets`, `flow_new_project` (introspección JSON-RPC 2.0 verificada).
+- **Pruebas de suite:** `npm test` (`node --test`) 3/3 PASS (concurrencia, recuperación y liberación de lock).
+- **Frontera de seguridad:** Perfil aislado en `%LOCALAPPDATA%\FlowImageChrome`, `.gitignore` local blindando `config.json`, `state.json`, `.flow.lock` y medios locales. Servidor inactivo hasta autorización de activación.
+

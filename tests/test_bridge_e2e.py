@@ -68,13 +68,12 @@ def main() -> int:
           f"{len(js_files)} archivos")
     for js in js_files:
         proc = subprocess.run([node, "--check", str(js)],
-                              capture_output=True, text=True, timeout=60)
+                              capture_output=True, text=True, timeout=60, encoding="utf-8", errors="replace")
         check(f"sintaxis OK: {js.name}", proc.returncode == 0,
               proc.stderr.strip()[:150])
 
     print("── 2. E2E contractual: bridge.js real ↔ backend mock")
-    proc = subprocess.run([node, str(HARNESS)], capture_output=True,
-                          text=True, timeout=180, cwd=str(REPO))
+    proc = subprocess.run([node, str(HARNESS)], capture_output=True, text=True, timeout=180, cwd=str(REPO), encoding="utf-8", errors="replace")
     salida = (proc.stdout or "") + (proc.stderr or "")
     check("harness corre sin FATAL", "FATAL" not in salida, salida[-200:])
     check("harness exit 0", proc.returncode == 0, f"exit={proc.returncode}")
@@ -112,8 +111,8 @@ def main() -> int:
     mf = json.loads((EXT / "manifest.json").read_text(encoding="utf-8"))
     hp = mf.get("host_permissions", [])
     check("manifest.json es JSON válido con MV3", mf.get("manifest_version") == 3)
-    check("extensión continúa siendo v2.x (sin salto mayor; EXECUTION CONTRACT = 2.4.0)",
-          str(mf.get("version", "")).startswith("2.4"), mf.get("version"))
+    check("extensión continúa siendo v2.x (sin salto mayor; minor 2.5 = [flow-start-frame F1])",
+          str(mf.get("version", "")).startswith("2."), mf.get("version"))
     check("host_permissions incluye el dominio ACTUAL https://flow.google.com/*",
           "https://flow.google.com/*" in hp, repr(hp))
     check("host_permissions CONSERVA labs.google (compatibilidad)",

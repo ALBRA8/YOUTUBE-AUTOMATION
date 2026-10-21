@@ -1802,6 +1802,13 @@ from fastapi import Request as _Req
 from services import mcp_server  # noqa: E402  (tras crear `app` para evitar círculos)
 app.mount("/mcp", mcp_server.app)
 
+# ── YOUTUBE HARNESS CONTRACT V1 (transformación final §6/§16) ──────
+# Arnés especializado agnóstico del host: fachada de dominio sobre la
+# fábrica. Router versionado /api/harness/v1 — hereda auth_guard,
+# csrf_guard y límites de body por ser middlewares de app (sin bypass).
+from services.youtube_harness import api as harness_api  # noqa: E402
+app.include_router(harness_api.router)
+
 
 @app.api_route("/mcp", methods=["GET", "POST"])
 async def mcp_sin_barra(req: _Req):

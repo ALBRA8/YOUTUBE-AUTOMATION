@@ -52,3 +52,20 @@ window.__FLOW_RPC_OBS__
 ```
 
 No generar otro vídeo hasta clasificar esta captura.
+
+
+## TEST-SUITE-F5-CONSOLIDADA (2026-10-20)
+**Estado:** PASS 100% EN VM/HARNESS (244/244 CHECKS VERIFICADOS).
+
+Resultados de la validación final agrupada:
+1. `tests/test_flow_batchexecute.py` (F1): **64 OK · 0 fallos**.
+2. `tests/test_flow_startframe_fase2.py` (F2): **67 OK · 0 fallos**.
+3. `tests/test_flow_startframe_eb1hjf.py` (Dual eb1hJf + Post-Autopsia + F5): **58 OK · 0 fallos**.
+   - Incluye 11 checks de ingestión polimórfica (Request, URLSearchParams, Duck-typing, Streams).
+   - Incluye 9 checks F5 de precedencia explícita (`body: ""` y `body: null`), orden causal determinista y resiliencia ante errores de stream.
+4. `tests/test_harness.py` (YouTube Harness V1): **55 OK · 0 fallos**.
+
+**Total Consolidado:** 244 OK · 0 fallos.
+
+### Límite de evidencia:
+Estas 244 pruebas validan con rigor algorítmico y de microtareas la implementación de `extension/injector.js` en V8 (Node.js hermético). No equivalen a una prueba LIVE en Chrome contra la infraestructura real de Google Flow.

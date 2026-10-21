@@ -165,8 +165,8 @@ def main() -> int:
 
     print("── 3. versión y sintaxis")
     mf = json.loads((EXT / "manifest.json").read_text(encoding="utf-8"))
-    check("manifest 2.4.2 (bump patch: M7 worker + A6 re-arme RATE_LIMITED)",
-          mf.get("version") == "2.4.2", mf.get("version"))
+    check("manifest 2.6.0 (bump minor: [flow-start-frame F2] parser anidado batchexecute)",
+          mf.get("version") == "2.6.0", mf.get("version"))
     if node:
         for js in ("background.js", "bridge.js", "injector.js"):
             proc = subprocess.run([node, "--check", str(EXT / js)],

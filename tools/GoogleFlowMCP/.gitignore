@@ -1,0 +1,24 @@
+# ════════════════════════════════════════════════════════════════════
+# GoogleFlowMCP — Exclusiones Locales de Seguridad y Runtime
+# ════════════════════════════════════════════════════════════════════
+
+# Dependencias locales
+node_modules/
+
+# Estado y configuración local del usuario (contiene projectId y rutas absolutas locales)
+config.json
+state.json
+
+# Bloqueo de concurrencia entre procesos (contiene PID local)
+.flow.lock
+.flow.lock/
+
+# Directorios de datos generados y referencias de usuario (imágenes, descargas)
+output/*
+!output/.gitkeep
+inputs/*
+!inputs/.gitkeep
+
+# Logs y volcados
+*.log
+npm-debug.log*
