@@ -53,6 +53,7 @@ window.__FLOW_RPC_OBS__
 
 No generar otro vídeo hasta clasificar esta captura.
 
+<<<<<<< HEAD
 
 ## TEST-SUITE-F5-CONSOLIDADA (2026-10-20)
 **Estado:** PASS 100% EN VM/HARNESS (244/244 CHECKS VERIFICADOS).
@@ -69,3 +70,14 @@ Resultados de la validación final agrupada:
 
 ### Límite de evidencia:
 Estas 244 pruebas validan con rigor algorítmico y de microtareas la implementación de `extension/injector.js` en V8 (Node.js hermético). No equivalen a una prueba LIVE en Chrome contra la infraestructura real de Google Flow.
+=======
+## GoogleFlowMCP bridge — 2026-10-20
+**Estado:** pruebas reportadas PASS; LIVE pendiente. Los resultados siguientes provienen del informe de Antigravity y no se reejecutaron al actualizar este índice.
+
+- `tests/test_flow_mcp_bridge.py`: 21/21 PASS reportado.
+- `tests/flow_batchexecute_eb1hjf_mock.js`: regresión mock F5.1 PASS reportado.
+- `tests/test_harness.py`: 55 OK reportado.
+- `tools/GoogleFlowMCP`: `npm test`, 3/3 PASS reportado.
+
+**Límite:** los tests aislados y mocks no demuestran una generación real por Google Flow. LIVE TEST 1 sigue pendiente hasta preparar el perfil dedicado y ejecutar una imagen controlada con autorización explícita.
+>>>>>>> origin/main

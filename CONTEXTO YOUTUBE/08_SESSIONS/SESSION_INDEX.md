@@ -18,9 +18,10 @@
 - **Referencia:** `SES-2026-10-18-02_GOOGLE_FLOW_START_FRAME_LIVE_CAPTURE.md`.
 
 ## SES-2026-10-19-01 — LIVE FAIL, Autopsia, Ingestión Polimórfica y Cierre Integral F5
-- **Estado:** CLOSED / AUDITADA CON RIESGOS DOCUMENTADOS (PRE-LIVE GATE READY).
-- **Hecho:** tras implementar el parser dual (commit `85ab666`), el LIVE Gate produjo video real en Google Flow pero telemetría vacía en `window.__FLOW_RPC_OBS__` (LIVE FAIL). La autopsia de red reveló que Flow pasa un objeto `Request` a `fetch(input)` sin `init.body`.
-- **Acción:** se implementó localmente una ingestión polimórfica no destructiva en `extension/injector.js` mediante `Request.clone().text()`, duck-typing para `URLSearchParams`/`FormData` y aislamiento de streams. Se resolvieron los hallazgos F5 de precedencia estricta de `init.body` y orden causal de telemetría (`reqObsPromise` + `onSettled`). Se agregaron tests herméticos en `flow_batchexecute_eb1hjf_mock.js` y `test_flow_startframe_eb1hjf.py`.
-- **Resultado consolidado:** 244/244 tests aprobados en 4 suites continuas (F1: 64, F2: 67, eb1hJf: 58, Harness: 55).
-- **Puertas vigentes:** NO COMMIT, NO LIVE, NO MERGE, NO CONSTRUCTOR, NO BACKEND CHANGES.
-- **Referencia:** `SES-2026-10-19-01_FLOW_LIVE_FAIL_INGESTION_FIX_AUDIT.md`.
+- **Estado:** CLOSED / AUDITADA CON RIESGOS DOCUMENTADOS.
+- **Hecho:** Ingestión polimórfica en `extension/injector.js`, resolución de precedencia `init.body` y orden causal de telemetría.
+- **Resultado:** 244/244 tests aprobados en suites herméticas.
+
+## SES-2026-10-20-03 — GoogleFlowMCP: puente implementado y robustez de transporte
+- **Estado:** Implementación consolidada en main; LIVE TEST 1 preparado.
+- **Hecho:** Implementación del cliente Stdio MCP, buffer de salida en bridge.js, selectores DOM con contingencia, purga de stale locks y sanitización de prompts.

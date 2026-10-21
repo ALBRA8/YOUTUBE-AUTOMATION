@@ -32,11 +32,14 @@
 - **Objetivo:** Auditar la semántica de `fetch(Request)`, clonación con `input.clone().text()`, duck-typing de cuerpos, protección de streams y orden causal determinista de telemetría.
 - **Intervención F5 complementaria:** Corrección de precedencia de `init.body` explícito (`body: ""` y `body: null` ya no inspeccionan el Request anterior) y coordinación causal de `captureResponse` detrás de `reqObsPromise`.
 - **Resultados de pruebas locales consolidados:** 244/244 PASS acumulados (F1: 64, F2: 67, eb1hJf Dual+F5: 58, Harness: 55).
-- **Puertas de control:** NO COMMIT, NO LIVE, NO MERGE, NO CONSTRUCTOR. Listo para solicitud de autorización de LIVE Gate.
 
 ## AUD-006 — Auditoría de preparación e instalación de GoogleFlowMCP (tools/GoogleFlowMCP)
 - **Estado:** CLOSED / PASS (Fase de Preparación Completada y Verificada).
 - **Referencia detallada:** [`AUD-006_GOOGLE_FLOW_MCP_PREPARATION.md`](./AUD-006_GOOGLE_FLOW_MCP_PREPARATION.md).
-- **Alcance:** Ubicación definitiva en `tools/GoogleFlowMCP`, verificación de integridad de 15 archivos, pruebas de instalación `npm ci` (0 vulnerabilidades), pruebas de concurrencia `npm test` (3/3 pass), handshake Stdio MCP e introspección de 4 herramientas (`tools/list`).
-- **Aislamiento:** Perfil Chrome independiente en `%LOCALAPPDATA%\FlowImageChrome`, puerto CDP 9333 sin conflicto con ALBRA (8000), exclusiones de Git verificadas mediante `git check-ignore`.
-- **Puertas de control:** Desacoplado de producción, sin conexión a Antigravity activa, sin navegación real en Chrome. Listo para revisión de cierre de fase.
+- **Alcance:** Ubicación definitiva en `tools/GoogleFlowMCP`, verificación de integridad de archivos, instalación `npm ci`, pruebas `npm test` (3/3 pass), handshake Stdio MCP e introspección de 4 herramientas.
+- **Aislamiento:** Perfil Chrome independiente en `%LOCALAPPDATA%\FlowImageChrome`, puerto CDP 9333 sin conflicto.
+
+## AUD-007 — Puente GoogleFlowMCP YOUTUBE-AUTOMATION
+- **Estado:** IMPLEMENTACIÓN Y PRUEBAS AISLADAS PASS; LIVE TEST PENDIENTE.
+- **Resultado reportado:** 21/21 pruebas del puente, regresión mock F5.1 PASS, harness backend 55 OK y pruebas del paquete MCP 3/3 PASS.
+- **Diseño:** `FLOW_MCP_ENABLED=0` por defecto; generación condicional; validación binaria del archivo y fallback a proveedores existentes.

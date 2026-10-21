@@ -4,6 +4,25 @@
 **Última actualización:** 2026-10-19.  
 **Fuente:** Archivos del repo `harness-v1` y auditorías técnicas. Este snapshot no reemplaza tests ni convierte simulaciones en E2E real.
 
+## Estado operativo actualizado — 2026-10-20
+
+### GoogleFlowMCP
+- **Puente Python/MCP:** implementación local reportada por Antigravity; las pruebas aisladas se reportan PASS (21/21 puente, 55 OK harness backend, 3/3 pruebas del paquete MCP y regresión F5.1 mock PASS).
+- **Archivos locales reportados:** `backend/config.py`, `backend/pipeline/images.py`, `backend/services/flow_mcp_client.py`, `tests/test_flow_mcp_bridge.py`.
+- **Activación:** `FLOW_MCP_ENABLED=0` por defecto. No se ha reportado activación permanente.
+- **Prueba real del puente:** NOT RUN. El preflight reportó que el perfil dedicado `%LOCALAPPDATA%\\FlowImageChrome` no existía y requiere inicialización/autenticación interactiva si Google la solicita.
+- **Resultado de LIVE TEST 1:** BLOCKED / PENDING. No declarar generación real de imagen a través del puente hasta comprobar el recorrido pipeline → MCP → Google Flow → archivo validado.
+- **Integridad:** F5.1 se reporta intacto. No abrir ni modificar la configuración MCP activa de Antigravity como parte de este hito.
+- **Estado Git:** el informe indica cambios y archivos sin seguimiento en el árbol local de `harness-v1`. No asumir que esos cambios están committeados, pusheados o presentes en `main`. El contexto de esta memoria registra el informe, no sustituye la verificación del código remoto.
+
+### Próxima acción segura
+1. Preparar el perfil aislado GoogleFlowMCP, sin reutilizar el perfil habitual ni copiar cookies.
+2. Si requiere login, el usuario lo realiza manualmente en la ventana dedicada.
+3. Tras autorización explícita, ejecutar una sola generación real en una carpeta de prueba aislada.
+4. Verificar procedencia, archivo, método `flow_mcp`, cierre del proceso y fallback; mantener el flag predeterminado desactivado.
+
+La auditoría histórica de Start Frame descrita abajo sigue siendo una línea de trabajo separada. La prueba de una imagen con GoogleFlowMCP no demuestra Start Frame ni reemplaza aquella captura.
+
 ## Propósito y arquitectura
 YOUTUBE-AUTOMATION es la especialización audiovisual de ALBRA. `ALBRA8/AGENTE-GENERAL` es el cuerpo central y mantiene infraestructura transversal; la lógica de producción audiovisual y Google Flow permanece en YOUTUBE-AUTOMATION. No se justifica rediseñar ni duplicar el bridge/orquestador.
 
