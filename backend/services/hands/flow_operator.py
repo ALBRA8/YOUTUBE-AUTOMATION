@@ -837,3 +837,82 @@ class FlowOperator:
 
     def close(self) -> OperationResult:
         return self._op("CLOSE_FLOW_SESSION", self.driver.close_session)
+
+
+# ════════════════════════════════════════════════════════════════════════
+# SELECTORES DOM CON CONTINGENCIA (PROC-003, F-009)
+# ════════════════════════════════════════════════════════════════════════
+FLOW_DOM_SELECTORS = {
+    # 1. Inyección de prompts
+    "prompt_input": {
+        "primary": "textarea[aria-label*='Prompt' i], [contenteditable='true'][role='textbox']",
+        "fallbacks": [
+            "//textarea[contains(@placeholder, 'prompt') or contains(@aria-label, 'prompt')]",
+            "//div[@role='textbox']",
+            "div.prompt-input-container textarea",
+            "[data-placeholder*='prompt' i]",
+        ],
+    },
+    # 2. Selección de modo Fotogramas (F-009)
+    "tab_fotogramas": {
+        "primary": "button[role='tab']:has-text('Fotogramas'), [role='tab'][aria-label*='Fotogramas' i]",
+        "fallbacks": [
+            "//button[@role='tab' and contains(., 'Fotogramas')]",
+            "//div[@role='tab' and contains(., 'Fotogramas')]",
+            "[data-tab-name='frames']",
+        ],
+    },
+    # 3. Slot de inicio (Start Frame / Iniciar) (PROC-003, F-009)
+    "slot_iniciar": {
+        "primary": "div[role='button'][aria-label*='Iniciar' i], button:has-text('Iniciar')",
+        "fallbacks": [
+            "//div[@role='button' and (contains(., 'Iniciar') or contains(@aria-label, 'Iniciar'))]",
+            "//button[contains(., 'Iniciar') or contains(@aria-label, 'Start')]",
+            "[data-slot='start-frame']",
+            "div[aria-label*='Start frame' i]",
+        ],
+    },
+}
+
+
+def resolve_flow_selector(driver_page: Any, selector_key: str, *, timeout_s: float = 10.0, evidence_layer: Any = None) -> Any:
+    """Resuelve un selector DOM evaluando primero el primario y luego la cascada de fallbacks semánticos/a11y/XPath.
+    Si todos fallan tras el timeout, registra la evidencia diagnóstica y screenshot."""
+    spec = FLOW_DOM_SELECTORS.get(selector_key)
+    if not spec:
+        raise ValueError(f"Selector no registrado: {selector_key}")
+
+    candidates = [spec["primary"]] + spec.get("fallbacks", [])
+    last_err = None
+
+    for selector in candidates:
+        try:
+            # Compatibilidad si driver_page ofrece locator/wait_for o query_selector
+            if hasattr(driver_page, "locator"):
+                loc = driver_page.locator(selector).first
+                if loc.is_visible(timeout=int(timeout_s * 1000 / len(candidates))):
+                    return loc
+            elif hasattr(driver_page, "query_selector"):
+                el = driver_page.query_selector(selector)
+                if el:
+                    return el
+        except Exception as err:
+            last_err = err
+            continue
+
+    # Si se agotaron los candidatos
+    if evidence_layer and hasattr(evidence_layer, "record_element_not_found"):
+        screenshot = None
+        if hasattr(driver_page, "screenshot"):
+            try:
+                screenshot = driver_page.screenshot()
+            except Exception:
+                pass
+        evidence_layer.record_element_not_found(
+            spec["primary"],
+            timeout_s=timeout_s,
+            diagnostics={"candidates_tested": candidates, "last_error": str(last_err)},
+            screenshot_bytes=screenshot,
+        )
+
+    raise TimeoutError(f"No se pudo resolver el elemento DOM para '{selector_key}' usando selectores primario/fallbacks tras {timeout_s}s")

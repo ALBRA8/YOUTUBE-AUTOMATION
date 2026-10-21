@@ -203,3 +203,91 @@ class FileLock:
 def new_owner_token(prefix: str = "owner") -> str:
     """Token de dueño único para locks/sesiones."""
     return new_id(prefix)
+
+
+def is_pid_alive(pid: int) -> bool:
+    """Comprueba si un proceso PID sigue vivo en el sistema operativo."""
+    if pid <= 0:
+        return False
+    try:
+        if os.name == "nt":
+            import ctypes
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            STILL_ACTIVE = 259
+            handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if not handle:
+                return False
+            exit_code = ctypes.c_ulong()
+            success = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return bool(success and exit_code.value == STILL_ACTIVE)
+        else:
+            os.kill(pid, 0)
+            return True
+    except (OSError, PermissionError):
+        return False
+
+
+def purge_stale_lockfiles(search_dirs: list[str | Path] | None = None, *, stale_s: float = 300.0) -> list[str]:
+    """Rutina de verificación y purga de stale lockfiles al iniciar el servicio (startup hook)
+    para evitar bloqueos por ejecuciones previas abortadas (§20)."""
+    purged: list[str] = []
+    if search_dirs is None:
+        search_dirs = [Path("."), Path("backend/data"), Path("tools/GoogleFlowMCP")]
+
+    for d in search_dirs:
+        base = Path(d)
+        if not base.exists():
+            continue
+        # Buscar .flow.lock (directorio o archivo) y *.lock
+        try:
+            candidates = list(base.glob("**/.flow.lock")) + list(base.glob("**/*.lock"))
+        except OSError:
+            continue
+
+        for cand in candidates:
+            # Omitir lockfiles del paquete git o node_modules
+            p_str = str(cand).replace("\\", "/")
+            if "node_modules" in p_str or ".git" in p_str:
+                continue
+
+            stale = False
+            pid_file = cand / "pid" if cand.is_dir() else cand
+            try:
+                if pid_file.is_file():
+                    raw = pid_file.read_text(encoding="utf-8", errors="ignore").strip()
+                    pid = 0
+                    try:
+                        data = json.loads(raw)
+                        pid = int(data.get("pid") or 0)
+                    except Exception:
+                        if raw.isdigit():
+                            pid = int(raw)
+                    if pid > 0 and not is_pid_alive(pid):
+                        stale = True
+
+                if not stale and cand.exists():
+                    age = time.time() - cand.stat().st_mtime
+                    if age > stale_s:
+                        stale = True
+            except OSError:
+                stale = True
+
+            if stale:
+                try:
+                    if cand.is_dir():
+                        import shutil
+                        shutil.rmtree(cand, ignore_errors=True)
+                    else:
+                        cand.unlink(missing_ok=True)
+                    purged.append(str(cand))
+                except OSError:
+                    pass
+
+    return purged
+
+
+def startup_lock_cleanup_hook() -> dict[str, Any]:
+    """Hook de inicio para sanear el entorno de concurrencia."""
+    purged = purge_stale_lockfiles()
+    return {"ok": True, "purged_count": len(purged), "purged_locks": purged}

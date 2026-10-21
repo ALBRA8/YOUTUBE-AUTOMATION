@@ -13,6 +13,7 @@ import database as db
 from config import OUTPUT_DIR
 from services import gemini_client
 from services import flow_mcp_client
+from pipeline import sanitizer
 from services import avatar_schema
 from services import camera_recipes
 from services.themes import get_style
@@ -175,8 +176,9 @@ async def generate_scene_image(scene: dict, project: dict, idx: int,
     if flow_mcp_client.available():
         try:
             aspect = "9:16" if project.get("format") == "short" else "16:9"
+            clean_prompt = sanitizer.normalize_flow_prompt(prompt)
             mcp_files = await flow_mcp_client.generate_image(
-                prompt=prompt,
+                prompt=clean_prompt,
                 aspect=aspect,
                 count=1,
                 out_dir=scene_dir(project["id"]),

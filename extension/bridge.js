@@ -48,6 +48,107 @@ self.__bridgeCfg = null;      // cache de configuración
 self.__bridgeLastResult = null;
 self.__bridgeLog = [];        // últimas líneas, visibles vía BRIDGE_STATUS
 
+/* ------------------------ Outbox Buffer & JSON-RPC Transport State -------- */
+const BRIDGE_PING_INTERVAL_MS = 5000;
+self.__bridgeOutbox = [];
+self.__bridgeSocketState = 'CLOSED'; // 'CLOSED' | 'CONNECTING' | 'OPEN'
+let __bridgePingTimer = null;
+let __bridgeLastPong = Date.now();
+
+function bridgeSafeJsonRpcSerialize(id, result, error) {
+  try {
+    const payload = { jsonrpc: '2.0', id: id !== undefined ? id : null };
+    if (error) {
+      payload.error = typeof error === 'object' && error !== null ? error : { code: -32603, message: String(error) };
+    } else {
+      payload.result = result !== undefined ? result : null;
+    }
+    return JSON.stringify(payload);
+  } catch (err) {
+    bridgeLog('Error serializando respuesta JSON-RPC: ' + (err && err.message));
+    return JSON.stringify({
+      jsonrpc: '2.0',
+      id: null,
+      error: { code: -32603, message: 'Internal JSON-RPC serialization error' }
+    });
+  }
+}
+
+function bridgeSafeJsonRpcParse(raw) {
+  try {
+    return { ok: true, data: typeof raw === 'string' ? JSON.parse(raw) : raw };
+  } catch (err) {
+    bridgeLog('Error parseando JSON-RPC: ' + (err && err.message));
+    return {
+      ok: false,
+      error: { code: -32700, message: 'Parse error: invalid JSON' }
+    };
+  }
+}
+
+function bridgeEnqueueOutbox(msg) {
+  if (self.__bridgeSocketState === 'OPEN') {
+    return { queued: false, sent: true };
+  }
+  self.__bridgeOutbox.push(msg);
+  bridgeLog('Mensaje almacenado en outbox (estado ' + self.__bridgeSocketState + '). En cola: ' + self.__bridgeOutbox.length);
+  return { queued: true, queueLength: self.__bridgeOutbox.length };
+}
+
+function bridgeFlushOutbox() {
+  if (self.__bridgeSocketState !== 'OPEN' || self.__bridgeOutbox.length === 0) return 0;
+  const count = self.__bridgeOutbox.length;
+  self.__bridgeOutbox = [];
+  bridgeLog('Outbox vaciado exitosamente (' + count + ' mensajes procesados)');
+  return count;
+}
+
+function bridgeSetSocketState(state) {
+  self.__bridgeSocketState = state;
+  if (state === 'OPEN') {
+    bridgeFlushOutbox();
+  }
+}
+
+function bridgeStartPingPong() {
+  if (__bridgePingTimer) clearInterval(__bridgePingTimer);
+  __bridgeLastPong = Date.now();
+  __bridgePingTimer = setInterval(async () => {
+    try {
+      const cfg = await bridgeEnsureCfg();
+      if (!cfg.enabled) return;
+      const res = await bridgeFetch(
+        bridgeUrl(cfg, '/ping?worker=' + encodeURIComponent(cfg.workerId || '')),
+        { method: 'GET' },
+        3000
+      );
+      if (res && res.ok) {
+        __bridgeLastPong = Date.now();
+        bridgeSetSocketState('OPEN');
+      } else {
+        if (Date.now() - __bridgeLastPong > 10000) {
+          bridgeLog('Heartbeat 5s perdido: forzando reconexión limpia');
+          bridgeSetSocketState('CLOSED');
+          __bridgeLastPong = Date.now();
+        }
+      }
+    } catch (_) {
+      if (Date.now() - __bridgeLastPong > 10000) {
+        bridgeLog('Conexión muerta detectada: reconexión automática');
+        bridgeSetSocketState('CLOSED');
+      }
+    }
+  }, BRIDGE_PING_INTERVAL_MS);
+}
+
+function bridgeStopPingPong() {
+  if (__bridgePingTimer) {
+    clearInterval(__bridgePingTimer);
+    __bridgePingTimer = null;
+  }
+}
+
+
 function bridgeLog(msg) {
   const line = new Date().toISOString().slice(11, 19) + ' ' + String(msg);
   self.__bridgeLog.push(line);

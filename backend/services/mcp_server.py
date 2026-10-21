@@ -515,6 +515,9 @@ async def entry(req: Request):
                             status_code=400)
     mid, method = msg.get("id"), msg.get("method", "")
 
+    if method in ("ping", "heartbeat"):
+        from services.hands.contracts import now_iso
+        return {"jsonrpc": "2.0", "id": mid, "result": {"pong": True, "status": "OPEN", "timestamp": now_iso()}}
     if method == "initialize":
         return {"jsonrpc": "2.0", "id": mid, "result": {
             "protocolVersion": PROTOCOL_VERSION,
@@ -544,3 +547,9 @@ async def entry(req: Request):
 @app.post("/")
 async def rpc(req: Request):
     return await entry(req)
+
+@app.get("/ping")
+@app.get("/heartbeat")
+async def ping_pong():
+    from services.hands.contracts import now_iso
+    return {"ok": True, "pong": True, "status": "OPEN", "timestamp": now_iso()}
