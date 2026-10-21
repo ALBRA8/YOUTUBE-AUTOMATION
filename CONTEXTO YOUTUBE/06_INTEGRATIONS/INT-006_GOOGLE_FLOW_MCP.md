@@ -1,168 +1,241 @@
-# INT-006 — INTEGRACIÓN GoogleFlowMCP (DRIVER CDP / MCP PARA GOOGLE FLOW)
+# INT-006 — INTEGRACIÓN GoogleFlowMCP
 
-**Fecha de Preparación:** 2026-10-20  
-**Estado:** PUENTE IMPLEMENTADO Y PROBADO (DESACTIVADO POR DEFECTO CON FLOW_MCP_ENABLED=0)  
-**Ubicación Definitiva:** `D:\PROYECTOS\YOUTUBE AUTOMATION\tools\GoogleFlowMCP`  
-**Origen:** `srzGoogleFlowMCP.zip` (Downloads)
+**Última actualización:** 2026-10-21  
+**Estado actual:** PUENTE LIVE VALIDADO · `FLOW_MCP_ENABLED=0` POR DEFECTO  
+**Ubicación:** `D:\PROYECTOS\YOUTUBE AUTOMATION\tools\GoogleFlowMCP`  
+**Servidor:** `srz-google-flow-mcp` v1.0.1  
+**Protocolo:** MCP Stdio / JSON-RPC 2.0  
+**Transporte navegador:** Chrome DevTools Protocol (CDP), puerto 9333
 
----
-
-## 1. Propósito y Alcance
-
-Proveer una capacidad complementaria o alternativa de automatización directa del navegador para Google Flow mediante el **Model Context Protocol (MCP)**, utilizando `playwright-core` sobre el protocolo **Chrome DevTools Protocol (CDP)** en el puerto 9333.
-
-> **Regla de frontera:** En esta fase de preparación, el componente NO se encuentra conectado al pipeline de producción ni se ha ejecutado ninguna generación real en Flow. Solo se ha auditado, instalado, blindado y probado herméticamente en local.
+> **IMPORTANTE:** Este documento reemplaza el estado histórico que indicaba que no se había ejecutado generación real. Desde el 2026-10-21 el puente básico fue probado LIVE con Google Flow y posteriormente se implementó el Scene Asset Resolver. El detalle de Reference / Asset Lineage está documentado en `INT-007_GATE_B_REFERENCE_ASSET_LINEAGE.md`.
 
 ---
 
-## 2. Inventario de Archivos
+## 1. FRONTERA ARQUITECTÓNICA
 
-| Archivo / Carpeta | Función | Clasificación |
-| :--- | :--- | :--- |
-| `package.json` | Metadatos y dependencias declaradas (`engines.node >= 18`) | Imprescindible |
-| `package-lock.json` | Bloqueo determinista de 95 dependencias | Imprescindible |
-| `src/mcp.js` | Punto de entrada del servidor MCP stdio (McpServer v1.0.1) | Imprescindible |
-| `src/flow.js` | Lógica de interacción con Google Flow (ProseMirror, settings, upload, assets) | Imprescindible |
-| `src/chrome.js` | Detección de binario Chrome y spawn con flags CDP y perfil dedicado | Imprescindible |
-| `src/lock.js` | Mecanismo de exclusión mutua cross-process (`.flow.lock/pid`) | Imprescindible |
-| `src/cli.js` | Interfaz de línea de comandos para control manual y login inicial | Imprescindible |
-| `test/lock.test.js` | Pruebas unitarias de concurrencia y recuperación de locks | Desarrollo / Pruebas |
-| `.gitignore` | Exclusiones locales de seguridad (node_modules, state, config, output, inputs) | Seguridad |
-| `inputs/.gitkeep` | Directorio para imágenes de referencia locales | Runtime local |
-| `output/.gitkeep` | Directorio para descargas de imágenes generadas | Runtime local |
-| `README.md` | Documentación operativa de usuario | Documentación |
-| `CLAUDE.md` | Guía de instalación y troubleshooting de referencia | Documentación |
-| `AGENTS.md` | Metadatos de integración para agentes | Documentación |
-| `examples/referencia-producto.txt` | Ejemplo de prompt con `@` | Ejemplo |
+`GoogleFlowMCP` es un **puente técnico**, no un agente ni un orquestador.
 
----
+`YOUTUBE-AUTOMATION` mantiene la responsabilidad de orquestación audiovisual. Google Flow es un proveedor/capacidad de generación.
 
-## 3. Dependencias y Requisitos Confirmados
+No se crea un nuevo agente, Production Studio, VIDEO EDITOR AGENT, QA paralelo ni MCP adicional para esta integración.
 
-- **Node.js:** Versión instalada `v24.14.0` (cumple `engines.node >= 18`). Ubicación: `C:\Program Files\nodejs\node.exe`.
-- **npm:** Versión instalada `11.9.0`.
-- **Dependencias declaradas:**
-  - `@modelcontextprotocol/sdk`: `^1.31.0` (Protocolo MCP estándar)
-  - `playwright-core`: `^1.63.0` (Librería CDP ligera sin descarga de navegadores adicionales)
-  - `zod`: `^4.6.5` (Validación de esquemas de herramientas)
-- **Instalación:** Ejecutado `npm ci` con éxito (95 paquetes instalados, 0 vulnerabilidades).
+La extensión Chrome y GoogleFlowMCP son mecanismos diferentes:
 
----
-
-## 4. Mapa de Rutas Reales y Comportamiento de Rutas
-
-- **Resolución de Raíz (`ROOT`):** Dinámica vía `path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')`. Funciona independientemente del nombre del directorio y tolera espacios en la ruta (`YOUTUBE AUTOMATION`).
-- **Ubicación de Chrome:** `C:\Program Files\Google\Chrome\Application\chrome.exe` (detectada automáticamente en Windows).
-- **Perfil de Usuario de Chrome (`userDataDir`):** `%LOCALAPPDATA%\FlowImageChrome` (ubicado fuera del repositorio de trabajo, evitando contaminación de Git).
-- **Archivos de Estado / Configuración:**
-  - `config.json` (ruta absoluta a carpeta de salida, opcional).
-  - `state.json` (persistencia del `projectId` actual de Flow).
-  - `.flow.lock` (directorio temporal con PID de proceso).
-- **Archivos de Medios:**
-  - `output/` (imágenes generadas).
-  - `inputs/` (referencias locales del usuario).
-
----
-
-## 5. Exclusiones de Seguridad
-
-Se configuró el archivo `tools/GoogleFlowMCP/.gitignore` para asegurar que ningún artefacto sensible llegue a Git:
-
-```gitignore
-node_modules/
-config.json
-state.json
-.flow.lock/
-output/*
-!output/.gitkeep
-inputs/*
-!inputs/.gitkeep
-*.log
-npm-debug.log*
+```text
+GoogleFlowMCP
+   ↓ MCP / stdio
+Node.js
+   ↓ CDP :9333
+Chrome dedicado
+   ↓
+Google Flow
 ```
 
+GoogleFlowMCP no depende de la extensión para transportar la generación.
+
 ---
 
-## 6. Configuración Prevista para Antigravity
+## 2. COMPONENTES PRINCIPALES
 
-Bloque a integrar en `C:\Users\Johan\.gemini\config\mcp_config.json`:
+- `backend/services/flow_mcp_client.py` — cliente Python asíncrono MCP.
+- `backend/config.py` — `FLOW_MCP_ENABLED`, `FLOW_MCP_DIR`, `FLOW_MCP_MODEL`, `FLOW_MCP_TIMEOUT`.
+- `backend/pipeline/images.py` — Plan 0 condicional `flow_mcp` y fallback existente.
+- `tools/GoogleFlowMCP/src/mcp.js` — servidor MCP.
+- `tools/GoogleFlowMCP/src/flow.js` — interacción con Google Flow, prompts, assets y uploads.
+- `tools/GoogleFlowMCP/src/chrome.js` — Chrome/CDP.
+- `tools/GoogleFlowMCP/src/lock.js` — exclusión mutua.
 
-```json
-{
-  "mcpServers": {
-    "google-flow-mcp": {
-      "command": "C:\\Program Files\\nodejs\\node.exe",
-      "args": [
-        "D:\\PROYECTOS\\YOUTUBE AUTOMATION\\tools\\GoogleFlowMCP\\src\\mcp.js"
-      ]
-    }
-  }
-}
+Herramientas MCP expuestas:
+
+1. `flow_generate_image`
+2. `flow_upload_file`
+3. `flow_list_assets`
+4. `flow_new_project`
+
+---
+
+## 3. CONFIGURACIÓN Y SEGURIDAD
+
+- `FLOW_MCP_ENABLED=0` continúa como valor por defecto.
+- El perfil Chrome dedicado permanece fuera del repositorio.
+- No se almacenan cookies, tokens ni credenciales en Git.
+- `.flow.lock`, `state.json`, `config.json`, `output/*`, `inputs/*` y `node_modules/` permanecen excluidos según `.gitignore`.
+- La activación permanente del MCP en la configuración de Antigravity no forma parte de este documento ni de los Gates actuales.
+
+---
+
+## 4. VALIDACIÓN PREVIA DEL PUENTE
+
+GoogleFlowMCP fue instalado y probado localmente.
+
+- `npm ci`: PASS.
+- 95 paquetes instalados, 0 vulnerabilidades reportadas.
+- `npm test`: 3/3 PASS para concurrencia/locks.
+- Handshake MCP: PASS.
+- `tools/list`: PASS.
+- Cliente Python: 21/21 tests PASS en la batería original del bridge.
+
+---
+
+## 5. LIVE TEST 1 — GENERACIÓN BÁSICA
+
+Proyecto aislado:
+
+`_live_mcp_test_01`
+
+Prompt:
+
+`A glowing crystal artifact floating in an ancient stone temple, cinematic lighting, ultra detailed`
+
+Resultado:
+
+- `FLOW_MCP_ENABLED=True` en memoria.
+- `flow_mcp_client.available()=True`.
+- Método efectivo: `flow_mcp`.
+- Duración: 30.20 s.
+- PNG: `backend/data/output/_live_mcp_test_01/scene_01.png`.
+- Tamaño: 963,905 bytes.
+- Validación binaria: PASS.
+- `.flow.lock` tras ejecución: ausente.
+
+**Gate A: PASS.**
+
+---
+
+## 6. REFERENCE / ASSET LINEAGE
+
+Gate B detectó un integration gap: `Production JSON` ya conserva `references`, pero el Plan 0 MCP no las convertía en assets de Google Flow.
+
+La capacidad del MCP ya existía:
+
+```text
+flow_upload_file()
+      ↓
+asset name
+      ↓
+@{asset_name}
+      ↓
+flow_generate_image()
 ```
 
----
+El detalle completo de la auditoría, diseño e implementación está en:
 
-## 7. Pruebas Realizadas y Resultados
-
-1. **Pruebas Unitarias de Concurrencia (`test/lock.test.js`):**
-   - Script ajustado en `package.json` a `"test": "node --test"` para compatibilidad nativa en Windows.
-   - Serialización de llamadas concurrentes: PASS
-   - Liberación de lock ante excepciones: PASS
-   - Recuperación de lock ante proceso muerto: PASS
-   - Total: **3/3 PASS** (`npm test` duración: 570 ms).
-2. **Prueba de Servidor MCP (Stdio JSON-RPC 2.0):**
-   - Handshake `initialize` (protocolVersion `2024-11-05`): PASS (`srz-google-flow-mcp` v`1.0.1`).
-   - Introspección `tools/list`: PASS. Expone exactamente 4 herramientas:
-     - `flow_upload_file`: Sube imagen local y registra etiqueta `@{name}` (`filePath` requerido, `name`, `replace`).
-     - `flow_list_assets`: Lista activos del proyecto activo de Flow.
-     - `flow_generate_image`: Genera imágenes con Nano Banana (`prompt` requerido, `aspect` enum `[16:9, 4:3, 1:1, 3:4, 9:16]`, `count` 1-4, `model` enum `[2, pro, lite]`, `outDir`).
-     - `flow_new_project`: Inicializa nuevo proyecto en Flow.
-   - Resolución dinámica de `outDir` tolerante a espacios en `YOUTUBE AUTOMATION`: PASS (`d:\PROYECTOS\YOUTUBE AUTOMATION\tools\GoogleFlowMCP\output`).
-3. **Aislamiento y Seguridad:**
-   - Perfil Chrome `%LOCALAPPDATA%\FlowImageChrome`: PASS (verificado limpio/inexistente previamente).
-   - Reglas de Git: PASS (`git check-ignore` verificado para `.flow.lock`, `node_modules`, `config.json`, `state.json`, `output/*`, `inputs/*`).
+`CONTEXTO YOUTUBE/06_INTEGRATIONS/INT-007_GATE_B_REFERENCE_ASSET_LINEAGE.md`
 
 ---
 
-## 8. Riesgos y Decisiones Pendientes (Para Fase Siguiente)
+## 7. SCENE ASSET RESOLVER — GATE B.2
 
-1. **Autenticación en Flow:** Requiere que el operador humano abra la ventana dedicada de Chrome (`node src/cli.js chrome`) una única vez para iniciar sesión con su cuenta de Google.
-2. **Coexistencia con Extensión:** La extensión inyectada en Chrome y el driver Playwright actúan por canales diferentes (la extensión observa el tráfico `/batchexecute`; el driver Playwright controla el DOM y los clics). Deben coordinarse para que no colisionen.
-3. **Estabilidad de Selectores:** El MCP depende de clases y roles de Material Design (`div.ProseMirror`, `button.settings-trigger-button`, `flow-image-tile`). Cualquier rediseño de Google Flow podría requerir mantenimiento de selectores.
-4. **Activación en Antigravity:** La configuración en `~/.gemini/config/mcp_config.json` se mantiene deliberadamente vacía hasta que se apruebe la fase de activación.
+Se autorizó una única abstracción nueva:
 
----
+`backend/pipeline/asset_resolver.py`
 
-## 9. Diseño Técnico del Puente Orquestador ↔ GoogleFlowMCP
+Responsabilidades:
 
-### 9.1 Arquitectura del Puente
-El orquestador de YOUTUBE-AUTOMATION (Python/FastAPI) se comunica con `GoogleFlowMCP` mediante un cliente asíncrono tipado (`FlowMCPClient` en `backend/services/flow_mcp_client.py`) sobre el protocolo estándar **MCP Stdio (JSON-RPC 2.0)**.
-- **Transmisión:** Proceso hijo de Node.js invocando `tools/GoogleFlowMCP/src/mcp.js` con stdin/stdout en UTF-8 y delimitación por saltos de línea (`\n`).
-- **Aislamiento:** Controlado por el feature flag `FLOW_MCP_ENABLED=0` en `backend/config.py`. En estado inactivo o en caso de fallo, el pipeline degrada de forma natural a la cadena de planes existente (Gemini -> z-ai -> Extension -> Placeholder).
+- extracción de referencias;
+- validación local;
+- nombres deterministas;
+- manejo de colisiones;
+- construcción de `@{asset_name}`.
 
-### 9.2 Contrato Mínimo de Herramientas
-1. `flow_new_project`:
-   - Entrada: `{}`
-   - Salida: `{"ok": bool, "project_id": str, "error": str | None}`
-2. `flow_upload_file`:
-   - Entrada: `{"filePath": str, "name": str | None, "replace": bool}`
-   - Salida: `{"ok": bool, "name": str, "media_id": str | None, "reused": bool, "error": str | None}`
-3. `flow_list_assets`:
-   - Entrada: `{}`
-   - Salida: `{"ok": bool, "assets": list[str], "error": str | None}`
-4. `flow_generate_image`:
-   - Entrada: `{"prompt": str, "aspect": "16:9"|"4:3"|"1:1"|"3:4"|"9:16", "count": 1..4, "model": "2"|"pro"|"lite", "outDir": str | None}`
-   - Salida: `{"ok": bool, "files": list[Path], "count": int, "duration_s": float, "error": str | None}`
+Integración:
 
-### 9.3 Gestión de Fallos y Verificación
-- Verificación de imagen mediante apertura e inspección de cabecera con PIL y tamaño mínimo > 4KB.
-- Si el servidor reporta `Not signed in to Google`, se mapea a excepción `FlowMCPAuthError` y no se reintenta, pasando inmediatamente al siguiente plan.
-- Timeout estricto de 120s por generación; en caso de timeout se aborta el proceso sin dejar locks residuales.
+`backend/pipeline/images.py`
+
+No se modificaron `production_json.py`, `flow_jobs.py`, `execution_contract.py` ni la extensión.
+
+Tests del resolver: **22/22 PASS**.
+
+Suite reportada de regresión: **45/45 PASS**.
+
+Mock F5.1: **PASS**.
+
+`git diff --check`: **0 errores**.
 
 ---
 
-## 10. Implementación y Validación del Puente (2026-10-20)
-- **Módulo Cliente:** [`backend/services/flow_mcp_client.py`](file:///d:/PROYECTOS/YOUTUBE%20AUTOMATION/backend/services/flow_mcp_client.py) implementa handshake secuencial Stdio JSON-RPC 2.0 (`initialize` $\rightarrow$ `notifications/initialized` $\rightarrow$ `tools/call`), gestión de procesos con recolección de stderr y finalización garantizada.
-- **Configuración:** [`backend/config.py`](file:///d:/PROYECTOS/YOUTUBE%20AUTOMATION/backend/config.py) añade `FLOW_MCP_ENABLED` (False por defecto), `FLOW_MCP_DIR`, `FLOW_MCP_MODEL` y `FLOW_MCP_TIMEOUT`.
-- **Integración de Pipeline:** [`backend/pipeline/images.py`](file:///d:/PROYECTOS/YOUTUBE%20AUTOMATION/backend/pipeline/images.py) añade el Plan 0 condicional `flow_mcp`, con verificación previa de imagen y copia segura hacia la ruta definitiva de escena.
-- **Batería de Pruebas:** [`tests/test_flow_mcp_bridge.py`](file:///d:/PROYECTOS/YOUTUBE%20AUTOMATION/tests/test_flow_mcp_bridge.py) aprobada al 100% (**21/21 tests OK** en 0.70s), cubriendo flags, fallbacks, respuestas corruptas, timeouts y preservación de F5.1.
+## 8. LIVE TEST 2 — UPLOAD DE REFERENCIA
+
+Referencia:
+
+`backend/data/output/_live_mcp_test_01/scene_01.png`
+
+Asset name:
+
+`crystal_orb`
+
+Evidencia confirmada:
+
+- upload físico a Google Flow: PASS;
+- media ID real: `40be5550-1eb5-43c0-a940-593147159f1d`;
+- rename físico en UI: PASS;
+- `aria-label="crystal_orb"`: confirmado;
+- `span.footer-title` contiene `crystal_orb`: confirmado mediante diagnóstico DOM.
+
+### Limitación detectada
+
+La UI actual oculta el título hasta hover. `renameTile()` utiliza actualmente `innerText()` sin hover, por lo que Chromium/Playwright puede devolver cadena vacía aunque el rename haya ocurrido.
+
+Evidencia:
+
+- `textContent()` → `crystal_orb`.
+- `hover()` + `innerText()` → `crystal_orb`.
+- `innerText()` sin hover → vacío.
+
+Esto es un **bug de verificación DOM en GoogleFlowMCP**, no un fallo del upload ni del Scene Asset Resolver.
+
+Durante B.2 no se modificó `tools/GoogleFlowMCP` porque esa corrección no estaba autorizada en esa fase.
+
+---
+
+## 9. ESTADO ACTUAL DE LOS GATES
+
+| Gate | Estado |
+|---|---|
+| Gate A — generación básica LIVE | **PASS** |
+| Gate B — Reference / Asset Lineage audit | **PASS — INTEGRATION GAP identificado** |
+| Gate B.1 — diseño Scene Asset Resolver | **PASS** |
+| Gate B.2 — implementación | **PASS** |
+| Gate B.2 — tests | **PASS** |
+| Gate B.2 — upload/reference transport LIVE | **PASS** |
+| Gate B.2 — rename verification | **PENDING — DOM compatibility fix** |
+| Gate B.2 — generación LIVE consumiendo referencia | **PENDING** |
+| Gate B.2 — consumo visual determinista de referencia | **PENDING / depende de evidencia** |
+
+**No declarar todavía PASS E2E completo para referencias.**
+
+---
+
+## 10. PRÓXIMO PASO
+
+El único siguiente paso autorizado es:
+
+**Gate B.2R — corrección mínima de la verificación de `renameTile` + LIVE TEST 2R completo.**
+
+Secuencia:
+
+```text
+archivo local
+   ↓
+upload_file()
+   ↓
+asset_name
+   ↓
+@{asset_name}
+   ↓
+flow_generate_image()
+   ↓
+PNG válido
+```
+
+Criterio de evidencia:
+
+- Upload PASS.
+- Naming PASS.
+- Mention injection PASS.
+- Generation PASS.
+- PNG válido PASS.
+- Lock liberado PASS.
+- Si no existe observación determinista del consumo del chip: `REFERENCE TRANSPORT PASS / REFERENCE CONSUMPTION UNVERIFIABLE`.
+
+No tocar Start Frame, imagen ancla de escena 0 ni otros mecanismos avanzados hasta cerrar este gate.
