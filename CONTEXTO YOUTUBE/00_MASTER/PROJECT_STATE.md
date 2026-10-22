@@ -1,8 +1,33 @@
 # PROJECT STATE — YOUTUBE-AUTOMATION
 
-**Estado:** IN_PROGRESS — Auditoría técnica del fix de ingestión polimórfica (Flow Script Processor 2.6.0).  
-**Última actualización:** 2026-10-19.  
+**Estado:** IN_PROGRESS — migración AGENTE-GENERAL ↔ harness: P3-B PASS según informe; publicación de commits de código P3-B pendiente de verificación.  
+**Última actualización:** 2026-10-22.  
 **Fuente:** Archivos del repo `harness-v1` y auditorías técnicas. Este snapshot no reemplaza tests ni convierte simulaciones en E2E real.
+
+
+
+## Estado de migración actualizado — 2026-10-22 (P3-B)
+
+- **P1:** PASS.
+- **P1.5:** publicado vía PR #67, CI 5/5, merge `3afa77f` en AGENTE-GENERAL/main.
+- **P2:** PASS, 45 checks reportados, ciclo sin launch ni producción.
+- **P3-A:** PASS; matriz definitiva en `06_INTEGRATIONS/INT-015_P3_CAPABILITY_MATRIX.md`.
+- **P3-B:** PASS según informe de ejecución; cierre documentado en `06_INTEGRATIONS/INT-016_P3B_QUIRURGICAS_CIERRE.md`.
+
+### P3-B — cambios reportados y límite de publicación
+
+1. G-01: fix mínimo en envelope de publish; `op_publish` incorpora `external_status`; el estado canónico `PUBLISHED` se preserva; fallos reales mantienen `FAILED`, `PROVIDER_FAILURE` y `recovery`.
+2. Skills host nuevas: `skill.youtube.validate` y `skill.youtube.system_status`; sin endpoints nuevos, riesgo LOW, permiso `youtube.read`.
+3. PB-04: documentación de `HARNESS_ALLOWED_PERMISSIONS`.
+4. PB-03/G-02: NO implementado; afecta al contrato v1 y requiere autorización explícita. PB-05 fuera de alcance.
+5. G-13: metadata declarativa del seed no persiste; mitigación por verificación funcional reportada; seed intacto.
+6. Tests reportados: YT-AUT 620/620 (17/17 suites); AG-G especialización 22/22; los 18 fallos de la suite unitaria completa de AG-G son preexistentes e idénticos al baseline.
+
+**Importante — no confundir informe de ejecución con publicación:** el informe P3-B declaró commits locales `a552b3d` + `56be4b9` en YT-AUT, rama `p3b-g01-publish-envelope`, y `8859b4b` en AG-G, rama `p3b-skills-host`. La publicación se reportó `BLOCKED BY AUTH`. No declarar estos cambios en GitHub `main` hasta verificar los refs remotos y completar los flujos de publicación respectivos.
+
+El PAT que circuló por el chat no debe reutilizarse; revocarlo/rotarlo y sustituirlo por una credencial segura de mínimo privilegio. No almacenar secretos en el contexto.
+
+**STOP:** no iniciar P4 ni implementar PB-03/G-02 sin autorización explícita. No ejecutar producción, publicación real, Flow LIVE ni render como parte de esta actualización documental.
 
 ## Estado operativo actualizado — 2026-10-20
 
