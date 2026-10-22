@@ -57,10 +57,21 @@
 - **LIVE:** `_live_video_test_02`, Start Frame `crystal_orb_c1`, MP4 720x1280, 8.00 s.
 
 ## INT-011 — Gate C.2: Flow Video ↔ Production Orchestrator
-- **Estado:** PASS / LIVE END-TO-END VALIDATION REPORTADA.
+- **Estado:** PASS / LIVE END-TO-END VALIDATION CONFIRMADA.
 - **Documento:** `INT-011_GATE_C2_FLOW_VIDEO_ORCHESTRATOR_INTEGRATION.md`.
 - **Resultado:** el orquestador normal puede generar videos Flow para escenas pendientes, reutilizar clips existentes de forma idempotente, entregar los clips al ensamblador existente y degradar escenas fallidas a Ken Burns.
 - **Feature flag:** `FLOW_MCP_VIDEO_ENABLED=0` por defecto.
 - **LIVE:** `live_c2_test_01`, dos escenas; escena 01 reutilizada, escena 02 generada en vivo; ambos clips descubiertos por `flow_import`; video final producido y proyecto en estado `ready`.
-- **Observación pendiente:** el video final reportó 3.43 s frente a clips individuales de ~8 s; revisar retiming/duración antes de declarar cerrada la política temporal de producción.
-- **Estado Git:** el informe C.2 recibido indica que el gate quedó pendiente de autorización de commit/push en el momento de documentarlo.
+- **Observación:** la duración final reportada fue 3.43 s frente a clips individuales de ~8 s; la política temporal/retiming debe considerarse pendiente de validación de producción.
+- **Estado Git:** C.2 quedó posteriormente publicado en `origin/main`; el cierre técnico fue registrado fuera del documento inicial.
+
+## INT-012 — HARD E2E: Flow Video → Producción Completa
+- **Estado:** FAIL / FALLO LOCALIZADO EN RENDER FINAL DE SUBTÍTULOS.
+- **Documento:** `INT-012_HARD_E2E_FLOW_VIDEO_PRODUCTION_PIPELINE.md`.
+- **Proyecto:** `_hard_e2e_c2_01`.
+- **Resultado:** 4/4 escenas generadas realmente en Google Flow mediante MCP, con Start Frames y referencias independientes; cuatro MP4 válidos descargados e ingeridos; ensamblado y mezcla de audio completados.
+- **Punto de fallo:** `backend/pipeline/video.py`, `burn_subtitles`, `_run_ffmpeg(..., timeout=900)`; `subprocess.TimeoutExpired` después de 900 s durante `libass` + `libx264 -preset medium`.
+- **Final observado:** archivo final de ~45.8 MB, 19.733 s, H.264 + AAC, con subtítulos Hormozi y audio mezclado, pero el supervisor declaró la ejecución `failed` por timeout.
+- **Idempotencia Run 2:** no ejecutada porque Run 1 terminó por timeout.
+- **Limpieza:** `.flow.lock` liberado y sin procesos/locks huérfanos reportados.
+- **Dictamen:** el primer fallo de esta prueba dura está en el render final FFmpeg, no en GoogleFlowMCP/Google Flow/Start Frame/referencias/import/ensamblado.
