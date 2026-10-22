@@ -8,6 +8,7 @@
 | Master | `00_MASTER/PROJECT_STATE.md` | IN_PROGRESS | estado actual, bloqueo y plan inmediato |
 | Master | `00_MASTER/ARCHITECTURE.md` | VERIFIED / IN_PROGRESS | capas, frontera y límites de evidencia; incorpora la referencia conceptual del video base |
 | Master | `00_MASTER/GLOSSARY.md` | VERIFIED | términos del proyecto |
+| Master | `00_MASTER/MIGRATION_ANALYSIS.md` | ANALYSIS / STOP | análisis de migración AGENTE-GENERAL → harness; fases P0–P5, límites protegidos y riesgos; no implementado |
 | Decisions | `01_DECISIONS/DECISION_LOG.md` | POPULATED | decisiones arquitectónicas y Start Frame |
 | Processes | `02_PROCESSES/PROCESS_INDEX.md` | POPULATED | procedimientos de auditoría y prueba real |
 | Findings | `03_FINDINGS/FINDINGS_INDEX.md` | POPULATED | hallazgos y evidencia |
@@ -17,6 +18,10 @@
 | Failures | `07_FAILURES/FAILURE_INDEX.md` | POPULATED | incidente histórico, gaps y riesgos |
 | Sessions | `08_SESSIONS/SESSION_INDEX.md` | POPULATED | resumen de continuidad de la sesión |
 | Knowledge | `09_KNOWLEDGE/KNOWLEDGE_INDEX.md` | POPULATED | reglas técnicas, jerarquía de evidencia, referencias conceptuales y catálogo de herramientas IA |
+
+## Migración AGENTE-GENERAL ↔ harness
+
+- `00_MASTER/MIGRATION_ANALYSIS.md` registra la síntesis A–L del análisis de migración compartido el 2026-10-22. Estado: **ANÁLISIS DOCUMENTADO / STOP RESPETADO / MIGRACIÓN NO IMPLEMENTADA**. Es una síntesis de continuidad; el informe local original de 420 líneas y su commit local `a3485a0` no estaban disponibles en `main` al registrar esta entrada.
 
 ## Referencias de conocimiento incorporadas
 
