@@ -22,3 +22,9 @@
 
 ## D-006 — Preservar P1 y capas fuera de alcance
 - **Estado:** VERIFIED. No tocar Creative Engine, P1, Production JSON, orquestador, leases/heartbeat, HANDS núcleo ni AGENTE-GENERAL sin evidencia causal.
+
+## D-007 — Frontera operativa Constructor / Antigravity
+- **Estado:** VERIFIED / VIGENTE.
+- **Decisión:** el **Constructor en la nube** es el agente responsable del trabajo sobre el código real del repositorio GitHub: auditoría del repositorio, modificaciones de código, conexiones/integraciones y documentación/versionado. **Google Antigravity**, instalado en el computador del usuario, es el agente destinado principalmente a pruebas locales, validaciones, despliegues y comprobaciones que dependan del entorno físico/local.
+- **Regla de operación:** no trasladar al computador una auditoría o modificación de repositorio que el Constructor pueda realizar en GitHub; no cargar al Constructor con pruebas que necesariamente dependan del entorno local. ChatGPT coordina la arquitectura, determina qué agente corresponde y valida los resultados.
+- **Alcance temporal:** esta separación se adopta como regla estable del flujo de trabajo, no como una excepción de corto plazo.
