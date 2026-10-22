@@ -2,7 +2,7 @@
 
 **Misión:** P3-B (PB-01/PB-02/PB-04) · **Fecha:** 2026-10-23 · **Dictamen:** P3-B — PASS
 **Repositorios:** YOUTUBE-AUTOMATION (p1-work, rama `p3b-g01-publish-envelope`) · AGENTE-GENERAL (ag-integration, rama `p3b-skills-host`)
-**Base:** `main` `a3ac4a0` (YT-AUT) y `main` `3afa77f` (AG-G), ambos verificados contra `origin` por fetch anónimo.
+**Base:** `main` `a3ac4a0` (YT-AUT) y `main` `3afa77f` (AG-G), verificados contra `origin` por fetch anónimo. En la sesión de publicación (2026-10-23) la rama YT-AUT fue rebaseada sobre `4394f3b` (4 commits docs de cierre publicados entre tanto); AG-G permaneció sobre `3afa77f` (sin drift).
 
 ---
 
@@ -91,7 +91,11 @@ Diff total vs `main`:
 
 Production JSON y `guion_json`, execution contract, `flow_jobs`, orquestador, `pipeline/video.py` y FFmpeg, Flow export/import, `asset_resolver`, `flow_mcp_client`/GoogleFlowMCP, F5/F5.1 y F2, HANDS y memorydv, security/database, `agent.py` y `/api/chat`, VÓRTICE, `albra_seed`: **cero modificaciones**.
 
-## 9. Estado Git y publicación
+## 9. Estado Git y publicación (registrado 2026-10-23)
 
-- Commits preparados en ramas locales `p3b-g01-publish-envelope` (YT-AUT) y `p3b-skills-host` (AG-G) — ver §commits del informe P3-B.
-- **Publicación GitHub: BLOCKED BY AUTH** — no hay credencial con `contents:write` autorizada en esta sesión (el PAT que circuló por el chat se considera comprometido; prohibido reutilizarlo, mandato §5). No se intentó ninguna publicación; no se fingió push. Ruta de publicación cuando exista credencial: AG-G vía rama+PR (ruleset *Protección Main - Clean Room* exige checks); YT-AUT admite push directo a main.
+- **AGENTE-GENERAL:** rama `p3b-skills-host` (`8859b4b`, base `3afa77f`) publicada → **PR #68** con CI 5/5 SUCCESS (Python 3.10/3.11/3.12 + dashboard build + Windows) → **merge `69c79da`** en `main` vía ruleset *Protección Main - Clean Room* (vía PR, sin bypass).
+- **YOUTUBE-AUTOMATION:** rama `p3b-g01-publish-envelope` rebaseada sobre `origin/main` `4394f3b` → commits `5e31cb3` (fix G-01 + tests, +90/−3) y `1c384b1` (docs INT-017, +124/−3) → **push directo a `main`** (fast-forward `4394f3b..1c384b1`; este repo no tiene ruleset). Registro de publicación: commit de cierre de esta misma sesión.
+- SHAs históricos del informe local (`a552b3d`/`56be4b9`) preservados en la rama local de respaldo `p3b-backup-local-report`; los SHAs publicados son los de esta sección (mismo contenido, nueva base).
+- **Credencial:** token de la cuenta `ALBRA8` (scopes `repo`, `workflow`) aportado por el propietario en la sesión de publicación; usado solo transitoriamente en memoria para push/API (URLs desechables, sin credential helper persistente), sin escribirlo en archivos, config de git, commits ni documentos. El PAT previamente expuesto en el chat sigue prohibido y debe revocarse/rotarse por el propietario.
+- Tests re-verificados en la sesión de publicación: YT-AUT 17/17 suites PASS (620/620, 0 fallos); AG-G especialización 22 passed; unit completa 18 failed/468 passed/4 skipped — mismos 18 pre-existentes ambientales (audio_transcribe/nvidia_provider/ollama), 0 relacionados youtube, 0 regresiones.
+- Superficies protegidas re-verificadas sobre el diff publicado: solo los 6 archivos autorizados (3 por repo). Sin producción real, sin LIVE, sin render.
