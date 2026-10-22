@@ -1,7 +1,7 @@
 # CONTEXTO YOUTUBE — INDEX
 
 **Estado:** INTEGRATED IN MAIN / IN_PROGRESS
-**Última actualización:** 2026-10-22
+**Última actualización:** 2026-10-22 (P1 PASS · P1.5 integrado local · P2 PASS · P3 no iniciado)
 
 | Área | Archivo | Estado | Propósito |
 |---|---|---|---|
@@ -22,6 +22,9 @@
 ## Migración AGENTE-GENERAL ↔ harness
 
 - `00_MASTER/MIGRATION_ANALYSIS.md` registra la síntesis A–L del análisis de migración AGENTE-GENERAL → harness compartido el 2026-10-22. Estado: **P0 COMPLETADO / STOP RESPETADO / MIGRACIÓN NO IMPLEMENTADA**. La síntesis está versionada en `main`; no equivale al informe local original de 420 líneas ni a una reejecución independiente de sus pruebas. El commit local `a3485a0` no se pudo publicar por el HTTP 401 del PAT revocado. No almacenar ni solicitar credenciales en el contexto.
+- **P1 — conexión fría: PASS (2026-10-22, VERIFIED).** Conexión real demostrada: AGENTE-GENERAL (cliente/tool/skill reales de `feature/youtube-harness` `b5b7220`) → HTTP Bearer → `/api/harness/v1` @ `main` `3e15beb` → operaciones LOW read-only → HarnessResult válido. 272 checks verdes (baterías del motor + host + smoke). Fail-closed verificado en 6 vectores. Cero modificaciones de código. Variables reales confirmadas: `YOUTUBE_HARNESS_URL` / `YOUTUBE_HARNESS_API_KEY` (host) → `MASTER_API_KEY` (arnés).
+- **P1.5 — integración: merge `--no-ff` de `b5b7220` sobre `origin/main` `5f277b3` → commit local `9bb3870`, cero conflictos, no-regresión probada (18 fallos pre-existentes idénticos en main puro vs fusionado; +15 tests nuevos en verde). Push a GitHub pendiente: PAT inválido para escritura (BLOCKED BY AUTH) — un solo comando al disponer credencial.
+- **P2 — ciclo operativo sin launch: PASS (2026-10-22, VERIFIED).** 45 checks, 0 fallos con motor real y HTTP TCP real: descubrimiento (manifiesto 19 operaciones), secuencia read controlada (7 operaciones LOW por las tres capas del host, incluida `validate_production` con el ejemplo canónico del motor), 5 límites negativos BLOCKED, idempotencia del libro verificada (replay `metadata.replayed=True`), `projects=0/jobs=0/flow_jobs=0` antes=después. Sin vídeo, sin render, sin launch, sin publicación. Detalle y matriz P3 en `06_INTEGRATIONS/INT-014_AGENTE_GENERAL_HARNESS_P1_P2.md`.
 
 ## Referencias de conocimiento incorporadas
 
@@ -38,4 +41,4 @@ Esta separación es una regla estable del flujo de trabajo, no una excepción te
 
 - Integración unificada en `main`: F5.1 live gate, GoogleFlowMCP bridge y robustez de transporte (buffer outbox, fallbacks de selectores, purga de cerrojos y normalización de prompts).
 - La incidencia HARD E2E del render final FFmpeg permanece separada y localizada en INT-012; `backend/pipeline/video.py` y su timeout reportado de 900 s están protegidos para esta migración.
-- Migración AGENTE-GENERAL → harness: análisis P0 documentado; siguiente fase propuesta P1 = conexión fría, configuración y smoke test read-only, cero cambios de código. Requiere verificar las revisiones exactas de ambos repos, el nombre real de la variable de API key y los permisos antes de configurar. No conectar ni activar producción por inferencia.
+- Migración AGENTE-GENERAL → harness: P0 documentado (INT-013); **P1 PASS** y **P2 PASS** ejecutados y verificados (INT-014); P1.5 integrado localmente (`9bb3870`) con publicación pendiente de credencial de escritura. Siguiente fase propuesta: **P3 = gaps v1.1 + tests cruzados** (matriz de capacidades lista en INT-014 §10). No iniciar P3 ni activar producción sin nueva misión.

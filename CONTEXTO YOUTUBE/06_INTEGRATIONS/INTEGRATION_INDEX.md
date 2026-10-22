@@ -75,3 +75,17 @@
 - **Idempotencia Run 2:** no ejecutada porque Run 1 terminó por timeout.
 - **Limpieza:** `.flow.lock` liberado y sin procesos/locks huérfanos reportados.
 - **Dictamen:** el primer fallo de esta prueba dura está en el render final FFmpeg, no en GoogleFlowMCP/Google Flow/Start Frame/referencias/import/ensamblado.
+
+## INT-013 — Preparación de Arnés AGENTE-GENERAL
+- **Estado:** PREPARACIÓN / ANÁLISIS ARQUITECTÓNICO — SIN MIGRACIÓN EJECUTADA.
+- **Documento:** `INT-013_AGENT_GENERAL_HARNESS_MIGRATION_PREPARATION.md`.
+- **Resultado:** frontera agente/arnés definida, AgentAdapter diseñado, skills/knowledge mapeados, plan P0–P5 y superficies protegidas registrados.
+
+## INT-014 — Integración AGENTE-GENERAL ↔ Harness V1 (P1 + P1.5 + P2)
+- **Estado:** P1 PASS / P1.5 INTEGRADO LOCAL (push pendiente de credencial) / P2 PASS / P3 NO INICIADO.
+- **Documento:** `INT-014_AGENTE_GENERAL_HARNESS_P1_P2.md`.
+- **Resultado P1:** conexión fría real demostrada — host (cliente/tool/skill reales) → HTTP Bearer → `/api/harness/v1` → operaciones LOW read-only → HarnessResult válido; 272 checks verdes; fail-closed en 6 vectores; cero modificaciones de código.
+- **Resultado P1.5:** merge `--no-ff` de `feature/youtube-harness` (`b5b7220`) sobre `origin/main` (`5f277b3`) → commit `9bb3870` local; cero conflictos; no-regresión probada por comparación con worktree de control; push a GitHub bloqueado por PAT inválido para escritura (BLOCKED BY AUTH).
+- **Resultado P2:** ciclo operativo sin launch demostrado con motor real (45 checks, 0 fallos): descubrimiento, secuencia read controlada (7 operaciones LOW por las tres capas del host), contrato completo, 5 límites negativos BLOCKED, idempotencia del libro verificada (replay `metadata.replayed=True`), `projects=0/jobs=0/flow_jobs=0` antes=después, sin vídeo/render/publicación.
+- **Gobernanza:** 9/9 skills host con riesgo coherente con la operación del arnés; HITL único en `publish`; política del host es adición al PolicyEngine del seed.
+- **Entrada P3:** matriz de capacidades (17 internas / 19 operaciones / 9 skills host) con estado VERIFIED/MISSING/DIVERGENT/N-A incluida en el documento.
