@@ -99,3 +99,15 @@
 - **Hallazgos nuevos:** G-01 bug de envelope (publish exitoso reporta FAILED); G-02 `doctor fix` muta bajo RISK_LOW/read; G-03 launch HIGH sin HITL host (decisión consciente); G-04 delete sin guard de published; G-05..G-12 menores (ledger sin TTL, replay sin comparar cuerpo, env no documentada, etc.).
 - **Tests P3:** YT-AUT 17/17 suites PASS (610 checks, 0 fallos); AG-G especialización 15 passed; unit completa 18 failed/461 passed/4 skipped con los 18 pre-existentes idénticos al baseline.
 - **Publicación:** PR #67 (merge `3afa77f`, especialización en GitHub main); `12e02ca` (INT-014) publicado; INT-015 + índices en commit docs de P3.
+
+
+## INT-016 — Cierre P3-B: correcciones quirúrgicas y skills host
+- **Estado:** P3-B — PASS según informe de ejecución; publicación de código pendiente de verificación.
+- **Documento:** `INT-016_P3B_QUIRURGICAS_CIERRE.md`.
+- **PB-01 / G-01:** causa raíz en `op_publish` (faltaba `external_status`) y `_final_status` (fallback `or FAILED`). Fix mínimo reportado; estado canónico `PUBLISHED` reutilizado; fallo auténtico `FAILED` + `PROVIDER_FAILURE` + `recovery` preservado. 10 checks de regresión con fixtures, sin producción.
+- **PB-02:** añadidas `skill.youtube.validate` y `skill.youtube.system_status`, LOW/`youtube.read`, sin endpoints nuevos. HITL sigue exclusivo de `publish`.
+- **PB-04:** `HARNESS_ALLOWED_PERMISSIONS` documentada.
+- **Pendiente:** PB-03/G-02 no implementado (afecta al contrato v1; exige autorización explícita). PB-05 fuera de alcance. G-13 documentado; seed intacto.
+- **Tests reportados:** YT-AUT 620/620 (17/17 suites); AG-G especialización 22/22; los 18 fallos de la suite unitaria completa de AG-G son preexistentes e idénticos al baseline.
+- **Commits locales reportados:** YT-AUT `a552b3d` + `56be4b9`, rama `p3b-g01-publish-envelope`; AG-G `8859b4b`, rama `p3b-skills-host`. El informe indicó BLOCKED BY AUTH; verificar refs remotos antes de declarar publicados.
+- **Seguridad/límites:** no reutilizar el PAT expuesto; revocarlo/rotarlo y usar credencial de mínimo privilegio. No se ejecutó producción, Flow LIVE, render ni publicación real.
