@@ -27,8 +27,8 @@ from services.themes import STYLES, get_style
 from pipeline import orchestrator
 from pipeline import video as video_pipeline
 
-from .contracts import (ACCEPTED, BLOCKED, FAILED, READY, RUNNING,
-                        HarnessValidationError, normalize_status)
+from .contracts import (ACCEPTED, BLOCKED, FAILED, PUBLISHED, READY,
+                        RUNNING, HarnessValidationError, normalize_status)
 
 
 class AdapterError(Exception):
@@ -435,8 +435,13 @@ def op_publish(input: dict) -> dict:
     db.update_project(pid, status="published", youtube_id=vid,
                       meta={**(db.get_project(pid).get("meta") or {}),
                             "publish_state": "PUBLISHED"})
+    # G-01 (P3-B): el éxito debe leerse como éxito. `_final_status`
+    # resuelve youtube.publish desde external_status; sin esta clave el
+    # envelope reportaba FAILED para una publicación real (harness.py).
+    # PUBLISHED es estado canónico del contrato (contracts.py §9).
     return {"project_id": pid, "job_id": jid, "youtube_id": vid,
-            "url": f"https://youtube.com/watch?v={vid}"}
+            "url": f"https://youtube.com/watch?v={vid}",
+            "external_status": PUBLISHED}
 
 
 def op_delete(input: dict) -> dict:

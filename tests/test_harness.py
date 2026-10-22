@@ -49,6 +49,7 @@ for _p in (_cfg.OUTPUT_DIR, _cfg.DATA_DIR, _cfg.TMP_DIR):
     _p.mkdir(parents=True, exist_ok=True)
 
 import main as _main  # noqa: E402
+import database as db  # noqa: E402
 import security as _security  # noqa: E402
 from services.youtube_harness import contracts as hc  # noqa: E402
 from services.youtube_harness import capabilities as hcap  # noqa: E402
@@ -334,6 +335,87 @@ async def main_async() -> None:
     h = r.json()
     check("health ok + checks.database", r.status_code == 200
           and h.get("ok") is True and h["checks"]["database"] is True)
+
+    # ═════════ 11. envelope de publicación — regresión G-01 (P3-B) ═══
+    # G-01: op_publish no incluía external_status → _final_status
+    # devolvía FAILED para un publish EXITOSO. Tras el parche el éxito
+    # se reporta PUBLISHED (estado canónico §9) y el fallo auténtico
+    # sigue siendo FAILED + errors[] + recovery (camino AdapterError).
+    print("── 11. envelope publish: éxito real ≠ FAILED (G-01)")
+    from services import youtube_publish as _ypub
+    _orig_configured, _orig_upload = _ypub.configured, _ypub.upload
+    try:
+        # proyecto A: publicación exitosa simulada (sin red, sin YouTube)
+        r = await _post(client, json=_req("exec-11a-000001", "youtube.create",
+                                          perms=["youtube.production.create"],
+                                          inp={"idea": "publish ok G-01",
+                                               "format": "short"}))
+        pid_a = (r.json().get("outputs", {}).get("project") or {})
+        pid_a = pid_a.get("project_id")
+        db.update_project(pid_a, video_url="videos/g01-ok.mp4")
+        _ypub.configured = lambda: True
+        _ypub.upload = lambda *a, **k: "g01vid1234"
+        r = await _post(client, json=_req(
+            "exec-11a-000002", "youtube.publish",
+            perms=["youtube.publish"], inp={"project_id": pid_a}))
+        b = r.json()
+        check("publish exitoso → envelope PUBLISHED (G-01 corregido)",
+              b["status"] == "PUBLISHED", f"status={b.get('status')!r}")
+        check("envelope PUBLISHED sin errors[]",
+              b["status"] == "PUBLISHED" and not b.get("errors"))
+        check("outputs traen youtube_id + url + external_status",
+              b["outputs"].get("youtube_id") == "g01vid1234"
+              and b["outputs"].get("external_status") == "PUBLISHED"
+              and str(b["outputs"].get("url", "")).startswith(
+                  "https://youtube.com/watch?v="))
+        _pa = db.get_project(pid_a)
+        check("BD: proyecto published + youtube_id (estado real intacto)",
+              _pa["status"] == "published"
+              and _pa["youtube_id"] == "g01vid1234")
+        r = await _post(client, json=_req(
+            "exec-11a-000002", "youtube.publish",
+            perms=["youtube.publish"], inp={"project_id": pid_a}))
+        b2 = r.json()
+        check("replay del ledger conserva el éxito (metadata.replayed)",
+              b2.get("status") == "PUBLISHED"
+              and b2.get("metadata", {}).get("replayed") is True)
+        r = await _post(client, json=_req(
+            "exec-11a-000003", "youtube.publish",
+            perms=["youtube.publish"], inp={"project_id": pid_a}))
+        b3 = r.json()
+        check("re-publish del mismo proyecto → CONFLICT (idempotencia)",
+              b3["status"] == "FAILED"
+              and b3["errors"][0]["code"] == "CONFLICT")
+
+        # proyecto B: fallo auténtico del proveedor (upload lanza)
+        r = await _post(client, json=_req("exec-11b-000001", "youtube.create",
+                                          perms=["youtube.production.create"],
+                                          inp={"idea": "publish fail G-01",
+                                               "format": "short"}))
+        pid_b = (r.json().get("outputs", {}).get("project") or {})
+        pid_b = pid_b.get("project_id")
+        db.update_project(pid_b, video_url="videos/g01-fail.mp4")
+
+        def _boom(*a, **k):
+            raise RuntimeError("quotaExceeded simulada (fixture)")
+        _ypub.upload = _boom
+        r = await _post(client, json=_req(
+            "exec-11b-000002", "youtube.publish",
+            perms=["youtube.publish"], inp={"project_id": pid_b}))
+        bf = r.json()
+        check("fallo auténtico → FAILED con errors[]",
+              bf["status"] == "FAILED"
+              and bf["errors"][0]["code"] == "PROVIDER_FAILURE")
+        check("fallo auténtico → recovery.recoverable (hint recover/doctor)",
+              bf.get("recovery", {}).get("recoverable") is True)
+        _pb = db.get_project(pid_b)
+        check("BD: fallo NO publica ni marca youtube_id",
+              _pb["status"] != "published" and not _pb.get("youtube_id"))
+        check("éxito y fallo son distinguibles por envelope",
+              b["status"] == "PUBLISHED" and bf["status"] == "FAILED"
+              and bool(bf["errors"]) and not b["errors"])
+    finally:
+        _ypub.configured, _ypub.upload = _orig_configured, _orig_upload
 
     await client.aclose()
 
