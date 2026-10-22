@@ -20,3 +20,6 @@ Usar PROPOSED, PLANNED, IN_PROGRESS, EXPERIMENTAL, VERIFIED, FAILED, BLOCKED, SU
 
 ## K-007 — Video base de referencia 2026-10-17
 `K-007_VIDEO_BASE_REFERENCIA_2026-10-17.md` conserva el video que originó conceptualmente la línea de YOUTUBE-AUTOMATION. El conocimiento transferible es: producción basada en proyectos y escenas, separación narrativa/visual, assets identificables, generación como capacidad/proveedor intercambiable, validación de resultados y postproducción. Google Flow se interpreta como una capacidad dentro de un pipeline mayor; YOUTUBE-AUTOMATION permanece como orquestador audiovisual. El video es referencia conceptual/histórica, no evidencia técnica ni especificación de código.
+
+## K-008 — Catálogo de herramientas de IA (julio de 2026)
+`K-008_CATALOGO_HERRAMIENTAS_IA_REFERENCIA_2026-07.md` conserva el documento externo “Herramientas de Inteligencia Artificial”, versión 5.0, julio de 2026. Enumera herramientas para texto/investigación, imágenes y composición, vídeo, música y voz. Es un mapa exploratorio de candidatos, no una auditoría de proveedores ni una recomendación de integración. Precios, cuotas, calidad, modelos subyacentes y disponibilidad deben verificarse antes de tomar decisiones.
