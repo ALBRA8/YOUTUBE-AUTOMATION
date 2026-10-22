@@ -247,3 +247,9 @@ El siguiente trabajo debe concentrarse exclusivamente en el rendimiento/timeout 
 **No crear otra capa de orquestación.**
 
 **No repetir la prueba completa hasta resolver/validar el punto de fallo.**
+
+---
+
+## Addendum 2026-10-23 — corrección aplicada (INT-020)
+
+La causa raíz del fallo de este incidente (quemado de subtítulos con `-preset medium` + `TimeoutExpired` sin capturar en `backend/pipeline/video.py::burn_subtitles`) fue corregida por la misión de cierre técnico. Ver `INT-020_RENDER_BURN_TIMEOUT_FIX.md`: preset `veryfast` (consistente con el módulo) y timeout enrutado por la degradación honesta de `subs_status.json` (QA final la reporta como warn). Este documento permanece como registro histórico del incidente; el re-run real del HARD E2E y la idempotencia "Run 2" siguen pendientes como validación de Antigravity (requieren Chrome + sesión del usuario).

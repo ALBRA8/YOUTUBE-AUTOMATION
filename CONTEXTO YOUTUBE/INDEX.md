@@ -43,11 +43,11 @@ Esta separación es una regla estable del flujo de trabajo, no una excepción te
 ## Hitos vigentes
 
 - Integración unificada en `main`: F5.1 live gate, GoogleFlowMCP bridge y robustez de transporte (buffer outbox, fallbacks de selectores, purga de cerrojos y normalización de prompts).
-- La incidencia HARD E2E del render final FFmpeg permanece separada y localizada en INT-012; `backend/pipeline/video.py` y su timeout reportado de 900 s están protegidos para esta migración.
+- La incidencia HARD E2E del render final FFmpeg (INT-012) quedó **corregida** en el cierre técnico 2026-10-23 (`06_INTEGRATIONS/INT-020_RENDER_BURN_TIMEOUT_FIX.md`): `burn_subtitles` usa `-preset veryfast` y el timeout se degrada honestamente vía `subs_status.json` (QA warn); batería nueva 16/16 y suite canónica en verde. El re-run real en 4K y la idempotencia Run 2 permanecen como validación de Antigravity (Chrome + sesión del usuario).
 - Migración AGENTE-GENERAL → harness: P0 documentado (INT-013); **P1 PASS**, **P1.5 publicado** (PR #67 → `3afa77f`), **P2 PASS** (INT-014), **P3-A PASS** (INT-015) y **P3-B PASS y PUBLICADO** (cierre INT-016 + ejecución técnica INT-017: G-01 corregido + skills `validate`/`system_status` + docs env; PB-03/G-02 pendiente de autorización explícita). Publicación: AG-G PR #68 → merge `69c79da`; YT-AUT push directo `4394f3b..1c384b1`. No activar producción ni implementar PB-03/PB-05 sin nueva autorización.
 
 
-## Evaluación externa — Agnes Video Generator (2026-10-22)
-- Revisión documental y selectiva registrada en `06_INTEGRATIONS/INT-017_AGNES_VIDEO_GENERATOR_EVALUATION.md`.
-- Dictamen: referencia útil para estudiar checkpoints/reanudación, artefactos intermedios, continuidad visual, sincronización de subtítulos y regresión de artefactos finales.
-- No integrar directamente, no sustituir componentes ALBRA ni crear otro agente audiovisual. No se ejecutó el repo externo ni se corrieron sus tests.
+## Evaluación externa — Agnes Video Generator (2026-10-22 / 2026-10-23)
+- Revisión documental y selectiva registrada en `06_INTEGRATIONS/INT-018_AGNES_VIDEO_GENERATOR_EVALUATION.md` (renumerado desde INT-017; número ocupado por el informe P3-B).
+- **Comparación dirigida basada en código real (2026-10-23):** `06_INTEGRATIONS/INT-019_AGNES_COMPARACION_DIRIGIDA.md` — 6 áreas con anclas archivo:línea de ambos repos; veredicto: capacidades clave YA EXISTEN aquí; 3 ideas adaptables (R1/R2/R3) y 7 descartes con motivo; decisión D-008 en `01_DECISIONS/DECISION_LOG.md`.
+- No integrar directamente, no sustituir componentes ALBRA ni crear otro agente audiovisual. Licencia MIT verificada en el clon; cero código copiado; el repo externo no se ejecutó.

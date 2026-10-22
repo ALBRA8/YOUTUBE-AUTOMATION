@@ -125,11 +125,26 @@
 - **Publicación:** COMPLETADA 2026-10-23 — AG-G `p3b-skills-host` (`8859b4b`) → PR #68 (CI 5/5 SUCCESS) → merge `69c79da` en `main` (ruleset, sin bypass); YT-AUT `p3b-g01-publish-envelope` rebaseada sobre `4394f3b` → `5e31cb3` (fix G-01) + `1c384b1` (docs) → push directo a `main` (`4394f3b..1c384b1`). Detalle completo en INT-017 §9.
 
 
-## INT-017 — Evaluación externa: Agnes Video Generator
+## INT-018 — Evaluación externa: Agnes Video Generator
 - **Estado:** EVALUACIÓN INICIAL COMPLETADA / REFERENCIA SELECTIVA; NO INTEGRAR DIRECTAMENTE.
-- **Documento:** `INT-017_AGNES_VIDEO_GENERATOR_EVALUATION.md`.
+- **Documento:** `INT-018_AGNES_VIDEO_GENERATOR_EVALUATION.md` (renumerado desde INT-017: número ocupado por el informe técnico P3-B).
 - **Repo:** https://github.com/lcy362/agnes-video-generator
 - **Ideas potencialmente útiles:** checkpoints y reanudación por escena; productos intermedios de pipeline; taxonomía de keyframes/transiciones/referencias; recuperación de cues de subtítulos; validación de artefactos finales; skills operativas separadas para uso/diagnóstico/contribución.
 - **Frontera:** no reemplaza YOUTUBE-AUTOMATION, Production JSON, GoogleFlowMCP ni los jobs/leases/retries/asset lineage existentes; no justifica un nuevo agente audiovisual.
 - **Evidencia/alcance:** revisión documental y selectiva de código público; no se clonó ni ejecutó, no se corrieron sus tests ni se verificó generación real.
 - **Licencia observada:** MIT; verificar licencia del commit y dependencias antes de copiar código.
+
+## INT-019 — Comparación dirigida basada en código: Agnes ↔ YOUTUBE-AUTOMATION
+- **Estado:** COMPLETADA / SOLO LECTURA / SIN IMPORTACIÓN DE CÓDIGO.
+- **Documento:** `INT-019_AGNES_COMPARACION_DIRIGIDA.md`.
+- **Método:** Agnes clonado en research/ (commit `05d1b2e`, MIT verificado); 6 áreas comparadas con anclas archivo:línea de ambos repos.
+- **Veredicto:** capacidades clave YA EXISTEN en YOUTUBE-AUTOMATION; 3 ideas adaptables registradas (R1 QA-ASR del final, R2 preflight libass, R3 conocimiento cue-cache); 7 descartes con motivo; decisión D-008.
+- **Frontera:** no importa código, no crea agentes, no sustituye orquestador/Flow/jobs.
+
+## INT-020 — Corrección INT-012: burn_subtitles resiliente
+- **Estado:** IMPLEMENTADO / 16/16 checks nuevos / suites relacionadas en verde / PUBLICACIÓN PENDIENTE DE CREDENCIAL.
+- **Documento:** `INT-020_RENDER_BURN_TIMEOUT_FIX.md`.
+- **Causa raíz:** `video.py::burn_subtitles` con `-preset medium` (inconsistente con el módulo) y `TimeoutExpired` sin capturar → tumbaba el pipeline completo (incidente `_hard_e2e_c2_01`).
+- **Fix:** `-preset veryfast` + timeout capturado que degrada por el camino honesto existente (`subs_status.json` burned=false → QA warn). Timeout 900 s intacto; sin cambios de contrato ni permisos.
+- **Tests:** `tests/test_burn_subtitles_resilience.py` (16) registrada en `run_all.py`; autopublish/flow_mcp_video/gobernanza/qa_forensics re-ejecutadas OK; suite canónica completa re-ejecutada al cierre.
+- **Pendiente honesto:** re-run real 4K del HARD E2E (Chrome + sesión del usuario → Antigravity); idempotencia Run 2 de INT-012 sin ejecutar.
