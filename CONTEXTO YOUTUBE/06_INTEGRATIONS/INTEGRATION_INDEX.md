@@ -111,3 +111,15 @@
 - **Tests reportados:** YT-AUT 620/620 (17/17 suites); AG-G especialización 22/22; los 18 fallos de la suite unitaria completa de AG-G son preexistentes e idénticos al baseline.
 - **Commits locales reportados:** YT-AUT `a552b3d` + `56be4b9`, rama `p3b-g01-publish-envelope`; AG-G `8859b4b`, rama `p3b-skills-host`. El informe indicó BLOCKED BY AUTH; verificar refs remotos antes de declarar publicados.
 - **Seguridad/límites:** no reutilizar el PAT expuesto; revocarlo/rotarlo y usar credencial de mínimo privilegio. No se ejecutó producción, Flow LIVE, render ni publicación real.
+
+## INT-017 — P3-B: Ejecución Quirúrgica G-01 + Skills Host Justificadas (informe técnico)
+- **Estado:** P3-B — PASS / PB-01 + PB-02 + PB-04 EJECUTADOS / PB-03 PENDIENTE DE AUTORIZACIÓN / PB-05 FUERA DE ALCANCE.
+- **Documento:** `INT-017_P3B_EJECUCION_QUIRURGICA.md` (renumerado desde INT-016: el número quedó ocupado en `main` por el cierre `INT-016_P3B_QUIRURGICAS_CIERRE.md`).
+- **PB-01 (G-01 corregido):** `op_publish` devuelve ahora `external_status=PUBLISHED` (estado canónico §9 ya existente) — un publish exitoso ya no se reporta `FAILED`; el fallo auténtico sigue `FAILED`+`errors[]`+`recoverable`. 10 checks de regresión (fixtures, sin producción). Sin cambios en harness.py, permisos, HITL ni máquina de estados.
+- **PB-02 (11 skills host):** añadidas `skill.youtube.validate` (→ `youtube.validate_production`) y `skill.youtube.system_status` (→ `youtube.system_status`), ambas LOW/idempotentes/`youtube.read`, con políticas ALLOW-lectura, grants y snapshot actualizados; HITL sigue exclusivo de publish. Tests positivos/negativos/permisos: especialización 22 passed.
+- **PB-04 (G-08 cerrado):** `HARNESS_ALLOWED_PERMISSIONS` documentada en `backend/.env.example`.
+- **PB-03 (G-02):** definición completa registrada (separar `doctor fix` en op MEDIUM con `youtube.production.launch` o documentar excepción + declarar `ejecutar_tests`); NO implementado — toca clasificación del contrato compartido v1 y exige autorización explícita.
+- **Hallazgo nuevo G-13:** metadata declarativa de skills host (`harness_permissions`) no persistida por `SkillContract` del seed (pydantic extra=ignore); mitigado con verificación funcional (`youtube.read` ejercido en el cuerpo HTTP); sin tocar el seed.
+- **Tests P3-B:** YT-AUT 17/17 suites PASS (620/620 checks; +10 en harness); AG-G especialización 22 passed; unit completa 18 failed/468 passed/4 skipped con DIFF DE FAILED VACÍO vs `main` de control (mismos 18 pre-existentes, 0 regresiones).
+- **Superficies protegidas:** diff total 6 archivos (3 por repo), todos autorizados; production_json/contract/flow_jobs/orquestador/FFmpeg/Flow/HANDS/security/`agent.py`/VÓRTICE/`albra_seed` intactos.
+- **Publicación:** en curso en la sesión de publicación (AG-G: rama `p3b-skills-host` + PR #68; YT-AUT: push directo a `main` desde `p3b-g01-publish-envelope` rebaseada sobre `4394f3b`); datos definitivos (SHAs/PR) en el commit de cierre de publicación.

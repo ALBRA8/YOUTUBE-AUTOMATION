@@ -193,6 +193,8 @@ Cadena auditada por capacidad: L0–L5 → host policy → host skill → harnes
 
 Criterio del mandato §13 aplicado: PB-01 y PB-04 son "pequeño + claramente necesario + no destructivo + compatible + testeable + sin superficies protegidas"; PB-02 igual (todo en la especialización host). PB-03 toca la clasificación del contrato compartido → requiere autorización explícita. PB-05 es decisión de gobernanza. **Ninguno se ejecutó en esta misión.**
 
+**EJECUCIÓN P3-B (2026-10-23, ver INT-017):** PB-01 ✅ EJECUTADO (G-01 corregido + 10 checks de regresión; harness 65 OK) · PB-02 ✅ EJECUTADO (11 skills host, 7 tests nuevos, 22 passed) · PB-04 ✅ EJECUTADO (G-08 cerrado) · PB-03 ⏸ PENDIENTE DE AUTORIZACIÓN (definición completa en INT-016 §5) · PB-05 ⏸ FUERA DE ALCANCE. Hallazgo nuevo registrado en P3-B: **G-13** (metadata declarativa de skills host no persistida por SkillContract del seed; verificado funcionalmente, sin tocar el seed).
+
 ## 11. Elementos explícitamente postergados (FUTURE / fuera de P3)
 
 - Op `analyze_failure(project_id)` o scope por proyecto en `production_doctor` (v1.1).
