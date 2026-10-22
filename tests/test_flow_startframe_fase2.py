@@ -217,7 +217,14 @@ def main() -> int:
     check("N5. cambios de trabajo dentro de extension/ + tests/ únicamente",
           not fuera, str(fuera))
     backend_refs = subprocess.run(
-        ["rg", "-l", "FLOW_RPC_EVIDENCE|startFrame", str(BACKEND)],
+        # Guard N6: cero persistencia del canal F2. El marcador del canal es
+        # FLOW_RPC_EVIDENCE; el patrón incluía también "startFrame", pero
+        # desde los Gates C.0-C.2 (INT-008/010) "startFrame" es campo
+        # legítimo y documentado del contrato Flow video en el backend
+        # (flow_mcp_client.py), lo que hacía fallar este guard con un falso
+        # positivo PRE-EXISTENTE en main. La protección real (cero
+        # FLOW_RPC_EVIDENCE en backend) se mantiene verificada.
+        ["rg", "-l", "FLOW_RPC_EVIDENCE", str(BACKEND)],
         capture_output=True, text=True)
     check("N6. backend SIN referencia al canal (cero persistencia, como F1)",
           backend_refs.returncode != 0, backend_refs.stdout[:120])
