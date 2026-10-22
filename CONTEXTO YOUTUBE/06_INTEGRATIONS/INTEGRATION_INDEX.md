@@ -82,10 +82,20 @@
 - **Resultado:** frontera agente/arnés definida, AgentAdapter diseñado, skills/knowledge mapeados, plan P0–P5 y superficies protegidas registrados.
 
 ## INT-014 — Integración AGENTE-GENERAL ↔ Harness V1 (P1 + P1.5 + P2)
-- **Estado:** P1 PASS / P1.5 INTEGRADO LOCAL (push pendiente de credencial) / P2 PASS / P3 NO INICIADO.
+- **Estado:** P1 PASS / P1.5 PUBLICADO (PR #67 → merge `3afa77f` en main, CI 5/5) / P2 PASS / P3 PASS (ver INT-015).
 - **Documento:** `INT-014_AGENTE_GENERAL_HARNESS_P1_P2.md`.
 - **Resultado P1:** conexión fría real demostrada — host (cliente/tool/skill reales) → HTTP Bearer → `/api/harness/v1` → operaciones LOW read-only → HarnessResult válido; 272 checks verdes; fail-closed en 6 vectores; cero modificaciones de código.
 - **Resultado P1.5:** merge `--no-ff` de `feature/youtube-harness` (`b5b7220`) sobre `origin/main` (`5f277b3`) → commit `9bb3870` local; cero conflictos; no-regresión probada por comparación con worktree de control; push a GitHub bloqueado por PAT inválido para escritura (BLOCKED BY AUTH).
 - **Resultado P2:** ciclo operativo sin launch demostrado con motor real (45 checks, 0 fallos): descubrimiento, secuencia read controlada (7 operaciones LOW por las tres capas del host), contrato completo, 5 límites negativos BLOCKED, idempotencia del libro verificada (replay `metadata.replayed=True`), `projects=0/jobs=0/flow_jobs=0` antes=después, sin vídeo/render/publicación.
 - **Gobernanza:** 9/9 skills host con riesgo coherente con la operación del arnés; HITL único en `publish`; política del host es adición al PolicyEngine del seed.
 - **Entrada P3:** matriz de capacidades (17 internas / 19 operaciones / 9 skills host) con estado VERIFIED/MISSING/DIVERGENT/N-A incluida en el documento.
+
+## INT-015 — P3: Matriz Definitiva de Capacidades AGENTE-GENERAL ↔ YOUTUBE-AUTOMATION
+- **Estado:** P3 — PASS / MATRIZ DEFINITIVA CON EVIDENCIA / CERO CAMBIOS FUNCIONALES.
+- **Documento:** `INT-015_P3_CAPABILITY_MATRIX.md`.
+- **Resultado:** matriz definitiva (bloques A–H, ~35 capacidades) con owner, implementación interna, operación de arnés, skill host, permiso, riesgo, HITL, tests, estado y acción por fila — verificada contra el código real (file:line), no contra informes previos.
+- **Correcciones factuales:** riesgos reales 11 LOW/4 MEDIUM/3 HIGH/1 CRITICAL (delete=CRITICAL); `youtube.admin` expande permisos del arnés (no scopes Google; Google real = 2 scopes); `cleanup_failed` excluida del contrato v1 por diseño; policy/grants/firewall del host son datos declarativos no adoptados por runtime (enforcement real 100% arnés).
+- **Gaps con veredicto:** `validate_production` y `system_status` → únicas skills host nuevas propuestas (P3-B); catálogos nichos/estilos/avatares = contexto interno sin skill; `ANALYZE_FAILURE` DIVERGENT (falta scope por-proyecto, v1.1); `RETRY` VERIFIED en motor (attempts/leases) y FUTURE como op (sin checkpoints por paso); `cancel`/`delete`/`cleanup` sin skill host deliberadamente.
+- **Hallazgos nuevos:** G-01 bug de envelope (publish exitoso reporta FAILED); G-02 `doctor fix` muta bajo RISK_LOW/read; G-03 launch HIGH sin HITL host (decisión consciente); G-04 delete sin guard de published; G-05..G-12 menores (ledger sin TTL, replay sin comparar cuerpo, env no documentada, etc.).
+- **Tests P3:** YT-AUT 17/17 suites PASS (610 checks, 0 fallos); AG-G especialización 15 passed; unit completa 18 failed/461 passed/4 skipped con los 18 pre-existentes idénticos al baseline.
+- **Publicación:** PR #67 (merge `3afa77f`, especialización en GitHub main); `12e02ca` (INT-014) publicado; INT-015 + índices en commit docs de P3.
