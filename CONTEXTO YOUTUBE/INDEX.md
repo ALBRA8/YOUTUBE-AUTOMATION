@@ -21,13 +21,15 @@
 
 ## Migración AGENTE-GENERAL ↔ harness
 
-- `00_MASTER/MIGRATION_ANALYSIS.md` registra la síntesis A–L del análisis de migración compartido el 2026-10-22. Estado: **ANÁLISIS DOCUMENTADO / STOP RESPETADO / MIGRACIÓN NO IMPLEMENTADA**. Es una síntesis de continuidad; el informe local original de 420 líneas y su commit local `a3485a0` no estaban disponibles en `main` al registrar esta entrada.
+- `00_MASTER/MIGRATION_ANALYSIS.md` registra la síntesis A–L del análisis de migración AGENTE-GENERAL → harness compartido el 2026-10-22. Estado: **P0 COMPLETADO / STOP RESPETADO / MIGRACIÓN NO IMPLEMENTADA**. La síntesis está versionada en `main`; no equivale al informe local original de 420 líneas ni a una reejecución independiente de sus pruebas. El commit local `a3485a0` no se pudo publicar por el HTTP 401 del PAT revocado. No almacenar ni solicitar credenciales en el contexto.
 
 ## Referencias de conocimiento incorporadas
 
 - `09_KNOWLEDGE/K-007_VIDEO_BASE_REFERENCIA_2026-10-17.md` conserva el video que sirvió como origen conceptual del pipeline audiovisual. Se incorpora como **conocimiento de referencia**, no como evidencia técnica ni como especificación de implementación.
 - `09_KNOWLEDGE/K-008_CATALOGO_HERRAMIENTAS_IA_REFERENCIA_2026-07.md` conserva un catálogo externo de herramientas IA, versión 5.0 de julio de 2026. Es un mapa de candidatos por categoría, **no una evaluación técnica ni una orden de integración**. Las afirmaciones comerciales y comparativas requieren verificación actualizada.
 
-## Hito vigente
+## Hitos vigentes
 
-Integración unificada en main: F5.1 live gate, GoogleFlowMCP bridge y robustez de transporte (buffer outbox, fallbacks de selectores, purga de cerrojos y normalización de prompts). La incidencia HARD E2E del render final FFmpeg permanece separada y localizada en INT-012.
+- Integración unificada en `main`: F5.1 live gate, GoogleFlowMCP bridge y robustez de transporte (buffer outbox, fallbacks de selectores, purga de cerrojos y normalización de prompts).
+- La incidencia HARD E2E del render final FFmpeg permanece separada y localizada en INT-012; `backend/pipeline/video.py` y su timeout reportado de 900 s están protegidos para esta migración.
+- Migración AGENTE-GENERAL → harness: análisis P0 documentado; siguiente fase propuesta P1 = conexión fría, configuración y smoke test read-only, cero cambios de código. Requiere verificar las revisiones exactas de ambos repos, el nombre real de la variable de API key y los permisos antes de configurar. No conectar ni activar producción por inferencia.
