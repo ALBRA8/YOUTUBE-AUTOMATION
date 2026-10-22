@@ -45,3 +45,12 @@
 - **Verificación:** `HEAD == origin/main`; árbol limpio.
 - **Regla:** Gate B.2R ya no es trabajo pendiente. El siguiente trabajo debe abrir un nuevo alcance/Gate independiente.
 - **Documento:** `INT-008_GATE_B3_CLOSURE.md`.
+
+## INT-009 — Gate C.0 / LIVE Video Smoke Test
+- **Estado:** **PASS / CLOSED**.
+- **Objetivo:** demostrar imagen real → asset real → Start Frame real → Google Flow → video real → descarga → validación.
+- **Resultado:** generación real de video en Google Flow con Start Frame confirmado y MP4 H.264/AAC válido recuperado localmente.
+- **Evidencia principal:** `backend/data/output/_live_video_test_01/video_01.mp4`, 5,344,832 bytes, 8.00 s, 720x1280, 9:16, 24 fps, `.flow.lock` liberado.
+- **Start Frame:** `crystal_orb` / Media ID `f7057dfd-9eb5-415b-b4da-5edb16871292` seleccionado mediante el modo nativo `Fotogramas` de Google Flow.
+- **Documento:** `INT-009_GATE_C0_LIVE_VIDEO_SMOKE_TEST.md`.
+- **Próximo:** Gate C.1 — intento LIVE directo de producción de video desde YOUTUBE-AUTOMATION, sin auditoría preventiva amplia; si falla, micro-auditar únicamente el punto de fallo.
