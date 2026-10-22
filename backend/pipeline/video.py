@@ -305,10 +305,28 @@ async def burn_subtitles(project: dict, video_raw: Path, words_path: Path) -> Pa
 
     final = proj_dir / f"{project['id']}_final.mp4"
     sub_filter = f"ass={ass_path.as_posix().replace(':', '\\\\:')}"
+    # INT-012: en 4K (2160x3840) libass+libx264 «medium» superó los 900 s y el
+    # TimeoutExpired — no capturado — tumbaba TODO el pipeline aunque el resto
+    # del render fuera válido. Dos mitigaciones quirúrgicas: (1) preset
+    # veryfast, el mismo que ya usan kenburns/transitions en este módulo
+    # (típicamente 3-5× más rápido en 4K con coste de calidad marginal a CRF
+    # 20); (2) el timeout se captura y se degrada por el MISMO camino honesto
+    # que un rc != 0 (copia sin subtítulos + subs_status.json → el QA final
+    # la reporta como warn; jamás un ready silencioso con degradación).
     cmd = ["ffmpeg", "-y", "-i", str(video_raw), "-vf", sub_filter,
-           "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+           "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
            "-c:a", "copy", str(final)]
-    p = await asyncio.to_thread(lambda: _run_ffmpeg(cmd, timeout=900))
+    try:
+        p = await asyncio.to_thread(lambda: _run_ffmpeg(cmd, timeout=900))
+    except subprocess.TimeoutExpired:
+        log.error("subs burn: timeout 900s — degradando a copia sin subtítulos")
+        import shutil
+        shutil.copy(video_raw, final)
+        (proj_dir / "subs_status.json").write_text(json.dumps(
+            {"burned": False,
+             "reason": "ffmpeg timeout 900s — copiado sin subtítulos"},
+            ensure_ascii=False), encoding="utf8")
+        return final
     if p.returncode != 0:
         log.error("subs burn: %s", p.stderr[-300:])
         import shutil

@@ -43,6 +43,9 @@ BATERIAS = [
                                  # P1 verbatim + prompt de ~11KB + QA a escala
     "test_autopublish_generate.py", # pipeline _run completo con mocks +
                                  # QA gate real + autopublish (idempotencia v2.19)
+    "test_burn_subtitles_resilience.py", # INT-012: burn_subtitles con preset
+                                 # veryfast + timeout que degrada honesto en
+                                 # vez de tumbar el pipeline (16)
     "test_memorydv.py",          # MemoryDV §memoria: storage/retrieval/
                                  # consolidación/isolation (36)
     "test_skills_autonomia.py",  # Skill Contract §skills + autonomía L0-L5
