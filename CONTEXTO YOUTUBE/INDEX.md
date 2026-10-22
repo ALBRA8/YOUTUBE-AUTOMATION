@@ -14,7 +14,7 @@
 | Findings | `03_FINDINGS/FINDINGS_INDEX.md` | POPULATED | hallazgos y evidencia |
 | Audits | `04_AUDITS/AUDIT_INDEX.md` | POPULATED | auditorías realizadas y pendientes |
 | Tests | `05_TESTS/TEST_INDEX.md` | POPULATED | inventario de tests reportados y test real pendiente |
-| Integrations | `06_INTEGRATIONS/INTEGRATION_INDEX.md` | POPULATED | AGENTE-GENERAL, Bridge, Flow, Meta, HANDS |
+| Integrations | `06_INTEGRATIONS/INTEGRATION_INDEX.md` | POPULATED | AGENTE-GENERAL, Bridge, Flow, Meta, HANDS, evaluación externa Agnes (INT-017) |
 | Failures | `07_FAILURES/FAILURE_INDEX.md` | POPULATED | incidente histórico, gaps y riesgos |
 | Sessions | `08_SESSIONS/SESSION_INDEX.md` | POPULATED | resumen de continuidad de la sesión |
 | Knowledge | `09_KNOWLEDGE/KNOWLEDGE_INDEX.md` | POPULATED | reglas técnicas, jerarquía de evidencia, referencias conceptuales y catálogo de herramientas IA |
@@ -45,3 +45,9 @@ Esta separación es una regla estable del flujo de trabajo, no una excepción te
 - Integración unificada en `main`: F5.1 live gate, GoogleFlowMCP bridge y robustez de transporte (buffer outbox, fallbacks de selectores, purga de cerrojos y normalización de prompts).
 - La incidencia HARD E2E del render final FFmpeg permanece separada y localizada en INT-012; `backend/pipeline/video.py` y su timeout reportado de 900 s están protegidos para esta migración.
 - Migración AGENTE-GENERAL → harness: P0 documentado (INT-013); **P1 PASS**, **P1.5 publicado** (PR #67 → `3afa77f`), **P2 PASS** (INT-014), **P3-A PASS** (INT-015) y **P3-B PASS y PUBLICADO** (cierre INT-016 + ejecución técnica INT-017: G-01 corregido + skills `validate`/`system_status` + docs env; PB-03/G-02 pendiente de autorización explícita). Publicación: AG-G PR #68 → merge `69c79da`; YT-AUT push directo `4394f3b..1c384b1`. No activar producción ni implementar PB-03/PB-05 sin nueva autorización.
+
+
+## Evaluación externa — Agnes Video Generator (2026-10-22)
+- Revisión documental y selectiva registrada en `06_INTEGRATIONS/INT-017_AGNES_VIDEO_GENERATOR_EVALUATION.md`.
+- Dictamen: referencia útil para estudiar checkpoints/reanudación, artefactos intermedios, continuidad visual, sincronización de subtítulos y regresión de artefactos finales.
+- No integrar directamente, no sustituir componentes ALBRA ni crear otro agente audiovisual. No se ejecutó el repo externo ni se corrieron sus tests.
