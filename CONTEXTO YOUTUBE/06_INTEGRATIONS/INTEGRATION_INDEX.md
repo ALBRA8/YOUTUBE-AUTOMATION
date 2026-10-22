@@ -142,7 +142,7 @@
 - **Frontera:** no importa código, no crea agentes, no sustituye orquestador/Flow/jobs.
 
 ## INT-020 — Corrección INT-012: burn_subtitles resiliente
-- **Estado:** IMPLEMENTADO / 16/16 checks nuevos / suites relacionadas en verde / PUBLICACIÓN PENDIENTE DE CREDENCIAL.
+- **Estado:** IMPLEMENTADO / 16/16 checks nuevos / suites relacionadas en verde / **PUBLICADO** (`30535f2..f176103` → `origin/main`, 2026-10-23).
 - **Documento:** `INT-020_RENDER_BURN_TIMEOUT_FIX.md`.
 - **Causa raíz:** `video.py::burn_subtitles` con `-preset medium` (inconsistente con el módulo) y `TimeoutExpired` sin capturar → tumbaba el pipeline completo (incidente `_hard_e2e_c2_01`).
 - **Fix:** `-preset veryfast` + timeout capturado que degrada por el camino honesto existente (`subs_status.json` burned=false → QA warn). Timeout 900 s intacto; sin cambios de contrato ni permisos.

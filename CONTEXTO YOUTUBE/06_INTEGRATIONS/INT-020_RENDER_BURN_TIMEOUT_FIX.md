@@ -41,5 +41,7 @@ En `backend/pipeline/video.py::burn_subtitles`:
 
 ## 6. Estado de publicación
 
-- Commits locales sobre `main` (`30535f2`): `3b029a6` fix(render) INT-012 + `ebea81a` test(guards) N6 + `fd28f5e` docs(context) INT-018/019/020.
-- **Publicación GitHub: BLOCKED BY AUTH** en el momento de esta misión (sin credencial de escritura disponible; los PAT que circularon por chat están prohibidos y deben considerarse comprometidos). No se fingió ningún push. Al recibir credencial segura de mínimo privilegio: push de la rama + merge según convención del repo.
+- Commits locales sobre `main` (`30535f2`): `3b029a6` fix(render) INT-012 + `ebea81a` test(guards) N6 + `fd28f5e` docs(context) INT-018/019/020 + `f176103` docs(context) verificación post-commit.
+- **PUBLICADO (2026-10-23):** push directo `30535f2..f176103` → `origin/main` de `ALBRA8/YOUTUBE-AUTOMATION`, verificado con fetch anónimo post-push (`origin/main = f176103`). Sin force-push ni bypass de protección. El repo no tiene workflows de GitHub Actions configurados (0 workflows / 0 check-runs), por lo que la verificación remota equivale a push aceptado + estado remoto confirmado.
+- **Nota de seguridad:** la credencial usada circuló por chat → debe revocarse/rotarse tras su uso. Los PAT anteriores que circularon por chat siguen prohibidos y comprometidos.
+- **Validación HARD E2E 4K (Antigravity): sigue PENDIENTE** y es requisito independiente de esta publicación: re-run real del escenario `_hard_e2e_c2_01` + idempotencia Run 2 (Chrome + sesión del usuario). Publicar el fix NO equivale a demostrarlo en hardware real; paquete de validación reproducible emitido aparte.
