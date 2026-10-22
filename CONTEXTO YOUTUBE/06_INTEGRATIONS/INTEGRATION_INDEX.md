@@ -123,3 +123,13 @@
 - **Tests P3-B:** YT-AUT 17/17 suites PASS (620/620 checks; +10 en harness); AG-G especialización 22 passed; unit completa 18 failed/468 passed/4 skipped con DIFF DE FAILED VACÍO vs `main` de control (mismos 18 pre-existentes, 0 regresiones).
 - **Superficies protegidas:** diff total 6 archivos (3 por repo), todos autorizados; production_json/contract/flow_jobs/orquestador/FFmpeg/Flow/HANDS/security/`agent.py`/VÓRTICE/`albra_seed` intactos.
 - **Publicación:** COMPLETADA 2026-10-23 — AG-G `p3b-skills-host` (`8859b4b`) → PR #68 (CI 5/5 SUCCESS) → merge `69c79da` en `main` (ruleset, sin bypass); YT-AUT `p3b-g01-publish-envelope` rebaseada sobre `4394f3b` → `5e31cb3` (fix G-01) + `1c384b1` (docs) → push directo a `main` (`4394f3b..1c384b1`). Detalle completo en INT-017 §9.
+
+
+## INT-017 — Evaluación externa: Agnes Video Generator
+- **Estado:** EVALUACIÓN INICIAL COMPLETADA / REFERENCIA SELECTIVA; NO INTEGRAR DIRECTAMENTE.
+- **Documento:** `INT-017_AGNES_VIDEO_GENERATOR_EVALUATION.md`.
+- **Repo:** https://github.com/lcy362/agnes-video-generator
+- **Ideas potencialmente útiles:** checkpoints y reanudación por escena; productos intermedios de pipeline; taxonomía de keyframes/transiciones/referencias; recuperación de cues de subtítulos; validación de artefactos finales; skills operativas separadas para uso/diagnóstico/contribución.
+- **Frontera:** no reemplaza YOUTUBE-AUTOMATION, Production JSON, GoogleFlowMCP ni los jobs/leases/retries/asset lineage existentes; no justifica un nuevo agente audiovisual.
+- **Evidencia/alcance:** revisión documental y selectiva de código público; no se clonó ni ejecutó, no se corrieron sus tests ni se verificó generación real.
+- **Licencia observada:** MIT; verificar licencia del commit y dependencias antes de copiar código.
