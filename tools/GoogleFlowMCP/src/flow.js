@@ -81,7 +81,7 @@ async function inProject(fn) {
   try {
     const page = await flowPage(context);
     const url = `${FLOW_URL}project/${projectId}`;
-    if (!page.url().startsWith(url)) await page.goto(url, { waitUntil: 'domcontentloaded' });
+    if (page.url() !== url && (page.url().includes('/edit/') || !page.url().startsWith(url))) await page.goto(url, { waitUntil: 'domcontentloaded' });
     await assertSignedIn(page);
     await page.locator('div.ProseMirror').waitFor({ state: 'visible', timeout: 30000 });
     await closePicker(page);
@@ -94,10 +94,13 @@ async function inProject(fn) {
 // ---------- assets (uploaded files and generated images in the project) ----------
 
 function tiles(page) {
-  return page.evaluate(() => [...document.querySelectorAll('flow-grid-tile-container')].map((t) => ({
-    name: t.querySelector('span.footer-title')?.innerText.trim() || '',
-    mediaId: t.querySelector('img[data-media-id]')?.dataset.mediaId || '',
-  })).filter((t) => t.mediaId));
+  return page.evaluate(() => [...document.querySelectorAll('flow-grid-tile-container')].map((t) => {
+    const titleEl = t.querySelector('span.footer-title') || t.querySelector('.footer-title');
+    const name = (titleEl?.textContent || '').trim();
+    const img = t.querySelector('img[data-media-id], img');
+    const mediaId = img?.dataset.mediaId || (img?.src?.match(/image\/([0-9a-f-]{36})/i) || [])[1] || '';
+    return { name, mediaId };
+  }).filter((t) => t.mediaId));
 }
 
 export async function listAssets() {
@@ -111,11 +114,12 @@ const icon = (page, name) => page.locator('mat-icon', { hasText: new RegExp(`^\\
 
 // The upload button is the readiness signal: in an empty project the picker opens with no
 // button.asset-item at all, so waiting for an asset would time out.
-const uploadButton = (page) => page.locator('.sidebar-footer button').filter({ has: icon(page, 'upload') });
+const uploadButton = (page) => page.locator('.sidebar-footer button, .cdk-overlay-container button').filter({ has: icon(page, 'upload') });
+const addMenuButton = (page) => page.locator('button[mattooltip*="contenido multimedia"], button[aria-label*="contenido multimedia"], button[aria-label*="media menu"], div.add-menu-container button, div.tools-button-group button').first();
 
 async function openPicker(page) {
   if (await uploadButton(page).isVisible().catch(() => false)) return;
-  await page.locator('div.add-menu-container button').click();
+  await addMenuButton(page).click();
   await uploadButton(page).waitFor({ state: 'visible', timeout: 10000 });
 }
 
@@ -328,5 +332,196 @@ export async function generateImages({ prompt, aspect = '1:1', count = 1, model 
       files.push(file);
     }
     return { files, projectId, model, aspect, seconds: Math.round((Date.now() - started) / 1000) };
+  });
+}
+
+// ---------- video generation (Start Frame -> Google Flow Video) ----------
+
+async function configureVideo(page, { aspect = '9:16' }) {
+  const agent = page.locator('flow-agent-mode-toggle-chip button');
+  if (await agent.count() && (await agent.getAttribute('aria-pressed')) === 'true') {
+    await agent.click();
+    await page.waitForTimeout(500);
+  }
+
+  const panel = page.locator('flow-prompt-box-settings');
+  for (let i = 0; i < 4 && !(await panel.isVisible()); i++) {
+    await page.locator('button.settings-trigger-button').click();
+    await panel.waitFor({ state: 'visible', timeout: 2500 }).catch(() => {});
+  }
+  if (!(await panel.isVisible())) throw new Error("Could not open Flow's settings panel");
+
+  const videoRadio = panel.getByRole('radio', { name: /video/i });
+  if (await videoRadio.count()) {
+    await videoRadio.click();
+    await page.waitForTimeout(800);
+  }
+
+  const fotogramasRadio = panel.getByRole('radio', { name: /fotogramas/i });
+  if (await fotogramasRadio.count()) {
+    await fotogramasRadio.click();
+    await page.waitForTimeout(800);
+  }
+
+  if (aspect) {
+    const aspectRadio = panel.getByRole('radio', { name: aspect, exact: true });
+    if (await aspectRadio.count()) {
+      await aspectRadio.click();
+      await page.waitForTimeout(300);
+    }
+  }
+
+  for (let i = 0; i < 4 && (await panel.isVisible()); i++) {
+    await page.keyboard.press('Escape');
+    await panel.waitFor({ state: 'hidden', timeout: 1500 }).catch(() => {});
+  }
+  if (await panel.isVisible()) throw new Error("Could not close Flow's settings panel");
+}
+
+export async function generateVideo({
+  prompt,
+  startFrame,
+  aspect = '9:16',
+  outDir = DEFAULT_OUT,
+  outFile,
+  timeoutMs = 720000,
+}) {
+  if (!prompt?.trim()) throw new Error('prompt is required');
+  if (!startFrame?.trim()) throw new Error('startFrame is required');
+
+  return inProject(async (page, context, projectId) => {
+    await configureVideo(page, { aspect });
+
+    // Ensure start frame asset is selected in the Iniciar slot
+    const existingChip = page.locator('div.frame-trigger flow-image-ingredient-chip');
+    if (await existingChip.count()) {
+      const chipText = (await existingChip.first().innerText()).trim();
+      if (!chipText.toLowerCase().includes(startFrame.toLowerCase())) {
+        const deleteBtn = existingChip.locator('button, [role=button]').first();
+        if (await deleteBtn.count()) {
+          await deleteBtn.click();
+          await page.waitForTimeout(800);
+        }
+      }
+    }
+
+    const iniciarBtn = page.locator('div.frame-trigger button.empty-chip', { hasText: /iniciar/i }).first();
+    if (await iniciarBtn.isVisible()) {
+      await iniciarBtn.click();
+      await page.waitForTimeout(1000);
+
+      const escapedName = startFrame.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const assetOption = page.locator('.cdk-overlay-container button.asset-item').filter({
+        has: page.locator('.asset-title, span.footer-title', { hasText: new RegExp(`^\\s*${escapedName}\\s*$`, 'i') }),
+      }).first();
+      const fallbackOption = page.locator('.cdk-overlay-container button.asset-item').filter({ hasText: startFrame }).first();
+      const targetOption = (await assetOption.count()) ? assetOption : fallbackOption;
+
+      if ((await targetOption.count()) === 0) {
+        await page.keyboard.press('Escape');
+        throw new Error(`Start frame asset "${startFrame}" not found in Flow project assets. Upload it first with flow_upload_file.`);
+      }
+
+      await targetOption.click();
+      await page.waitForTimeout(600);
+
+      const addBtn = page.locator('.cdk-overlay-container button.detail-add-to-prompt-btn');
+      if (await addBtn.isVisible()) {
+        await addBtn.click();
+        await page.waitForTimeout(1000);
+      }
+    }
+
+    const slotImg = page.locator('div.frame-trigger img');
+    if ((await slotImg.count()) === 0) {
+      throw new Error(`Start Frame slot was not set for asset "${startFrame}"`);
+    }
+
+    const beforeVideos = new Set(await page.evaluate(() =>
+      Array.from(document.querySelectorAll('video, video source'))
+        .map((v) => v.src || v.getAttribute('src') || '')
+        .filter(Boolean)
+    ));
+    const failedBefore = (await failedTiles(page)).length;
+
+    await writePrompt(page, prompt);
+
+    const submit = page.locator('flow-generate-icon-button button[type=submit], flow-generate-icon-button button, button.generate-icon-button').first();
+    await page.waitForFunction((el) => !el.disabled, await submit.elementHandle(), { timeout: 15000 });
+    await submit.click();
+
+    const started = Date.now();
+    let videoUrl = null;
+
+    while (Date.now() - started < timeoutMs) {
+      await page.waitForTimeout(3000);
+
+      const failed = await failedTiles(page);
+      if (failed.length > failedBefore) {
+        throw new Error(`Flow reported a failed generation: ${failed[0].replace(/\s+/g, ' ').slice(0, 200)}`);
+      }
+
+      let freshVideos = await page.evaluate(() => {
+        const vids = Array.from(document.querySelectorAll('video, video source'));
+        return vids.map((v) => v.src || v.getAttribute('src') || '').filter(Boolean);
+      });
+
+      let cand = freshVideos.find((src) =>
+        !beforeVideos.has(src) &&
+        (src.includes('flow-content.google') || src.startsWith('blob:') || src.includes('.mp4') || src.includes('.webm') || src.includes('video/'))
+      );
+
+      // In Google Flow, video tiles lazy-load the <video> element on click.
+      if (!cand && Date.now() - started > 30000) {
+        const topTile = page.locator('flow-grid-tile-container').first();
+        if (await topTile.count()) {
+          const hasVideoTile = await topTile.locator('flow-video-tile, mat-icon:has-text("play_circle")').count();
+          if (hasVideoTile) {
+            await topTile.click().catch(() => {});
+            await page.waitForTimeout(1500);
+            freshVideos = await page.evaluate(() => {
+              const vids = Array.from(document.querySelectorAll('video, video source'));
+              return vids.map((v) => v.src || v.getAttribute('src') || '').filter(Boolean);
+            });
+            cand = freshVideos.find((src) =>
+              !beforeVideos.has(src) &&
+              (src.includes('flow-content.google') || src.startsWith('blob:') || src.includes('.mp4') || src.includes('.webm') || src.includes('video/'))
+            );
+          }
+        }
+      }
+
+      if (cand) {
+        videoUrl = cand;
+        break;
+      }
+    }
+
+    if (!videoUrl) {
+      throw new Error(`Video generation timed out after ${Math.round(timeoutMs / 1000)}s without producing a video.`);
+    }
+
+    let destination = outFile;
+    if (!destination) {
+      fs.mkdirSync(outDir, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      destination = path.join(outDir, `${stamp}-${slug(prompt)}.mp4`);
+    } else {
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+    }
+
+    const res = await context.request.get(videoUrl);
+    if (!res.ok()) throw new Error(`Video download failed (${res.status()}): ${videoUrl}`);
+    const videoBuffer = await res.body();
+    fs.writeFileSync(destination, videoBuffer);
+
+    return {
+      file: destination,
+      projectId,
+      aspect,
+      startFrame,
+      seconds: Math.round((Date.now() - started) / 1000),
+      bytes: videoBuffer.length,
+    };
   });
 }

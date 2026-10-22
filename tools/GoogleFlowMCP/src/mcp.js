@@ -4,7 +4,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { generateImages, newProject, uploadFile, listAssets, ASPECTS, DEFAULT_OUT } from './flow.js';
+import { generateImages, generateVideo, newProject, uploadFile, listAssets, ASPECTS, DEFAULT_OUT } from './flow.js';
 import { withFlowLock } from './lock.js';
 
 const server = new McpServer({ name: 'srz-google-flow-mcp', version: '1.0.1' });
@@ -69,6 +69,24 @@ server.registerTool('flow_new_project', {
     const id = await serial(() => newProject());
     return text(`Now working in Flow project ${id}`);
   } catch (err) { return fail('Creating a project', err); }
+});
+
+server.registerTool('flow_generate_video', {
+  description: 'Generate a video from a start frame image using Google Flow (Fotogramas) in the user\'s signed-in Chrome and save it to disk. '
+    + 'The start frame must be an asset already present in the project (use flow_upload_file first). '
+    + 'Returns the local MP4 file path.',
+  inputSchema: {
+    prompt: z.string().min(1).describe('Video animation prompt describing motion and camera behavior'),
+    startFrame: z.string().min(1).describe('Name of the Flow asset to use as Start Frame (e.g. "crystal_orb")'),
+    aspect: z.enum(ASPECTS).default('9:16').describe('Aspect ratio: 9:16, 16:9, etc.'),
+    outDir: z.string().optional().describe(`Folder to save into (default ${DEFAULT_OUT})`),
+    outFile: z.string().optional().describe('Specific destination file path for the MP4 video'),
+  },
+}, async ({ prompt, startFrame, aspect, outDir, outFile }) => {
+  try {
+    const r = await serial(() => generateVideo({ prompt, startFrame, aspect, outDir: outDir || DEFAULT_OUT, outFile }));
+    return text(`Generated video in ${r.seconds}s (${r.bytes} bytes, ${r.aspect}) with startFrame "${r.startFrame}":\n${r.file}`);
+  } catch (err) { return fail('Flow video generation', err); }
 });
 
 await server.connect(new StdioServerTransport());

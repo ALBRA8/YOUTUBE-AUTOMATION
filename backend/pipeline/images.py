@@ -273,6 +273,85 @@ async def generate_scene_image(scene: dict, project: dict, idx: int,
     return out, "placeholder"
 
 
+async def generate_scene_video(
+    scene: dict,
+    project: dict,
+    idx: int,
+    start_frame_path: Path | None = None,
+    asset_name: str | None = None,
+    prompt: str | None = None,
+    aspect: str | None = None,
+    timeout: float = 900.0,
+) -> Path | None:
+    """
+    Puente mínimo para generación de video real con Start Frame en Google Flow.
+    Guarda el MP4 resultante en:
+      output/<project_id>/flow/Escena_{idx+1:02d}_video.mp4
+    compatible directamente con flow_import.find_flow_videos().
+    """
+    if not flow_mcp_client.available():
+        log.warning("Flow MCP no disponible para generación de video de escena %d", idx + 1)
+        return None
+
+    # 1. Carpeta y archivo destino
+    proj_dir = Path(project.get("output_dir") or (config.OUTPUT_DIR / project["id"]))
+    flow_dir = proj_dir / "flow"
+    flow_dir.mkdir(parents=True, exist_ok=True)
+    target_file = flow_dir / f"Escena_{idx + 1:02d}_video.mp4"
+
+    # Idempotencia: si ya existe y es válido
+    if target_file.exists() and flow_mcp_client.verify_video_file(target_file):
+        log.info("Video Flow ya existe en disco para escena %d: %s", idx + 1, target_file)
+        return target_file
+
+    # 2. Localizar Start Frame local
+    start_path = start_frame_path
+    if not start_path:
+        raw_img = scene.get("image_path") or ""
+        if raw_img:
+            start_path = Path(raw_img)
+
+    if not start_path or not Path(start_path).exists():
+        raise FileNotFoundError(f"Start frame no encontrado para escena {idx + 1}: {start_path}")
+
+    # 3. Subir/Verificar asset en Google Flow
+    target_asset = asset_name
+    if not target_asset:
+        target_asset = asset_resolver.normalize_flow_asset_name(f"scene_{idx + 1:02d}_start")
+
+    log.info("Subiendo/asociando Start Frame %s como activo Flow '%s'...", start_path, target_asset)
+    await flow_mcp_client.upload_file(Path(start_path), name=target_asset)
+
+    # 4. Determinar prompt
+    target_prompt = prompt
+    if not target_prompt:
+        target_prompt = scene.get("video_prompt") or scene.get("prompt")
+    if not target_prompt:
+        target_prompt = (
+            "Animate the starting image naturally while preserving the exact subject, "
+            "composition, environment, lighting and visual identity. Add subtle cinematic "
+            "camera movement and realistic environmental motion with smooth temporal consistency."
+        )
+
+    # 5. Aspect ratio
+    target_aspect = aspect or ("9:16" if project.get("format") == "short" else "16:9")
+
+    # 6. Generación vía Flow MCP
+    log.info("Invocando generate_video para escena %d (Start Frame: %s)...", idx + 1, target_asset)
+    res_path = await flow_mcp_client.generate_video(
+        prompt=target_prompt,
+        start_frame=target_asset,
+        aspect=target_aspect,
+        out_file=target_file,
+        timeout=timeout,
+    )
+    if res_path and res_path.exists() and flow_mcp_client.verify_video_file(res_path):
+        log.info("Video Flow generado exitosamente para escena %d: %s", idx + 1, res_path)
+        return res_path
+
+    raise RuntimeError(f"Fallo en generación de video Flow para escena {idx + 1}")
+
+
 def _parse_grad(grad: str) -> tuple[str, str]:
     """Convierte cualquier grad en (c1, c2) hex válido.
     - 'linear-gradient(135deg,#a,#b)' → ('#a','#b')

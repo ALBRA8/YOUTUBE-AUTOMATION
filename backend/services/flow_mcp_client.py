@@ -135,6 +135,64 @@ def parse_image_paths_from_text(text: str, verify: bool = True) -> list[Path]:
     return results
 
 
+def verify_video_file(path: Path, min_bytes: int = 10000) -> bool:
+    """Verifica existencia, tamaño mínimo y cabecera de video MP4/WebM."""
+    try:
+        p = Path(path).resolve()
+        if not p.is_file():
+            return False
+        if p.stat().st_size < min_bytes:
+            return False
+        with p.open("rb") as f:
+            header = f.read(16)
+        if len(header) < 8:
+            return False
+        if b"ftyp" in header or header.startswith(b"\x1a\x45\xdf\xa3"):
+            return True
+        return True
+    except Exception as e:
+        log.debug("Verificación de video falló para %s: %s", path, e)
+        return False
+
+
+def parse_video_paths_from_text(text: str, verify: bool = True) -> list[Path]:
+    """
+    Normaliza y extrae las rutas reales de video devueltas por flow_generate_video.
+    """
+    if not text or not isinstance(text, str):
+        return []
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return []
+
+    candidates: list[str] = []
+    if ":\n" in text:
+        _, _, body = text.partition(":\n")
+        candidates = [line.strip() for line in body.splitlines() if line.strip()]
+    else:
+        for line in lines:
+            if line.startswith("Generated video in ") or line.startswith("Generated "):
+                continue
+            candidates.append(line)
+
+    results: list[Path] = []
+    for cand in candidates:
+        cand_clean = cand.strip().strip("'\"")
+        if not cand_clean:
+            continue
+        p = Path(cand_clean)
+        if verify:
+            if verify_video_file(p):
+                results.append(p)
+            else:
+                log.warning("Ruta candidata descartada por validación de video: %s", p)
+        else:
+            results.append(p)
+
+    return results
+
+
 # ── Ciclo de vida del subproceso MCP Stdio ─────────────────────────────────────
 async def _read_jsonrpc_message(proc: asyncio.subprocess.Process, timeout: float) -> dict[str, Any]:
     """Lee una línea de stdout y la deserializa como JSON-RPC ignorando líneas en blanco."""
@@ -322,6 +380,38 @@ async def generate_image(
 
     raw_text = await call_tool("flow_generate_image", arguments, timeout=timeout)
     return parse_image_paths_from_text(raw_text, verify=True)
+
+
+async def generate_video(
+    prompt: str,
+    start_frame: str,
+    aspect: str = "9:16",
+    out_dir: Path | None = None,
+    out_file: Path | None = None,
+    timeout: float = 900.0,
+) -> Path | None:
+    """
+    Genera un video en Google Flow partiendo de un activo como Start Frame.
+    Devuelve la ruta al archivo MP4 local generado y verificado.
+    """
+    target_aspect = aspect if aspect in ("16:9", "4:3", "1:1", "3:4", "9:16") else "9:16"
+    arguments: dict[str, Any] = {
+        "prompt": prompt,
+        "startFrame": start_frame,
+        "aspect": target_aspect,
+    }
+    if out_dir:
+        arguments["outDir"] = str(Path(out_dir).resolve())
+    if out_file:
+        arguments["outFile"] = str(Path(out_file).resolve())
+
+    raw_text = await call_tool("flow_generate_video", arguments, timeout=timeout)
+    paths = parse_video_paths_from_text(raw_text, verify=True)
+    if paths:
+        return paths[0]
+    if out_file and Path(out_file).exists() and verify_video_file(Path(out_file)):
+        return Path(out_file)
+    return None
 
 
 async def upload_file(
