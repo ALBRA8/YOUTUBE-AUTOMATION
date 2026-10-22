@@ -40,6 +40,9 @@ def sanitize_asset_name(raw_name: str, fallback: str = "asset") -> str:
     return cleaned[:24]
 
 
+normalize_flow_asset_name = sanitize_asset_name
+
+
 def extract_raw_references(scene: dict) -> list[Any]:
     """Extrae la lista de referencias desde los metadatos de la escena o su clave directa."""
     if not isinstance(scene, dict):

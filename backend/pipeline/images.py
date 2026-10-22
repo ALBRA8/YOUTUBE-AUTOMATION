@@ -10,10 +10,11 @@ import logging
 from pathlib import Path
 
 import database as db
+import config
 from config import OUTPUT_DIR
 from services import gemini_client
 from services import flow_mcp_client
-from pipeline import sanitizer
+from pipeline import asset_resolver, sanitizer
 from pipeline.asset_resolver import resolve_scene_references, inject_flow_asset_mentions
 from services import avatar_schema
 from services import camera_recipes
@@ -317,10 +318,10 @@ async def generate_scene_video(
     # 3. Subir/Verificar asset en Google Flow
     target_asset = asset_name
     if not target_asset:
-        target_asset = asset_resolver.normalize_flow_asset_name(f"scene_{idx + 1:02d}_start")
+        target_asset = asset_resolver.sanitize_asset_name(f"scene_{idx + 1:02d}_start")
 
     log.info("Subiendo/asociando Start Frame %s como activo Flow '%s'...", start_path, target_asset)
-    await flow_mcp_client.upload_file(Path(start_path), name=target_asset)
+    await flow_mcp_client.upload_file(Path(start_path), name=target_asset, timeout=min(timeout, 300.0))
 
     # 4. Determinar prompt
     target_prompt = prompt

@@ -453,7 +453,22 @@ export async function generateVideo({
     const started = Date.now();
     let videoUrl = null;
 
-    while (Date.now() - started < timeoutMs) {
+    const onResponse = (res) => {
+      const url = res.url();
+      const ct = res.headers()['content-type'] || '';
+      if (
+        (url.includes('googlevideo.com/videoplayback') && (url.includes('mime=video') || ct.includes('video'))) ||
+        url.includes('flow-content.google/video') ||
+        ct.includes('video/mp4') ||
+        url.endsWith('.mp4')
+      ) {
+        videoUrl = url;
+      }
+    };
+    page.on('response', onResponse);
+
+    try {
+      while (Date.now() - started < timeoutMs) {
       await page.waitForTimeout(3000);
 
       const failed = await failedTiles(page);
@@ -495,9 +510,26 @@ export async function generateVideo({
         videoUrl = cand;
         break;
       }
-    }
 
-    if (!videoUrl) {
+      if (videoUrl) break;
+
+      // Hover video tile to trigger video streaming request
+      const topTile = page.locator('flow-video-tile, flow-grid-tile-container:has(mat-icon:has-text("play_circle"))').first();
+      if (await topTile.count()) {
+        await topTile.hover({ force: true }).catch(() => {});
+        await page.waitForTimeout(1000);
+        if (videoUrl) break;
+      }
+    }
+  } finally {
+    page.off('response', onResponse);
+  }
+
+  if (page.url().includes('/edit/')) {
+    await page.goto(`${FLOW_URL}project/${projectId}`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+  }
+
+  if (!videoUrl) {
       throw new Error(`Video generation timed out after ${Math.round(timeoutMs / 1000)}s without producing a video.`);
     }
 

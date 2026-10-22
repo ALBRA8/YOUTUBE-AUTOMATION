@@ -14,10 +14,11 @@ from collections import deque
 from pathlib import Path
 
 import database as db
+import config
 from config import OUTPUT_DIR
 from pipeline import flow_import, images as imgs
 from pipeline import script_gen, tts_step, video
-from services import gemini_client, url_mode, whisper_service, youtube_publish
+from services import flow_mcp_client, gemini_client, url_mode, whisper_service, youtube_publish
 from services import library as library_svc
 
 log = logging.getLogger("orchestrator")
@@ -672,14 +673,55 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
         if project["mode"] == "production_json":
             _record_duration_deviations(project_id)
 
+        # PASO 3.5 (opcional) — Generación de video con Google Flow si está habilitado
+        flow_video_enabled = (
+            getattr(config, "FLOW_MCP_VIDEO_ENABLED", False)
+            or bool((db.get_project(project_id).get("meta") or {}).get("flow_video"))
+        )
+        flow_videos = {}
+        if flow_video_enabled:
+            flow_videos = flow_import.find_flow_videos(
+                OUTPUT_DIR / project_id, list(range(len(scenes)))
+            )
+            if flow_mcp_client.available():
+                await _emit(job_id, project_id, "flow_video", 73, "Generando videos de escena en Google Flow…")
+                total_scenes = len(scenes)
+                for idx, sc in enumerate(scenes):
+                    if is_cancelled(job_id)():
+                        raise asyncio.CancelledError("cancelado")
+                    if idx in flow_videos:
+                        continue  # Reutilización idempotente de clip ya existente
+                    try:
+                        await _emit(
+                            job_id, project_id, "flow_video",
+                            73 + int(2 * (idx + 1) / total_scenes),
+                            f"Generando video Flow {idx + 1}/{total_scenes}…"
+                        )
+                        v_path = await imgs.generate_scene_video(
+                            scene=sc,
+                            project=db.get_project(project_id),
+                            idx=idx,
+                            timeout=getattr(config, "FLOW_MCP_VIDEO_TIMEOUT", 900.0),
+                        )
+                        if v_path:
+                            flow_videos[idx] = v_path
+                    except Exception as e:
+                        log.warning("Fallo video Flow escena %d: %s (fallback Ken Burns)", idx + 1, e)
+
         # PASO 4 — render (con transiciones xfade y pad compensado para
         # mantener la sincronía exacta con la pista de voz)
-        await _emit(job_id, project_id, "render", 76, "Renderizando escenas (Ken Burns + transiciones)…")
+        render_msg = (
+            f"Renderizando escenas ({len(flow_videos)} Flow + Ken Burns + transiciones)…"
+            if flow_videos
+            else "Renderizando escenas (Ken Burns + transiciones)…"
+        )
+        await _emit(job_id, project_id, "render", 76, render_msg)
         transitions = bool((db.get_project(project_id).get("meta") or {}).get("transitions", True))
         async with RENDER_SEM:  # 1 mezcla de video a la vez (blindaje CPU)
             clips = await video.render_scenes(
                 db.get_project(project_id), scenes, durations,
                 None, is_cancelled(job_id),
+                flow_videos=flow_videos or None,
                 transition_pad=video.TRANSITION_DUR if transitions else 0.0)
             await _emit(job_id, project_id, "render", 82, "Uniendo clips…")
             silent = await video.concat_clips(db.get_project(project_id), clips,

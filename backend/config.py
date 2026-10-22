@@ -22,6 +22,7 @@ load_dotenv(ENV_PATH)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
 FLOW_MCP_ENABLED = os.getenv("FLOW_MCP_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+FLOW_MCP_VIDEO_ENABLED = os.getenv("FLOW_MCP_VIDEO_ENABLED", "0").strip().lower() in ("1", "true", "yes")
 FLOW_MCP_DIR = Path(os.getenv("FLOW_MCP_DIR", str(BASE_DIR.parent / "tools" / "GoogleFlowMCP"))).resolve()
 FLOW_MCP_MODEL = os.getenv("FLOW_MCP_MODEL", "2").strip()
 FLOW_MCP_TIMEOUT = float(os.getenv("FLOW_MCP_TIMEOUT", "120.0"))
@@ -128,11 +129,12 @@ def reload() -> None:
     global GEMINI_TTS_MODEL, GEMINI_TTS_VOICE, TTS_PROVIDER, EDGE_TTS_VOICE
     global TTS_RATE, WHISPER_MODEL, WHISPER_DEVICE, FPS
     global NVIDIA_API_KEY, NVIDIA_MODEL, NVIDIA_BASE_URL
-    global FLOW_MCP_ENABLED, FLOW_MCP_DIR, FLOW_MCP_MODEL, FLOW_MCP_TIMEOUT
+    global FLOW_MCP_ENABLED, FLOW_MCP_DIR, FLOW_MCP_MODEL, FLOW_MCP_TIMEOUT, FLOW_MCP_VIDEO_ENABLED
     load_dotenv(ENV_PATH, override=True)
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
     FLOW_MCP_ENABLED = os.getenv("FLOW_MCP_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+    FLOW_MCP_VIDEO_ENABLED = os.getenv("FLOW_MCP_VIDEO_ENABLED", "0").strip().lower() in ("1", "true", "yes")
     FLOW_MCP_DIR = Path(os.getenv("FLOW_MCP_DIR", str(BASE_DIR.parent / "tools" / "GoogleFlowMCP"))).resolve()
     FLOW_MCP_MODEL = os.getenv("FLOW_MCP_MODEL", "2").strip()
     FLOW_MCP_TIMEOUT = float(os.getenv("FLOW_MCP_TIMEOUT", "120.0"))

@@ -418,7 +418,7 @@ async def upload_file(
     file_path: Path,
     name: str | None = None,
     replace: bool = False,
-    timeout: float = 60.0,
+    timeout: float = 120.0,
 ) -> dict[str, Any]:
     """Sube un archivo de imagen al proyecto de Flow y registra su etiqueta @name."""
     p = Path(file_path).resolve()
