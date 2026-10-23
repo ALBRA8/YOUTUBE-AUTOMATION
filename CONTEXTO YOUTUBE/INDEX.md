@@ -61,3 +61,11 @@ Esta separación es una regla estable del flujo de trabajo, no una excepción te
 - Diseño documentado en `00_MASTER/PRODUCTION_FRAMEWORK_BLUEPRINTS.md`.
 - Framework común + Blueprints especializados: Microdrama, Short, Short-Form y UGC.
 - No confundir este diseño conceptual con schemas, selector o runtime ya implementados.
+
+
+## Continuidad de diseño — 2026-10-23
+
+- Sesión registrada en `08_SESSIONS/SESSION_2026-10-23_PRODUCTION_BLUEPRINTS.md`.
+- Documento canónico: `00_MASTER/PRODUCTION_FRAMEWORK_BLUEPRINTS.md`.
+- Registro inicial: Microdrama, Short, Short-Form y UGC.
+- Estado: diseño conceptual documentado; schemas, selector, validación runtime e integración no deben marcarse implementados sin evidencia.
