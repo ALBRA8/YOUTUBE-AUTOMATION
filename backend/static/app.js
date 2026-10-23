@@ -1863,6 +1863,32 @@ function renderMCP() {
       'Servidor <code>notebooklm-mcp</code> (uv tool install "notebooklm-py[browser]"). Primera vez: corre ' +
       '<code>notebooklm login</code> (tools/mcp-setup/). El notebookId se valida e inyecta dinámicamente ' +
       '(aquí → payload; fallback <code>NOTEBOOKLM_NOTEBOOK_ID</code> en backend/.env).')}
+    <div class="mcp-svc" id="pipe-card">
+      <div class="mcp-svc-head">
+        <h3>🚀 Pipeline completo (NotebookLM → Agente → Flow)</h3>
+        <span id="pipe-stage-badge"></span>
+      </div>
+      <p class="hintline">INT-023 · [1/3] lee el contexto del notebook activo → [2/3] genera el blueprint con el motor de guion de siempre (sin tocarlo) → [3/3] despacha cada escena a Google Flow con el MISMO personaje de referencia. Pre-flight: si un MCP no está autenticado, aborta sin gastar tokens.</p>
+      <div class="mcp-row">
+        <label for="pipe-idea">Idea del video</label>
+        <input id="pipe-idea" type="text" maxlength="500"
+               placeholder="ej. el tema del notebook activo (la bíblia de investigación llega de NotebookLM)">
+      </div>
+      <div class="mcp-row">
+        <label for="pipe-fmt">Formato</label>
+        <select id="pipe-fmt">
+          <option value="short">short (9:16)</option>
+          <option value="long">long (16:9)</option>
+        </select>
+      </div>
+      <div class="mcp-row btns">
+        <button class="btn" id="pipe-run-btn" onclick="pipeRun()">🚀 Run Full Pipeline (NotebookLM → Agent → Flow)</button>
+        <button class="btn ghost" id="pipe-retry-btn" onclick="pipeRetry()" style="display:none">🔁 Reintentar escenas fallidas</button>
+        <button class="btn ghost" onclick="pipeRefresh()">🔄 Actualizar</button>
+      </div>
+      <div id="pipe-progress"></div>
+      <pre class="mcp-log" id="pipe-log" style="display:none"></pre>
+    </div>
     <div class="mcp-row btns" style="margin-top:14px">
       <button class="btn" onclick="mcpTest('')">🧪 Test Pipeline (ambos)</button>
       <button class="btn ghost" onclick="mcpRefresh()">🔄 Refrescar estado</button>
@@ -1957,3 +1983,146 @@ async function mcpTest(svc) {
 
 // estado silencioso al arrancar (pills del topbar sin spam de errores)
 (async () => { try { await mcpRefresh(true); } catch {} })();
+
+/* ══════════════════════════════════════════════════════════════════
+   INT-023 · PIPELINE ORCHESTRATOR — NotebookLM → Agente → Flow
+   Progreso en vivo por polling ligero de /api/pipeline/status:
+   [1/3] Reading NotebookLM → [2/3] Generating Blueprint →
+   [3/3] Dispatching Scenes to Flow (X/Y). Falla una escena →
+   retry-scenes SOLO re-despacha las fallidas (Stage 1/2 intactos).
+   ══════════════════════════════════════════════════════════════════ */
+let pipeTimer = null;
+const PIPE_STAGES = {
+  queued:          ['EN COLA…', 'mcp-b-yellow'],
+  preflight:       ['PRE-FLIGHT…', 'mcp-b-yellow'],
+  stage1_context:  ['[1/3] READING NOTEBOOKLM…', 'mcp-b-yellow'],
+  stage2_blueprint:['[2/3] GENERATING BLUEPRINT…', 'mcp-b-yellow'],
+  stage3_dispatch: ['[3/3] DISPATCHING TO FLOW…', 'mcp-b-yellow'],
+  done:            ['COMPLETADO', 'mcp-b-green'],
+  error:           ['ERROR', 'mcp-b-red'],
+};
+
+function pipeActive(run) {
+  return !!run && ['queued', 'preflight', 'stage1_context',
+                   'stage2_blueprint', 'stage3_dispatch'].includes(run.stage);
+}
+
+function pipeBadgeHTML(run) {
+  if (!run) return '<span class="mcp-badge mcp-b-gray">SIN CORRIDAS</span>';
+  const [txt, cls] = PIPE_STAGES[run.stage] || PIPE_STAGES.queued;
+  return `<span class="mcp-badge ${cls}">${txt}</span>`;
+}
+
+function pipeStepsHTML(run) {
+  const total = (run.scenes || []).length;
+  const done = (run.scenes || []).filter(s => s.status === 'done').length;
+  const failed = (run.scenes || []).filter(s => s.status === 'failed').length;
+  const processed = done + failed;
+  let h = '<div class="pipe-steps">';
+  (run.steps || []).forEach(st => {
+    const mark = st.state === 'ok' ? '✅' : st.state === 'running' ? '⏳'
+               : st.state === 'failed' ? '❌' : '·';
+    let label = esc(st.label);
+    if (st.stage === 'stage3_dispatch' && total) {
+      label = `[3/3] Dispatching Scenes to Flow (${processed}/${total})…`;
+    }
+    h += `<div class="pipe-step"><span class="st">${mark}</span><span>${label}` +
+         (st.detail ? ` <span class="hintline">— ${esc(st.detail)}</span>` : '') +
+         `</span></div>`;
+  });
+  h += '</div>';
+  if (total) {
+    h += '<div class="pipe-chips">';
+    run.scenes.forEach(s => {
+      const cls = s.status === 'done' ? 'done' : s.status === 'failed' ? 'failed'
+                : s.status === 'dispatched' ? 'dispatched' : '';
+      const tip = s.detail ? ` title="${esc(s.detail)}"` : (s.video_file ? ` title="${esc(s.video_file)}"` : '');
+      const mark = s.status === 'done' ? '✓' : s.status === 'failed' ? '✗'
+                 : s.status === 'dispatched' ? '…' : '·';
+      h += `<span class="pipe-chip ${cls}"${tip}>${mark} ${esc(s.scene_id)} ${esc((s.title || '').slice(0, 26))}</span>`;
+    });
+    h += '</div>';
+  }
+  if (run.error_detail) {
+    h += `<p class="pipe-detail">⚠ [${esc(run.error_code || '')}] ${esc(run.error_detail)}</p>`;
+  }
+  return h;
+}
+
+function pipeApply(run) {
+  const badge = $('#pipe-stage-badge');
+  if (badge) badge.innerHTML = pipeBadgeHTML(run);
+  const zone = $('#pipe-progress');
+  if (zone) zone.innerHTML = run ? pipeStepsHTML(run) : '';
+  const log = $('#pipe-log');
+  if (log) {
+    if (run && (run.error_detail || run.context_chars)) {
+      log.style.display = '';
+      log.textContent = JSON.stringify({
+        run_id: run.run_id, stage: run.stage, idea: run.idea,
+        notebook_id: run.notebook_id, context_chars: run.context_chars,
+        blueprint_title: run.blueprint_title,
+        failed_scene_ids: run.failed_scene_ids,
+        error: run.error_detail || undefined,
+      }, null, 1);
+    } else log.style.display = 'none';
+  }
+  const rbtn = $('#pipe-retry-btn');
+  if (rbtn) rbtn.style.display = (run && run.failed_scene_ids && run.failed_scene_ids.length && !pipeActive(run)) ? '' : 'none';
+  const rbtn2 = $('#pipe-run-btn');
+  if (rbtn2) rbtn2.disabled = pipeActive(run);
+  if (run && !pipeActive(run) && !document.hidden) mcpRefresh(true);
+  return pipeActive(run);
+}
+
+async function pipeRefresh(silent) {
+  try {
+    const run = await api('/pipeline/status');
+    S.pipeRun = run;
+    S.pipeRunId = run.run_id;
+    return pipeApply(run);
+  } catch (e) {
+    if (!silent) toast('Pipeline: ' + e.message, 'err');
+    S.pipeRun = null;
+    if (typeof pipeApply === 'function') pipeApply(null);
+    return false;
+  }
+}
+
+function pipePollStart() {
+  if (pipeTimer) return;
+  pipeTimer = setInterval(async () => {
+    if (document.hidden) return;
+    const active = await pipeRefresh(true);
+    if (!active && pipeTimer) { clearInterval(pipeTimer); pipeTimer = null; }
+  }, 2000);
+}
+
+async function pipeRun() {
+  const idea = ($('#pipe-idea') || {}).value || '';
+  const body = { idea: idea.trim(), format: ($('#pipe-fmt') || {}).value || 'short' };
+  if (mcpNid()) body.notebook_id = mcpNid();
+  if (!body.idea) { toast('Escribe la idea del video primero', 'err'); return; }
+  try {
+    const js = await api('/pipeline/run', { method: 'POST', body });
+    S.pipeRunId = js.run_id;
+    toast('Pipeline lanzado 🚀 [1/3] Reading NotebookLM…');
+    await pipeRefresh(true);
+    pipePollStart();
+  } catch (e) { toast('Run Full Pipeline: ' + e.message, 'err'); }
+}
+
+async function pipeRetry() {
+  const rid = S.pipeRunId || (S.pipeRun || {}).run_id;
+  if (!rid) { toast('No hay corrida que reintentar', 'err'); return; }
+  try {
+    const run = await api('/pipeline/retry-scenes', { method: 'POST', body: { run_id: rid } });
+    S.pipeRun = run;
+    pipeApply(run);
+    pipePollStart();
+    toast('Re-despachando solo las escenas fallidas 🔁');
+  } catch (e) { toast('Retry escenas: ' + e.message, 'err'); }
+}
+
+// reanudar el seguimiento si el backend conserva una corrida activa (recarga de página)
+(async () => { const act = await pipeRefresh(true); if (act) pipePollStart(); })();

@@ -55,6 +55,13 @@ BATERIAS = [
                                  # execute), inyección dinámica de notebook_id
                                  # (payload > .env), preflight AUTH_REQUIRED,
                                  # timeouts con limpieza y endpoints /api/mcp/* (38)
+    "test_pipeline_orchestrator.py", # INT-023: Pipeline Orchestrator — handoff
+                                 # NotebookLM → Agente → Flow con mocks herméticos:
+                                 # pre-flight gatekeeper (aborta sin gastar
+                                 # tokens), blueprint con motor existente +
+                                 # contexto inyectado, consistencia de personaje
+                                 # @{ref}, PARTIAL_FAILURES + retry SOLO de
+                                 # escenas fallidas, endpoints /api/pipeline/* (55)
     "test_memorydv.py",          # MemoryDV §memoria: storage/retrieval/
                                  # consolidación/isolation (36)
     "test_skills_autonomia.py",  # Skill Contract §skills + autonomía L0-L5

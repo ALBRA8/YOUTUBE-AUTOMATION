@@ -522,5 +522,17 @@ code.mini { background: var(--bg2); border: 1px solid var(--border); border-radi
 .mcp-tools summary { cursor: pointer; font-size: 12.5px; color: var(--muted); margin-top: 8px; }
 .mcp-tools ul { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--muted); }
 .mcp-log { background: rgba(127,127,127,.12); border-radius: 8px; padding: 8px 10px; font-size: 11.5px; color: var(--muted); white-space: pre-wrap; max-height: 150px; overflow: auto; margin-top: 10px; }
+
+/* INT-023 · pipeline NotebookLM → Agent → Flow */
+#pipe-card select { background: rgba(127,127,127,.1); border: 1px solid rgba(127,127,127,.3); border-radius: 8px; padding: 8px 10px; color: inherit; font-size: 13px; }
+.pipe-steps { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.pipe-step { display: flex; gap: 8px; align-items: baseline; }
+.pipe-step .st { font-weight: 800; }
+.pipe-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.pipe-chip { border: 1px solid rgba(127,127,127,.3); border-radius: 999px; padding: 2px 10px; font-size: 11px; font-weight: 700; color: var(--muted); cursor: default; }
+.pipe-chip.done { border-color: var(--ok); color: var(--ok); }
+.pipe-chip.failed { border-color: var(--err); color: var(--err); }
+.pipe-chip.dispatched { border-color: #e6b800; color: #e6b800; }
+.pipe-detail { margin-top: 8px; font-size: 12px; color: var(--err); font-weight: 600; }
 .btn.ghost { background: transparent; border: 1px solid rgba(127,127,127,.35); }
 .btn.ghost:hover { border-color: var(--accent); }

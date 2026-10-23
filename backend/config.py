@@ -45,6 +45,27 @@ NOTEBOOKLM_NOTEBOOK_ID = os.getenv("NOTEBOOKLM_NOTEBOOK_ID", "").strip()
 # Carpeta de perfiles de notebooklm-py (vacío = ~/.notebooklm).
 NOTEBOOKLM_HOME = os.getenv("NOTEBOOKLM_HOME", "").strip()
 
+# ── Pipeline Orchestrator (INT-023) — NotebookLM → Agent → Flow ──────────
+# Tool de solo-lectura del servidor notebooklm-mcp que extrae la bíblia de
+# investigación (Stage 1). Si el servidor no la expone, el error llega a la
+# UI con la lista real de tools disponibles (TOOL_UNKNOWN).
+NOTEBOOKLM_CONTEXT_TOOL = os.getenv("NOTEBOOKLM_CONTEXT_TOOL", "query_notebook").strip()
+# Consulta enviada junto al notebookId (plantilla editable por .env).
+NOTEBOOKLM_CONTEXT_QUERY = os.getenv(
+    "NOTEBOOKLM_CONTEXT_QUERY",
+    "Extrae del notebook la biblia de investigación para producir un video: "
+    "puntos clave y datos verificables, arco narrativo sugerido, y una "
+    "descripción física CONSISTENTE del personaje principal (look, ropa, "
+    "rasgos) reutilizable en todas las escenas.").strip()
+# Máximo de contexto inyectado al generador (protege los tokens del LLM).
+PIPELINE_CONTEXT_MAX_CHARS = int(os.getenv("PIPELINE_CONTEXT_MAX_CHARS", "6000"))
+# Asset de referencia de personaje en Flow: se sube UNA vez y todas las
+# escenas lo referencian como @{personaje} (consistencia inter-escena).
+FLOW_REF_ASSET_NAME = os.getenv("FLOW_REF_ASSET_NAME", "personaje").strip()
+# Ruta opcional a una imagen de referencia existente (vacío = Flow genera el
+# ancla del personaje a partir del contexto del notebook).
+FLOW_REF_IMAGE_PATH = os.getenv("FLOW_REF_IMAGE_PATH", "").strip()
+
 # ── NVIDIA NIM (agente VÓRTICE · OpenAI-compatible) ───────────────────────
 # kimi-k3: planificación del agente, entiende el proyecto y ejecuta acciones
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()

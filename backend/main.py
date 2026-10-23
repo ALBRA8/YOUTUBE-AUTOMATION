@@ -1889,6 +1889,61 @@ async def mcp_test_pipeline(body: dict):
     return out
 
 
+# ─────────────── Pipeline Orchestrator (INT-023) · NotebookLM → Agent → Flow ──
+# Coordina las 3 etapas con mcp_manager sin tocar agent.py ni script_gen
+# (regla del mandato: generación de prompts/blueprints INTACTA). Pre-flight
+# gatekeeper: si algún MCP no está Connected & Authenticated se aborta antes
+# de gastar tokens. Hereda auth_guard/csrf_guard (middlewares de app).
+from services import pipeline_orchestrator as _pipe  # noqa: E402
+
+
+@app.post("/api/pipeline/run")
+async def pipeline_run(body: dict):
+    """Lanza la corrida completa con el notebookId activo del MCP Manager
+    (payload → .env fallback dentro de mcp_manager). Single-flight: Flow
+    serializa en el Chrome dedicado, así que una segunda corrida en marcha
+    se rechaza con 409."""
+    idea = (body.get("idea") or "").strip()
+    if not idea:
+        raise HTTPException(400, "idea requerida (¿qué video produce el pipeline?)")
+    try:
+        run = _pipe.orchestrator.create_run(
+            idea=idea,
+            notebook_id=(body.get("notebook_id") or "").strip() or None,
+            fmt=body.get("format") if body.get("format") in ("short", "long") else "short",
+            style=(body.get("style") or "auto").strip())
+        _pipe.orchestrator.start_run(run["run_id"])
+    except _pipe.PipelineError as e:
+        status = 409 if e.code == "PIPELINE_BUSY" else 400
+        raise HTTPException(status, f"[{e.code}] {e}") from e
+    log.info("[pipeline] corrida lanzada %s (idea=%r)", run["run_id"], idea[:60])
+    return {"run_id": run["run_id"], "stage": run["stage"],
+            "notebook_id": run["notebook_id"]}
+
+
+@app.get("/api/pipeline/status")
+async def pipeline_status(run_id: str = ""):
+    """Snapshot de la corrida (la última si no se indica run_id): etapa,
+    progreso X/Y de escenas, fallidas y assets generados."""
+    try:
+        return _pipe.orchestrator.get_status(run_id.strip())
+    except _pipe.PipelineError as e:
+        raise HTTPException(404, f"[{e.code}] {e}") from e
+
+
+@app.post("/api/pipeline/retry-scenes")
+async def pipeline_retry_scenes(body: dict):
+    """Re-despacha SOLO las escenas fallidas de Stage 3 usando el blueprint
+    persistido — nunca repite Stage 1 (NotebookLM) ni Stage 2 (LLM)."""
+    run_id = (body.get("run_id") or "").strip()
+    scene_ids = body.get("scene_ids") if isinstance(body.get("scene_ids"), list) else None
+    try:
+        return await _pipe.orchestrator.retry_scenes(run_id, scene_ids)
+    except _pipe.PipelineError as e:
+        status = 409 if e.code == "PIPELINE_BUSY" else 400
+        raise HTTPException(status, f"[{e.code}] {e}") from e
+
+
 @app.get("/")
 async def index():
     return FileResponse(STATIC_DIR / "index.html")
