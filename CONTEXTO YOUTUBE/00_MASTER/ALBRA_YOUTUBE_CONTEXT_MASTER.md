@@ -400,3 +400,14 @@ Fronteras: Creative Engine decide qué crear y genera Creative Specification + P
 **Estado honesto:** la arquitectura y los cuatro Blueprints están definidos a nivel documental/conceptual. No afirmar que schemas, selector, validadores o integración de runtime estén implementados o probados hasta verificarlos en el repositorio. El siguiente paso es formalizar los schemas, el registro/selector y las pruebas de contrato, reutilizando los motores existentes.
 
 Fuente canónica: `00_MASTER/PRODUCTION_FRAMEWORK_BLUEPRINTS.md`.
+
+
+---
+
+## 18. Consolidación de diseño multi-línea — sesión 2026-10-23
+
+Esta sesión consolidó y confirmó como referencia canónica el diseño descrito en `00_MASTER/PRODUCTION_FRAMEWORK_BLUEPRINTS.md`. Se cubren el Production Framework común, el registro de líneas y las gramáticas conceptuales de Microdrama, Short, Short-Form y UGC, además de la selección de línea, contrato de salida, validación y límites de responsabilidad entre componentes.
+
+La conversación de origen no equivale a implementación de software. Estado documental: **DISEÑO CONCEPTUAL v1.0**. Los JSON Schemas/validadores, selector de línea y conexión de runtime solo podrán marcarse implementados tras comprobar archivos, pruebas y ejecución reales.
+
+Continuidad de trabajo: seguir desde el documento canónico existente; no reconstruir los Blueprints desde cero, no duplicar motores y no confundir diseño guardado con código implementado.
