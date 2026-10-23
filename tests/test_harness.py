@@ -54,7 +54,7 @@ import security as _security  # noqa: E402
 from services.youtube_harness import contracts as hc  # noqa: E402
 from services.youtube_harness import capabilities as hcap  # noqa: E402
 from services.youtube_harness.legacy import (  # noqa: E402
-    VORTICE_ACTION_TO_OPERATION, equivalence_report)
+    AGENT_ACTION_TO_OPERATION, equivalence_report)
 
 _APP = _main.app
 
@@ -101,7 +101,7 @@ async def main_async() -> None:
         "knowledge_version") == "1.0")
     check("equivalencia legacy informada",
           mk.get("legacy_equivalence", {}).get("legacy_worker") ==
-          "VÓRTICE (services/agent.py)")
+          "Agente General (services/general_agent.py) — absorbe VÓRTICE (INT-028)")
 
     # ═══════════════ 2. validación estricta del contrato (§7) ═══════
     print("── 2. validación estricta (nada silencioso)")
@@ -288,13 +288,13 @@ async def main_async() -> None:
     check("desconocido→WAITING (honesto)",
           hc.normalize_status("no-se") == "WAITING")
 
-    # ═══════════════ 8. equivalencia legacy VÓRTICE (§12) ═══════════
-    print("── 8. puente legacy VÓRTICE → arnés")
+    # ═══════════════ 8. equivalencia legacy del chat (§12 · INT-028) ══
+    print("── 8. puente legacy cerebro-chat → arnés")
     check("delete_project → youtube.delete (destructiva)",
-          VORTICE_ACTION_TO_OPERATION["delete_project"] == "youtube.delete"
+          AGENT_ACTION_TO_OPERATION["delete_project"] == "youtube.delete"
           and hcap.OPERATIONS["youtube.delete"].destructive)
     check("create_video → youtube.create",
-          VORTICE_ACTION_TO_OPERATION["create_video"] == "youtube.create")
+          AGENT_ACTION_TO_OPERATION["create_video"] == "youtube.create")
     rep = equivalence_report()
     check("toda operación mapeada existe en el registro",
           all(i["operation_exists"] for i in rep["covered_by_harness"]))

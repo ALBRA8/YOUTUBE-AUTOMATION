@@ -23,7 +23,8 @@ from pipeline import images as imgs_pipeline
 from pipeline import orchestrator
 from pipeline import video as video_pipeline
 from pipeline.subtitles import words_to_srt
-from services import (agent as agent_svc, backup as backup_svc, camera_recipes,
+from services import (general_agent as agent_svc,  # INT-028: cerebro único (ex-VÓRTICE)
+                      backup as backup_svc, camera_recipes,
                       doctor as doctor_svc,
                       gemini_client, guion_json as guion_svc,
                       library as library_svc,
@@ -607,7 +608,7 @@ async def avatars_image_get(aid: str):
     return FileResponse(av["image_path"], media_type="image/png")
 
 
-# ────────────────────────────── chat-agente (v2.12 · VÓRTICE v3) ──
+# ──────────────────── chat-agente (v2.12 · Agente General, INT-028) ──
 @app.get("/api/cerebros")
 async def cerebros_list():
     """v2.12.1 · CEREBROS: catálogo de modelos NVIDIA con estado vivo
@@ -625,7 +626,7 @@ _IMAGE_RE = re.compile(
 
 @app.post("/api/cerebros")
 async def cerebros_pick(body: dict):
-    """Elige el cerebro de VÓRTICE (persistente en .env, aplica al instante)."""
+    """Elige el cerebro del Agente General (persistente en .env, aplica al instante)."""
     alias = str((body or {}).get("alias") or "").strip()
     c = nvidia_client.find_cerebro(alias)
     if not c:
@@ -639,10 +640,11 @@ async def cerebros_pick(body: dict):
 
 @app.post("/api/chat")
 async def chat(body: dict):
-    """Agente VÓRTICE: entiende la fábrica (contexto vivo) y ejecuta acciones
-    reales. Acciones destructivas exigen confirmación del usuario: la primera
-    llamada devuelve needs_confirm+pending; la ejecución real llega en la
-    segunda llamada con {confirm: {action, params}}."""
+    """Agente General (services/general_agent.py — INT-028 absorbe VÓRTICE):
+    entiende la fábrica (contexto vivo) y ejecuta acciones reales. Acciones
+    destructivas exigen confirmación del usuario: la primera llamada devuelve
+    needs_confirm+pending; la ejecución real llega en la segunda llamada con
+    {confirm: {action, params}}."""
     confirm = body.get("confirm") or None
     if confirm:
         action = str(confirm.get("action") or "")

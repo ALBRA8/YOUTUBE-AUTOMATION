@@ -585,7 +585,7 @@ async def endpoint_tests():
 
 # ─────────────────────────────── S9 · contrato UI ──
 def ui_tests():
-    print("\n── S9 · contrato UI v2.24.0 (sesión unificada + dropdown auto) ──")
+    print("\n── S9 · contrato UI (sesión unificada + dropdown auto; v≥2.25.0 INT-028) ──")
     static = BACKEND / "static"
     appjs = (static / "app.js").read_text(encoding="utf-8")
     index = (static / "index.html").read_text(encoding="utf-8")
@@ -616,7 +616,8 @@ def ui_tests():
                                        appjs.index("async function gsessCapture")])
     check("endpoint del backend invocado por la UI",
           "/mcp/login-google" in appjs and "/mcp/capture-google-session" in appjs)
-    check("index.html sirve app.js v2.24.0", "app.js?v=2.24.0" in index)
+    check("index.html sirve app.js v2.25.0 (INT-028 rebrand)",
+          "app.js?v=2.25.0" in index)
     check("fin del copy-paste: placeholder sin «pegar UUID» obligatorio",
           "conecta NotebookLM para listar los tuyos" in appjs)
 

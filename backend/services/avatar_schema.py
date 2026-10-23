@@ -4,13 +4,13 @@ v2.11 · Rescatado del plan «Avatar DNA Pipeline»: campos rostro y mechas
 (ADN facial más fino) y scene_suffix(outfit=…) para vestuario por escena —
 la ropa cambia, la cara NUNCA.
 
-Menús desplegables con la variedad de VÓRTICE PRO (tono de piel, ojos
-color+forma, cabello color+largo+textura, cuerpo, arquetipo, acento,
-jerga…) y ampliados con campos que VÓRTICE no tiene (género, edad,
-maquillaje, accesorios, estilo de ropa en dropdown, extras).
+Menús desplegables con la variedad del agente clásico «VÓRTICE PRO»
+(tono de piel, ojos color+forma, cabello color+largo+textura, cuerpo,
+arquetipo, acento, jerga…) y ampliados con campos que aquel no tiene
+(género, edad, maquillaje, accesorios, estilo de ropa en dropdown, extras).
 
-A diferencia de VÓRTICE (cuyo veoPrompt es una plantilla estática que ni
-siquiera inyecta las características), aquí CADA característica se
+A diferencia del veoPrompt estático del agente legacy retirado (que ni
+siquiera inyectaba las características), aquí CADA característica se
 traduce a inglés y se inyecta en tres sitios del motor real:
   1. portrait_prompt()  → retrato del avatar (Gemini o placeholder)
   2. scene_suffix()     → TODAS las escenas del video (consistencia)

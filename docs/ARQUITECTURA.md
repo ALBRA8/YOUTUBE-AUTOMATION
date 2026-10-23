@@ -21,6 +21,7 @@
 | v2.0–2.7 | Núcleo URL→guion→video, estilos, temas, biblioteca | El builder completo ya existía y funciona |
 | v2.10–2.11 | Rescate tras barrido, árbol Proyectos▸Nichos▸video, Avatar DNA, recetas de cámara | Los datos SON el proyecto; el código se puede reconstruir, la DB no |
 | v2.12.0–2.12.1 | VÓRTICE + CEREBROS (6 modelos NVIDIA, failover, visión) | El cerebro creativo es INTERCAMBIABLE — nadie ata el sistema a un proveedor |
+| INT-028 | Agente General (services/general_agent.py) ABSORBE a VÓRTICE: un solo cerebro para chat y fábrica; agent.py retirado | Un cerebro, cero duplicidad — el retiro §12 del arnés quedó ejecutado |
 | v2.12.2 | Backups automáticos + música, de la auditoría externa | Resiliencia primero: la fábrica debe sobrevivir desastres |
 
 **Hallazgo central del análisis (2026-10):** el sistema YA tenía sin saberlo las piezas de la
@@ -45,7 +46,7 @@ fuera ciudadano de primera clase**: hoy los nichos viven dispersos en txt suelto
 ┌─────────────────────────────────────────────────────────┐
 │ 2. CEREBRO(S) CREATIVO(S) — uno por etapa, intercambiable│
 │    ChatGPT web (gratis) · Gemini web (gratis)           │
-│    CEREBROS NVIDIA internos (VÓRTICE) · Gemini API      │
+│    CEREBROS NVIDIA internos (Agente General) · Gemini API│
 │    NO saben nada de Flow, FFmpeg ni del repo            │
 └──────────────────────────┬──────────────────────────────┘
                            │ production.json — SIEMPRE el mismo contrato
@@ -74,7 +75,7 @@ Una etapa elige su cerebro por competencia, no por comodidad:
 |---|---|---|
 | **Gemini web** | Imágenes con múltiples referencias (identidad+producto) | gratis |
 | **ChatGPT web** | Análisis visual de imágenes + redacción comercial/narrativa larga | gratis |
-| **CEREBROS NVIDIA** (VÓRTICE) | Automatización interna: acciones en la fábrica, planes JSON, visión rápida | gratis (API NVIDIA) |
+| **CEREBROS NVIDIA** (Agente General) | Automatización interna: acciones en la fábrica, planes JSON, visión rápida | gratis (API NVIDIA) |
 | **Gemini API** | Guion estructurado dentro del pipeline sin humano en el medio | cuota free tier |
 | **repo (código)** | Recortes, parseo, renombrado, validación — precisión matemática | $0 |
 | **fábrica (builder)** | TTS, montaje, subtítulos, publicación | $0–bajo |
@@ -232,7 +233,7 @@ donde se indica.
 
 ### FASE 4 — Cerebros internos en las etapas (opcionalidad)
 - [ ] Cada etapa del playbook puede declarar `cerebro_interno: "deepseek|gpt-oss|llama-90b..."` para ejecutarse SIN humano vía CEREBROS NVIDIA (con visión donde haga falta)
-- [ ] VÓRTICE gana acción "ejecutar etapa del playbook"
+- [ ] El Agente General gana acción "ejecutar etapa del playbook"
 - [ ] Extracción final del conocimiento de `flow_export.py` a playbooks (deuda saldada)
 
 ### FASE 5 — Automatización de puertas (solo si hay venta)
@@ -245,7 +246,7 @@ donde se indica.
 - ❌ Un formato creativo por proveedor (el proveedor se elige en el builder, no en el JSON)
 - ❌ Elenco global compartido entre nichos
 - ❌ Reescribir los prompts verbatim del usuario al empacarlos
-- ❌ Reemplazar VÓRTICE/trends por esta arquitectura (VÓRTICE se INTEGRA como cerebro interno, Fase 4)
+- ❌ Reemplazar trends por esta arquitectura (el Agente General —ex VÓRTICE— se INTEGRA como cerebro interno, Fase 4)
 
 ---
 

@@ -14,7 +14,8 @@
 #   knowledge     conocimiento estructurado del puesto (sin VÓRTICE)
 #   adapter       fachada fina sobre la fábrica existente
 #   harness       ejecutor + libro de ejecuciones idempotente
-#   legacy        puente declarativo VÓRTICE → arnés (retiro futuro)
+#   legacy        puente declarativo cerebro-chat → arnés (VÓRTICE retirado
+#                 en INT-028; hoy lo sirve services/general_agent.py)
 #   api           router HTTP versionado /api/harness/v1
 # ─────────────────────────────────────────────────────────────────────
 from .contracts import (CONTRACT_VERSION, HARNESS_NAME, CAPABILITY_ID,

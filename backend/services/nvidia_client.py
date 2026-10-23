@@ -1,8 +1,8 @@
 """
-YOUTUBE AUTOMATION v2.0 — Cliente NVIDIA NIM (agente VÓRTICE, v2.12.1 CEREBROS)
+YOUTUBE AUTOMATION v2.0 — Cliente NVIDIA NIM (Agente General, v2.12.1 CEREBROS)
 Endpoint OpenAI-compatible: https://integrate.api.nvidia.com/v1/chat/completions
 
-v2.12.1 · CEREBROS: el usuario elige con qué modelo piensa VÓRTICE (como los
+v2.12.1 · CEREBROS: el usuario elige con qué modelo piensa el agente (como los
 "cerebros" de OpenClaw). Catálogo construido probando el catálogo REAL de la
 clave contra /v1/models (2026-10): muchos nombres conocidos ya dan 410 Gone o
 404, así que solo entran los que respondieron en vivo.

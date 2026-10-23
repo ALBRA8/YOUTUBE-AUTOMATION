@@ -132,8 +132,9 @@ SAFETY_SEMANTICS: list[dict] = [
     {"rule": "confirmación host-side",
      "detail": "El arnés ejecuta destructivas cuando la solicitud viene "
      "autenticada y con permiso; el HOST es responsable de la "
-     "confirmación humana (HITL) previa. VÓRTICE delega igual hoy: "
-     "plan() nunca ejecuta; el dashboard pide confirmación."},
+     "confirmación humana (HITL) previa. El Agente General (ex-VÓRTICE, "
+     "INT-028) delega igual: plan() nunca ejecuta; el dashboard pide "
+     "confirmación."},
     {"rule": "publicación con barrera",
      "detail": "youtube.publish exige video listo, QA del render final "
      "sin errores y credenciales YouTube configuradas; idempotencia 409."},

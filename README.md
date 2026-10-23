@@ -61,7 +61,7 @@ Sin Whisper, los tiempos de subtítulo se estiman (funciona bien, pero el exacto
 
 ## 🧭 El flujo en el dashboard
 
-### 🤖 Agente VÓRTICE (nuevo en v2.1) — habla con tu fábrica
+### 🤖 Agente General (INT-028, absorbe a VÓRTICE) — habla con tu fábrica
 Chat conversacional que ejecuta acciones reales del motor:
 - «**crea un video sobre el imperio romano**» → produce el video completo y abre el progreso
 - «**muéstrame mis proyectos**» → lista clicable con el estado de cada uno

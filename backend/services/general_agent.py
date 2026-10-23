@@ -1,8 +1,23 @@
 """
-YOUTUBE AUTOMATION v2.0 — Agente VÓRTICE v3 (v2.12.0)
-Un agente que ENTIENDE el proyecto: recibe una descripción profunda de la
-fábrica + un contexto vivo (proyectos, nichos, avatares, estados) y puede
-responder preguntas técnicas Y ejecutar tareas repetitivas contra el motor.
+YOUTUBE AUTOMATION v2.0 — AGENTE GENERAL (v3.0 · INT-028, absorbe VÓRTICE)
+==========================================================================
+El cerebro ÚNICO y unificado del sistema para la superficie conversacional:
+entiende la fábrica (contexto vivo: proyectos, nichos, avatares, estados),
+responde preguntas técnicas Y ejecuta tareas repetitivas contra el motor.
+
+Procedencia (INT-028 — absorción de VÓRTICE):
+  * Este módulo ES el ex `services/agent.py` (VÓRTICE v3, v2.12.x) migrado
+    íntegro: mismas firmas públicas (plan/execute/build_context), mismos
+    10 VALID_ACTIONS, mismas reglas M9 (destructivas con confirmación
+    host-side, cero fuzzy matching) y misma cadena de degradación.
+  * `services/agent.py` quedó RETIRADO y eliminado del árbol.
+  * El contrato de comportamiento de /api/chat sigue siendo DO_NOT_TOUCH:
+    needs_confirm/pending intactos (tests M9: test_project_isolation).
+  * Relación con las demás capas del Agente General:
+      - pipeline_orchestrator (INT-023): NotebookLM → guion → Flow.
+      - youtube_harness (CONTRACT V1): operaciones formales host↔arnés;
+        el puente legacy.py mapea las acciones de ESTE cerebro → operaciones.
+      - A2A /api/agent/execute: puerta del Creative Engine (prod_svc).
 
 Cadena de inteligencia (siempre degrada con gracia, nunca rompe el chat):
 1. NVIDIA NIM (kimi-k3 → deepseek-v4.1-flash → kimi-k2.6) con failover
@@ -19,7 +34,7 @@ import re
 
 from services import gemini_client, niches as niches_svc, nvidia_client
 
-log = logging.getLogger("agent")
+log = logging.getLogger("general_agent")
 
 VALID_ACTIONS = ("create_video", "create_niche", "delete_niche", "delete_project",
                  "cleanup_failed", "list_projects", "list_niches",
@@ -29,7 +44,7 @@ VALID_PLATFORMS = {"youtube", "tiktok", "instagram", "facebook"}
 
 # ─────────────────────────── el cerebro: qué ES esta fábrica ──────────────
 SYSTEM_BRAIN = (
-    "Eres VÓRTICE, el agente de YT AUTOMATION v2 — una fábrica REAL de videos "
+    "Eres el AGENTE GENERAL de YT AUTOMATION v2 — una fábrica REAL de videos "
     "para YouTube/TikTok que corre en la máquina del usuario con coste $0.\n"
     "Cómo funciona la fábrica (estäla siempre presente al responder):\n"
     "• Proyectos: cada video es un proyecto con estados draft → processing "
@@ -76,7 +91,7 @@ SYSTEM_BRAIN = (
 )
 
 _HELP_TEXT = (
-    "Soy VÓRTICE 🤖 — entiendo toda la fábrica y ejecuto por ti:\n"
+    "Soy el Agente General 🤖 — entiendo toda la fábrica y ejecuto por ti:\n"
     "🎬 **Crear video**: «crea un video sobre el imperio romano»\n"
     "🗂️ **Nichos**: «crea un nicho de finanzas», «¿qué nichos tengo?», "
     "«borra el nicho Tecnología»\n"
@@ -202,7 +217,7 @@ async def _plan_nvidia(message: str, history: list[dict], system: str,
 
 
 async def _plan_gemini(message: str, history: list[dict], system: str) -> dict:
-    convo = "\n".join(f"{'Usuario' if h.get('role') == 'user' else 'VÓRTICE'}: "
+    convo = "\n".join(f"{'Usuario' if h.get('role') == 'user' else 'Agente'}: "
                       f"{h.get('text', '')[:300]}" for h in history[-6:])
     prompt = (f"Conversación previa:\n{convo}\n\n" if convo else "") + \
              f"Mensaje nuevo del usuario: «{message}»\n\nDevuelve SOLO el JSON."
@@ -245,6 +260,8 @@ def _extract_json(text: str) -> str:
     raise ValueError("JSON sin cerrar")
 
 
+# Regex local: la variante «vórtice, …» queda como ALIAS LEGACY tolerado
+# (músculo-memoria de usuarios previos a INT-028; no es marca activa).
 _RE_CREATE = re.compile(
     r"^(?:oye\s+)?(?:v[oó]rtice[,:]\s*)?(?:crea|créame|creame|haz|has|genera|genérame|"
     r"quiero|dame|fabrica|produce)\s+(?:un|una|el|un\s+nuevo)?\s*(?:video|vídeo|short|"

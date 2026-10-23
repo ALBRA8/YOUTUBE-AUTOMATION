@@ -119,7 +119,7 @@ RENDER_FFMPEG_TIMEOUT = float(os.getenv("RENDER_FFMPEG_TIMEOUT", "900"))
 RENDER_X264_PRESET = os.getenv("RENDER_X264_PRESET", "veryfast").strip()
 RENDER_CRF = int(os.getenv("RENDER_CRF", "20"))
 
-# ── NVIDIA NIM (agente VÓRTICE · OpenAI-compatible) ───────────────────────
+# ── NVIDIA NIM (Agente General · cerebros · OpenAI-compatible) ── ───────────────────────
 # kimi-k3: planificación del agente, entiende el proyecto y ejecuta acciones
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()
 NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "moonshotai/kimi-k3").strip()

@@ -46,7 +46,9 @@ FORBIDDEN_MODULES = {
     "services.orchestrator", "orchestrator", "services.scheduler", "scheduler",
     "services.flow_jobs", "flow_jobs", "services.youtube_publish",
     "pipeline", "services.production_json", "services.mcp_server",
-    "services.agent", "fastapi", "uvicorn",
+    "services.agent",  # retirado en INT-028 (se conserva en la denylist)
+    "services.general_agent",  # INT-028: cerebro unificado del chat
+    "fastapi", "uvicorn",
 }
 
 

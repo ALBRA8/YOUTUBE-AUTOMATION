@@ -185,8 +185,14 @@ BATERIAS = [
                                  # system-owned metadata (16)
     "test_harness.py",           # YOUTUBE HARNESS CONTRACT V1: contrato
                                  # estricto, permisos, libro idempotente,
-                                 # estados §9, legacy VÓRTICE, auth/CSRF
-                                 # heredados sin bypass (~55)
+                                 # estados §9, puente legacy del chat
+                                 # (INT-028), auth/CSRF heredados (~55)
+    "test_int028_general_agent.py",  # INT-028: absorción del agente —
+                                 # agent.py RETIRADO, services/general_agent.py
+                                 # es el cerebro único (API pública idéntica:
+                                 # plan/execute/M9), sin marca VÓRTICE activa,
+                                 # puente AGENT_ACTION_TO_OPERATION consistente
+                                 # con VALID_ACTIONS, /api/chat intacto (~50)
     "test_flow_batchexecute.py", # FLOW START FRAME F1 (ext 2.6.0): observación
                                  # PASIVA de batchexecute (WuwhI/eb1hJf/
                                  # jwpduf/as29s), Start Frame como huella fp,

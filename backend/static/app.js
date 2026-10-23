@@ -89,7 +89,7 @@ function renderHome() {
     ${S.demo ? `<div class="demo-banner">⚠️ Modo DEMO — no detecto el backend en :8000. Arranca el servidor o los datos son de muestra.</div>` : ''}
     <div class="agent-banner" onclick="nav('agent')">
       <div class="ab-ico">🤖</div>
-      <div class="ab-txt"><b>NUEVO · Agente VÓRTICE</b>
+      <div class="ab-txt"><b>Agente General</b>
         <small>Habla con tu fábrica: «crea un video sobre el imperio romano» y listo — el motor produce todo.</small></div>
       <button class="btn primary small">Probar →</button>
     </div>
@@ -1284,14 +1284,14 @@ async function doTrends() {
   }
 }
 
-/* ── vista: AGENTE (VÓRTICE v3 · v2.12 — entiende la fábrica y ejecuta) ── */
+/* ── vista: AGENTE (Agente General · INT-028 absorbe VÓRTICE — entiende la fábrica y ejecuta) ── */
 const engineTag = e => !e || e === 'local' ? ''
   : e === 'confirm' ? ' · ejecutado ✓'
   : e === 'gemini' ? ' · Gemini'
   : ' · ' + String(e).replace(/^nvidia:/, '').split('/').pop();
 
 function renderAgent() {
-  $('#greet').innerHTML = `Agente VÓRTICE 🤖<small id="greet-sub">Entiende tu fábrica: pregunta, crea nichos, lanza videos, limpia fallidos</small>`;
+  $('#greet').innerHTML = `Agente General 🤖<small id="greet-sub">Entiende tu fábrica: pregunta, crea nichos, lanza videos, limpia fallidos</small>`;
   const msgs = S.chat.map((m, i) => {
     if (m.role === 'user')
       return `<div class="chat-msg user"><div class="bubble">${m.img ? `<img class="chat-img" src="${m.img}" alt="adjunto">` : ''}${mmd(m.text)}</div><div class="who">Tú</div></div>`;
@@ -1303,9 +1303,9 @@ function renderAgent() {
     const confirmUI = m.pending && !m.confirmDone
       ? `<div class="chat-confirm"><button class="btn small danger" onclick="resolveConfirm(${i},true)">✓ Sí, hacerlo</button>
          <button class="btn small ghost" onclick="resolveConfirm(${i},false)">✕ Cancelar</button></div>` : '';
-    return `<div class="chat-msg bot"><div class="bubble">${mmd(m.text)}${confirmUI}${extra}</div><div class="who">VÓRTICE${engineTag(m.engine)}</div></div>`;
+    return `<div class="chat-msg bot"><div class="bubble">${mmd(m.text)}${confirmUI}${extra}</div><div class="who">AGENTE${engineTag(m.engine)}</div></div>`;
   }).join('') + (S.chatBusy
-    ? `<div class="chat-msg bot"><div class="bubble typing">VÓRTICE está pensando<span class="dots">…</span></div></div>` : '');
+    ? `<div class="chat-msg bot"><div class="bubble typing">El agente está pensando<span class="dots">…</span></div></div>` : '');
   const chips = ['¿Qué puedes hacer?',
                  'Resume el estado de mis proyectos',
                  '¿Qué nichos tengo?',
@@ -1792,7 +1792,7 @@ async function refreshAll() {
     $('#greet-sub').textContent = 'MODO DEMO — inicia el servidor backend';
   }
   if (!S.chat.length) {
-    S.chat = [{ role: 'bot', text: '¡Hola! Soy VÓRTICE 🤖, el agente de esta fábrica. '
+    S.chat = [{ role: 'bot', text: '¡Hola! Soy el Agente General 🤖, el cerebro de esta fábrica. '
       + 'Pídeme lo que quieras en lenguaje natural:\n'
       + '• «crea un video sobre el imperio romano»\n'
       + '• «muéstrame mis proyectos»\n'

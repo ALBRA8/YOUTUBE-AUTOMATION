@@ -40,7 +40,8 @@ backend/services/youtube_harness/
     knowledge.py     # conocimiento estructurado del PUESTO (§10-§12)
     adapter.py       # fachada fina sobre la fábrica existente
     harness.py       # ejecutor + libro de ejecuciones idempotente (kv)
-    legacy.py        # puente declarativo VÓRTICE → arnés (retiro futuro)
+    legacy.py        # puente declarativo cerebro-chat → arnés (VÓRTICE
+                     #   retirado en INT-028; hoy services/general_agent.py)
     api.py           # router HTTP /api/harness/v1 (§16-§18)
 ```
 
@@ -56,7 +57,7 @@ Wiring en `main.py` (2 líneas, junto a los mounts): `app.include_router(harness
 | flow_jobs, execution_contract, flow_adaptation, extensión, bridge, leases/watchdog | KEEP_YOUTUBE · DO_NOT_TOUCH estructural | ídem |
 | HANDS V1.0 completo | KEEP_YOUTUBE · DO_NOT_TOUCH | no se mueve ni se reimplementa; el host no conoce sus internos |
 | `backend/database.py` | KEEP_YOUTUBE | reutilizado (kv = libro de ejecuciones) |
-| `backend/services/agent.py` (VÓRTICE) | **LEGACY** | trabajador actual; conocimiento extraído a `knowledge.py`; comportamiento de `/api/chat` = DO_NOT_TOUCH (tests M9) |
+| `backend/services/general_agent.py` (Agente General, ex-VÓRTICE) | **UNIFICADO (INT-028)** | agent.py RETIRADO y absorbido íntegro; API pública idéntica (plan/execute/M9); comportamiento de `/api/chat` = DO_NOT_TOUCH (tests M9) |
 | `/api/chat` + dashboard | DO_NOT_TOUCH | contrato needs_confirm/pending intacto |
 | `/api/agent/execute` (A2A) | KEEP_YOUTUBE | puerta previa del Creative Engine; el arnés la complementa, no la reemplaza |
 | `/api/harness/v1` (nuevo) | SHARED_CONTRACT | única superficie nueva |
@@ -82,7 +83,7 @@ Wiring en `main.py` (2 líneas, junto a los mounts): `app.include_router(harness
 
 ## 7. Conocimiento (§10-§12)
 
-`knowledge.py` estructura lifecycle, objetos de dominio, semántica de producción (crear/lanzar/verificar/recuperar/QA/publicar), semántica de seguridad (reglas M9, confirmación host-side, idempotencia de publicación) y taxonomía de errores (VALIDATION/PROVIDER_FAILURE/ASSET_INVALID/WATCHDOG/…). NO es copia de SYSTEM_BRAIN: la identidad de VÓRTICE no migra; los catálogos vivos se consultan por operaciones. Prueba conceptual (§12): `VÓRTICE eliminado + host nuevo + arnés = misma capacidad operacional` — `legacy.equivalence_report()` la documenta (5 acciones cubiertas, el resto es interfaz del trabajador o administración de catálogo fuera del contrato v1).
+`knowledge.py` estructura lifecycle, objetos de dominio, semántica de producción (crear/lanzar/verificar/recuperar/QA/publicar), semántica de seguridad (reglas M9, confirmación host-side, idempotencia de publicación) y taxonomía de errores (VALIDATION/PROVIDER_FAILURE/ASSET_INVALID/WATCHDOG/…). NO es copia de SYSTEM_BRAIN: la identidad de VÓRTICE no migra; los catálogos vivos se consultan por operaciones. Prueba conceptual (§12): `VÓRTICE eliminado + host nuevo + arnés = misma capacidad operacional` — **EJECUTADA en INT-028**: `services/general_agent.py` absorbió a VÓRTICE (mismo contrato de /api/chat, tests M9 verdes) y `legacy.equivalence_report()` documenta el puente (5 acciones cubiertas, el resto es interfaz del trabajador o administración de catálogo fuera del contrato v1).
 
 ## 8. Batería y verificación
 
@@ -91,6 +92,6 @@ Wiring en `main.py` (2 líneas, junto a los mounts): `app.include_router(harness
 ## 9. Límites honestos
 
 - El libro de ejecuciones guarda el snapshot del resultado; el seguimiento en vivo de un lanzamiento se hace con `youtube.project_status` (o SSE interna del job) — el arnés no duplica el broker.
-- `create` no lanza: crear y lanzar son operaciones separadas (coordinación explícita del host; VÓRTICE las encadenaba).
+- `create` no lanza: crear y lanzar son operaciones separadas (coordinación explícita del host; el chat las encadena).
 - `submit_production` con `constraints.launch=true` exige permiso `youtube.production.create` (el launch implícito hereda la política de preflight/CONFIG_* del motor).
 - El contrato v1 no expone gestión de plantillas de nicho (crear/borrar) ni publicación programada compleja: administración del puesto, fuera de alcance mínimo.
