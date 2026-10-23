@@ -71,6 +71,18 @@ BATERIAS = [
                                  # antes de gastar tokens, fallback .env al
                                  # estado, endpoints /mcp/list-notebooks y
                                  # /pipeline/run sin id a nivel HTTP (~33)
+    "test_int025_google_session.py",  # INT-025/026: sesión Google unificada
+                                 # (google_profile_global) — launcher del Chrome
+                                 # de login con perfil compartido + CDP en
+                                 # FLOW_CDP_PORT (launch-auth-browser multi-
+                                 # pestaña flow.google.com + notebooklm),
+                                 # captura de cookies CDP → storage_state.json
+                                 # de notebooklm-py (layouts moderno/legacy),
+                                 # errores estables CHROME_*/PLAYWRIGHT_MISSING/
+                                 # NO_GOOGLE_COOKIES, inyección del perfil en
+                                 # _spawn, endpoints HTTP y contrato UI v2.24.0
+                                 # (botón «Vincular Sesión Google (Login Único)»
+                                 # + dropdown auto-poblado) (~78)
     "test_int024_assembler.py",  # INT-024: Asset Harvester & FFmpeg Video
                                  # Assembler — Stage 3.5 harvest a rutas
                                  # deterministas + manifest estricto validado,

@@ -32,9 +32,11 @@ import os
 import re
 import shlex
 import shutil
+import subprocess
 import sys
 import time
 from collections import deque
+from pathlib import Path
 from typing import Any
 from urllib import request as _urlreq
 
@@ -305,6 +307,13 @@ class MCPClientManager:
         if service == "google-flow":
             # §2 mandato: puerto/directorio de sesión explícitos y coherentes
             env.setdefault("FLOW_CDP_PORT", str(_cfg("FLOW_CDP_PORT", 9333)))
+            # INT-025 sesión unificada: expone el perfil global al bridge —
+            # si su chrome.js soporta un user-data-dir custom lo usa y con
+            # esto Flow comparte el MISMO perfil Chrome del login humano.
+            gpg = str(_cfg("GOOGLE_PROFILE_GLOBAL", "") or "")
+            if gpg:
+                env.setdefault("GOOGLE_PROFILE_GLOBAL", gpg)
+                env.setdefault("FLOW_USER_DATA_DIR", gpg)
         else:
             home = str(_cfg("NOTEBOOKLM_HOME", "") or "").strip()
             if home:
@@ -401,13 +410,15 @@ class MCPClientManager:
                     _cfg("NOTEBOOKLM_PROBE_TOOL", "list_notebooks") or "").strip():
                 warn.append(f"notebook_id ausente; '{tool}' es de listado y no lo necesita")
             else:
-                # HOTFIX INT-023.4: fallo DETERMINISTA con código estable en vez
-                # del TOOL_ERROR críptico del servidor ('Missing required argument').
+                # HOTFIX INT-023.4 + INT-025: fallo DETERMINISTA con código
+                # estable en vez del TOOL_ERROR críptico del servidor.
                 raise MCPManagerError(
                     f"la tool '{tool}' requiere notebook_id y está ausente "
                     f"(arguments['{id_key}'], payload y .env NOTEBOOKLM_NOTEBOOK_ID "
-                    f"vacíos). Usa «📋 Listar mis Notebooks» del panel para elegir "
-                    f"uno con 1 click o pégalo en «Notebook ID activo».",
+                    f"vacíos). Conecta NotebookLM en el panel y elige tu notebook "
+                    f"del dropdown «Notebook activo» (se rellena solo al conectar); "
+                    f"si la sesión Google no es válida usa «🔑 Vincular Sesión "
+                    f"Google (Login Único)» + «📥 Capturar sesión».",
                     "MISSING_NOTEBOOK_ID")
         conn = self._conns.get(service)
         if not conn or conn.state != ST_CONNECTED or not conn.proc or conn.proc.returncode is not None:
@@ -518,6 +529,240 @@ class MCPClientManager:
             return str((await self.list_notebooks()).get("first_id") or "")
         except MCPManagerError:
             return ""
+
+    # ── 🔑 sesión Google unificada (INT-025) ──
+    # UN login manual humano en un Chrome REAL con user-data-dir compartido
+    # (google_profile_global) autentica ambos servidores MCP:
+    #   · google-flow  : GoogleFlowMCP hace connectOverCDP al puerto
+    #     GOOGLE_LOGIN_CDP_PORT (= FLOW_CDP_PORT) → usa ESTE Chrome/sesión.
+    #   · notebooklm   : capture_google_session() extrae las cookies .google.com
+    #     del MISMO Chrome por CDP y las escribe en el storage_state.json que
+    #     notebooklm-py lee (estructura verificada del wheel 0.8.5:
+    #     <home>/profiles/<profile>/storage_state.json, fallback legacy <home>/).
+    _CHROME_CANDIDATES: tuple[str, ...] = (
+        "google-chrome-stable", "google-chrome", "chrome", "chromium",
+        "chromium-browser", "microsoft-edge", "brave-browser")
+
+    def _find_chrome_bin(self) -> str:
+        """Binario Chrome real para el login humano (parcheable en tests vía
+        MCP_LOGIN_CHROME_BIN / shutil.which)."""
+        override = str(_cfg("MCP_LOGIN_CHROME_BIN", "") or "").strip()
+        if override:
+            if os.path.isfile(override) or shutil.which(override):
+                return override
+            raise MCPManagerError(
+                f"MCP_LOGIN_CHROME_BIN='{override}' no existe en esta máquina",
+                "CHROME_NOT_FOUND")
+        for cand in self._CHROME_CANDIDATES:
+            w = shutil.which(cand)
+            if w:
+                return w
+        # rutas típicas de escritorio (Windows / macOS)
+        import platform
+        if platform.system() == "Windows":
+            pf = os.environ.get("PROGRAMFILES", r"C:\Program Files")
+            pf86 = os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")
+            lapp = os.environ.get("LOCALAPPDATA", "")
+            for p in (
+                    rf"{pf}\Google\Chrome\Application\chrome.exe",
+                    rf"{pf86}\Google\Chrome\Application\chrome.exe",
+                    rf"{lapp}\Google\Chrome\Application\chrome.exe",
+                    rf"{pf}\Microsoft\Edge\Application\msedge.exe",
+                    rf"{pf}\BraveSoftware\Brave-Browser\Application\brave.exe"):
+                if os.path.isfile(p):
+                    return p
+        elif platform.system() == "Darwin":
+            for p in (
+                    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+                    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+                    "/Applications/Chromium.app/Contents/MacOS/Chromium"):
+                if os.path.isfile(p):
+                    return p
+        raise MCPManagerError(
+            "no se encontró Chrome/Chromium/Edge/Brave en esta máquina — "
+            "instala Google Chrome o fija MCP_LOGIN_CHROME_BIN en backend/.env",
+            "CHROME_NOT_FOUND")
+
+    def _spawn_chrome(self, argv: list[str]) -> int:
+        """Lanza el Chrome de login DESACOPLADO del backend (parcheable):
+        start_new_session → sobrevive al reinicio de uvicorn; el perfil
+        compartido hace el resto (Chrome singleton reenvía a la instancia
+        viva si ya existía). Devuelve el pid."""
+        return subprocess.Popen(
+            argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL, start_new_session=True).pid
+
+    def _nb_storage_paths(self) -> list[Path]:
+        """Rutas candidatas del storage_state.json de notebooklm-py, en orden
+        de precedencia (verificada en el wheel 0.8.5 — paths.py):
+        1) <home>/profiles/<profile>/storage_state.json  (estructura moderna)
+        2) <home>/storage_state.json                     (fallback legacy del
+           perfil 'default'). Nota: el paquete MIGRA legacy→profiles/default
+           al arrancar, por eso si preexistía legacy escribimos legacy."""
+        home = Path(str(_cfg("NOTEBOOKLM_HOME", "") or "").strip() or
+                    Path.home() / ".notebooklm")
+        profile = (str(_cfg("NOTEBOOKLM_PROFILE", "") or "").strip()
+                   or "default")
+        return [home / "profiles" / profile / "storage_state.json",
+                home / "storage_state.json"]
+
+    def nb_storage_state(self) -> dict:
+        """Estado del storage_state.json de notebooklm-py (para la UI)."""
+        paths = self._nb_storage_paths()
+        existing = next((p for p in paths if p.is_file()), None)
+        return {"paths": [str(p) for p in paths],
+                "active": str(existing) if existing else "",
+                "exists": existing is not None,
+                "size_bytes": existing.stat().st_size if existing else 0,
+                "mtime": existing.stat().st_mtime if existing else 0.0}
+
+    async def launch_google_login(self, urls: list[str] | None = None) -> dict:
+        """🔑 Abre (o reutiliza) el Chrome REAL con el perfil global y la URL
+        de login de Google. UNA vez el humano loguea: Flow hereda la sesión
+        (mismo Chrome por CDP) y NotebookLM la captura («📥 Capturar sesión»).
+        urls: pestañas a abrir (default = [GOOGLE_LOGIN_URL]). El endpoint
+        «Vincular Sesión Google (Login Único)» pasa flow.google.com +
+        notebooklm.google.com para que el único login cubra ambos products."""
+        port = int(_cfg("GOOGLE_LOGIN_CDP_PORT", 9333))
+        profile = Path(str(_cfg("GOOGLE_PROFILE_GLOBAL", "")))
+        profile.mkdir(parents=True, exist_ok=True)
+        pages = [u.strip() for u in (urls or []) if u and u.strip()] or [
+            str(_cfg("GOOGLE_LOGIN_URL", "https://accounts.google.com/"))]
+        already_up = await self._cdp_up(port)
+        pid = None
+        if not already_up:
+            chrome = self._find_chrome_bin()
+            argv = [chrome,
+                    f"--user-data-dir={profile}",
+                    f"--remote-debugging-port={port}",
+                    "--no-first-run", "--no-default-browser-check",
+                    "--disable-session-crashed-bubble"] + pages
+            try:
+                pid = self._spawn_chrome(argv)
+            except OSError as e:
+                raise MCPManagerError(f"no se pudo lanzar Chrome: {e}",
+                                      "CHROME_SPAWN_FAILED") from e
+        st = self.nb_storage_state()
+        return {"ok": True, "already_up": already_up, "pid": pid,
+                "cdp_port": port,
+                "profile_dir": str(profile),
+                "login_url": pages[0],
+                "pages": pages,
+                "notebooklm_storage": st}
+
+    async def google_login_status(self) -> dict:
+        """Estado de la sesión unificada (polling barato de la UI)."""
+        port = int(_cfg("GOOGLE_LOGIN_CDP_PORT", 9333))
+        profile = Path(str(_cfg("GOOGLE_PROFILE_GLOBAL", "")))
+        out = {"cdp_port": port,
+               "chrome_up": await self._cdp_up(port),
+               "profile_dir": str(profile),
+               "profile_exists": profile.is_dir(),
+               "flow_cdp_port": int(_cfg("FLOW_CDP_PORT", 9333)),
+               "shared_with_flow": port == int(_cfg("FLOW_CDP_PORT", 9333)),
+               "notebooklm_storage": self.nb_storage_state()}
+        return out
+
+    async def _cdp_fetch_google_cookies_impl(self, port: int) -> list[dict]:
+        """Extrae cookies de dominios Google del Chrome de login vía
+        Playwright connectOverCDP (import diferido: solo existe en máquinas
+        con notebooklm-py[browser] — en el sandbox se parchea). Corre en
+        thread porque Playwright sync no puede vivir en el loop del backend."""
+        from playwright.sync_api import sync_playwright  # noqa: PLC0415
+
+        def _job() -> list[dict]:
+            with sync_playwright() as p:
+                browser = p.chromium.connect_over_cdp(
+                    f"http://127.0.0.1:{port}")
+                try:
+                    cookies: list[dict] = []
+                    for ctx in browser.contexts:
+                        for c in ctx.cookies():
+                            cookies.append({
+                                "name": c.get("name", ""),
+                                "value": c.get("value", ""),
+                                "domain": c.get("domain", ""),
+                                "path": c.get("path", "/"),
+                                "expires": c.get("expires", -1),
+                                "httpOnly": bool(c.get("httpOnly", False)),
+                                "secure": bool(c.get("secure", False)),
+                            })
+                    return cookies
+                finally:
+                    browser.close()
+        return await asyncio.to_thread(_job)
+
+    @staticmethod
+    def _filter_google_cookies(cookies: list[dict]) -> list[dict]:
+        """Solo cookies de dominios Google con name+value+domain (el
+        storage_state de Playwright exige esas tres claves)."""
+        out: list[dict] = []
+        seen: set[tuple] = set()
+        for c in cookies or []:
+            dom = str(c.get("domain") or "")
+            if "google.com" not in dom and "gstatic.com" not in dom:
+                continue
+            if not (c.get("name") and c.get("value") and dom):
+                continue
+            key = (c["name"], dom, c.get("path", "/"))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"name": c["name"], "value": c["value"],
+                        "domain": dom, "path": c.get("path", "/"),
+                        "expires": c.get("expires", -1),
+                        "httpOnly": bool(c.get("httpOnly", False)),
+                        "secure": bool(c.get("secure", True))})
+        return out
+
+    async def capture_google_session(self) -> dict:
+        """📥 Captura las cookies Google del Chrome de login (CDP) y las
+        escribe en el storage_state.json de notebooklm-py → el MCP de
+        NotebookLM autentica con EL MISMO login que Flow."""
+        port = int(_cfg("GOOGLE_LOGIN_CDP_PORT", 9333))
+        if not await self._cdp_up(port):
+            raise MCPManagerError(
+                f"el Chrome de login no responde en el puerto CDP {port} — "
+                "pulsa primero «🔑 Vincular Sesión Google (Login Único)» "
+                "y loguéate",
+                "CHROME_NOT_UP")
+        try:
+            raw = await self._cdp_fetch_google_cookies_impl(port)
+        except ImportError as e:
+            raise MCPManagerError(
+                "Playwright no está disponible en el backend — instala con: "
+                'uv tool install "notebooklm-py[browser]" (o pip install '
+                "playwright && playwright install chromium)", "PLAYWRIGHT_MISSING") from e
+        cookies = self._filter_google_cookies(raw)
+        if not cookies:
+            raise MCPManagerError(
+                "el Chrome de login no tiene cookies de Google todavía — "
+                "completa el login humano y reintenta la captura",
+                "NO_GOOGLE_COOKIES")
+        state = {"cookies": cookies,
+                 "origins": [],
+                 "captured_at": time.time(),
+                 "source": "google_profile_global"}
+        paths = self._nb_storage_paths()
+        pre = [p for p in paths if p.is_file()]
+        targets = pre if pre else paths  # respeta el layout ya existente
+        written: list[str] = []
+        for p in targets:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps(state, ensure_ascii=False, indent=1),
+                         encoding="utf-8")
+            try:
+                os.chmod(p, 0o600)
+            except OSError:
+                pass
+            written.append(str(p))
+        log.info("[google-login] storage_state capturado: %d cookies → %s",
+                 len(cookies), ", ".join(written))
+        return {"ok": True, "cookies": len(cookies),
+                "storage_paths": written,
+                "chrome_up": True, "cdp_port": port}
+
 
     # ── helpers ──
     def _allowed_tools(self, service: str) -> set[str] | None:

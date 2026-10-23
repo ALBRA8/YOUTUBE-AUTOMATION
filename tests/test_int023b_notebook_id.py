@@ -123,7 +123,8 @@ async def execute_tests():
             check("notebook_query sin id → MISSING_NOTEBOOK_ID",
                   e.code == "MISSING_NOTEBOOK_ID"
                   and "notebook_query" in str(e)
-                  and "Listar mis Notebooks" in str(e), (e.code, str(e)[:120]))
+                  and "Notebook activo" in str(e)
+                  and "Vincular Sesión Google" in str(e), (e.code, str(e)[:120]))
         # inyección por param (Stage 1 del orquestador)
         r = await m.execute("notebooklm", "notebook_query", {"query": "x"},
                             notebook_id="nbquery01")
@@ -321,9 +322,10 @@ async def orchestrator_tests():
         check("código PRE_FLIGHT_MISSING_NOTEBOOK_ID",
               snap["error_code"] == "PRE_FLIGHT_MISSING_NOTEBOOK_ID",
               snap["error_code"])
-        check("detalle pide usar «Listar mis Notebooks»",
-              "Listar mis Notebooks" in (snap["error_detail"] or ""),
-              snap["error_detail"][:120])
+        check("detalle apunta al dropdown auto + Vincular Sesión Google",
+              "Notebook activo" in (snap["error_detail"] or "")
+              and "Vincular Sesión Google" in (snap["error_detail"] or ""),
+              snap["error_detail"][:160])
         check("0 tokens: el generador de guion NO se llamó", called["n"] == 0,
               called["n"])
         check("sin llamadas notebooklm (nunca llegó a Stage 1)",

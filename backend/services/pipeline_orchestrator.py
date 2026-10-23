@@ -493,9 +493,12 @@ class PipelineOrchestrator:
                     self._fail(run, "PRE_FLIGHT_MISSING_NOTEBOOK_ID",
                                "notebook_id ausente en la UI y en .env, y el auto-"
                                "descubrimiento (list tool) no devolvió notebooks. "
-                               "Usa «📋 Listar mis Notebooks» del panel MCP para "
-                               "elegir uno con 1 click, pégalo en «Notebook ID "
-                               "activo», o fija NOTEBOOKLM_NOTEBOOK_ID en backend/.env.")
+                               "Conecta NotebookLM en el panel MCP — el dropdown "
+                               "«Notebook activo» se rellena SOLO con tus notebooks "
+                               "y eliges con 1 click —, o fija NOTEBOOKLM_NOTEBOOK_ID "
+                               "en backend/.env. Si el badge está rojo de sesión: "
+                               "«🔑 Vincular Sesión Google (Login Único)» + «📥 "
+                               "Capturar sesión».")
                     return
             self._set_step(run, ST_PREFLIGHT, "ok", pre_detail)
 

@@ -1903,6 +1903,56 @@ async def mcp_list_notebooks(body: dict):
         raise HTTPException(status, f"[{e.code}] {e}") from e
 
 
+# ─────────── Sesión Google unificada (INT-025) · google_profile_global ──
+@app.post("/api/mcp/launch-auth-browser")
+async def mcp_launch_auth_browser():
+    """🔑 «Vincular Sesión Google (Login Único)» — lanza el Chrome REAL con
+    el perfil persistente COMPARTIDO (google_profile_global) y CDP en
+    GOOGLE_LOGIN_CDP_PORT (= FLOW_CDP_PORT 9333), abriendo
+    https://flow.google.com/ + NotebookLM (GOOGLE_LOGIN_PAGES).
+    Si ya hay Chrome vivo en ese puerto NO lo relanza (already_up=true):
+    el singleton del perfil reenvía la petición a la instancia existente y
+    el flujo humano continúa en su ventana. Tras loguearse, «🔄 Refrescar
+    estado» o «🧪 Test Pipeline» validan las cookies y ponen los badges
+    green (preflight de sesión §2)."""
+    try:
+        return await _mcpm.manager.launch_google_login(
+            list(getattr(config, "GOOGLE_LOGIN_PAGES", []) or []) or None)
+    except _mcpm.MCPManagerError as e:
+        raise HTTPException(502, f"[{e.code}] {e}") from e
+
+
+@app.post("/api/mcp/login-google")
+async def mcp_login_google():
+    """🔑 Lanza (o reutiliza) el Chrome REAL con el user-data-dir global
+    (google_profile_global) abierto en el login de Google. Un solo login
+    humano: Flow hereda la sesión por CDP (mismo Chrome/puerto) y NotebookLM
+    la captura con «📥 Capturar sesión»."""
+    try:
+        return await _mcpm.manager.launch_google_login()
+    except _mcpm.MCPManagerError as e:
+        raise HTTPException(502, f"[{e.code}] {e}") from e
+
+
+@app.get("/api/mcp/login-google")
+async def mcp_login_google_status():
+    """Estado de la sesión unificada: Chrome CDP arriba/abajo, perfil
+    compartido, y storage_state de NotebookLM (ruta activa/existencia)."""
+    return await _mcpm.manager.google_login_status()
+
+
+@app.post("/api/mcp/capture-google-session")
+async def mcp_capture_google_session():
+    """📥 Extrae las cookies Google del Chrome de login (CDP) y las escribe
+    en el storage_state.json de notebooklm-py → un login manual cubre ambos
+    MCP. Errores estables: CHROME_NOT_UP / PLAYWRIGHT_MISSING /
+    NO_GOOGLE_COOKIES."""
+    try:
+        return await _mcpm.manager.capture_google_session()
+    except _mcpm.MCPManagerError as e:
+        raise HTTPException(502, f"[{e.code}] {e}") from e
+
+
 # ─────────────── Pipeline Orchestrator (INT-023) · NotebookLM → Agent → Flow ──
 # Coordina las 3 etapas con mcp_manager sin tocar agent.py ni script_gen
 # (regla del mandato: generación de prompts/blueprints INTACTA). Pre-flight

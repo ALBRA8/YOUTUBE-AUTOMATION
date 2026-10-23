@@ -44,6 +44,41 @@ NOTEBOOKLM_ID_KEY = os.getenv("NOTEBOOKLM_ID_KEY", "notebook_id").strip()
 NOTEBOOKLM_NOTEBOOK_ID = os.getenv("NOTEBOOKLM_NOTEBOOK_ID", "").strip()
 # Carpeta de perfiles de notebooklm-py (vacío = ~/.notebooklm).
 NOTEBOOKLM_HOME = os.getenv("NOTEBOOKLM_HOME", "").strip()
+# Perfil activo de notebooklm-py (vacío = "default"; estructura verificada:
+# <home>/profiles/<profile>/storage_state.json con fallback legacy <home>/).
+NOTEBOOKLM_PROFILE = os.getenv("NOTEBOOKLM_PROFILE", "").strip()
+
+# ── 🔑 Sesión Google unificada (INT-025) — google_profile_global ──────────
+# UN solo login manual humano cubre AMBOS servidores MCP:
+#   · Google Flow MCP  → el Chrome de login corre con --remote-debugging-port=
+#     GOOGLE_LOGIN_CDP_PORT (= FLOW_CDP_PORT), y GoogleFlowMCP hace
+#     connectOverCDP a ESE Chrome (patrón verificado del bridge), con lo que
+#     hereda la sesión del perfil compartido.
+#   · NotebookLM MCP   → tras el login, «📥 Capturar sesión» extrae las
+#     cookies .google.com del MISMO Chrome vía CDP y las escribe en el
+#     storage_state.json que notebooklm-py usa para autenticar.
+# User-data-dir compartido (default: backend/data/google_profile_global).
+GOOGLE_PROFILE_GLOBAL = Path(os.getenv(
+    "GOOGLE_PROFILE_GLOBAL", str(DATA_DIR / "google_profile_global")))
+# URL que abre el Chrome de login (el continue deja también la cookie de
+# NotebookLM lista y facilita el flujo humano).
+GOOGLE_LOGIN_URL = os.getenv(
+    "GOOGLE_LOGIN_URL",
+    "https://accounts.google.com/signinchooser?continue="
+    "https%3A%2F%2Fnotebooklm.google.com%2F").strip()
+# Puerto CDP del Chrome de login global. POR DEFECTO coincide con
+# FLOW_CDP_PORT para que Flow se enganche a este Chrome (sesión compartida).
+GOOGLE_LOGIN_CDP_PORT = int(os.getenv(
+    "GOOGLE_LOGIN_CDP_PORT", str(FLOW_CDP_PORT)))
+# Binario Chrome explícito (vacío = autodetección: chrome/google-chrome/
+# chromium/edge/brave según plataforma).
+MCP_LOGIN_CHROME_BIN = os.getenv("MCP_LOGIN_CHROME_BIN", "").strip()
+# Pestañas que abre el botón «🔑 Vincular Sesión Google (Login Único)»:
+# Flow + NotebookLM — el único login humano cubre ambos productos.
+GOOGLE_LOGIN_PAGES = [u.strip() for u in os.getenv(
+    "GOOGLE_LOGIN_PAGES",
+    "https://flow.google.com/,https://notebooklm.google.com/").split(",")
+    if u.strip()]
 
 # ── Pipeline Orchestrator (INT-023) — NotebookLM → Agent → Flow ──────────
 # Tool de solo-lectura del servidor notebooklm-mcp que extrae la bíblia de

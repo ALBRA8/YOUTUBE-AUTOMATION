@@ -1831,21 +1831,28 @@ function mcpBadgeHTML(state) {
 
 function mcpSvcHTML(svc, label, hint) {
   const isNblm = svc === 'notebooklm';
+  // INT-025 · dropdown dinámico en lugar del input crudo: se autorellena al
+  // conectar notebooklm (mcpListNotebooks silent) o con «🔄 Listar».
+  const nidBlock = isNblm ? `<div class="mcp-row">
+      <label for="nblm-nid-sel">Notebook activo</label>
+      <select id="nblm-nid-sel" onchange="mcpPickNotebook(this.value)">
+        <option value="">— conecta NotebookLM para listar los tuyos —</option>
+        <option value="__manual__">✍️ Pegar ID manual…</option>
+      </select>
+      <input id="nblm-nid" type="text" placeholder="ej. 9a1b2c3d… (vacío = auto-descubrir en [0/3])"
+             value="${esc(localStorage.getItem(NID_KEY) || '')}" oninput="mcpSaveId()"
+             style="display:none; margin-top:6px">
+    </div>
+    <div class="mcp-row btns">
+      <button class="btn ghost" id="nblm-list-btn" onclick="mcpListNotebooks()">🔄 Listar / refrescar notebooks</button>
+    </div>` : '';
   return `<div class="mcp-svc">
     <div class="mcp-svc-head">
       <h3>${label}</h3>
       <span id="mcp-${svc}-badge">${mcpBadgeHTML('disconnected')}</span>
     </div>
     <p class="hintline">${hint}</p>
-    ${isNblm ? `<div class="mcp-row">
-        <label for="nblm-nid">Notebook ID activo</label>
-        <input id="nblm-nid" type="text" placeholder="ej. 9a1b2c3d… (vacío = auto-descubrir en [0/3])"
-               value="${esc(localStorage.getItem(NID_KEY) || '')}" oninput="mcpSaveId()">
-      </div>
-      <div class="mcp-row btns">
-        <button class="btn ghost" id="nblm-list-btn" onclick="mcpListNotebooks()">📋 Listar mis Notebooks</button>
-      </div>
-      <div class="mcp-row" id="nblm-nid-pick" style="display:none"></div>` : ''}
+    ${nidBlock}
     <div class="mcp-row btns">
       <button class="btn" id="mcp-${svc}-connect" onclick="mcpConnect('${svc}')">🔌 Conectar</button>
       <button class="btn ghost" id="mcp-${svc}-disc" onclick="mcpDisconnect('${svc}')">⏏️ Desconectar</button>
@@ -1859,16 +1866,18 @@ function renderMCP() {
   $('#view').innerHTML = `
   <div class="card">
     <h2 class="sec">🔌 MCP Connection Manager <span class="hint">servidores MCP stdio gestionados por el backend</span></h2>
+    ${mcpGsessHTML()}
     ${mcpSvcHTML('google-flow', '🎬 Google Flow MCP',
-      'Servidor tools/GoogleFlowMCP (Node) que maneja un Chrome dedicado con CDP persistente ' +
-      '(puerto <code>FLOW_CDP_PORT</code>, perfil propio). Inicia sesión de Google en ese Chrome UNA vez; ' +
-      'la sesión sobrevive entre ejecuciones. Requiere <code>FLOW_MCP_ENABLED=1</code> en backend/.env.')}
+      'Servidor tools/GoogleFlowMCP (Node). Con el login unificado se engancha POR CDP al Chrome del perfil ' +
+      'compartido (<code>GOOGLE_PROFILE_GLOBAL</code>, puerto <code>FLOW_CDP_PORT</code>) y hereda la sesión — ' +
+      'sin login separado. Sin el login global, usa su Chrome dedicado de siempre. Requiere ' +
+      '<code>FLOW_MCP_ENABLED=1</code> en backend/.env.')}
     ${mcpSvcHTML('notebooklm', '📚 NotebookLM MCP',
-      'Servidor <code>notebooklm-mcp</code> (uv tool install "notebooklm-py[browser]"). Primera vez: corre ' +
-      '<code>notebooklm login</code> (tools/mcp-setup/). El notebookId se valida e inyecta dinámicamente ' +
-      '(aquí → payload; fallback <code>NOTEBOOKLM_NOTEBOOK_ID</code> en backend/.env). Usa «📋 Listar mis ' +
-      'Notebooks» para elegirlo con 1 click; si lo dejas vacío, el pre-flight [0/3] intenta auto-descubrirlo ' +
-      'y, si no puede, aborta con <code>PRE_FLIGHT_MISSING_NOTEBOOK_ID</code>.')}
+      'Servidor <code>notebooklm-mcp</code> (uv tool install "notebooklm-py[browser]"). Autenticación: ' +
+      '«🔑 Login Google» + «📥 Capturar sesión» (arriba) escribe el <code>storage_state.json</code> desde el ' +
+      'MISMO login — o <code>notebooklm login</code> clásico. El notebook se elige del DROPDOWN (se rellena ' +
+      'solo al conectar); si lo dejas vacío, el pre-flight [0/3] intenta auto-descubrirlo y, si no puede, ' +
+      'aborta con <code>PRE_FLIGHT_MISSING_NOTEBOOK_ID</code>.')}
     <div class="mcp-svc" id="pipe-card">
       <div class="mcp-svc-head">
         <h3>🚀 Pipeline completo (NotebookLM → Agente → Flow)</h3>
@@ -1907,43 +1916,138 @@ function renderMCP() {
     <pre class="mcp-log" id="mcp-log">Estado en vivo…</pre>
   </div>`;
   mcpRefresh();
+  gsessRefresh(true);   // INT-025 · estado de la sesión unificada sin ruido
 }
 
 function mcpSaveId() { const el = $('#nblm-nid'); if (el) localStorage.setItem(NID_KEY, el.value.trim()); }
 function mcpNid() { const el = $('#nblm-nid'); return el ? el.value.trim() : (localStorage.getItem(NID_KEY) || ''); }
 
-// HOTFIX INT-023.4 · «📋 Listar mis Notebooks»: llama a la tool de listado del
-// MCP (notebook_list / list_notebooks) vía el backend y pinta un dropdown para
-// fijar el notebook activo con 1 click — fin de copiar UUIDs desde la URL.
-async function mcpListNotebooks() {
-  const btn = $('#nblm-list-btn'), zone = $('#nblm-nid-pick');
+/* ══ INT-025 · SESIÓN GOOGLE UNIFICADA (google_profile_global) ══════════
+   Un login manual humano → ambos MCP:
+   · 🔑 Login Google: Chrome REAL con user-data-dir compartido + CDP en
+     FLOW_CDP_PORT → GoogleFlowMCP hace connectOverCDP a ESE Chrome.
+   · 📥 Capturar sesión: cookies .google.com del mismo Chrome →
+     storage_state.json de notebooklm-py (NOTEBOOKLM_HOME/PROFILE).       */
+function mcpGsessHTML() {
+  return `<div class="mcp-svc" id="gsess-card">
+    <div class="mcp-svc-head">
+      <h3>🔑 Sesión Google unificada</h3>
+      <span id="gsess-badge"><span class="mcp-badge mcp-b-gray">SIN VERIFICAR</span></span>
+    </div>
+    <p class="hintline">UN solo login manual: se abre tu Chrome con un perfil compartido
+      (<code>google_profile_global</code>) en el puerto CDP de Flow — Flow lo reutiliza y NotebookLM recibe
+      sus cookies con «📥 Capturar sesión». Nada de scripts .bat, terminales ni logins separados.</p>
+    <div class="mcp-row btns">
+      <button class="btn" id="gsess-login-btn" onclick="gsessLogin()" title="Abre el navegador con tu perfil unificado y las pestañas de Flow y NotebookLM — un único login de Google">🔑 Vincular Sesión Google (Login Único)</button>
+      <button class="btn ghost" id="gsess-capture-btn" onclick="gsessCapture()">📥 Capturar sesión → NotebookLM</button>
+      <button class="btn ghost" onclick="gsessRefresh()">🔄 Refrescar estado</button>
+    </div>
+    <p class="hintline" id="gsess-hint">💡 Haz clic aquí para abrir el navegador con tu perfil unificado,
+      inicia sesión en Google una sola vez, y luego presiona «Refrescar estado» — los badges MCP se
+      pondrán verdes al validar las cookies activas.</p>
+    <div id="gsess-zone"><p class="hintline">Estado: sin verificar — pulsa «🔄 Refrescar estado» o «🔑 Vincular Sesión Google (Login Único)».</p></div>
+  </div>`;
+}
+
+async function gsessLogin() {
+  const btn = $('#gsess-login-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Abriendo navegador…'; }
+  try {
+    const js = await api('/mcp/launch-auth-browser', { method: 'POST', body: {} });
+    const pages = (js.pages || []).length;
+    toast(js.already_up
+      ? 'El Chrome del perfil unificado ya está activo ✅ — inicia sesión en su ventana'
+      : 'Navegador abierto con el perfil unificado 🌐 (' + pages + ' pestañas: Flow + NotebookLM) — inicia sesión UNA vez');
+    await gsessRefresh();
+    await mcpRefresh(true);   // badges MCP al día (verde cuando la sesión valide)
+  } catch (e) { toast('Vincular Sesión Google: ' + e.message, 'err'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '🔑 Vincular Sesión Google (Login Único)'; } }
+}
+
+async function gsessCapture() {
+  const btn = $('#gsess-capture-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Capturando…'; }
+  try {
+    const js = await api('/mcp/capture-google-session', { method: 'POST', body: {} });
+    toast('Sesión capturada ✅ ' + js.cookies + ' cookies de Google → storage_state de NotebookLM');
+    await gsessRefresh();
+    // repuebla el dropdown del notebook con la sesión recién capturada
+    if (S.mcp && (S.mcp.notebooklm || {}).state === 'connected')
+      mcpListNotebooks({ silent: true });
+  } catch (e) { toast('Capturar sesión: ' + e.message, 'err'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '📥 Capturar sesión → NotebookLM'; } }
+}
+
+function gsessApply(js) {
+  const badge = $('#gsess-badge'), zone = $('#gsess-zone');
+  if (!zone) return;
+  const up = !!js.chrome_up;
+  const st = js.notebooklm_storage || {};
+  if (badge) badge.innerHTML = up
+    ? '<span class="mcp-badge mcp-b-green">CHROME ACTIVO</span>'
+    : '<span class="mcp-badge mcp-b-gray">CHROME APAGADO</span>';
+  let h = `<p class="hintline">Chrome CDP (puerto ${js.cdp_port}): ${up ? '✅ arriba — Flow compartirá ESTE Chrome' : '❌ abajo — pulsa «🔑 Login Google»'}` +
+    (js.shared_with_flow ? ' · <b>perfil compartido con Flow</b> (mismo puerto CDP)' : ' · ⚠ puerto distinto de FLOW_CDP_PORT') + `</p>`;
+  h += `<p class="hintline">storage NotebookLM: ${st.exists
+    ? '✅ capturado → <code>' + esc(st.active.split(/[\\\\/]/).pop()) + '</code> (' + (st.size_bytes || 0) + ' bytes)'
+    : '❌ sin storage_state — haz login y «📥 Capturar sesión»'}</p>`;
+  if (js.profile_dir) h += `<p class="hintline">Perfil global: <code>${esc(js.profile_dir)}</code></p>`;
+  zone.innerHTML = h;
+}
+
+async function gsessRefresh(silent) {
+  try {
+    const js = await api('/mcp/login-google');
+    gsessApply(js);
+    return js;
+  } catch (e) { if (!silent) toast('Estado sesión: ' + e.message, 'err'); return null; }
+}
+
+/* Dropdown de notebooks (INT-025): puebla SIEMPRE el select visible; el
+   input #nblm-nid queda como soporte manual (pipeRun sigue leyéndolo). */
+function mcpPopulateNotebooks(nbs) {
+  const sel = $('#nblm-nid-sel');
+  if (!sel) return;
+  const cur = mcpNid();
+  const opts = ['<option value="">— elige notebook —</option>']
+    .concat((nbs || []).map(n =>
+      `<option value="${esc(n.id)}">${esc((n.title || '(sin título)') + ' · ' + n.id.slice(0, 8) + '…')}</option>`))
+    .concat(['<option value="__manual__">✍️ Pegar ID manual…</option>']);
+  sel.innerHTML = opts.join('');
+  const hit = (nbs || []).find(n => n.id === cur);
+  if (cur && hit) { sel.value = cur; const ip = $('#nblm-nid'); if (ip) ip.style.display = 'none'; }
+  else if (cur) { sel.value = '__manual__'; const ip = $('#nblm-nid'); if (ip) ip.style.display = ''; }
+}
+
+async function mcpListNotebooks(opts) {
+  const silent = !!(opts && opts.silent);
+  const btn = $('#nblm-list-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Listando…'; }
   try {
     const js = await api('/mcp/list-notebooks', { method: 'POST', body: {} });
-    if (!zone) return;
     const nbs = js.notebooks || [];
     if (!nbs.length) {
-      zone.style.display = '';
-      zone.innerHTML = '<p class="hintline" style="color:var(--warn)">⚠ La cuenta no devolvió notebooks (¿lista vacía o sin sesión?).</p>';
+      if (!silent) toast('La cuenta no devolvió notebooks (¿lista vacía o sin sesión?)', 'err');
       return;
     }
-    zone.style.display = '';
-    zone.innerHTML = `<label for="nblm-nid-pick-sel">Elige tu notebook (${nbs.length} encontrados) — 1 click lo fija</label>
-      <select id="nblm-nid-pick-sel" onchange="mcpPickNotebook(this.value)">
-        <option value="">— selecciona —</option>
-        ${nbs.map(n => `<option value="${esc(n.id)}">${esc((n.title || '(sin título)') + ' · ' + n.id.slice(0, 8) + '…')}</option>`).join('')}
-      </select>
-      <p class="hintline">Fuente: <code>${esc(js.tool || 'list tool')}</code> del MCP de NotebookLM.</p>`;
-    toast(nbs.length + ' notebooks encontrados — elige uno del dropdown');
-  } catch (e) { toast('Listar notebooks: ' + e.message, 'err'); }
-  finally { if (btn) { btn.disabled = false; btn.textContent = '📋 Listar mis Notebooks'; } }
+    mcpPopulateNotebooks(nbs);
+    if (!silent) toast(nbs.length + ' notebooks listados — elige uno del dropdown');
+  } catch (e) {
+    if (!silent) toast('Listar notebooks: ' + e.message, 'err');
+  }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '🔄 Listar / refrescar notebooks'; } }
 }
 
 function mcpPickNotebook(id) {
+  const el = $('#nblm-nid'), sel = $('#nblm-nid-sel');
+  if (id === '__manual__') {
+    if (el) { el.style.display = ''; el.focus(); }
+    return;
+  }
   if (!id) return;
-  const el = $('#nblm-nid');
-  if (el) { el.value = id; mcpSaveId(); }
-  toast('Notebook ID fijado ✅ ' + id.slice(0, 8) + '… — ya puedes lanzar el pipeline');
+  if (el) { el.value = id; el.style.display = 'none'; mcpSaveId(); }
+  if (sel) sel.value = id;
+  toast('Notebook fijado ✅ ' + id.slice(0, 8) + '… — ya puedes lanzar el pipeline');
 }
 
 function mcpZoneHTML(st) {
@@ -2000,6 +2104,10 @@ async function mcpConnect(svc) {
     const st = await api('/mcp/connect', { method: 'POST', body });
     if (st.state === 'auth_required') toast('Sesión Google no válida — badge rojo con detalle', 'err');
     else toast((svc === 'google-flow' ? 'Google Flow' : 'NotebookLM') + ' conectado ✅');
+    // INT-025 · al conectar NotebookLM: auto-listar y rellenar el dropdown
+    // de notebooks (nombres amigables, 1 click) sin preguntar nada.
+    if (svc === 'notebooklm' && st.state === 'connected')
+      mcpListNotebooks({ silent: true });
   } catch (e) { toast('Conexión: ' + e.message, 'err'); }
   mcpRefresh(true);
 }
