@@ -33,3 +33,12 @@
 - **Estado:** VERIFIED / VIGENTE. Comparación dirigida basada en código real en `06_INTEGRATIONS/INT-019_AGNES_COMPARACION_DIRIGIDA.md` (evaluación inicial: INT-018).
 - **Decisión:** no importar código, dependencias ni componentes de lcy362/agnes-video-generator (MIT). Sus capacidades valiosas ya existen en YOUTUBE-AUTOMATION (checkpoint/reanudación, QA de producto, errores) o quedan registradas como ideas adaptables R1/R2/R3 con decisión separada. Prohibido usarlo como orquestador alternativo o crear un agente editor de vídeo.
 - **Evidencia:** tabla comparativa 6 áreas con anclas archivo:línea de ambos repos; licencia MIT verificada en el clon; cero líneas copiadas; suite canónica en verde tras el fix INT-020.
+
+
+## D-009 — Production Framework común y Blueprints por línea
+- **Estado:** DESIGN DECISION / DOCUMENTED; implementación pendiente de verificación.
+- **Decisión:** YOUTUBE-AUTOMATION organizará múltiples líneas audiovisuales mediante un Production Framework común y un Blueprint especializado por línea. Primer registro: Microdrama (`microdrama_vertical_series_5x60`), Short (`short_vertical_v1`), Short-Form (`short_form_production_v1`) y UGC (`ugc_creator_content_v1`).
+- **Límites:** Creative Engine decide qué crear y produce Creative Specification + Production JSON; YOUTUBE-AUTOMATION ejecuta. Reverse Engineering Engine permanece independiente/transversal. NotebookLM y otras fuentes aportan conocimiento y canon; no sustituyen el Blueprint ni el criterio del usuario.
+- **No hacer:** no crear un motor o agente separado por línea; no forzar todas las líneas a una gramática única; no declarar schemas, selector, runtime o integración como implementados sin evidencia.
+- **Siguiente paso:** formalizar schemas/validación, registro y selector de línea, pruebas de contrato e integración segura con el pipeline existente.
+- **Documento:** `00_MASTER/PRODUCTION_FRAMEWORK_BLUEPRINTS.md`.
