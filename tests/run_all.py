@@ -62,6 +62,15 @@ BATERIAS = [
                                  # contexto inyectado, consistencia de personaje
                                  # @{ref}, PARTIAL_FAILURES + retry SOLO de
                                  # escenas fallidas, endpoints /api/pipeline/* (55)
+    "test_int023b_notebook_id.py", # INT-023.4 HOTFIX: propagación y auto-
+                                 # descubrimiento de notebook_id — parser de
+                                 # list_notebooks, FAIL-FAST MISSING_NOTEBOOK_ID
+                                 # en execute (fin del TOOL_ERROR críptico del
+                                 # servidor), pre-flight [0/3] auto-descubre o
+                                 # aborta con PRE_FLIGHT_MISSING_NOTEBOOK_ID
+                                 # antes de gastar tokens, fallback .env al
+                                 # estado, endpoints /mcp/list-notebooks y
+                                 # /pipeline/run sin id a nivel HTTP (~33)
     "test_int024_assembler.py",  # INT-024: Asset Harvester & FFmpeg Video
                                  # Assembler — Stage 3.5 harvest a rutas
                                  # deterministas + manifest estricto validado,

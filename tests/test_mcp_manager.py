@@ -105,7 +105,10 @@ async def core_tests():
         m3 = await _fresh("nblm", slow_ms="1500")
         await m3.connect("notebooklm")
         try:
-            await m3.execute("notebooklm", "slow", {}, timeout=0.4)
+            # HOTFIX INT-023.4: la tool recibe notebook_id (el fail-fast de id
+            # ausente se prueba en S5 y en test_int023b_notebook_id.py).
+            await m3.execute("notebooklm", "slow", {}, timeout=0.4,
+                             notebook_id="slowid23")
             check("timeout lanza", False)
         except mcpm.MCPManagerError as e:
             check("timeout lanza MCPManagerError", e.code == "TIMEOUT", e.code)
@@ -138,9 +141,14 @@ async def core_tests():
         args = __import__("json").loads(r["text"])
         check("id directo en argumentos respeta y no avisa",
               args.get("notebook_id") == "directo99" and not r.get("warnings"), r)
-        r = await m4.execute("notebooklm", "echo", {})
-        check("sin id en ningún sitio: warning presente",
-              any("notebook_id" in w for w in r.get("warnings", [])), r)
+        # HOTFIX INT-023.4: el warning silencioso pasa a fallo DETERMINISTA con
+        # código estable (fin del TOOL_ERROR críptico del servidor MCP).
+        try:
+            await m4.execute("notebooklm", "echo", {})
+            check("sin id en ningún sitio: MISSING_NOTEBOOK_ID determinista", False)
+        except mcpm.MCPManagerError as e:
+            check("sin id en ningún sitio: MISSING_NOTEBOOK_ID determinista",
+                  e.code == "MISSING_NOTEBOOK_ID" and "echo" in str(e), e.code)
 
         print("\n── S6 · allowlist opcional de tools ──")
         old_tools = config.NOTEBOOKLM_MCP_TOOLS

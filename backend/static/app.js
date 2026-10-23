@@ -1839,9 +1839,13 @@ function mcpSvcHTML(svc, label, hint) {
     <p class="hintline">${hint}</p>
     ${isNblm ? `<div class="mcp-row">
         <label for="nblm-nid">Notebook ID activo</label>
-        <input id="nblm-nid" type="text" placeholder="ej. 9a1b2c3d… (vacío = usar .env)"
+        <input id="nblm-nid" type="text" placeholder="ej. 9a1b2c3d… (vacío = auto-descubrir en [0/3])"
                value="${esc(localStorage.getItem(NID_KEY) || '')}" oninput="mcpSaveId()">
-      </div>` : ''}
+      </div>
+      <div class="mcp-row btns">
+        <button class="btn ghost" id="nblm-list-btn" onclick="mcpListNotebooks()">📋 Listar mis Notebooks</button>
+      </div>
+      <div class="mcp-row" id="nblm-nid-pick" style="display:none"></div>` : ''}
     <div class="mcp-row btns">
       <button class="btn" id="mcp-${svc}-connect" onclick="mcpConnect('${svc}')">🔌 Conectar</button>
       <button class="btn ghost" id="mcp-${svc}-disc" onclick="mcpDisconnect('${svc}')">⏏️ Desconectar</button>
@@ -1862,7 +1866,9 @@ function renderMCP() {
     ${mcpSvcHTML('notebooklm', '📚 NotebookLM MCP',
       'Servidor <code>notebooklm-mcp</code> (uv tool install "notebooklm-py[browser]"). Primera vez: corre ' +
       '<code>notebooklm login</code> (tools/mcp-setup/). El notebookId se valida e inyecta dinámicamente ' +
-      '(aquí → payload; fallback <code>NOTEBOOKLM_NOTEBOOK_ID</code> en backend/.env).')}
+      '(aquí → payload; fallback <code>NOTEBOOKLM_NOTEBOOK_ID</code> en backend/.env). Usa «📋 Listar mis ' +
+      'Notebooks» para elegirlo con 1 click; si lo dejas vacío, el pre-flight [0/3] intenta auto-descubrirlo ' +
+      'y, si no puede, aborta con <code>PRE_FLIGHT_MISSING_NOTEBOOK_ID</code>.')}
     <div class="mcp-svc" id="pipe-card">
       <div class="mcp-svc-head">
         <h3>🚀 Pipeline completo (NotebookLM → Agente → Flow)</h3>
@@ -1905,6 +1911,40 @@ function renderMCP() {
 
 function mcpSaveId() { const el = $('#nblm-nid'); if (el) localStorage.setItem(NID_KEY, el.value.trim()); }
 function mcpNid() { const el = $('#nblm-nid'); return el ? el.value.trim() : (localStorage.getItem(NID_KEY) || ''); }
+
+// HOTFIX INT-023.4 · «📋 Listar mis Notebooks»: llama a la tool de listado del
+// MCP (notebook_list / list_notebooks) vía el backend y pinta un dropdown para
+// fijar el notebook activo con 1 click — fin de copiar UUIDs desde la URL.
+async function mcpListNotebooks() {
+  const btn = $('#nblm-list-btn'), zone = $('#nblm-nid-pick');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Listando…'; }
+  try {
+    const js = await api('/mcp/list-notebooks', { method: 'POST', body: {} });
+    if (!zone) return;
+    const nbs = js.notebooks || [];
+    if (!nbs.length) {
+      zone.style.display = '';
+      zone.innerHTML = '<p class="hintline" style="color:var(--warn)">⚠ La cuenta no devolvió notebooks (¿lista vacía o sin sesión?).</p>';
+      return;
+    }
+    zone.style.display = '';
+    zone.innerHTML = `<label for="nblm-nid-pick-sel">Elige tu notebook (${nbs.length} encontrados) — 1 click lo fija</label>
+      <select id="nblm-nid-pick-sel" onchange="mcpPickNotebook(this.value)">
+        <option value="">— selecciona —</option>
+        ${nbs.map(n => `<option value="${esc(n.id)}">${esc((n.title || '(sin título)') + ' · ' + n.id.slice(0, 8) + '…')}</option>`).join('')}
+      </select>
+      <p class="hintline">Fuente: <code>${esc(js.tool || 'list tool')}</code> del MCP de NotebookLM.</p>`;
+    toast(nbs.length + ' notebooks encontrados — elige uno del dropdown');
+  } catch (e) { toast('Listar notebooks: ' + e.message, 'err'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '📋 Listar mis Notebooks'; } }
+}
+
+function mcpPickNotebook(id) {
+  if (!id) return;
+  const el = $('#nblm-nid');
+  if (el) { el.value = id; mcpSaveId(); }
+  toast('Notebook ID fijado ✅ ' + id.slice(0, 8) + '… — ya puedes lanzar el pipeline');
+}
 
 function mcpZoneHTML(st) {
   let h = '';
@@ -2138,9 +2178,11 @@ function pipePollStart() {
 
 async function pipeRun() {
   const idea = ($('#pipe-idea') || {}).value || '';
+  const nid = mcpNid();  // lectura EXPLÍCITA del «Notebook ID activo» del panel MCP
   const body = { idea: idea.trim(), format: ($('#pipe-fmt') || {}).value || 'short' };
-  if (mcpNid()) body.notebook_id = mcpNid();
+  if (nid) body.notebook_id = nid;
   if (!body.idea) { toast('Escribe la idea del video primero', 'err'); return; }
+  if (!nid) toast('notebook_id vacío: [0/3] intentará auto-descubrirlo (list tool); si no hay, aborta con PRE_FLIGHT_MISSING_NOTEBOOK_ID');
   try {
     const js = await api('/pipeline/run', { method: 'POST', body });
     S.pipeRunId = js.run_id;

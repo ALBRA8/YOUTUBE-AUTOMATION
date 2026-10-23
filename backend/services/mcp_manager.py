@@ -54,6 +54,66 @@ ST_ERROR = "error"                    # rojo (fallo técnico)
 _PROTO = "2024-11-05"
 _NOTEBOOK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{5,63}$")
 _AUTHISH_RE = re.compile(r"not signed in|auth|sign[- ]?in|login|cookie|credential|unauthor|401|403", re.I)
+_UUID_RE = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+# Tools de listado del servidor NotebookLM MCP (HOTFIX INT-023.4): no requieren
+# notebook_id y son la fuente del auto-descubrimiento / dropdown del panel.
+_LIST_NOTEBOOK_TOOLS = ("notebook_list", "list_notebooks")
+
+
+def parse_notebook_list(text: str) -> list[dict]:
+    """Parsea la respuesta de la tool de listado de notebooks (tolerante).
+    Acepta JSON (lista de dicts, dict con key notebooks/items), líneas con
+    UUID estándar, URLs /notebook/<id> y viñetas con título. Devuelve
+    [{'id', 'title'}, …] sin duplicados y solo con ids que pasan el patrón
+    canónico (_NOTEBOOK_ID_RE) — el mismo que valida execute()."""
+    raw = (text or "").strip()
+    if not raw:
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    def _add(nid: str, title: str) -> None:
+        nid = (nid or "").strip()
+        if nid and nid not in seen and _NOTEBOOK_ID_RE.match(nid):
+            seen.add(nid)
+            out.append({"id": nid,
+                        "title": re.sub(r"[\s\-—–|,;:]+$", "",
+                                        (title or "").strip())[:120]})
+
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        data = None
+    if isinstance(data, list):
+        for it in data:
+            if isinstance(it, dict):
+                nid = str(it.get("id") or it.get("notebook_id")
+                          or it.get("notebookId") or "")
+                _add(nid, str(it.get("title") or it.get("name")
+                              or it.get("display_name") or ""))
+            elif isinstance(it, str):
+                m = _UUID_RE.search(it)
+                if m:
+                    _add(m.group(0), it[:m.start()].strip(" -*•—–:|("))
+        return out
+    if isinstance(data, dict):
+        items = data.get("notebooks") or data.get("items") or []
+        if isinstance(items, list):
+            return parse_notebook_list(json.dumps(items, ensure_ascii=False))
+
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = _UUID_RE.search(line)
+        if m:
+            _add(m.group(0), line[:m.start()].strip(" -*•—–:|("))
+            continue
+        m2 = re.search(r"/notebook/([A-Za-z0-9][A-Za-z0-9_\-]{5,63})", line)
+        if m2:
+            _add(m2.group(1), line[:m2.start()].strip(" -*•—–:|("))
+    return out
 
 
 class MCPManagerError(Exception):
@@ -337,9 +397,18 @@ class MCPClientManager:
                     raise MCPManagerError(
                         f"notebook_id inválido: '{nid[:24]}' (patrón {id_key})", "INVALID_NOTEBOOK_ID")
                 arguments[id_key] = nid            # §3: inyección dinámica
+            elif tool in _LIST_NOTEBOOK_TOOLS or tool == str(
+                    _cfg("NOTEBOOKLM_PROBE_TOOL", "list_notebooks") or "").strip():
+                warn.append(f"notebook_id ausente; '{tool}' es de listado y no lo necesita")
             else:
-                warn.append(f"notebook_id ausente (payload, .env NOTEBOOKLM_NOTEBOOK_ID); "
-                            f"la tool debe recibir '{id_key}' por argumentos")
+                # HOTFIX INT-023.4: fallo DETERMINISTA con código estable en vez
+                # del TOOL_ERROR críptico del servidor ('Missing required argument').
+                raise MCPManagerError(
+                    f"la tool '{tool}' requiere notebook_id y está ausente "
+                    f"(arguments['{id_key}'], payload y .env NOTEBOOKLM_NOTEBOOK_ID "
+                    f"vacíos). Usa «📋 Listar mis Notebooks» del panel para elegir "
+                    f"uno con 1 click o pégalo en «Notebook ID activo».",
+                    "MISSING_NOTEBOOK_ID")
         conn = self._conns.get(service)
         if not conn or conn.state != ST_CONNECTED or not conn.proc or conn.proc.returncode is not None:
             if not auto_connect:
@@ -401,6 +470,54 @@ class MCPClientManager:
                      and res.get("auth") == "ok"
                      and (service != "google-flow" or res.get("browser_up")))
         return res
+
+    # ── notebook discovery (HOTFIX INT-023.4) ──
+    async def list_notebooks(self, notebook_id: str | None = None) -> dict:
+        """Lista los notebooks de la cuenta vía la tool de listado del MCP
+        (notebook_list / list_notebooks). Alimenta el dropdown «📋 Listar mis
+        Notebooks» del panel y el auto-descubrimiento del pre-flight."""
+        conn = self._conns.get("notebooklm")
+        if (not conn or conn.state != ST_CONNECTED or not conn.proc
+                or conn.proc.returncode is not None):
+            await self.connect("notebooklm", notebook_id=notebook_id)
+            conn = self._conns.get("notebooklm")
+            if not conn or conn.state != ST_CONNECTED:
+                raise MCPManagerError("notebooklm no se pudo conectar", "DISCONNECTED")
+        names = {t.get("name") for t in conn.tools}
+        probe = str(_cfg("NOTEBOOKLM_PROBE_TOOL", "list_notebooks") or "").strip()
+        candidates = [t for t in _LIST_NOTEBOOK_TOOLS if t in names]
+        if probe and probe in names and probe not in candidates:
+            candidates.append(probe)
+        if not candidates:
+            raise MCPManagerError(
+                "el servidor no expone tool de listado de notebooks "
+                f"(esperaba {', '.join(_LIST_NOTEBOOK_TOOLS)})", "TOOL_UNKNOWN")
+        last_err: MCPManagerError | None = None
+        for t in candidates:
+            try:
+                text = await conn.call(t, {}, timeout=25.0)
+            except MCPManagerError as e:
+                if _AUTHISH_RE.search(str(e)):
+                    raise MCPManagerError(
+                        f"sesión Google no válida al listar notebooks: {e}",
+                        "AUTH_REQUIRED") from e
+                last_err = e
+                continue
+            nbs = parse_notebook_list(text)
+            if nbs:
+                return {"ok": True, "tool": t, "notebooks": nbs,
+                        "first_id": nbs[0]["id"]}
+        raise MCPManagerError(
+            "listado de notebooks vacío o ilegible"
+            + (f" ({last_err})" if last_err else ""), "LIST_EMPTY")
+
+    async def discover_notebook_id(self) -> str:
+        """Primer notebook_id disponible ("" si no hay — NUNCA lanza).
+        Fallback determinista del pre-flight del orquestador (HOTFIX INT-023.4)."""
+        try:
+            return str((await self.list_notebooks()).get("first_id") or "")
+        except MCPManagerError:
+            return ""
 
     # ── helpers ──
     def _allowed_tools(self, service: str) -> set[str] | None:

@@ -1889,6 +1889,20 @@ async def mcp_test_pipeline(body: dict):
     return out
 
 
+@app.post("/api/mcp/list-notebooks")
+async def mcp_list_notebooks(body: dict):
+    """Lista los notebooks de la cuenta vía la tool de listado del MCP de
+    NotebookLM (notebook_list / list_notebooks). Alimenta el dropdown
+    «📋 Listar mis Notebooks» del panel para fijar el notebook activo con
+    1 click (HOTFIX INT-023.4: fin de copiar UUIDs desde la URL)."""
+    try:
+        return await _mcpm.manager.list_notebooks(
+            notebook_id=(body.get("notebook_id") or "").strip() or None)
+    except _mcpm.MCPManagerError as e:
+        status = 502
+        raise HTTPException(status, f"[{e.code}] {e}") from e
+
+
 # ─────────────── Pipeline Orchestrator (INT-023) · NotebookLM → Agent → Flow ──
 # Coordina las 3 etapas con mcp_manager sin tocar agent.py ni script_gen
 # (regla del mandato: generación de prompts/blueprints INTACTA). Pre-flight

@@ -461,8 +461,43 @@ class PipelineOrchestrator:
                            f"Google Flow no listo: state={pre_f.get('state')} "
                            f"auth={pre_f.get('auth')} {pre_f.get('detail') or pre_f.get('auth_detail') or ''}")
                 return
-            self._set_step(run, ST_PREFLIGHT, "ok",
-                           "notebooklm ✅ · google-flow ✅")
+            # ── HOTFIX INT-023.4: propagación / auto-descubrimiento del notebook_id ──
+            # Resolución: UI payload > .env NOTEBOOKLM_NOTEBOOK_ID > auto-descubrimiento
+            # vía la tool de listado del MCP (notebook_list / list_notebooks). Si nada
+            # produce un id, [0/3] ABORTA con PRE_FLIGHT_MISSING_NOTEBOOK_ID antes de
+            # gastar tokens — nunca se llega a Stage 1 con notebook_id vacío.
+            nid = (run["notebook_id"] or "").strip()
+            if not nid:
+                nid = str(_cfg("NOTEBOOKLM_NOTEBOOK_ID", "") or "").strip()
+                if nid:
+                    run["notebook_id"] = nid          # env → estado (visibilidad total)
+                    self._save(run)
+            pre_detail = "notebooklm ✅ · google-flow ✅"
+            if not nid:
+                disc = getattr(self.manager, "discover_notebook_id", None)
+                auto = ""
+                if disc:
+                    try:
+                        auto = await disc() or ""
+                    except Exception:  # noqa: BLE001 — degrada al guard determinista
+                        auto = ""
+                if auto and mcpm._NOTEBOOK_ID_RE.match(auto):
+                    run["notebook_id"] = auto
+                    self._save(run)
+                    nid = auto
+                    pre_detail += (f" · notebook_id auto-descubierto vía list tool: "
+                                   f"{auto[:12]}…")
+                    log.info("[pipeline %s] notebook_id auto-descubierto: %s",
+                             run["run_id"], auto)
+                else:
+                    self._fail(run, "PRE_FLIGHT_MISSING_NOTEBOOK_ID",
+                               "notebook_id ausente en la UI y en .env, y el auto-"
+                               "descubrimiento (list tool) no devolvió notebooks. "
+                               "Usa «📋 Listar mis Notebooks» del panel MCP para "
+                               "elegir uno con 1 click, pégalo en «Notebook ID "
+                               "activo», o fija NOTEBOOKLM_NOTEBOOK_ID en backend/.env.")
+                    return
+            self._set_step(run, ST_PREFLIGHT, "ok", pre_detail)
 
             # ── Stage 1: contexto de NotebookLM (solo-lectura) ──
             self._set_step(run, ST_STAGE1, "running")
@@ -475,14 +510,20 @@ class PipelineOrchestrator:
                 "y una descripción física CONSISTENTE del personaje principal "
                 "(look, ropa, rasgos) reutilizable en todas las escenas.") or "").strip()
             try:
+                # HOTFIX INT-023.4: inyección EXPLÍCITA del id resuelto en los
+                # arguments (defensa en profundidad; mcp_manager re-valida/inyecta).
+                id_key = str(_cfg("NOTEBOOKLM_ID_KEY", "notebook_id") or "notebook_id")
+                args = {"query": query}
+                if (run["notebook_id"] or "").strip():
+                    args[id_key] = run["notebook_id"].strip()
                 res = await self.manager.execute(
-                    "notebooklm", tool,
-                    {"query": query},
+                    "notebooklm", tool, args,
                     timeout=float(_cfg("NOTEBOOKLM_MCP_TIMEOUT", 60.0)),
                     notebook_id=run["notebook_id"] or None)
             except mcpm.MCPManagerError as e:
-                self._fail(run, "CONTEXT_EXTRACTION_FAILED",
-                           f"tool '{tool}': [{e.code}] {e}")
+                code = ("PRE_FLIGHT_MISSING_NOTEBOOK_ID"
+                        if e.code == "MISSING_NOTEBOOK_ID" else "CONTEXT_EXTRACTION_FAILED")
+                self._fail(run, code, f"tool '{tool}': [{e.code}] {e}")
                 return
             context = (res.get("text") or "").strip()
             if not context:

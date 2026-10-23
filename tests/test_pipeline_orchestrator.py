@@ -51,17 +51,24 @@ class FakeManager:
 
     def __init__(self, nblm_ok=True, flow_ok=True, fail_video_at=None,
                  context_error=None, flow_dies_in_stage3=False,
-                 flow_state=None):
+                 flow_state=None, discover_id="pipeid23"):
         self.nblm_ok = nblm_ok
         self.flow_ok = flow_ok
         self.flow_state = flow_state or ("connected" if flow_ok else "auth_required")
         self.fail_video_at = fail_video_at
         self.context_error = context_error      # (code, msg) o None
         self.flow_dies_in_stage3 = flow_dies_in_stage3
+        self.discover_id = discover_id          # HOTFIX INT-023.4: auto-descubrimiento
+        self.disc_calls = 0                     # nº de llamadas a discover_notebook_id
         self.calls = []                          # (kind, service, tool, arguments)
         self._probe_n = 0                        # nº de test_pipeline de flow
         self._img_n = 0
         self._vid_n = 0
+
+    async def discover_notebook_id(self):
+        """Imita list tool del MCP: primer notebook disponible ("" = nada)."""
+        self.disc_calls += 1
+        return self.discover_id
 
     async def test_pipeline(self, service, notebook_id=None):
         self.calls.append(("test", service, "", {}))
