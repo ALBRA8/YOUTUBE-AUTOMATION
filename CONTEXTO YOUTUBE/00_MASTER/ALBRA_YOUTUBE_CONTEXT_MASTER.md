@@ -379,3 +379,24 @@ Nunca tratar un mock como sustituto de una prueba LIVE.
 **Después:** nueva prueba LIVE Start Frame.
 
 **Solo después:** decisión sobre certificación y eventual merge a `main`.
+
+
+---
+
+## 17. Production Framework y familia de Blueprints — 2026-10-23
+
+Se consolidó el diseño conceptual de una arquitectura de múltiples líneas de producción, documentada en `00_MASTER/PRODUCTION_FRAMEWORK_BLUEPRINTS.md`.
+
+Decisión central: usar un **Production Framework común** y un Blueprint especializado por línea; no crear un Blueprint universal ni un motor independiente por línea.
+
+Registro inicial:
+- `microdrama` → `microdrama_vertical_series_5x60`
+- `short` → `short_vertical_v1`
+- `short_form` → `short_form_production_v1`
+- `ugc` → `ugc_creator_content_v1`
+
+Fronteras: Creative Engine decide qué crear y genera Creative Specification + Production JSON; YOUTUBE-AUTOMATION ejecuta; Reverse Engineering Engine permanece independiente y transversal; NotebookLM/fuentes son conocimiento/canon/documentación, no un director creativo ni el motor de producción.
+
+**Estado honesto:** la arquitectura y los cuatro Blueprints están definidos a nivel documental/conceptual. No afirmar que schemas, selector, validadores o integración de runtime estén implementados o probados hasta verificarlos en el repositorio. El siguiente paso es formalizar los schemas, el registro/selector y las pruebas de contrato, reutilizando los motores existentes.
+
+Fuente canónica: `00_MASTER/PRODUCTION_FRAMEWORK_BLUEPRINTS.md`.
