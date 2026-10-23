@@ -35,11 +35,13 @@ import re
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import config
 from pipeline import script_gen
+from services import asset_harvester as harv
 from services import mcp_manager as mcpm
+from services import video_assembler as vasm
 
 log = logging.getLogger("pipeline_orchestrator")
 
@@ -49,10 +51,12 @@ ST_PREFLIGHT = "preflight"
 ST_STAGE1 = "stage1_context"
 ST_STAGE2 = "stage2_blueprint"
 ST_STAGE3 = "stage3_dispatch"
+ST_STAGE4 = "stage4_render"
 ST_DONE = "done"
 ST_ERROR = "error"
 
-_STAGES_ACTIVE = {ST_QUEUED, ST_PREFLIGHT, ST_STAGE1, ST_STAGE2, ST_STAGE3}
+_STAGES_ACTIVE = {ST_QUEUED, ST_PREFLIGHT, ST_STAGE1, ST_STAGE2, ST_STAGE3,
+                  ST_STAGE4}
 
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{6,80}$")
 _PATH_LINE_RE = re.compile(r"([A-Za-z]:\\[^\s]+|/[^\s]+)\s*$")
@@ -62,6 +66,7 @@ _STEPS = (
     (ST_STAGE1, "[1/3] Reading NotebookLM…"),
     (ST_STAGE2, "[2/3] Generating Blueprint…"),
     (ST_STAGE3, "[3/3] Dispatching Scenes to Flow…"),
+    (ST_STAGE4, "[4/4] Assembling Final Video (FFmpeg)…"),
 )
 
 
@@ -107,6 +112,7 @@ class PipelineOrchestrator:
         self.runs_dir.mkdir(parents=True, exist_ok=True)
         self._tasks: dict[str, asyncio.Task] = {}
         self._busy: str | None = None  # single-flight: Flow serializa en el Chrome
+        self._render_busy: dict[str, bool] = {}  # Stage 4 por corrida
 
     # ──────────────────────────────── persistencia ──
     def _run_dir(self, run_id: str) -> Path:
@@ -125,9 +131,15 @@ class PipelineOrchestrator:
     def _load(self, run_id: str) -> dict:
         try:
             f = self._run_dir(run_id) / "state.json"
-            return json.loads(f.read_text(encoding="utf-8"))
+            run = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             raise PipelineError(f"corrida no encontrada: {run_id}", "RUN_NOT_FOUND")
+        # backfill INT-024: corridas creadas antes del Stage 4
+        run.setdefault("render", {"status": "idle", "stage": "",
+                                  "progress_pct": 0, "output": "",
+                                  "error_code": "", "error_detail": "",
+                                  "started_at": "", "finished_at": ""})
+        return run
 
     # ──────────────────────────────── API pública ──
     def create_run(self, idea: str, notebook_id: str | None = None,
@@ -161,6 +173,9 @@ class PipelineOrchestrator:
             "done_count": 0,
             "failed_scene_ids": [],
             "reference_asset": "",
+            "render": {"status": "idle", "stage": "", "progress_pct": 0,
+                       "output": "", "error_code": "", "error_detail": "",
+                       "started_at": "", "finished_at": ""},
         }
         self._save(run)
         return run
@@ -220,6 +235,10 @@ class PipelineOrchestrator:
         if self._busy:
             raise PipelineError(
                 f"ya hay un pipeline en marcha ({self._busy})", "PIPELINE_BUSY")
+        if self._render_busy.get(run_id):
+            raise PipelineError(
+                f"la corrida {run_id} está renderizando (Stage 4) — espera su fin",
+                "RENDER_BUSY")
         self._busy = run_id
         try:
             run["stage"], run["error_code"], run["error_detail"] = ST_STAGE3, "", ""
@@ -246,6 +265,146 @@ class PipelineOrchestrator:
             self._busy = None
             self._save(run)
         return run
+
+    # ─────────────────────── Stage 4: harvest + render ──
+    def render_final(self, run_id: str,
+                     force_placeholder_on_failed: bool = False,
+                     dry_run: bool = False) -> dict:
+        """Lanza Stage 3.5 (harvest + manifest) + Stage 4 (FFmpeg) en un hilo
+        (NO bloquea el event loop). Gatekeeper del mandato §3:
+        · corrida activa → PIPELINE_BUSY · ya renderizando → RENDER_BUSY
+        · corrida sin Stage 3 terminado → RENDER_NOT_DONE
+        · PARTIAL_FAILURES sin flag → RENDER_BLOCKED_PARTIAL_FAILURES
+        · ffmpeg ausente sin dry_run → surfaced honesto desde el worker."""
+        run = self._load(run_id)
+        if run["stage"] in _STAGES_ACTIVE and run["stage"] != ST_QUEUED:
+            raise PipelineError("el pipeline sigue en marcha", "PIPELINE_BUSY")
+        if self._render_busy.get(run_id):
+            raise PipelineError(
+                f"la corrida {run_id} ya está renderizando", "RENDER_BUSY")
+        if run["stage"] not in (ST_DONE, ST_ERROR):
+            raise PipelineError(
+                "Stage 3 no ha terminado — no hay assets que ensamblar",
+                "RENDER_NOT_DONE")
+        failed = list(run.get("failed_scene_ids") or [])
+        if failed and not force_placeholder_on_failed:
+            raise PipelineError(
+                "escenas fallidas bloquean el render: " + ", ".join(failed)
+                + " — usa retry-scenes o force_placeholder_on_failed=true",
+                "RENDER_BLOCKED_PARTIAL_FAILURES")
+        if not any(s.get("status") == "done" for s in run.get("scenes") or []):
+            if not failed or not force_placeholder_on_failed:
+                raise PipelineError(
+                    "ninguna escena está lista — nada que ensamblar",
+                    "RENDER_NOTHING_READY")
+        self._render_busy[run_id] = True
+        run["render"].update({"status": "running", "stage": "harvest",
+                              "progress_pct": 0, "output": "",
+                              "error_code": "", "error_detail": "",
+                              "dry_run": bool(dry_run),
+                              "force_placeholder": bool(failed) and bool(force_placeholder_on_failed),
+                              "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                              "finished_at": ""})
+        run["stage"] = ST_STAGE4
+        self._set_step(run, ST_STAGE4, "running",
+                       "harvest de assets + manifest")
+        run["stage"] = ST_STAGE4  # _set_step fija la etapa en curso
+        self._save(run)
+        task = asyncio.create_task(asyncio.to_thread(
+            self._render_worker, run_id, bool(dry_run)))
+        self._tasks[f"render:{run_id}"] = task
+        task.add_done_callback(
+            lambda _t: (self._tasks.pop(f"render:{run_id}", None),
+                        self._render_busy.pop(run_id, None)))
+        return run["render"]
+
+    def _render_progress(self, run_id: str) -> Callable[[str, str, int], None]:
+        def cb(stage: str, detail: str, pct: int) -> None:
+            try:
+                run = self._load(run_id)
+                run["render"].update({"stage": stage, "progress_pct": int(pct),
+                                      "detail": str(detail)[:280]})
+                self._set_step(run, ST_STAGE4, "running", f"[{stage}] {detail}")
+                run["stage"] = ST_STAGE4
+                self._save(run)
+            except (PipelineError, OSError):
+                pass  # la corrida dejó de existir: el worker termina solo
+        return cb
+
+    def _render_worker(self, run_id: str, dry_run: bool) -> None:
+        """Cuerpo del Stage 4 EN HILO: harvest → manifest → assemble.
+        Nunca lanza hacia el event loop: todo se persiste en run['render']."""
+        try:
+            run = self._load(run_id)
+            rd = self._run_dir(run_id)
+            force = bool(run["render"].get("force_placeholder"))
+            manifest, _ = harv.harvest_run(run, rd, placeholders_for_failed=force)
+            self._render_progress(run_id)("plan",
+                f"manifest OK — {len(manifest['scenes'])} escena(s)", 5)
+            res = vasm.assemble_run(
+                rd, dry_run=dry_run,
+                music_path=str(_cfg("RENDER_MUSIC_PATH", "") or ""),
+                progress_cb=self._render_progress(run_id))
+            run = self._load(run_id)
+            run["render"].update({"status": "done", "stage": "done",
+                                  "progress_pct": 100,
+                                  "output": res["output"],
+                                  "dry_run": bool(dry_run),
+                                  "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                                  "detail": f"{res.get('steps', '?')} pasos · "
+                                            f"{res.get('duration_total', 0):.1f}s"
+                                            f"{'' if not dry_run else ' (dry-run)'}"})
+            self._set_step(run, ST_STAGE4, "ok",
+                           ("dry-run: plan generado → " if dry_run else "render final → ")
+                           + Path(res["output"]).name)
+            run["stage"] = ST_DONE
+            self._save(run)
+            log.info("[render %s] terminado: %s", run_id, res["output"])
+        except (harv.HarvesterError, vasm.AssemblerError) as e:
+            self._render_fail(run_id, e.code, str(e))
+        except Exception as e:  # noqa: BLE001 — el render nunca tumba el backend
+            self._render_fail(run_id, "RENDER_CRASH", str(e)[:300])
+
+    def _render_fail(self, run_id: str, code: str, detail: str) -> None:
+        try:
+            run = self._load(run_id)
+            run["render"].update({"status": "error", "error_code": code,
+                                  "error_detail": detail[:400],
+                                  "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S")})
+            self._set_step(run, ST_STAGE4, "failed", f"[{code}] {detail[:200]}")
+            run["stage"] = ST_DONE
+            self._save(run)
+            log.error("[render %s] %s: %s", run_id, code, detail[:200])
+        except (PipelineError, OSError):
+            pass
+
+    def get_render_status(self, run_id: str = "") -> dict:
+        """Snapshot del Stage 4 (la última corrida si no se indica run_id)."""
+        run = self.get_status(run_id)
+        return {"run_id": run["run_id"], "stage": run["stage"],
+                "failed_scene_ids": run.get("failed_scene_ids") or [],
+                "render": run.get("render") or {}}
+
+    def get_manifest(self, run_id: str) -> dict:
+        """Manifest.json de la corrida (404 limpio si no existe)."""
+        self._load(run_id)  # valida run_id + existencia
+        return harv.load_manifest(self._run_dir(run_id))
+
+    def harvest_only(self, run_id: str,
+                     placeholders_for_failed: bool = False) -> dict:
+        """Stage 3.5 standalone: re-consolida assets + regenera manifest.json
+        SIN renderizar (útil para inspección y para tests)."""
+        run = self._load(run_id)
+        if run["stage"] in _STAGES_ACTIVE and run["stage"] != ST_QUEUED:
+            raise PipelineError("el pipeline sigue en marcha", "PIPELINE_BUSY")
+        if run["stage"] not in (ST_DONE, ST_ERROR):
+            raise PipelineError(
+                "Stage 3 no ha terminado — no hay assets que consolidar",
+                "RENDER_NOT_DONE")
+        force = bool(placeholders_for_failed)
+        manifest, _ = harv.harvest_run(run, self._run_dir(run_id),
+                                       placeholders_for_failed=force)
+        return manifest
 
     # ──────────────────────────────── motor de etapas ──
     def _set_step(self, run: dict, stage: str, state: str,

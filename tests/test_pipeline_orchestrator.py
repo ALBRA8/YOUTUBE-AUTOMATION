@@ -156,9 +156,15 @@ async def stage_tests():
                            fmt="short")
         check("run creado con id saneado", po._RUN_ID_RE.match(run["run_id"]) is not None,
               run["run_id"])
-        check("etapas inicializadas", [s["stage"] for s in run["steps"]] ==
-              ["preflight", "stage1_context", "stage2_blueprint", "stage3_dispatch"],
+        check("etapas inicializadas (INT-024: 5 etapas canónicas, Stage 4 opcional)",
+              [s["stage"] for s in run["steps"]] ==
+              ["preflight", "stage1_context", "stage2_blueprint",
+               "stage3_dispatch", "stage4_render"],
               run["steps"])
+        check("labels canónicos intactos ([0/3]…[3/3]) + [4/4] FFmpeg",
+              run["steps"][0]["label"].startswith("[0/3]") and
+              run["steps"][3]["label"].startswith("[3/3]") and
+              run["steps"][4]["label"] == "[4/4] Assembling Final Video (FFmpeg)…")
     finally:
         po.script_gen.from_idea = orig_from_idea
 
@@ -407,9 +413,9 @@ async def endpoint_tests():
             r = await c.get("/api/pipeline/status",
                             params={"run_id": rid})
             js = r.json()
-            check("GET /status 200 con etapas", r.status_code == 200
+            check("GET /status 200 con etapas (5 canónicas INT-024)", r.status_code == 200
                   and js.get("stage") == "done"
-                  and len(js.get("steps", [])) == 4, r.text[:300])
+                  and len(js.get("steps", [])) == 5, r.text[:300])
             check("status trae escenas y progreso",
                   len(js.get("scenes", [])) == 3 and js.get("progress_pct") == 100,
                   (len(js.get("scenes", [])), js.get("progress_pct")))

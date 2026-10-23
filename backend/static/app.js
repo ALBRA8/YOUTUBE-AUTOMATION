@@ -1868,7 +1868,7 @@ function renderMCP() {
         <h3>🚀 Pipeline completo (NotebookLM → Agente → Flow)</h3>
         <span id="pipe-stage-badge"></span>
       </div>
-      <p class="hintline">INT-023 · [1/3] lee el contexto del notebook activo → [2/3] genera el blueprint con el motor de guion de siempre (sin tocarlo) → [3/3] despacha cada escena a Google Flow con el MISMO personaje de referencia. Pre-flight: si un MCP no está autenticado, aborta sin gastar tokens.</p>
+      <p class="hintline">INT-023/024 · [1/3] lee el contexto del notebook activo → [2/3] genera el blueprint con el motor de guion de siempre (sin tocarlo) → [3/3] despacha cada escena a Google Flow con el MISMO personaje de referencia → [4/4] opcional: 🎞️ harvest + manifest + ensambla el MP4 final con FFmpeg (duration-sync, música ducked -20dB, captions .srt). Pre-flight: si un MCP no está autenticado, aborta sin gastar tokens.</p>
       <div class="mcp-row">
         <label for="pipe-idea">Idea del video</label>
         <input id="pipe-idea" type="text" maxlength="500"
@@ -1884,7 +1884,12 @@ function renderMCP() {
       <div class="mcp-row btns">
         <button class="btn" id="pipe-run-btn" onclick="pipeRun()">🚀 Run Full Pipeline (NotebookLM → Agent → Flow)</button>
         <button class="btn ghost" id="pipe-retry-btn" onclick="pipeRetry()" style="display:none">🔁 Reintentar escenas fallidas</button>
+        <button class="btn ghost" id="pipe-render-btn" onclick="pipeRender()" style="display:none">🎞️ Render Final MP4</button>
+        <a class="btn ghost" id="pipe-dl-link" style="display:none" href="#" download>⬇️ Descargar MP4</a>
         <button class="btn ghost" onclick="pipeRefresh()">🔄 Actualizar</button>
+      </div>
+      <div class="mcp-row" id="pipe-force-wrap" style="display:none">
+        <label class="hintline"><input type="checkbox" id="pipe-force-ph"> forzar placeholders en escenas fallidas (clip de color con su narración — el testeo nunca se deadlocka)</label>
       </div>
       <div id="pipe-progress"></div>
       <pre class="mcp-log" id="pipe-log" style="display:none"></pre>
@@ -1998,13 +2003,15 @@ const PIPE_STAGES = {
   stage1_context:  ['[1/3] READING NOTEBOOKLM…', 'mcp-b-yellow'],
   stage2_blueprint:['[2/3] GENERATING BLUEPRINT…', 'mcp-b-yellow'],
   stage3_dispatch: ['[3/3] DISPATCHING TO FLOW…', 'mcp-b-yellow'],
+  stage4_render:   ['[4/4] ASSEMBLING (FFMPEG)…', 'mcp-b-yellow'],
   done:            ['COMPLETADO', 'mcp-b-green'],
   error:           ['ERROR', 'mcp-b-red'],
 };
 
 function pipeActive(run) {
   return !!run && ['queued', 'preflight', 'stage1_context',
-                   'stage2_blueprint', 'stage3_dispatch'].includes(run.stage);
+                   'stage2_blueprint', 'stage3_dispatch',
+                   'stage4_render'].includes(run.stage);
 }
 
 function pipeBadgeHTML(run) {
@@ -2043,6 +2050,20 @@ function pipeStepsHTML(run) {
     });
     h += '</div>';
   }
+  // INT-024 · Stage 4: estado del ensamblador FFmpeg (run.render del backend)
+  const render = run.render || {};
+  if (render.status && render.status !== 'idle') {
+    if (render.status === 'running') {
+      h += `<p class="pipe-detail">🎞️ [4/4] ${esc(render.stage || '…')} — ${render.progress_pct || 0}% ` +
+           (render.detail ? `— ${esc(render.detail)}` : '') + `</p>`;
+    } else if (render.status === 'done') {
+      h += `<p class="pipe-detail">${render.dry_run ? '🧪 Dry-run: plan en <code>render_plan.json</code>' : '✅ Render final listo'} ` +
+           (render.output ? `→ <code>${esc(render.output)}</code>` : '') +
+           (render.detail ? ` <span class="hintline">(${esc(render.detail)})</span>` : '') + `</p>`;
+    } else if (render.status === 'error') {
+      h += `<p class="pipe-detail">❌ [${esc(render.error_code || '')}] ${esc(render.error_detail || '')}</p>`;
+    }
+  }
   if (run.error_detail) {
     h += `<p class="pipe-detail">⚠ [${esc(run.error_code || '')}] ${esc(run.error_detail)}</p>`;
   }
@@ -2071,6 +2092,23 @@ function pipeApply(run) {
   if (rbtn) rbtn.style.display = (run && run.failed_scene_ids && run.failed_scene_ids.length && !pipeActive(run)) ? '' : 'none';
   const rbtn2 = $('#pipe-run-btn');
   if (rbtn2) rbtn2.disabled = pipeActive(run);
+  // INT-024 · botón de render final + flag de placeholders + descarga MP4
+  const render = (run && run.render) || {};
+  const rbtnR = $('#pipe-render-btn');
+  const forceWrap = $('#pipe-force-wrap');
+  const dl = $('#pipe-dl-link');
+  const canRender = !!run && !pipeActive(run) && run.stage === 'done'
+    && ((run.done_count || 0) > 0 || (run.failed_scene_ids || []).length > 0);
+  if (rbtnR) {
+    rbtnR.style.display = canRender ? '' : 'none';
+    rbtnR.disabled = render.status === 'running';
+  }
+  if (forceWrap) forceWrap.style.display = (canRender && (run.failed_scene_ids || []).length) ? '' : 'none';
+  if (dl) {
+    const ok = render.status === 'done' && render.output && !render.dry_run;
+    dl.style.display = ok ? '' : 'none';
+    if (ok) dl.href = '/api/pipeline/render/file?run_id=' + encodeURIComponent(run.run_id);
+  }
   if (run && !pipeActive(run) && !document.hidden) mcpRefresh(true);
   return pipeActive(run);
 }
@@ -2122,6 +2160,20 @@ async function pipeRetry() {
     pipePollStart();
     toast('Re-despachando solo las escenas fallidas 🔁');
   } catch (e) { toast('Retry escenas: ' + e.message, 'err'); }
+}
+
+// INT-024 · Stage 4: ensambla el MP4 final con FFmpeg (harvest + manifest + render)
+async function pipeRender() {
+  const rid = S.pipeRunId || (S.pipeRun || {}).run_id;
+  if (!rid) { toast('No hay corrida que renderizar', 'err'); return; }
+  const force = (($('#pipe-force-ph') || {}).checked) || false;
+  try {
+    await api('/pipeline/render', { method: 'POST',
+      body: { run_id: rid, force_placeholder_on_failed: force } });
+    toast('Stage 4 lanzado 🎞️ [4/4] Assembling (FFmpeg)…');
+    await pipeRefresh(true);
+    pipePollStart();
+  } catch (e) { toast('Render Final MP4: ' + e.message, 'err'); }
 }
 
 // reanudar el seguimiento si el backend conserva una corrida activa (recarga de página)

@@ -66,6 +66,24 @@ FLOW_REF_ASSET_NAME = os.getenv("FLOW_REF_ASSET_NAME", "personaje").strip()
 # ancla del personaje a partir del contexto del notebook).
 FLOW_REF_IMAGE_PATH = os.getenv("FLOW_REF_IMAGE_PATH", "").strip()
 
+# ── 🎞️ INT-024 — Asset Harvester & FFmpeg Video Assembler (Stage 3.5 + 4) ──
+# Duración de escena estimada SIN TTS: caracteres de narración / segundo
+# (español neutro ~14-15 cps a +8%); suelo para escenas mínimas.
+RENDER_EST_CPS = float(os.getenv("RENDER_EST_CPS", "14.5"))
+RENDER_MIN_SCENE_SEC = float(os.getenv("RENDER_MIN_SCENE_SEC", "2.0"))
+# Cama musical: atenuación fija (ducking determinista) en dB negativos.
+RENDER_MUSIC_DUCK_DB = float(os.getenv("RENDER_MUSIC_DUCK_DB", "-20"))
+# Cama musical por defecto: ruta absoluta o nombre de archivo dentro de
+# config.MUSIC_DIR (vacío = mezclar sin música).
+RENDER_MUSIC_PATH = os.getenv("RENDER_MUSIC_PATH", "").strip()
+# Subtítulos del render final: burn (quemados con libass) | soft (mux
+# mov_text) | off. Si libass no está disponible degrada a soft solo.
+RENDER_SUBTITLES = os.getenv("RENDER_SUBTITLES", "burn").strip().lower()
+# Timeout por comando ffmpeg del ensamblador (segundos) y calidad H.264.
+RENDER_FFMPEG_TIMEOUT = float(os.getenv("RENDER_FFMPEG_TIMEOUT", "900"))
+RENDER_X264_PRESET = os.getenv("RENDER_X264_PRESET", "veryfast").strip()
+RENDER_CRF = int(os.getenv("RENDER_CRF", "20"))
+
 # ── NVIDIA NIM (agente VÓRTICE · OpenAI-compatible) ───────────────────────
 # kimi-k3: planificación del agente, entiende el proyecto y ejecuta acciones
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()

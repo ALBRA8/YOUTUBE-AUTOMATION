@@ -62,6 +62,16 @@ BATERIAS = [
                                  # contexto inyectado, consistencia de personaje
                                  # @{ref}, PARTIAL_FAILURES + retry SOLO de
                                  # escenas fallidas, endpoints /api/pipeline/* (55)
+    "test_int024_assembler.py",  # INT-024: Asset Harvester & FFmpeg Video
+                                 # Assembler — Stage 3.5 harvest a rutas
+                                 # deterministas + manifest estricto validado,
+                                 # duration math (trim/loop/kenburns),
+                                 # captions .srt exactas, construcción de
+                                 # comandos ffmpeg en dry-run (scale/crop/
+                                 # stream_loop/zoompan/apad/volume=-20dB/
+                                 # subtitles), gatekeeper del render en el
+                                 # orquestador, endpoints /api/pipeline/*
+                                 # y micro-render REAL de humo si hay ffmpeg (56)
     "test_memorydv.py",          # MemoryDV §memoria: storage/retrieval/
                                  # consolidación/isolation (36)
     "test_skills_autonomia.py",  # Skill Contract §skills + autonomía L0-L5

@@ -1944,6 +1944,79 @@ async def pipeline_retry_scenes(body: dict):
         raise HTTPException(status, f"[{e.code}] {e}") from e
 
 
+# ────── 🎞️ INT-024 · Stage 3.5 (harvest) + Stage 4 (FFmpeg assembler) ──────
+# Stage 3.5 consolida los assets de Flow en rutas deterministas
+# (scenes/scene_XXX.mp4) y genera el manifest.json estricto. Stage 4 ensambla
+# el .mp4 final (duration-sync trim/loop/Ken Burns, música ducked -20dB,
+# captions .srt quemadas o soft) SIN bloquear el event loop (asyncio.to_thread).
+
+@app.post("/api/pipeline/harvest")
+async def pipeline_harvest(body: dict):
+    """Stage 3.5 standalone: re-consolida assets y regenera manifest.json
+    sin renderizar. Devuelve el manifest completo (inspección en el panel)."""
+    run_id = (body.get("run_id") or "").strip()
+    force = bool(body.get("force_placeholder_on_failed"))
+    try:
+        return _pipe.orchestrator.harvest_only(run_id, placeholders_for_failed=force)
+    except _pipe.PipelineError as e:
+        status = 409 if e.code == "PIPELINE_BUSY" else 404 if e.code == "RUN_NOT_FOUND" else 400
+        raise HTTPException(status, f"[{e.code}] {e}") from e
+
+
+@app.post("/api/pipeline/render")
+async def pipeline_render(body: dict):
+    """Dispara Stage 3.5 + Stage 4 en un hilo del backend. Si la corrida tiene
+    escenas fallidas, el ensamblaje se BLOQUEA (RENDER_BLOCKED_PARTIAL_FAILURES)
+    salvo force_placeholder_on_failed=true — el testeo nunca se deadlocka."""
+    run_id = (body.get("run_id") or "").strip()
+    force = bool(body.get("force_placeholder_on_failed"))
+    dry = bool(body.get("dry_run"))
+    try:
+        render = _pipe.orchestrator.render_final(
+            run_id, force_placeholder_on_failed=force, dry_run=dry)
+    except _pipe.PipelineError as e:
+        status = 409 if e.code in ("PIPELINE_BUSY", "RENDER_BUSY") else \
+                 404 if e.code == "RUN_NOT_FOUND" else 400
+        raise HTTPException(status, f"[{e.code}] {e}") from e
+    log.info("[pipeline] render lanzado %s (force=%s dry_run=%s)",
+             run_id, force, dry)
+    return {"run_id": run_id, "render": render}
+
+
+@app.get("/api/pipeline/render/status")
+async def pipeline_render_status(run_id: str = ""):
+    """Snapshot del Stage 4: estado, progreso, salida y errores del render."""
+    try:
+        return _pipe.orchestrator.get_render_status(run_id.strip())
+    except _pipe.PipelineError as e:
+        raise HTTPException(404, f"[{e.code}] {e}") from e
+
+
+@app.get("/api/pipeline/manifest")
+async def pipeline_manifest(run_id: str):
+    """manifest.json estricto de la corrida (contrato del ensamblador)."""
+    try:
+        return _pipe.orchestrator.get_manifest(run_id.strip())
+    except _pipe.PipelineError as e:
+        raise HTTPException(404, f"[{e.code}] {e}") from e
+    except _pipe.harv.HarvesterError as e:
+        raise HTTPException(404, f"[{e.code}] {e}") from e
+
+
+@app.get("/api/pipeline/render/file")
+async def pipeline_render_file(run_id: str):
+    """Descarga del MP4 final (video/mp4) — solo si ya existe."""
+    try:
+        st = _pipe.orchestrator.get_render_status(run_id.strip())
+    except _pipe.PipelineError as e:
+        raise HTTPException(404, f"[{e.code}] {e}") from e
+    out = Path((st.get("render") or {}).get("output") or "")
+    if not out.is_file():
+        raise HTTPException(404, "[RENDER_NO_OUTPUT] aún no hay final_render.mp4 "
+                                 "para esa corrida — lanza Stage 4 primero")
+    return FileResponse(out, media_type="video/mp4", filename=out.name)
+
+
 @app.get("/")
 async def index():
     return FileResponse(STATIC_DIR / "index.html")
