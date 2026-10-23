@@ -53,3 +53,11 @@ Esta separación es una regla estable del flujo de trabajo, no una excepción te
 - **Comparación dirigida basada en código real (2026-10-23):** `06_INTEGRATIONS/INT-019_AGNES_COMPARACION_DIRIGIDA.md` — 6 áreas con anclas archivo:línea de ambos repos; veredicto: capacidades clave YA EXISTEN aquí; 3 ideas adaptables (R1/R2/R3) y 7 descartes con motivo; decisión D-008 en `01_DECISIONS/DECISION_LOG.md`.
 - No integrar directamente, no sustituir componentes ALBRA ni crear otro agente audiovisual. Licencia MIT verificada en el clon; cero código copiado; el repo externo no se ejecutó.
 - **INT-022** · MCP Connection Manager: panel ↔ GoogleFlowMCP/notebooklm-mcp (badges, toggles, notebookId dinámico, Test Pipeline, preflight AUTH_REQUIRED). [Ver integración](06_INTEGRATIONS/INT-022_MCP_CONNECTION_MANAGER.md)
+
+| Master | `00_MASTER/PRODUCTION_FRAMEWORK_BLUEPRINTS.md` | DESIGN v1.0 / NOT IMPLEMENTED | Production Framework común, registry y Blueprints Microdrama, Short, Short-Form y UGC; distingue diseño documental de implementación verificada |
+
+## Producción creativa multi-línea — 2026-10-23
+
+- Diseño documentado en `00_MASTER/PRODUCTION_FRAMEWORK_BLUEPRINTS.md`.
+- Framework común + Blueprints especializados: Microdrama, Short, Short-Form y UGC.
+- No confundir este diseño conceptual con schemas, selector o runtime ya implementados.
