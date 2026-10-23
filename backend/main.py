@@ -774,8 +774,8 @@ async def create_project(body: dict):
                      "style_reference": bool(body.get("style_reference", True))}
             if g.get("camara"):
                 pmeta["camara"] = g["camara"]
-            sub = (body.get("subtitle_style") or "hormozi").lower()
-            if sub in ("hormozi", "tiktok", "karaoke"):
+            sub = (body.get("subtitle_style") or "shorts").lower()
+            if sub in ("shorts", "hormozi", "tiktok", "karaoke"):
                 pmeta["subtitle_style"] = sub
             return db.create_project(
                 title=(g.get("titulo") or "Video desde Production JSON"),
@@ -840,14 +840,14 @@ async def create_project(body: dict):
         if not body.get("voice"):
             body["voice"] = tpl.get("voice") or None
         if not body.get("subtitle_style"):
-            body["subtitle_style"] = tpl.get("subtitles") or "hormozi"
+            body["subtitle_style"] = tpl.get("subtitles") or "shorts"
     if body.get("custom_style_prompt"):
         meta["custom_style_prompt"] = body["custom_style_prompt"].strip()
     # v2.4 — toggles de producción expuestos en el dashboard
     meta["transitions"] = bool(body.get("transitions", True))
     meta["style_reference"] = bool(body.get("style_reference", True))
-    sub_style = (body.get("subtitle_style") or "hormozi").lower()
-    if sub_style in ("hormozi", "tiktok", "karaoke"):
+    sub_style = (body.get("subtitle_style") or "shorts").lower()
+    if sub_style in ("shorts", "hormozi", "tiktok", "karaoke"):
         meta["subtitle_style"] = sub_style
     cookies = (body.get("cookies_from_browser") or "").strip().lower()
     if cookies in ("chrome", "firefox", "edge", "brave", "safari", "vivaldi"):

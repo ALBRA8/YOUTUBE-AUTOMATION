@@ -12,6 +12,7 @@ from pathlib import Path
 
 from config import FPS, LONG_H, LONG_W, MUSIC_VOLUME, OUTPUT_DIR, SHORT_H, SHORT_W
 from pipeline import subtitles as subs_mod
+from pipeline import typography as typo_mod
 
 log = logging.getLogger("video")
 
@@ -297,14 +298,30 @@ async def burn_subtitles(project: dict, video_raw: Path, words_path: Path) -> Pa
     ass_path = proj_dir / "subs.ass"
     w, h = (SHORT_W, SHORT_H) if project["format"] == "short" else (LONG_W, LONG_H)
     # estilo de subtítulo elegible desde el dashboard (meta.subtitle_style):
-    # hormozi (amarillo gigante, default) / tiktok (blanco) / karaoke (lima)
+    # shorts (INT-021: Montserrat ExtraBold + contraste dinámico, default)
+    # / hormozi (amarillo gigante) / tiktok (blanco) / karaoke (lima)
     sub_style = ((project.get("meta") or {}).get("subtitle_style")
-                 or "hormozi")
-    ass_path.write_text(subs_mod.build_ass(words, w, h, style=sub_style),
-                        encoding="utf8")
+                 or "shorts")
+    # INT-021: brillo medio REAL de una muestra del raw (ffmpeg signalstats
+    # YAVG) alimenta la paleta de contraste dinámico. Pasa por _run_ffmpeg
+    # (hermético en baterías) y su fallback interno es 0.5 ante CUALQUIER
+    # fallo — el quemado nunca depende de esta medición.
+    avg_bright = typo_mod.estimate_video_brightness(video_raw,
+                                                    runner=_run_ffmpeg)
+    ass_path.write_text(
+        subs_mod.build_ass(words, w, h, style=sub_style,
+                           avg_brightness=avg_bright),
+        encoding="utf8")
 
     final = proj_dir / f"{project['id']}_final.mp4"
     sub_filter = f"ass={ass_path.as_posix().replace(':', '\\\\:')}"
+    # INT-021: fontsdir hace que libass resuelva la Montserrat ExtraBold
+    # embarcada (matching por familia ID1, verificado empíricamente con A/B
+    # de MD5 de fotogramas — CONTEXTO INT-021 §3). Sin fontsdir el estilo
+    # degradaría en silencio a la fuente por defecto del sistema.
+    if typo_mod.FONT_DIR.is_dir():
+        sub_filter += (f":fontsdir="
+                       f"{typo_mod.FONT_DIR.as_posix().replace(':', '\\\\:')}")
     # INT-012: en 4K (2160x3840) libass+libx264 «medium» superó los 900 s y el
     # TimeoutExpired — no capturado — tumbaba TODO el pipeline aunque el resto
     # del render fuera válido. Dos mitigaciones quirúrgicas: (1) preset

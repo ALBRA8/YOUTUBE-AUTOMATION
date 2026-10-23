@@ -144,7 +144,7 @@ function renderProjectCards(list) {
 const W = { step: 1, mode: 'idea', format: 'short', style: 'auto',
             title: '', idea: '', script: '', url: '', custom: '', voice: '', tts: '',
             avatar: '', platforms: ['youtube', 'tiktok'],
-            transitions: true, styleReference: true, subtitles: 'hormozi',
+            transitions: true, styleReference: true, subtitles: 'shorts',
             cookies: '', nicho: '', nichoAdjust: '' };
 
 function renderCreate() {
@@ -247,6 +247,7 @@ function renderCreate() {
         <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
           <div style="flex:1;min-width:180px"><label style="font-size:12px;color:var(--muted)">Estilo de subtítulos</label>
             <select onchange="W.subtitles=this.value">
+              <option value="shorts" ${W.subtitles === 'shorts' ? 'selected' : ''}>Shorts · Montserrat dinámico</option>
               <option value="hormozi" ${W.subtitles === 'hormozi' ? 'selected' : ''}>Hormozi · amarillo gigante</option>
               <option value="tiktok" ${W.subtitles === 'tiktok' ? 'selected' : ''}>TikTok · blanco clásico</option>
               <option value="karaoke" ${W.subtitles === 'karaoke' ? 'selected' : ''}>Karaoke · verde lima</option>

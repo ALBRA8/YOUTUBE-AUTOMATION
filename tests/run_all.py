@@ -46,6 +46,10 @@ BATERIAS = [
     "test_burn_subtitles_resilience.py", # INT-012: burn_subtitles con preset
                                  # veryfast + timeout que degrada honesto en
                                  # vez de tumbar el pipeline (16)
+    "test_typography.py",        # INT-021: tipografía Montserrat embarcada +
+                                 # contraste dinámico WCAG >= 4.5 + fuente
+                                 # (tabla name) + build_ass shorts/legacy +
+                                 # matching libass A/B vía MD5 real (59)
     "test_memorydv.py",          # MemoryDV §memoria: storage/retrieval/
                                  # consolidación/isolation (36)
     "test_skills_autonomia.py",  # Skill Contract §skills + autonomía L0-L5

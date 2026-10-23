@@ -6,6 +6,8 @@ con resaltado de palabra activa. Los tiempos vienen de Whisper.
 """
 from __future__ import annotations
 
+from pipeline.typography import find_font, generate_shorts_sub_style
+
 ASS_HEADER = """[Script Info]
 ScriptType: v4.00+
 PlayResX: {w}
@@ -21,6 +23,24 @@ Style: Hormozi,{font},{size},&H0033FFFF,&H00FFFFFF,&H00000000,&H7F000000,-1,0,0,
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
+# INT-021: cabecera del estilo 'Shorts' — la línea Style la genera
+# pipeline.typography (fuente embarcada + contraste dinámico verificado
+# WCAG >= 4.5:1; matching libass probado empíricamente, ver INT-021 §3).
+SHORTS_HEADER = """[Script Info]
+ScriptType: v4.00+
+PlayResX: {w}
+PlayResY: {h}
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+{style_line}
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+
 # Estilos de subtítulo disponibles
 SUB_STYLES = {
     "hormozi": {"font": "Impact", "size_ratio": 0.062, "outline": 9, "shadow": 4,
@@ -29,6 +49,12 @@ SUB_STYLES = {
                 "active_color": "&H00FFFFFF&", "chunks": 1},        # blanco clásico
     "karaoke": {"font": "Montserrat", "size_ratio": 0.06, "outline": 8, "shadow": 3,
                 "active_color": "&H0000FF7F&", "chunks": 1},        # verde lima
+    # INT-021: estilo Shorts — Fontname/colores reales los decide
+    # pipeline.typography (fuente embarcada + contraste dinámico); esta
+    # entrada fija el ratio tipográfico y la agrupación del pop.
+    "shorts":  {"font": "Montserrat ExtraBold", "size_ratio": 0.037,
+                "outline": 4, "shadow": 2,
+                "active_color": "&H00FFFFFF&", "chunks": 3},
 }
 
 
@@ -72,14 +98,31 @@ def group_words_smart(words: list[dict], chunk: int = 3,
     return groups
 
 
-def build_ass(words: list[dict], w: int, h: int, style: str = "hormozi") -> str:
-    cfg = SUB_STYLES.get(style, SUB_STYLES["hormozi"])
+def build_ass(words: list[dict], w: int, h: int, style: str = "hormozi",
+              avg_brightness: float | None = None) -> str:
+    """INT-021: style='shorts' -> tipografía de impacto (Montserrat
+    ExtraBold embarcada) + paleta de contraste dinámico WCAG >= 4.5:1
+    según el brillo medio de escena (avg_brightness 0..1; None = 0.5
+    neutro). Los estilos legacy (hormozi/tiktok/karaoke) emiten
+    EXACTAMENTE la misma salida que antes (regresión protegida por
+    tests/test_typography.py)."""
+    cfg = (SUB_STYLES["shorts"] if style == "shorts"
+           else SUB_STYLES.get(style, SUB_STYLES["hormozi"]))
     font_size = max(int(h * cfg["size_ratio"]), 28)
-    marginv = int(h * 0.30) if h > w else int(h * 0.22)  # más arriba del centro
-
-    header = ASS_HEADER.format(w=w, h=h, font=cfg["font"], size=font_size,
-                               outline=cfg["outline"], shadow=cfg["shadow"],
-                               marginv=marginv)
+    if style == "shorts":
+        style_name = "Shorts"
+        header = SHORTS_HEADER.format(
+            w=w, h=h,
+            style_line=generate_shorts_sub_style(
+                font_path=find_font(), w=w, h=h,
+                avg_brightness=0.5 if avg_brightness is None
+                else avg_brightness))
+    else:
+        style_name = "Hormozi"
+        marginv = int(h * 0.30) if h > w else int(h * 0.22)  # más arriba del centro
+        header = ASS_HEADER.format(w=w, h=h, font=cfg["font"], size=font_size,
+                                   outline=cfg["outline"], shadow=cfg["shadow"],
+                                   marginv=marginv)
 
     events: list[str] = []
     usable = max(w - 120, 300)  # ancho útil (margins L/R de 60px)
@@ -95,7 +138,7 @@ def build_ass(words: list[dict], w: int, h: int, style: str = "hormozi") -> str:
         fx = (r"{\fscx118\fscy118\t(0,120,\fscx%d\fscy%d)}" % (settle, settle)
               if settle < 100 else r"{\fscx118\fscy118\t(0,120,\fscx100\fscy100)}")
         events.append(
-            f"Dialogue: 0,{_ts(start)},{_ts(end)},Hormozi,,0,0,0,,{fx}{text}")
+            f"Dialogue: 0,{_ts(start)},{_ts(end)},{style_name},,0,0,0,,{fx}{text}")
 
     return header + "\n".join(events) + "\n"
 

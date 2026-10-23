@@ -341,7 +341,7 @@ async def execute(plan_out: dict, db, orchestrator, avatars: list[dict]) -> dict
                 meta={"idea": niches_svc.compose_idea(tpl, params.get("idea")),
                       "niche_template": tpl["id"], "via": "chat-agente",
                       "transitions": True, "style_reference": True,
-                      "subtitle_style": tpl.get("subtitles") or "hormozi"},
+                      "subtitle_style": tpl.get("subtitles") or "shorts"},
                 platforms=params.get("platforms") or ["youtube"])
         else:
             style = params.get("style") or (avatar or {}).get("style") or "auto"

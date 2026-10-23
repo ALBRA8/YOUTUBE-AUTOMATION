@@ -298,7 +298,7 @@ def op_create(input: dict) -> dict:
         composed = niches_svc.compose_idea(tpl, idea or None)
         meta.update({"idea": composed, "niche_template": tpl["id"],
                      "transitions": True, "style_reference": True,
-                     "subtitle_style": tpl.get("subtitles") or "hormozi"})
+                     "subtitle_style": tpl.get("subtitles") or "shorts"})
         title = title or f"Video {tpl.get('name') or nicho}"
         plats = platforms or ["youtube"]
     else:

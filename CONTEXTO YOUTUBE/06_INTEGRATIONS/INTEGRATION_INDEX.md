@@ -148,3 +148,9 @@
 - **Fix:** `-preset veryfast` + timeout capturado que degrada por el camino honesto existente (`subs_status.json` burned=false → QA warn). Timeout 900 s intacto; sin cambios de contrato ni permisos.
 - **Tests:** `tests/test_burn_subtitles_resilience.py` (16) registrada en `run_all.py`; autopublish/flow_mcp_video/gobernanza/qa_forensics re-ejecutadas OK; suite canónica completa re-ejecutada al cierre.
 - **Pendiente honesto:** re-run real 4K del HARD E2E (Chrome + sesión del usuario → Antigravity); idempotencia Run 2 de INT-012 sin ejecutar.
+
+## INT-021 — Tipografía de impacto + contraste dinámico de subtítulos (estilo Shorts)
+- **Estado:** IMPLEMENTADO — VALIDACIÓN VISUAL REAL PENDIENTE (Antigravity, Windows real).
+- **Documento:** `INT-021_TIPOGRAFIA_IMPACTO_CONTRASTE_DINAMICO.md`.
+- **Componentes:** `backend/pipeline/typography.py` (NUEVO: luminancia WCAG 2.x, paleta por bandas con contrato doble >= 4.5:1, línea `Style:` ASS, brillo vía signalstats YAVG con fallback 0.5), `backend/data/fonts/Montserrat-ExtraBold.ttf` + `OFL.txt` (NUEVOS, SIL OFL 1.1), `subtitles.py` (SHORTS_HEADER + estilo `shorts`), `video.py` (medición de brillo + fontsdir condicional), defaults a `shorts` en `main.py` / `agent.py` / `adapter.py` / `app.js`.
+- **Límite:** libass resuelve el `fontsdir` por familia ID1 — Fontname `Montserrat ExtraBold` (pedir `Montserrat` degrada en silencio a la fuente default; A/B de MD5 congelado en batería S8); estilos legacy byte-idénticos (contrato protegido por test); sin validación visual HARD E2E en la máquina del usuario; cambios aún sin commitear (commit previsto por el integrador).
