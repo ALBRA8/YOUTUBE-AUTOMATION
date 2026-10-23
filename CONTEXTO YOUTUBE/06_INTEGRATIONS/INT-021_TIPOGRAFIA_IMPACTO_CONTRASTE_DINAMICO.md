@@ -79,6 +79,8 @@ Batería nueva `tests/test_typography.py`, secciones:
 - La línea literal `pytest tests/ -v -k "subtitle or video or live"` fue intentada para el expediente y reproduce el `INTERNALERROR` conocido (las baterías de este repo son scripts canónicos, no colección pytest).
 - La batería queda registrada en `tests/run_all.py` tras `test_burn_subtitles_resilience`.
 
+**Verificación post-commit (árbol limpio, commit `e995563`):** los 2 baterías con guards de higiene pasan íntegras — `test_flow_batchexecute` **64/0** (62+2 guards), `test_flow_startframe_fase2` **67/0** (64+3 guards) — y se re-verifican `test_typography` **59/0** y `test_burn_subtitles_resilience` **16/0**. **Total de la sesión: 47/47 baterías ejecutadas, 2.186 checks, 0 fallos.** (Salvedad `test_10_escenas` arriba; baseline 44/44.)
+
 ## 6. Pendiente (honesto)
 
 - **Validación visual HARD E2E en Windows real (Antigravity):** el matching de fuentes y el render deben confirmarse en la máquina del usuario, con el build de ffmpeg que él use (el A/B de §2 se ejecutó con ffmpeg 7.1.5 del sandbox). Ver el video final y confirmar que la Montserrat ExtraBold se ve y que la paleta responde a escenas claras/oscuras reales.
@@ -86,4 +88,5 @@ Batería nueva `tests/test_typography.py`, secciones:
 
 ## 7. Estado
 
-Implementado en working tree (branch `main`, cambios sin commitear); commit directo a `main` previsto por el integrador.
+- **COMMIT EN `main`: `e995563`** (14 archivos, +852/−20, sobre `c724231`; árbol limpio verificado; `main` = `e995563`, `origin/main` queda 1 commit atrás hasta el push).
+- Clasificación: **IMPLEMENTADA — VALIDACIÓN VISUAL REAL PENDIENTE** (§6).
