@@ -50,6 +50,11 @@ BATERIAS = [
                                  # contraste dinámico WCAG >= 4.5 + fuente
                                  # (tabla name) + build_ass shorts/legacy +
                                  # matching libass A/B vía MD5 real (59)
+    "test_mcp_manager.py",       # INT-022: MCP Connection Manager — cliente
+                                 # stdio persistente (connect/handshake/
+                                 # execute), inyección dinámica de notebook_id
+                                 # (payload > .env), preflight AUTH_REQUIRED,
+                                 # timeouts con limpieza y endpoints /api/mcp/* (38)
     "test_memorydv.py",          # MemoryDV §memoria: storage/retrieval/
                                  # consolidación/isolation (36)
     "test_skills_autonomia.py",  # Skill Contract §skills + autonomía L0-L5

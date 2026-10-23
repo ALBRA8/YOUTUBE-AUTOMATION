@@ -27,6 +27,24 @@ FLOW_MCP_DIR = Path(os.getenv("FLOW_MCP_DIR", str(BASE_DIR.parent / "tools" / "G
 FLOW_MCP_MODEL = os.getenv("FLOW_MCP_MODEL", "2").strip()
 FLOW_MCP_TIMEOUT = float(os.getenv("FLOW_MCP_TIMEOUT", "120.0"))
 
+# ── MCP Connection Manager (INT-022) — panel ↔ servidores MCP stdio ──────
+# Puerto CDP del Chrome DEDICADO de GoogleFlowMCP (debe coincidir con
+# tools/GoogleFlowMCP/src/chrome.js: CDP_PORT = FLOW_CDP_PORT || 9333).
+FLOW_CDP_PORT = int(os.getenv("FLOW_CDP_PORT", "9333"))
+# notebooklm-mcp (uv tool install "notebooklm-py[browser]"): comando completo.
+NOTEBOOKLM_MCP_CMD = os.getenv("NOTEBOOKLM_MCP_CMD", "notebooklm-mcp").strip()
+NOTEBOOKLM_MCP_TIMEOUT = float(os.getenv("NOTEBOOKLM_MCP_TIMEOUT", "60.0"))
+# Allowlist opcional de tools de NotebookLM (coma). Vacío = permitir todas
+# (panel local protegido por auth_guard); ejemplo solo-lectura en .env.example.
+NOTEBOOKLM_MCP_TOOLS = os.getenv("NOTEBOOKLM_MCP_TOOLS", "").strip()
+# Tool liviana de solo-lectura para el preflight de sesión (AUTH_REQUIRED).
+NOTEBOOKLM_PROBE_TOOL = os.getenv("NOTEBOOKLM_PROBE_TOOL", "list_notebooks").strip()
+# notebookId dinámico (§3): clave de argumento + fallback desde .env.
+NOTEBOOKLM_ID_KEY = os.getenv("NOTEBOOKLM_ID_KEY", "notebook_id").strip()
+NOTEBOOKLM_NOTEBOOK_ID = os.getenv("NOTEBOOKLM_NOTEBOOK_ID", "").strip()
+# Carpeta de perfiles de notebooklm-py (vacío = ~/.notebooklm).
+NOTEBOOKLM_HOME = os.getenv("NOTEBOOKLM_HOME", "").strip()
+
 # ── NVIDIA NIM (agente VÓRTICE · OpenAI-compatible) ───────────────────────
 # kimi-k3: planificación del agente, entiende el proyecto y ejecuta acciones
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()

@@ -505,3 +505,22 @@ code.mini { background: var(--bg2); border: 1px solid var(--border); border-radi
   border-radius: 10px; border: 1px solid var(--border); }
 .chat-img { max-width: 190px; max-height: 140px; border-radius: 10px;
   border: 1px solid var(--border); display: block; margin-bottom: 6px; }
+
+/* ═══ INT-022 · MCP Connection Manager ═══ */
+.mcp-svc { border: 1px solid rgba(127,127,127,.25); border-radius: 12px; padding: 14px 16px; margin: 12px 0; }
+.mcp-svc-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.mcp-svc-head h3 { margin: 0; font-size: 15.5px; }
+.mcp-badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 10.5px; font-weight: 800; letter-spacing: .4px; white-space: nowrap; }
+.mcp-b-gray   { background: rgba(127,127,127,.18); color: var(--muted); }
+.mcp-b-yellow { background: rgba(255,176,32,.14);  color: var(--warn); border: 1px solid var(--warn); }
+.mcp-b-green  { background: rgba(43,217,118,.14);  color: var(--ok);   border: 1px solid var(--ok); }
+.mcp-b-red    { background: rgba(255,84,112,.14);  color: var(--err);  border: 1px solid var(--err); }
+.mcp-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.mcp-row.btns { margin-top: 12px; }
+.mcp-row label { font-size: 12.5px; color: var(--muted); font-weight: 700; }
+.mcp-row input { flex: 1; min-width: 220px; background: rgba(127,127,127,.1); border: 1px solid rgba(127,127,127,.3); border-radius: 8px; padding: 8px 10px; color: inherit; font-size: 13px; }
+.mcp-tools summary { cursor: pointer; font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+.mcp-tools ul { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--muted); }
+.mcp-log { background: rgba(127,127,127,.12); border-radius: 8px; padding: 8px 10px; font-size: 11.5px; color: var(--muted); white-space: pre-wrap; max-height: 150px; overflow: auto; margin-top: 10px; }
+.btn.ghost { background: transparent; border: 1px solid rgba(127,127,127,.35); }
+.btn.ghost:hover { border-color: var(--accent); }

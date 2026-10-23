@@ -64,7 +64,7 @@ function nav(view) {
   const views = { home: renderHome, create: renderCreate, projects: renderProjects,
                   factory: renderFactory, publish: renderPublish, settings: renderSettings,
                   project: renderProject, agent: renderAgent, avatars: renderAvatars,
-                  trends: renderTrends };
+                  trends: renderTrends, mcp: renderMCP };
   (views[view] || renderHome)();
 }
 
@@ -1011,7 +1011,9 @@ function goPublish(pid) { PUB_PID = pid; nav('publish'); }
 
 /* ── vista: AJUSTES (configuración de APIs desde el dashboard) ── */
 function updatePills() {
-  const pills = [['pill-gemini', S.health.gemini], ['pill-whisper', S.health.whisper], ['pill-yt', S.health.youtube]];
+  const pills = [['pill-gemini', S.health.gemini], ['pill-whisper', S.health.whisper], ['pill-yt', S.health.youtube],
+                 ['pill-flow', !!(S.mcp && S.mcp['google-flow'] && S.mcp['google-flow'].state === 'connected')],
+                 ['pill-nblm', !!(S.mcp && S.mcp.notebooklm && S.mcp.notebooklm.state === 'connected')]];
   pills.forEach(([id, on]) => { const el = $('#' + id); if (el) $('.dot', el).classList.toggle('on', !!on); });
 }
 
@@ -1805,3 +1807,153 @@ async function refreshAll() {
     try { S.projects = await api('/projects'); refreshSidebar(); } catch {}
   }, 15000);
 })();
+
+/* ══════════════════════════════════════════════════════════════════
+   INT-022 · MCP CONNECTION MANAGER — panel ↔ GoogleFlowMCP / NotebookLM
+   Badges: gris=desconectado · amarillo=conectando · verde=conectado y
+   autenticado · rojo=error de sesión/técnico. Acciones: conectar/
+   desconectar por servicio, Test Pipeline (dry-run §mandato) y registro
+   dinámico del notebookId (payload → localStorage → .env fallback).
+   ══════════════════════════════════════════════════════════════════ */
+const NID_KEY = 'yta-nblm-nid';
+
+function mcpBadgeHTML(state) {
+  const map = {
+    disconnected:  ['DESCONECTADO', 'mcp-b-gray'],
+    connecting:    ['CONECTANDO…', 'mcp-b-yellow'],
+    connected:     ['CONECTADO · AUTENTICADO', 'mcp-b-green'],
+    auth_required: ['ERROR DE SESIÓN GOOGLE', 'mcp-b-red'],
+    error:         ['ERROR TÉCNICO', 'mcp-b-red'],
+  };
+  const [txt, cls] = map[state] || map.disconnected;
+  return `<span class="mcp-badge ${cls}">${txt}</span>`;
+}
+
+function mcpSvcHTML(svc, label, hint) {
+  const isNblm = svc === 'notebooklm';
+  return `<div class="mcp-svc">
+    <div class="mcp-svc-head">
+      <h3>${label}</h3>
+      <span id="mcp-${svc}-badge">${mcpBadgeHTML('disconnected')}</span>
+    </div>
+    <p class="hintline">${hint}</p>
+    ${isNblm ? `<div class="mcp-row">
+        <label for="nblm-nid">Notebook ID activo</label>
+        <input id="nblm-nid" type="text" placeholder="ej. 9a1b2c3d… (vacío = usar .env)"
+               value="${esc(localStorage.getItem(NID_KEY) || '')}" oninput="mcpSaveId()">
+      </div>` : ''}
+    <div class="mcp-row btns">
+      <button class="btn" id="mcp-${svc}-connect" onclick="mcpConnect('${svc}')">🔌 Conectar</button>
+      <button class="btn ghost" id="mcp-${svc}-disc" onclick="mcpDisconnect('${svc}')">⏏️ Desconectar</button>
+      <button class="btn ghost" onclick="mcpTest('${svc}')">🧪 Probar</button>
+    </div>
+    <div id="mcp-${svc}-zone"></div>
+  </div>`;
+}
+
+function renderMCP() {
+  $('#view').innerHTML = `
+  <div class="card">
+    <h2 class="sec">🔌 MCP Connection Manager <span class="hint">servidores MCP stdio gestionados por el backend</span></h2>
+    ${mcpSvcHTML('google-flow', '🎬 Google Flow MCP',
+      'Servidor tools/GoogleFlowMCP (Node) que maneja un Chrome dedicado con CDP persistente ' +
+      '(puerto <code>FLOW_CDP_PORT</code>, perfil propio). Inicia sesión de Google en ese Chrome UNA vez; ' +
+      'la sesión sobrevive entre ejecuciones. Requiere <code>FLOW_MCP_ENABLED=1</code> en backend/.env.')}
+    ${mcpSvcHTML('notebooklm', '📚 NotebookLM MCP',
+      'Servidor <code>notebooklm-mcp</code> (uv tool install "notebooklm-py[browser]"). Primera vez: corre ' +
+      '<code>notebooklm login</code> (tools/mcp-setup/). El notebookId se valida e inyecta dinámicamente ' +
+      '(aquí → payload; fallback <code>NOTEBOOKLM_NOTEBOOK_ID</code> en backend/.env).')}
+    <div class="mcp-row btns" style="margin-top:14px">
+      <button class="btn" onclick="mcpTest('')">🧪 Test Pipeline (ambos)</button>
+      <button class="btn ghost" onclick="mcpRefresh()">🔄 Refrescar estado</button>
+    </div>
+    <pre class="mcp-log" id="mcp-log">Estado en vivo…</pre>
+  </div>`;
+  mcpRefresh();
+}
+
+function mcpSaveId() { const el = $('#nblm-nid'); if (el) localStorage.setItem(NID_KEY, el.value.trim()); }
+function mcpNid() { const el = $('#nblm-nid'); return el ? el.value.trim() : (localStorage.getItem(NID_KEY) || ''); }
+
+function mcpZoneHTML(st) {
+  let h = '';
+  if (st.auth_detail) h += `<p class="hintline">🔐 ${esc(st.auth_detail)}</p>`;
+  if (st.last_error) h += `<p class="hintline" style="color:var(--err)">⚠ ${esc(st.last_error)}</p>`;
+  if (st.server_info && st.server_info.name)
+    h += `<p class="hintline">Servidor: <b>${esc(st.server_info.name)}</b> v${esc(st.server_info.version || '?')}` +
+         (st.pid ? ` · PID ${st.pid} · ${st.uptime_s || 0}s` : '') + `</p>`;
+  if (st.tools && st.tools.length)
+    h += `<details class="mcp-tools"><summary>🔧 ${st.tools.length} tools expuestas</summary><ul>` +
+         st.tools.map(t => `<li><b>${esc(t.name)}</b>${t.description ? ' — ' + esc(t.description) : ''}</li>`).join('') +
+         `</ul></details>`;
+  if (st.hint) h += `<p class="hintline" style="color:var(--warn)">ℹ ${esc(st.hint)}</p>`;
+  if (st.browser_up !== undefined)
+    h += `<p class="hintline">Chrome CDP (${st.cdp_port || ''}): ${st.browser_up ? '✅ arriba' : '❌ no responde — abre el Chrome dedicado'}</p>`;
+  if (st.notebook_id_valid !== undefined && st.notebook_id)
+    h += `<p class="hintline">notebookId «${esc(st.notebook_id)}»: ${st.notebook_id_valid ? '✅ válido' : '❌ inválido'}</p>`;
+  if (st.stderr_tail && st.stderr_tail.length)
+    h += `<pre class="mcp-log">${esc(st.stderr_tail.join('\n'))}</pre>`;
+  return h || '<p class="hintline">Sin información adicional.</p>';
+}
+
+function mcpApplyStatus(services) {
+  S.mcp = services || {};
+  ['google-flow', 'notebooklm'].forEach(svc => {
+    const st = S.mcp[svc] || {};
+    const badge = $('#mcp-' + svc + '-badge');
+    if (badge) badge.innerHTML = mcpBadgeHTML(st.state || 'disconnected');
+    const zone = $('#mcp-' + svc + '-zone');
+    if (zone) zone.innerHTML = mcpZoneHTML(st);
+    const btnC = $('#mcp-' + svc + '-connect'), btnD = $('#mcp-' + svc + '-disc');
+    if (btnC) { btnC.disabled = st.state === 'connecting'; btnC.textContent = st.state === 'connecting' ? '⏳ Conectando…' : '🔌 Conectar'; }
+    if (btnD) btnD.disabled = st.state === 'connecting' || st.state === 'disconnected';
+  });
+  updatePills();
+}
+
+async function mcpRefresh(silent) {
+  try {
+    const js = await api('/mcp/status');
+    mcpApplyStatus(js.services || {});
+    const log = $('#mcp-log');
+    if (log) log.textContent = Object.entries(js.services || {})
+      .map(([k, v]) => `[${k}] ${v.state}${v.auth && v.auth !== 'unknown' ? ' · auth=' + v.auth : ''}`).join('\n');
+  } catch (e) { if (!silent) toast('MCP status: ' + e.message, 'err'); }
+}
+
+async function mcpConnect(svc) {
+  const body = { service: svc };
+  if (svc === 'notebooklm' && mcpNid()) body.notebook_id = mcpNid();
+  const b = $('#mcp-' + svc + '-badge'); if (b) b.innerHTML = mcpBadgeHTML('connecting');
+  try {
+    const st = await api('/mcp/connect', { method: 'POST', body });
+    if (st.state === 'auth_required') toast('Sesión Google no válida — badge rojo con detalle', 'err');
+    else toast((svc === 'google-flow' ? 'Google Flow' : 'NotebookLM') + ' conectado ✅');
+  } catch (e) { toast('Conexión: ' + e.message, 'err'); }
+  mcpRefresh(true);
+}
+
+async function mcpDisconnect(svc) {
+  try { await api('/mcp/disconnect', { method: 'POST', body: { service: svc } }); toast('Desconectado'); }
+  catch (e) { toast('Desconexión: ' + e.message, 'err'); }
+  mcpRefresh(true);
+}
+
+async function mcpTest(svc) {
+  const body = { service: svc };
+  if (mcpNid()) body.notebook_id = mcpNid();
+  toast('Test Pipeline en marcha…');
+  try {
+    const js = await api('/mcp/test-pipeline', { method: 'POST', body });
+    const log = $('#mcp-log');
+    if (log) {
+      log.textContent = Object.entries(js).filter(([k]) => k !== 'ok')
+        .map(([k, v]) => `[${k}] ${typeof v === 'object' ? JSON.stringify(v, null, 1) : v}`).join('\n');
+    }
+    toast(js.ok ? 'Test Pipeline OK ✅' : 'Test con problemas — mira el log', js.ok ? '' : 'err');
+  } catch (e) { toast('Test Pipeline: ' + e.message, 'err'); }
+  mcpRefresh(true);
+}
+
+// estado silencioso al arrancar (pills del topbar sin spam de errores)
+(async () => { try { await mcpRefresh(true); } catch {} })();

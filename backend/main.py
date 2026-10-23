@@ -1818,6 +1818,77 @@ async def mcp_sin_barra(req: _Req):
     return await mcp_server.entry(req)
 
 
+# ─────────────── MCP Connection Manager (INT-022) · panel ↔ servidores ──
+# Cliente MCP persistente en el backend: el panel (navegador) no puede
+# hablar stdio; estos endpoints exponen conectar/estado/ejecutar/probar.
+# Heredan auth_guard y csrf_guard por ser middlewares de app (sin bypass).
+from services import mcp_manager as _mcpm  # noqa: E402
+
+
+def _svc(body: dict) -> str:
+    s = (body.get("service") or "").strip().lower()
+    if s not in _mcpm.SERVICES:
+        raise HTTPException(400, "service debe ser 'google-flow' o 'notebooklm'")
+    return s
+
+
+@app.post("/api/mcp/connect")
+async def mcp_connect(body: dict):
+    """Conecta el servicio MCP y ejecuta el preflight de sesión (§2).
+    AUTH_REQUIRED llega como estado (no como 5xx) para pintar el badge rojo."""
+    try:
+        return await _mcpm.manager.connect(
+            _svc(body), notebook_id=(body.get("notebook_id") or "").strip() or None)
+    except _mcpm.MCPManagerError as e:
+        raise HTTPException(502, f"[{e.code}] {e}") from e
+
+
+@app.post("/api/mcp/disconnect")
+async def mcp_disconnect(body: dict):
+    return await _mcpm.manager.disconnect(_svc(body))
+
+
+@app.get("/api/mcp/status")
+async def mcp_status():
+    """Estado en vivo de ambos servicios + pistas de configuración."""
+    return await _mcpm.manager.status()
+
+
+@app.post("/api/mcp/execute")
+async def mcp_execute(body: dict):
+    """Despacha una tool al servidor MCP activo (§1).
+    - tool: nombre exacto (validado contra tools/list y allowlist si aplica)
+    - arguments: dict libre; para notebooklm se inyecta notebook_id dinámico (§3)
+      con fallback NOTEBOOKLM_NOTEBOOK_ID y validación de patrón.
+    - auth_required/timeout se reportan con código estable para la UI."""
+    tool = (body.get("tool") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_\-]{1,64}", tool):
+        raise HTTPException(400, "tool inválida")
+    args = body.get("arguments") if isinstance(body.get("arguments"), dict) else {}
+    try:
+        return await _mcpm.manager.execute(
+            _svc(body), tool, args,
+            timeout=float(body.get("timeout")) if body.get("timeout") else None,
+            notebook_id=(body.get("notebook_id") or "").strip() or None,
+            auto_connect=bool(body.get("auto_connect", True)))
+    except _mcpm.MCPManagerError as e:
+        status = 504 if e.code == "TIMEOUT" else 502
+        raise HTTPException(status, f"[{e.code}] {e}") from e
+
+
+@app.post("/api/mcp/test-pipeline")
+async def mcp_test_pipeline(body: dict):
+    """Dry-run (§4 'Test Pipeline'): conecta si hace falta, verifica sesión
+    Google, CDP del Chrome dedicado y validez del notebookId. No genera nada."""
+    service = (body.get("service") or "").strip().lower()
+    targets = list(_mcpm.SERVICES) if not service else [_svc(body)]
+    notebook_id = (body.get("notebook_id") or "").strip() or None
+    out = {t: await _mcpm.manager.test_pipeline(t, notebook_id=notebook_id)
+           for t in targets}
+    out["ok"] = all(v.get("ok") for v in out.values())
+    return out
+
+
 @app.get("/")
 async def index():
     return FileResponse(STATIC_DIR / "index.html")
