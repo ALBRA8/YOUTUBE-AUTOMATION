@@ -7,6 +7,7 @@
 |---|---|---|---|
 | Master | `00_MASTER/PROJECT_STATE.md` | IN_PROGRESS | estado actual, bloqueo y plan inmediato |
 | Master | `00_MASTER/ARCHITECTURE.md` | VERIFIED / IN_PROGRESS | capas, frontera y límites de evidencia; incorpora la referencia conceptual del video base |
+| Master | `00_MASTER/PRODUCTION_FRAMEWORK_BLUEPRINTS.md` | DESIGN v1.0 / NOT IMPLEMENTED | Production Framework común, registry y Blueprints Microdrama, Short, Short-Form y UGC; distingue diseño documental de implementación verificada |
 | Master | `00_MASTER/GLOSSARY.md` | VERIFIED | términos del proyecto |
 | Master | `00_MASTER/MIGRATION_ANALYSIS.md` | ANALYSIS / STOP | análisis de migración AGENTE-GENERAL → harness; fases P0–P5, límites protegidos y riesgos; no implementado |
 | Decisions | `01_DECISIONS/DECISION_LOG.md` | POPULATED | decisiones arquitectónicas, Start Frame y frontera operativa Constructor/Antigravity |
@@ -54,7 +55,6 @@ Esta separación es una regla estable del flujo de trabajo, no una excepción te
 - No integrar directamente, no sustituir componentes ALBRA ni crear otro agente audiovisual. Licencia MIT verificada en el clon; cero código copiado; el repo externo no se ejecutó.
 - **INT-022** · MCP Connection Manager: panel ↔ GoogleFlowMCP/notebooklm-mcp (badges, toggles, notebookId dinámico, Test Pipeline, preflight AUTH_REQUIRED). [Ver integración](06_INTEGRATIONS/INT-022_MCP_CONNECTION_MANAGER.md)
 
-| Master | `00_MASTER/PRODUCTION_FRAMEWORK_BLUEPRINTS.md` | DESIGN v1.0 / NOT IMPLEMENTED | Production Framework común, registry y Blueprints Microdrama, Short, Short-Form y UGC; distingue diseño documental de implementación verificada |
 
 ## Producción creativa multi-línea — 2026-10-23
 
