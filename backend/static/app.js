@@ -223,10 +223,13 @@ function renderCreate() {
           </select>
           ${S.avatars.length ? '' : '<small style="color:var(--muted);display:block;margin-top:4px">Crea personajes en la pestaña 🎭 Avatares</small>'}</div>
         <div class="field"><label>Voz (opcional, la del avatar manda si no eliges)</label>
-          <select onchange="W.tts=this.value">
-            <option value="">edge-tts · Salomé 🇨🇴 (gratis ilimitado)</option>
-            <option value="gemini" ${S.health.gemini ? '' : 'disabled'}>Gemini TTS · Fenrir 🎖️ (premium)</option>
-          </select></div>
+          <div style="display:flex;gap:6px">
+            <select id="wiz-voice-select" onchange="W.voice=this.value" style="flex:1">
+              <option value="">edge-tts · Salomé 🇨🇴 (gratis ilimitado)</option>
+              <option value="gemini" ${S.health.gemini ? '' : 'disabled'}>Gemini TTS · Fenrir 🎖️ (premium)</option>
+            </select>
+            <button type="button" class="btn small ghost" onclick="openVoiceGallery({target:'wizard'})" title="Explorar y escuchar voces">🎧 Galería</button>
+          </div></div>
       </div>
       <div class="field"><label>📡 Plataformas destino</label>
         <div class="plats">${PLATFORMS.map(p => `
@@ -1140,7 +1143,8 @@ async function renderSettings() {
         <div class="field"><label>Velocidad (ej. +8% o -10%)</label>
           <input type="text" id="cfg-rate" value="${esc(c.tts_rate || '+8%')}"></div>
         <div class="cfg-actions"><button class="btn primary small"
-          onclick="saveCfg({TTS_PROVIDER: document.getElementById('cfg-tts').value, EDGE_TTS_VOICE: document.getElementById('cfg-edge-voice').value, GEMINI_TTS_VOICE: document.getElementById('cfg-gemini-voice').value, TTS_RATE: document.getElementById('cfg-rate').value}, 'Voz guardada')">💾 Guardar voz</button></div>
+          onclick="saveCfg({TTS_PROVIDER: document.getElementById('cfg-tts').value, EDGE_TTS_VOICE: document.getElementById('cfg-edge-voice').value, GEMINI_TTS_VOICE: document.getElementById('cfg-gemini-voice').value, TTS_RATE: document.getElementById('cfg-rate').value}, 'Voz guardada')">💾 Guardar voz</button>
+          <button class="btn small" onclick="openVoiceGallery({target:'global'})" title="Abrir Galería de Voces con Preescucha">🎙️ Galería de Voces</button></div>
         <div class="hintline">Si un proveedor falla, el sistema cae automáticamente al otro. Nunca se bloquea el render.</div>
       </div>
 
@@ -1646,10 +1650,10 @@ function renderAvatarForm() {
         ['Otros detalles (texto libre)', avFree('extras', 'Ej: cicatriz en la ceja, tatuaje de brújula')]]))}
       ${sec('🎙️ Voz y habla', grid2([[AV_LABELS.acento, avSelect('acento')],
         [AV_LABELS.jerga, avSelect('jerga')],
-        ['Voz (edge-tts)', `<select id="av-voice-select" onchange="AV_FORM.fields.voice=this.value">
+        ['Voz (edge-tts)', `<div style="display:flex;gap:6px"><select id="av-voice-select" onchange="AV_FORM.fields.voice=this.value" style="flex:1">
             <option value="">— sin voz fija —</option>
             ${edgeVoices.map(v => `<option value="${v.id}" ${f.voice === v.id ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}
-          </select>`]])
+          </select><button type="button" class="btn small ghost" onclick="openVoiceGallery({target:'avatar'})" title="Escuchar y probar voces">🎧 Galería</button></div>`]])
         + grid2([['Estilo visual por defecto', `<select onchange="AV_FORM.fields.style=this.value">
             <option value="">— sin estilo fijo —</option>
             ${S.styles.map(s => `<option value="${s.id}" ${f.style === s.id ? 'selected' : ''}>${s.emoji} ${esc(s.name)}</option>`).join('')}
@@ -2483,5 +2487,241 @@ async function regenProjectHooks(pid) {
     }
   } catch (err) {
     toast(err.message, 'err');
+  }
+}
+
+
+
+/* ══════════════════════════════════════════════════════════════════
+   INT-040 · Galería de Voces con Preescucha Interactiva
+   ══════════════════════════════════════════════════════════════════ */
+let VG_STATE = {
+  voices: [],
+  filterCountry: 'all',
+  filterGender: 'all',
+  search: '',
+  target: 'global',
+  currentAudio: null,
+  playingVoiceId: null,
+  loadingVoiceId: null,
+};
+
+async function openVoiceGallery(opts = {}) {
+  VG_STATE.target = opts.target || 'global';
+  if (!VG_STATE.voices.length) {
+    try {
+      const res = await api('/voices');
+      VG_STATE.voices = res.voices || [];
+      S.allVoices = VG_STATE.voices;
+    } catch (e) {
+      toast('Error cargando catálogo de voces: ' + e.message, 'err');
+      return;
+    }
+  }
+
+  const countries = ['all', ...new Set(VG_STATE.voices.map(v => v.country))];
+  const countryChips = countries.map(c => {
+    const label = c === 'all' ? '🌐 Todos' : c;
+    return `<span class="vg-chip ${VG_STATE.filterCountry === c ? 'active' : ''}" onclick="vgSetCountry('${c}')">${esc(label)}</span>`;
+  }).join('');
+
+  const genders = [
+    { id: 'all', label: 'Todos' },
+    { id: 'Femenina', label: '👩 Femenina' },
+    { id: 'Masculina', label: '👨 Masculina' }
+  ];
+  const genderChips = genders.map(g => {
+    return `<span class="vg-chip ${VG_STATE.filterGender === g.id ? 'active' : ''}" onclick="vgSetGender('${g.id}')">${g.label}</span>`;
+  }).join('');
+
+  $('#overlay-root').innerHTML = `
+    <div class="overlay voice-gallery-overlay" onclick="if(event.target===this)closeVoiceGallery()">
+      <div class="box card">
+        <div class="vg-header">
+          <div>
+            <h3>🎙️ Galería de Voces Neuronales</h3>
+            <p>Escucha y prueba cada voz en audio real antes de generar tu video.</p>
+          </div>
+          <button class="modal-x" onclick="closeVoiceGallery()" title="Cerrar">✕</button>
+        </div>
+        <div class="vg-search-row">
+          <input type="text" class="vg-search-input" id="vg-search"
+            value="${esc(VG_STATE.search)}"
+            placeholder="🔍 Buscar por nombre, país, tono o estilo..."
+            oninput="vgSearch(this.value)">
+        </div>
+        <div class="vg-filters" id="vg-country-filters">${countryChips}</div>
+        <div class="vg-filters" id="vg-gender-filters">${genderChips}</div>
+        <div class="vg-grid" id="vg-grid"></div>
+      </div>
+    </div>`;
+
+  document.addEventListener('keydown', vgEscClose);
+  renderVoiceGrid();
+}
+
+function vgEscClose(e) {
+  if (e.key === 'Escape') closeVoiceGallery();
+}
+
+function closeVoiceGallery() {
+  if (VG_STATE.currentAudio) {
+    VG_STATE.currentAudio.pause();
+    VG_STATE.currentAudio = null;
+  }
+  VG_STATE.playingVoiceId = null;
+  VG_STATE.loadingVoiceId = null;
+  document.removeEventListener('keydown', vgEscClose);
+  closeOverlay();
+}
+
+function vgSetCountry(c) {
+  VG_STATE.filterCountry = c;
+  const chips = document.querySelectorAll('#vg-country-filters .vg-chip');
+  chips.forEach(el => el.classList.toggle('active', el.textContent.includes(c === 'all' ? 'Todos' : c)));
+  renderVoiceGrid();
+}
+
+function vgSetGender(g) {
+  VG_STATE.filterGender = g;
+  const chips = document.querySelectorAll('#vg-gender-filters .vg-chip');
+  chips.forEach(el => el.classList.toggle('active', el.textContent.includes(g === 'all' ? 'Todos' : g)));
+  renderVoiceGrid();
+}
+
+function vgSearch(val) {
+  VG_STATE.search = val.trim().toLowerCase();
+  renderVoiceGrid();
+}
+
+function renderVoiceGrid() {
+  const container = $('#vg-grid');
+  if (!container) return;
+  const q = VG_STATE.search;
+  const c = VG_STATE.filterCountry;
+  const g = VG_STATE.filterGender;
+
+  let list = VG_STATE.voices.filter(v => {
+    if (c !== 'all' && v.country !== c) return false;
+    if (g !== 'all' && v.gender !== g) return false;
+    if (q) {
+      const match = v.name.toLowerCase().includes(q) ||
+        v.country.toLowerCase().includes(q) ||
+        v.tone.toLowerCase().includes(q) ||
+        v.description.toLowerCase().includes(q) ||
+        (v.tags || []).some(t => t.toLowerCase().includes(q));
+      if (!match) return false;
+    }
+    return true;
+  });
+
+  if (!list.length) {
+    container.innerHTML = `<div class="card empty" style="grid-column:1/-1;text-align:center;padding:24px">No se encontraron voces con los filtros seleccionados</div>`;
+    return;
+  }
+
+  container.innerHTML = list.map(v => {
+    const isPlaying = VG_STATE.playingVoiceId === v.id;
+    const isLoading = VG_STATE.loadingVoiceId === v.id;
+    return `
+      <div class="vg-card ${isPlaying ? 'active-preview' : ''}" id="vgc-${v.id}">
+        <div class="vg-card-top">
+          <span class="vg-name">${v.flag || '🗣️'} ${esc(v.name)}</span>
+          <span class="vg-badge ${v.provider}">${v.provider === 'edge' ? 'Gratis $0' : 'Gemini'}</span>
+        </div>
+        <div class="vg-tone">${esc(v.tone)} · ${esc(v.country)}</div>
+        <div class="vg-desc">${esc(v.description)}</div>
+        <div class="vg-tags">
+          ${(v.tags || []).map(t => `<span class="vg-tag">${esc(t)}</span>`).join('')}
+        </div>
+        <div class="vg-actions">
+          <button class="btn small ${isPlaying ? 'primary' : 'ghost'} vg-play-btn" onclick="previewVoice('${v.id}')">
+            ${isLoading ? '⏳ Cargando…' : isPlaying ? '⏸️ Pausar' : '▶️ Escuchar'}
+          </button>
+          <button class="btn small primary vg-select-btn" onclick="selectVoiceFromGallery('${v.id}')">
+            ✓ Elegir
+          </button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function previewVoice(voiceId) {
+  if (VG_STATE.playingVoiceId === voiceId && VG_STATE.currentAudio) {
+    VG_STATE.currentAudio.pause();
+    VG_STATE.currentAudio = null;
+    VG_STATE.playingVoiceId = null;
+    renderVoiceGrid();
+    return;
+  }
+
+  if (VG_STATE.currentAudio) {
+    VG_STATE.currentAudio.pause();
+    VG_STATE.currentAudio = null;
+    VG_STATE.playingVoiceId = null;
+  }
+
+  VG_STATE.loadingVoiceId = voiceId;
+  renderVoiceGrid();
+
+  try {
+    const res = await api('/voices/preview', { method: 'POST', body: { voice_id: voiceId } });
+    VG_STATE.loadingVoiceId = null;
+    const audio = new Audio(res.audio_url);
+    VG_STATE.currentAudio = audio;
+    VG_STATE.playingVoiceId = voiceId;
+    renderVoiceGrid();
+
+    audio.onended = () => {
+      VG_STATE.playingVoiceId = null;
+      VG_STATE.currentAudio = null;
+      renderVoiceGrid();
+    };
+    audio.onerror = () => {
+      toast('Error al reproducir audio de la voz', 'err');
+      VG_STATE.playingVoiceId = null;
+      VG_STATE.currentAudio = null;
+      renderVoiceGrid();
+    };
+    await audio.play();
+  } catch (err) {
+    VG_STATE.loadingVoiceId = null;
+    VG_STATE.playingVoiceId = null;
+    renderVoiceGrid();
+    toast('Error generando preescucha: ' + err.message, 'err');
+  }
+}
+
+async function selectVoiceFromGallery(voiceId) {
+  const v = VG_STATE.voices.find(x => x.id === voiceId);
+  if (!v) return;
+
+  if (VG_STATE.target === 'wizard') {
+    W.voice = voiceId;
+    W.tts = v.provider;
+    const sel = $('#wiz-voice-select');
+    if (sel) sel.value = voiceId;
+    closeVoiceGallery();
+    toast(`Voz seleccionada: ${v.flag} ${v.name}`, 'ok');
+    return;
+  }
+
+  if (VG_STATE.target === 'avatar') {
+    AV_FORM.fields.voice = voiceId;
+    const sel = document.querySelector('#av-voice-select');
+    if (sel) sel.value = voiceId;
+    closeVoiceGallery();
+    toast(`Voz asignada al avatar: ${v.flag} ${v.name}`, 'ok');
+    return;
+  }
+
+  // Global settings
+  try {
+    await api('/voices/select', { method: 'POST', body: { voice_id: voiceId } });
+    closeVoiceGallery();
+    toast(`Voz predeterminada guardada: ${v.flag} ${v.name} (${v.provider})`, 'ok');
+    if (S.view === 'settings') renderSettings();
+  } catch (err) {
+    toast('Error guardando voz: ' + err.message, 'err');
   }
 }

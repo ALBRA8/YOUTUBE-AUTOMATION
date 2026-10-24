@@ -188,3 +188,10 @@
 - **Origen:** ClonaKit Feature Gap #3 inspirada en Anai App (`anaiapp.ai`).
 - **Componentes:** `backend/services/pipeline_orchestrator.py` · `backend/main.py` · `backend/static/app.js` · `tests/test_scene_surgical_regen.py`.
 - **Resultado:** Re-despacho y regeneración quirúrgica de tomas individuales de Google Flow sin rehacer el video completo ni relanzar etapas previas (NotebookLM/guion). Soporte de `force=True` en `retry_scenes` y endpoint `POST /api/pipeline/retry-scenes` para reintentar escenas ya finalizadas; endpoint `POST /api/scenes/{scene_id}/regenerate-flow` con persistencia en SQLite para el editor de proyectos Studio; botones interactivos `🔄 Toma Flow` en tarjetas de escenas (`sceneCard`) y `🔄` en chips del pipeline runner (`pipeStepsHTML`). Baterías 100% verdes.
+
+## INT-040 — Galería de Voces Neuronales con Preescucha Interactiva
+- **Estado:** IMPLEMENTADO / VERIFICADO AL 100% (Batería test_voice_gallery: 25/25 OK, test_scene_surgical_regen: 17/17 OK).
+- **Documento:** [INT-040](INT-040_VOICE_GALLERY_AND_INTERACTIVE_PREVIEW.md).
+- **Origen:** ClonaKit Feature Gap #2 inspirada en Anai App (`anaiapp.ai`).
+- **Componentes:** `backend/services/voices_catalog.py` · `backend/main.py` · `backend/static/app.js` · `backend/static/style.css` · `tests/test_voice_gallery.py`.
+- **Resultado:** Catálogo curado de 17 voces neuronales (Edge TTS \$0 ilimitado + Google Gemini TTS Studio) con metadatos de país/bandera, género, estilo vocal y frases de muestra contextuales. Módulo de preescucha interactiva con síntesis bajo demanda y caché local en disco para reproducción instantánea (<1ms); endpoints REST `GET /api/voices`, `POST /api/voices/preview`, `GET /api/voices/audio/{filename}` y `POST /api/voices/select` (asignación global o por proyecto). Interfaz web interactiva en modal con búsqueda reactiva, filtros por país/género, reproductor de audio integrado y botones de acceso en Ajustes, Wizard de creación y Avatar Studio PRO. Baterías 100% verdes.

@@ -289,6 +289,97 @@ async def settings():
     }
 
 
+# ────── 🎙️ Galería de Voces con Preescucha Interactiva (INT-040) ─────────
+@app.get("/api/voices")
+async def list_voices(provider: str = "", gender: str = "", country: str = "", q: str = ""):
+    """Catálogo enriquecido de voces con filtrado por proveedor, país, género o texto."""
+    from services import voices_catalog
+    return {
+        "ok": True,
+        "gemini_available": gemini_client.available(),
+        "current_provider": config.TTS_PROVIDER,
+        "current_edge_voice": config.EDGE_TTS_VOICE,
+        "current_gemini_voice": config.GEMINI_TTS_VOICE,
+        "voices": voices_catalog.get_all_voices(
+            provider=provider or None,
+            gender=gender or None,
+            country=country or None,
+            query=q or None,
+        ),
+    }
+
+
+@app.post("/api/voices/preview")
+async def voice_preview(payload: dict):
+    """Genera o sirve desde caché una muestra de audio para preescucha de voz."""
+    from services import voices_catalog
+    voice_id = (payload.get("voice_id") or "").strip()
+    if not voice_id:
+        raise HTTPException(400, "voice_id es requerido")
+    text = (payload.get("text") or "").strip() or None
+    provider = (payload.get("provider") or "").strip().lower() or None
+    try:
+        path, duration, mime = await voices_catalog.synthesize_preview(
+            voice_id, text=text, provider=provider
+        )
+        return {
+            "ok": True,
+            "voice_id": voice_id,
+            "audio_url": f"/api/voices/audio/{path.name}",
+            "duration": round(duration, 2),
+            "mime": mime,
+        }
+    except Exception as e:
+        log.error("Error generando preescucha de voz %s: %s", voice_id, e)
+        raise HTTPException(500, f"Error generando preview: {str(e)[:200]}") from e
+
+
+@app.get("/api/voices/audio/{filename}")
+async def serve_voice_audio(filename: str):
+    """Sirve el archivo de audio generado para preescucha en el navegador."""
+    from services import voices_catalog
+    clean_name = Path(filename).name
+    file_path = voices_catalog.PREVIEWS_DIR / clean_name
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(404, "Audio de preescucha no encontrado")
+    media_type = "audio/mpeg" if clean_name.endswith(".mp3") else "audio/wav"
+    return FileResponse(file_path, media_type=media_type)
+
+
+@app.post("/api/voices/select")
+async def select_voice(payload: dict):
+    """Selecciona y aplica una voz a nivel global o a un proyecto específico."""
+    from services import voices_catalog
+    voice_id = (payload.get("voice_id") or "").strip()
+    if not voice_id:
+        raise HTTPException(400, "voice_id es requerido")
+    voice = voices_catalog.get_voice_by_id(voice_id)
+    if not voice:
+        raise HTTPException(404, "Voz no encontrada en el catálogo")
+
+    provider = voice["provider"]
+    project_id = (payload.get("project_id") or "").strip()
+
+    if project_id:
+        pid = _pid(project_id)
+        p = db.get_project(pid)
+        if not p:
+            raise HTTPException(404, "Proyecto no encontrado")
+        db.update_project(pid, voice=voice_id, tts_provider=provider)
+        return {"ok": True, "scope": "project", "project_id": pid, "voice": voice}
+
+    if provider == "gemini":
+        config.GEMINI_TTS_VOICE = voice_id
+        config.TTS_PROVIDER = "gemini"
+        config.save_env({"GEMINI_TTS_VOICE": voice_id, "TTS_PROVIDER": "gemini"})
+    else:
+        config.EDGE_TTS_VOICE = voice_id
+        config.TTS_PROVIDER = "edge"
+        config.save_env({"EDGE_TTS_VOICE": voice_id, "TTS_PROVIDER": "edge"})
+
+    return {"ok": True, "scope": "global", "voice": voice, "tts_provider": provider}
+
+
 # ─────────────────────────────── configuración desde el dashboard ──
 def _mask(secret: str) -> str:
     if not secret:
