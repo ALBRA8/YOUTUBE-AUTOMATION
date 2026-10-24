@@ -71,7 +71,26 @@ def deps_ok(timeout=120):
         return False
 
 
+def disable_quickedit():
+    """QuickEdit OFF (0x40) + ENABLE_EXTENDED_FLAGS (0x80) en la consola:
+    un click en la ventana pausa stdout y congela pip/uvicorn (aparece
+    'Seleccionar' en el titulo). No-op si no hay consola (ruta oculta)."""
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        k = ctypes.windll.kernel32
+        h = k.GetStdHandle(-10)          # STD_INPUT_HANDLE
+        m = ctypes.c_uint(0)
+        if k.GetConsoleMode(h, ctypes.byref(m)):
+            k.SetConsoleMode(h, (m.value & ~0x40) | 0x80)
+    except Exception:
+        pass
+
+
 def launch():
+    disable_quickedit()
+
     # 1. Ya corriendo -> abrir y salir
     if healthy():
         webbrowser.open(URL)

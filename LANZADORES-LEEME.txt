@@ -40,6 +40,13 @@ SI ALGO SALE MAL
   ensurepip y, si el .venv esta corrupto, lo borra y lo recrea solo.
   Antes de instalar actualiza pip (wheels fluidos en Python 3.14).
   Fuerza manual: start.bat --fresh
+- Hacer click en la ventana de start.bat YA NO congela la instalacion:
+  QuickEdit se desactiva solo al arrancar (0x40 via ctypes). Y pip imprime
+  TODO en vivo (-v sin buffer): si ves mucho texto, NO esta congelado,
+  esta descargando/compiling - lo ves paso a paso.
+- Python: se prefiere 3.12 > 3.11 > 3.10 (todas las ruedas binarias
+  publicadas); 3.13/3.14 quedan como ultimo recurso porque algunos
+  binarios aun no salen y compilan durante minutos (ahora, visibles -v).
 - El servidor guarda su registro en .server_log.txt (en la raiz del
   proyecto). Si en 2 minutos no arranca, el propio lanzador te abre
   ese archivo en el Bloc de notas para que veas el error.

@@ -4,7 +4,10 @@ REM  ALBRA - START - experiencia "npm run dev" en un solo golpe
 REM ------------------------------------------------------------
 REM  Doble click en start.bat (o `start.bat` en una terminal) y
 REM  TODO queda corriendo:
-REM    [1/5] Localiza Python (py -3 / python / python3)
+REM    [1/5] Localiza Python prefiriendo 3.12 > 3.11 > 3.10 (wheels todos)
+REM          antes del py -3 generico (3.14 compila extensiones C/Rust)
+REM          + QuickEdit OFF (ctypes 0x40): un click NO pausa pip/uvicorn
+REM          + PYTHONUNBUFFERED=1: salida en streaming, nunca parece colgado
 REM    [2/5] Crea backend\.venv con SPINNER + SALUD DE PIP: si pip falta
 REM          lo repara con ensurepip y, si el .venv esta corrupto, lo
 REM          borra y lo recrea solo (cero intervencion manual)
@@ -24,6 +27,7 @@ REM ============================================================
 setlocal EnableExtensions
 chcp 65001 >nul
 title ALBRA - modo dev (npm run dev)
+set "PYTHONUNBUFFERED=1"
 set "SELF=%~f0"
 set "NO_BROWSER=0"
 set "FRESH=0"
@@ -56,8 +60,21 @@ set "URL=http://127.0.0.1:%PORT%"
 
 REM ---------- 1. Localizar Python ----------
 set "PY="
-py -3 --version >nul 2>&1
-if not errorlevel 1 set "PY=py -3"
+REM wheels binarios maduros primero; 3.13/3.14 solo como ultimo recurso
+py -3.12 --version >nul 2>&1
+if not errorlevel 1 set "PY=py -3.12"
+if not defined PY (
+    py -3.11 --version >nul 2>&1
+    if not errorlevel 1 set "PY=py -3.11"
+)
+if not defined PY (
+    py -3.10 --version >nul 2>&1
+    if not errorlevel 1 set "PY=py -3.10"
+)
+if not defined PY (
+    py -3 --version >nul 2>&1
+    if not errorlevel 1 set "PY=py -3"
+)
 if not defined PY (
     python --version >nul 2>&1
     if not errorlevel 1 set "PY=python"
@@ -74,6 +91,11 @@ if not defined PY (
     exit /b 1
 )
 echo [1/5] Python listo: %PY%
+REM QuickEdit OFF: 0x40=ENABLE_QUICK_EDIT_MODE, 0x80=ENABLE_EXTENDED_FLAGS
+REM (obligatorio para que el bit de QuickEdit aplique). Sin esto, un click
+REM en la ventana pausa stdout y congela pip/uvicorn ("Seleccionar" arriba).
+%PY% -c "import ctypes as c,sys;k=c.windll.kernel32;h=k.GetStdHandle(-10);m=c.c_uint(0);sys.exit(0) if k.GetConsoleMode(h,c.byref(m)) and k.SetConsoleMode(h,(m.value&~64)|128) else sys.exit(1)" >nul 2>&1
+if not errorlevel 1 echo       QuickEdit desactivado: hacer click ya no pausa la instalacion
 
 REM ---------- 2. Ya esta corriendo? (doble click a prueba de duplicados) ----------
 call :health >nul 2>&1
@@ -178,10 +200,10 @@ if "%DEPS_SIG%"=="%REQSIG%" (
 )
 echo       Barras de descarga reales abajo - los proximos arranques saltan esto.
 echo       Actualizando pip del venv (evita cuelgues compilando wheels en 3.14)...
-"%VPY%" -m pip install --upgrade pip --progress-bar on --no-input --disable-pip-version-check
+"%VPY%" -u -m pip install --upgrade pip --progress-bar on --no-input --disable-pip-version-check -v
 if errorlevel 1 echo       [AVISO] pip no se actualizo (sin red?). Sigo con el pip actual.
 echo.
-"%VPY%" -m pip install --progress-bar on --prefer-binary --no-input --disable-pip-version-check -r requirements.txt
+"%VPY%" -u -m pip install --no-input --progress-bar on --prefer-binary --disable-pip-version-check -v -r requirements.txt
 if errorlevel 1 (
     echo.
     echo [ERROR] Fallo pip install. Revisa tu conexion y vuelve a lanzar start.bat

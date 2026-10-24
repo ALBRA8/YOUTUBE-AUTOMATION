@@ -7,6 +7,8 @@
 #  Flags:  --fresh   fuerza reinstalar dependencias
 # ════════════════════════════════════════════════════════════════
 set -e
+# salida sin buffer: pip/uvicorn en streaming, nunca parece congelado
+export PYTHONUNBUFFERED=1
 FRESH=0
 [ "${1:-}" = "--fresh" ] && FRESH=1
 cd "$(dirname "$0")/backend"
@@ -24,9 +26,12 @@ PYEOF
 
 # [1/4] entorno virtual con SPINNER animado (solo la primera vez)
 PY=.venv/bin/python
+# ruedas binarias maduras primero: 3.12/3.11/3.10 antes que 3.13/3.14
+PYBASE=$(command -v python3.12 || command -v python3.11 || command -v python3.10 || command -v python3 || true)
+[ -n "$PYBASE" ] || { echo "[ERROR] Python 3 no encontrado (instala python.org o apt)"; exit 1; }
 if [ ! -x .venv/bin/python ]; then
     echo "[1/4] Preparando entorno virtual — avance abajo..."
-    python3 -m venv .venv & VP=$!
+    "$PYBASE" -m venv .venv & VP=$!
     SPIN='|/-\'; i=0
     while kill -0 "$VP" 2>/dev/null; do
         printf '\r  %c Creando entorno virtual — %ss transcurridos...   ' \
@@ -52,7 +57,7 @@ if ! "$PY" -m pip --version >/dev/null 2>&1; then
     echo "  [AUTO-REPARACIÓN] ensurepip falló: .venv corrupto — recreando desde cero..."
     rm -f .venv/.deps_ok
     rm -rf .venv
-    python3 -m venv .venv --upgrade-deps 2>/dev/null || { rm -rf .venv; python3 -m venv .venv; } || {
+    "$PYBASE" -m venv .venv --upgrade-deps 2>/dev/null || { rm -rf .venv; "$PYBASE" -m venv .venv; } || {
         echo "[ERROR] No se pudo recrear el .venv (disco/permisos/antivirus)"; exit 1; }
     "$PY" -m pip --version >/dev/null 2>&1 || { echo "[ERROR] pip sigue sin responder tras recrear el .venv"; exit 1; }
 fi
@@ -74,9 +79,9 @@ if [ "$NEED" = "1" ]; then
         echo "[2/4] Instalando dependencias — solo la 1a vez o si requirements.txt cambió..."
     fi
     echo "  Actualizando pip del venv (evita cuelgues compilando wheels en Python 3.14)..."
-    "$PY" -m pip install --upgrade pip --progress-bar on --disable-pip-version-check || \
+    "$PY" -u -m pip install --upgrade pip --progress-bar on --disable-pip-version-check -v || \
         echo "  [AVISO] pip no se actualizó — continúo con el pip actual"
-    "$PY" -m pip install --progress-bar on --prefer-binary --disable-pip-version-check -r requirements.txt
+    "$PY" -u -m pip install --no-input --progress-bar on --prefer-binary --disable-pip-version-check -v -r requirements.txt
     if ! verify_deps; then
         echo "[ERROR] pip terminó pero faltan módulos. Ejecuta: ./start.sh --fresh"
         exit 1
