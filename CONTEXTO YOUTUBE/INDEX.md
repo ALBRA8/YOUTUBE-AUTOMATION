@@ -54,6 +54,7 @@ Esta separación es una regla estable del flujo de trabajo, no una excepción te
 - **Comparación dirigida basada en código real (2026-10-23):** `06_INTEGRATIONS/INT-019_AGNES_COMPARACION_DIRIGIDA.md` — 6 áreas con anclas archivo:línea de ambos repos; veredicto: capacidades clave YA EXISTEN aquí; 3 ideas adaptables (R1/R2/R3) y 7 descartes con motivo; decisión D-008 en `01_DECISIONS/DECISION_LOG.md`.
 - No integrar directamente, no sustituir componentes ALBRA ni crear otro agente audiovisual. Licencia MIT verificada en el clon; cero código copiado; el repo externo no se ejecutó.
 - **INT-022** · MCP Connection Manager: panel ↔ GoogleFlowMCP/notebooklm-mcp (badges, toggles, notebookId dinámico, Test Pipeline, preflight AUTH_REQUIRED). [Ver integración](06_INTEGRATIONS/INT-022_MCP_CONNECTION_MANAGER.md)
+- **INT-035** · Google Unified Login & Decoupled Browser Spawn Fix: resolución de bloqueo Google OAuth, purga de procesos zombis de Chrome y alineación del perfil compartido a FlowImageChrome (%LOCALAPPDATA%). [Ver integración](06_INTEGRATIONS/INT-035_GOOGLE_UNIFIED_LOGIN_AND_BROWSER_SPAWN_FIX.md)
 
 
 ## Producción creativa multi-línea — 2026-10-23
