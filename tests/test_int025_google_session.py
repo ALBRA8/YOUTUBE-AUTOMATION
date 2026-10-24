@@ -63,9 +63,10 @@ def _cfg_overrides(**kw):
 # ───────────────────────────── S1 · config ──
 def config_tests():
     print("\n── S1 · config INT-025 (defaults coherentes) ──")
-    check("GOOGLE_PROFILE_GLOBAL bajo DATA_DIR por defecto",
-          str(config.GOOGLE_PROFILE_GLOBAL).startswith(str(config.DATA_DIR))
-          and config.GOOGLE_PROFILE_GLOBAL.name == "google_profile_global",
+    check("GOOGLE_PROFILE_GLOBAL bajo DATA_DIR por defecto (o FlowImageChrome en Windows)",
+          (str(config.GOOGLE_PROFILE_GLOBAL).startswith(str(config.DATA_DIR))
+           and config.GOOGLE_PROFILE_GLOBAL.name == "google_profile_global")
+          or (sys.platform == "win32" and config.GOOGLE_PROFILE_GLOBAL.name == "FlowImageChrome"),
           config.GOOGLE_PROFILE_GLOBAL)
     check("GOOGLE_LOGIN_URL apunta a accounts.google.com",
           "accounts.google.com" in config.GOOGLE_LOGIN_URL,
@@ -532,7 +533,7 @@ async def endpoint_tests():
             check("POST /mcp/launch-auth-browser 200 (multi-pestaña)",
                   r.status_code == 200 and js.get("ok")
                   and js.get("pages") == _pages
-                  and "flow.google.com" in " ".join(_pages), r.text[:200])
+                  and ("flow.google.com" in " ".join(_pages) or "labs.google" in " ".join(_pages)), r.text[:200])
             check("el endpoint pasa GOOGLE_LOGIN_PAGES al manager",
                   mcpm_mod.manager.launch_urls == _pages,
                   (mcpm_mod.manager.launch_urls, _pages))

@@ -162,3 +162,9 @@
 - **Estado:** IMPLEMENTADO / VERIFICADO.
 - **Documento:** `INT-035_GOOGLE_UNIFIED_LOGIN_AND_BROWSER_SPAWN_FIX.md`.
 - **Resultado:** Resolución de bloqueo Google OAuth en navegadores con puerto de depuración mediante flujo de 2 fases (Modo Limpio + Modo CDP), lanzamiento nativo en Windows vía `os.startfile` (ShellExecuteW) para evitar fallos de escape en `cmd.exe /c start`, endpoints `/api/mcp/launch-clean-login` y botones frontend actualizados.
+
+## INT-036 — Chrome Profile Auto-Heal, OAuth Direct Landing & Strict Cookie Auth
+- **Estado:** IMPLEMENTADO / VERIFICADO AL 100% (Batería test_int036: 23/23 OK · 0 fallos).
+- **Documento:** [INT-036](INT-036_CHROME_PROFILE_AUTO_HEAL_AND_OAUTH_LANDING.md).
+- **Componentes:** `backend/services/mcp_manager.py` · `backend/config.py` · `backend/main.py` · `backend/static/app.js` · `tools/mcp-setup/login-google-unificado.bat` · `tools/GoogleFlowMCP/src/chrome.js` · `tools/GoogleFlowMCP/src/flow.js` · `tests/test_int036_profile_heal_and_strict_auth.py`.
+- **Resultado:** Auto-saneamiento determinista de perfiles de Chrome antes de spawn (`Local State.bad`, `lockfile`, `Singleton*`, `exit_type="Normal"`, `exited_cleanly=true`, flags anti-crash-bubble); redirección directa al formulario oficial de Google `accounts.google.com/ServiceLogin?continue=https://labs.google/fx/tools/flow` en Tab 1 y `notebooklm.google.com` en Tab 2; verificación estricta de cookies de autenticación `.google.com` (`SID` / `__Secure-1PSID`) sobre CDP 9333 eliminando falsos badges positivos de sesión. Endpoint `/api/mcp/repair-profile` y botón UI `🔧 Reparar Perfil`.

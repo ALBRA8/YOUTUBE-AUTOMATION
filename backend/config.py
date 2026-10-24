@@ -63,11 +63,10 @@ GOOGLE_PROFILE_GLOBAL = Path(os.getenv(
     str(Path(os.environ["LOCALAPPDATA"]) / "FlowImageChrome") if "LOCALAPPDATA" in os.environ
     else str(DATA_DIR / "google_profile_global")))
 # URL que abre el Chrome de login (el continue deja también la cookie de
-# NotebookLM lista y facilita el flujo humano).
+# Flow y NotebookLM lista y facilita el flujo humano directo).
 GOOGLE_LOGIN_URL = os.getenv(
     "GOOGLE_LOGIN_URL",
-    "https://accounts.google.com/signinchooser?continue="
-    "https%3A%2F%2Fnotebooklm.google.com%2F").strip()
+    "https://accounts.google.com/ServiceLogin?continue=https://labs.google/fx/tools/flow").strip()
 # Puerto CDP del Chrome de login global. POR DEFECTO coincide con
 # FLOW_CDP_PORT para que Flow se enganche a este Chrome (sesión compartida).
 GOOGLE_LOGIN_CDP_PORT = int(os.getenv(
@@ -76,10 +75,11 @@ GOOGLE_LOGIN_CDP_PORT = int(os.getenv(
 # chromium/edge/brave según plataforma).
 MCP_LOGIN_CHROME_BIN = os.getenv("MCP_LOGIN_CHROME_BIN", "").strip()
 # Pestañas que abre el botón «🔑 Vincular Sesión Google (Login Único)»:
-# Flow + NotebookLM — el único login humano cubre ambos productos.
+# Tab 1: Login de Google directo hacia Flow (labs.google/fx/tools/flow).
+# Tab 2: NotebookLM — el único login humano cubre ambos productos.
 GOOGLE_LOGIN_PAGES = [u.strip() for u in os.getenv(
     "GOOGLE_LOGIN_PAGES",
-    "https://accounts.google.com/,https://flow.google.com/,https://notebooklm.google.com/").split(",")
+    "https://accounts.google.com/ServiceLogin?continue=https://labs.google/fx/tools/flow,https://notebooklm.google.com/").split(",")
     if u.strip()]
 
 # ── Pipeline Orchestrator (INT-023) — NotebookLM → Agent → Flow ──────────

@@ -50,8 +50,9 @@ async function flowPage(context) {
 }
 
 async function assertSignedIn(page) {
-  if (/accounts\.google\.com/.test(page.url())) {
-    throw new Error('Not signed in to Google in the Flow Chrome. Run `node src/cli.js chrome`, sign in, and retry.');
+  const url = page.url();
+  if (/accounts\.google\.com/.test(url) || /flow\.google\.com\/about/.test(url) || /\/about(\/|\?|$)/.test(url)) {
+    throw new Error('Not signed in to Google in the Flow Chrome. Inicia sesión en Google con «🔑 Vincular Sesión Google» en el panel.');
   }
 }
 

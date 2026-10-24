@@ -543,6 +543,98 @@ class MCPClientManager:
         "google-chrome-stable", "google-chrome", "chrome", "chromium",
         "chromium-browser", "microsoft-edge", "brave-browser")
 
+    @staticmethod
+    def heal_chrome_profile(profile_path: Path | str | None = None) -> dict:
+        """Sanea el perfil de Chrome (google_profile_global / FlowImageChrome) antes de spawn:
+        1. Elimina Local State.bad si existe.
+        2. Elimina bloqueos huérfanos: lockfile, SingletonLock, SingletonCookie, SingletonSocket.
+        3. Verifica y repara Local State si está dañado o JSON corrupto.
+        4. Sanea Default/Preferences: repara JSON corrupto y fuerza exit_type='Normal' y exited_cleanly=True.
+        """
+        p = Path(profile_path if profile_path else str(_cfg("GOOGLE_PROFILE_GLOBAL", "")))
+        actions: list[str] = []
+        if not p.exists():
+            try:
+                p.mkdir(parents=True, exist_ok=True)
+                actions.append("directorio creado")
+            except OSError:
+                pass
+            return {"ok": True, "profile": str(p), "actions": actions}
+
+        # 1. Local State.bad
+        bad_ls = p / "Local State.bad"
+        if bad_ls.is_file():
+            try:
+                bad_ls.unlink()
+                actions.append("Local State.bad eliminado")
+                log.info("[mcp-profile] Local State.bad eliminado en %s", p)
+            except OSError as e:
+                actions.append(f"error eliminando Local State.bad: {e}")
+
+        # 2. Bloqueos huérfanos
+        for lock_name in ("lockfile", "SingletonLock", "SingletonCookie", "SingletonSocket"):
+            lock = p / lock_name
+            if lock.is_file() or lock.exists():
+                try:
+                    lock.unlink()
+                    actions.append(f"{lock_name} eliminado")
+                except OSError as e:
+                    actions.append(f"error eliminando {lock_name}: {e}")
+
+        # 3. Local State
+        ls = p / "Local State"
+        if ls.is_file():
+            try:
+                content = ls.read_text(encoding="utf-8", errors="ignore")
+                json.loads(content)
+            except Exception:
+                try:
+                    ls.unlink()
+                    actions.append("Local State corrupto eliminado")
+                    log.warning("[mcp-profile] Local State corrupto eliminado en %s", p)
+                except OSError as e:
+                    actions.append(f"error eliminando Local State corrupto: {e}")
+
+        # 4. Default/Preferences
+        pref_file = p / "Default" / "Preferences"
+        if pref_file.is_file():
+            repaired = False
+            try:
+                content = pref_file.read_text(encoding="utf-8", errors="ignore")
+                prefs = json.loads(content)
+                if not isinstance(prefs, dict):
+                    prefs = {}
+                    repaired = True
+            except Exception:
+                prefs = {}
+                repaired = True
+
+            prof = prefs.setdefault("profile", {})
+            if prof.get("exit_type") != "Normal":
+                prof["exit_type"] = "Normal"
+                repaired = True
+            if not prof.get("exited_cleanly"):
+                prof["exited_cleanly"] = True
+                repaired = True
+
+            if prefs.get("exit_type") and prefs.get("exit_type") != "Normal":
+                prefs["exit_type"] = "Normal"
+                repaired = True
+
+            if repaired:
+                try:
+                    pref_file.write_text(json.dumps(prefs, ensure_ascii=False), encoding="utf-8")
+                    actions.append("Default/Preferences saneado (exit_type=Normal, exited_cleanly=true)")
+                    log.info("[mcp-profile] Default/Preferences saneado en %s", pref_file)
+                except OSError as e:
+                    actions.append(f"error escribiendo Default/Preferences: {e}")
+
+        return {"ok": True, "profile": str(p), "actions": actions}
+
+    def repair_profile(self, profile_path: Path | str | None = None) -> dict:
+        """Alias público de saneamiento del perfil Chrome."""
+        return self.heal_chrome_profile(profile_path)
+
     def _find_chrome_bin(self) -> str:
         """Binario Chrome real para el login humano (parcheable en tests vía
         MCP_LOGIN_CHROME_BIN / shutil.which)."""
@@ -590,6 +682,13 @@ class MCPClientManager:
         compartido hace el resto (Chrome singleton reenvía a la instancia
         viva si ya existía). Devuelve el pid."""
         import sys
+        # Auto-heal profile si --user-data-dir está en argv
+        for a in argv:
+            if a.startswith("--user-data-dir="):
+                u_dir = a[len("--user-data-dir="):].strip('"')
+                self.heal_chrome_profile(u_dir)
+                break
+
         if sys.platform == "win32":
             chrome = argv[0]
             cmd_parts = [f'"{chrome}"']
@@ -637,13 +736,16 @@ class MCPClientManager:
         de login de Google. UNA vez el humano loguea: Flow hereda la sesión
         (mismo Chrome por CDP) y NotebookLM la captura («📥 Capturar sesión»).
         urls: pestañas a abrir (default = [GOOGLE_LOGIN_URL]). El endpoint
-        «Vincular Sesión Google (Login Único)» pasa flow.google.com +
+        «Vincular Sesión Google (Login Único)» pasa ServiceLogin Flow +
         notebooklm.google.com para que el único login cubra ambos products."""
         port = int(_cfg("GOOGLE_LOGIN_CDP_PORT", 9333))
         profile = Path(str(_cfg("GOOGLE_PROFILE_GLOBAL", "")))
         profile.mkdir(parents=True, exist_ok=True)
+        heal_res = self.heal_chrome_profile(profile)
+
         pages = [u.strip() for u in (urls or []) if u and u.strip()] or [
-            str(_cfg("GOOGLE_LOGIN_URL", "https://accounts.google.com/"))]
+            str(_cfg("GOOGLE_LOGIN_URL",
+                     "https://accounts.google.com/ServiceLogin?continue=https://labs.google/fx/tools/flow"))]
         already_up = await self._cdp_up(port) if cdp else False
         pid = None
         if not already_up:
@@ -651,7 +753,9 @@ class MCPClientManager:
             argv = [chrome,
                     f"--user-data-dir={profile}",
                     "--no-first-run", "--no-default-browser-check",
-                    "--disable-session-crashed-bubble"]
+                    "--disable-session-crashed-bubble",
+                    "--hide-crash-restore-bubble",
+                    "--disable-features=SessionCrashedBubble"]
             if cdp:
                 argv.insert(2, f"--remote-debugging-port={port}")
             argv += pages
@@ -674,6 +778,7 @@ class MCPClientManager:
                 "profile_dir": str(profile),
                 "login_url": pages[0],
                 "pages": pages,
+                "heal_actions": heal_res.get("actions", []),
                 "notebooklm_storage": st}
 
     async def google_login_status(self) -> dict:
@@ -688,6 +793,73 @@ class MCPClientManager:
                "shared_with_flow": port == int(_cfg("FLOW_CDP_PORT", 9333)),
                "notebooklm_storage": self.nb_storage_state()}
         return out
+
+    async def _cdp_fetch_cookies_raw(self, port: int, timeout: float = 4.0) -> list[dict]:
+        """Consulta cookies reales del Chrome vía CDP WebSocket (Storage.getCookies o Network.getAllCookies).
+        Usa aiohttp nativo si está disponible, o fallback a Playwright sync en thread."""
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                ws_url = None
+                try:
+                    async with session.get(f"http://127.0.0.1:{port}/json/version",
+                                           timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            ws_url = data.get("webSocketDebuggerUrl")
+                except Exception:
+                    pass
+
+                if not ws_url:
+                    try:
+                        async with session.get(f"http://127.0.0.1:{port}/json/list",
+                                               timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+                            if resp.status == 200:
+                                targets = await resp.json()
+                                for t in targets:
+                                    if t.get("webSocketDebuggerUrl"):
+                                        ws_url = t["webSocketDebuggerUrl"]
+                                        break
+                    except Exception:
+                        pass
+
+                if ws_url:
+                    async with session.ws_connect(ws_url, timeout=timeout) as ws:
+                        await ws.send_json({"id": 1, "method": "Storage.getCookies"})
+                        msg = await ws.receive_json(timeout=timeout)
+                        cookies = msg.get("result", {}).get("cookies", [])
+                        if cookies:
+                            return cookies
+                        await ws.send_json({"id": 2, "method": "Network.getAllCookies"})
+                        msg = await ws.receive_json(timeout=timeout)
+                        return msg.get("result", {}).get("cookies", [])
+        except Exception as e:
+            log.debug("[mcp] _cdp_fetch_cookies_raw via aiohttp falló (%s)", e)
+
+        # Fallback a Playwright si aiohttp no obtuvo cookies
+        try:
+            return await self._cdp_fetch_google_cookies_impl(port)
+        except Exception as e:
+            log.debug("[mcp] fallback playwright falló: %s", e)
+            return []
+
+    async def _cdp_has_google_auth(self, port: int) -> tuple[bool, str]:
+        """Comprueba de forma estricta si el Chrome en port tiene cookies de autenticación Google.
+        Busca __Secure-1PSID o SID asociadas a .google.com con valor no vacío."""
+        if not await self._cdp_up(port):
+            return False, f"Chrome no responde en el puerto CDP {port}"
+        cookies = await self._cdp_fetch_cookies_raw(port)
+        if not cookies:
+            return False, "Sin cookies en el perfil de Chrome (sesión no iniciada)"
+        has_auth = any(
+            ("google.com" in str(c.get("domain") or "")) and
+            c.get("name") in ("__Secure-1PSID", "SID", "__Secure-3PSID", "SAPISID") and
+            bool(c.get("value"))
+            for c in cookies
+        )
+        if has_auth:
+            return True, "Sesión activa (cookies Google válidas en CDP)"
+        return False, "Sesión no iniciada: falta cookie __Secure-1PSID / SID en FlowImageChrome"
 
     async def _cdp_fetch_google_cookies_impl(self, port: int) -> list[dict]:
         """Extrae cookies de dominios Google del Chrome de login vía
@@ -752,13 +924,19 @@ class MCPClientManager:
                 "pulsa primero «🔑 Vincular Sesión Google (Login Único)» "
                 "y loguéate",
                 "CHROME_NOT_UP")
+        raw = []
         try:
-            raw = await self._cdp_fetch_google_cookies_impl(port)
-        except ImportError as e:
-            raise MCPManagerError(
-                "Playwright no está disponible en el backend — instala con: "
-                'uv tool install "notebooklm-py[browser]" (o pip install '
-                "playwright && playwright install chromium)", "PLAYWRIGHT_MISSING") from e
+            raw = await self._cdp_fetch_cookies_raw(port)
+        except Exception:
+            pass
+        if not raw:
+            try:
+                raw = await self._cdp_fetch_google_cookies_impl(port)
+            except ImportError as e:
+                raise MCPManagerError(
+                    "Playwright no está disponible en el backend — instala con: "
+                    'uv tool install "notebooklm-py[browser]" (o pip install '
+                    "playwright && playwright install chromium)", "PLAYWRIGHT_MISSING") from e
         cookies = self._filter_google_cookies(raw)
         if not cookies:
             raise MCPManagerError(
@@ -803,16 +981,47 @@ class MCPClientManager:
         Cualquier problema → state=auth_required, sin excepción."""
         try:
             if conn.service == "google-flow":
-                text = await conn.call("flow_list_assets", {}, timeout=20.0)
-                if "not signed in" in text.lower():
+                is_mock = (conn.server_info.get("name") == "fake-flow")
+                port = int(_cfg("FLOW_CDP_PORT", 9333))
+                cdp_alive = await self._cdp_up(port)
+                if cdp_alive:
+                    auth_ok, auth_detail = await self._cdp_has_google_auth(port)
+                    if not auth_ok:
+                        conn.auth = "auth_required"
+                        conn.auth_detail = auth_detail
+                        conn.state = ST_AUTH_REQUIRED
+                        return
+                elif not is_mock:
                     conn.auth = "auth_required"
-                    conn.auth_detail = text.strip()[:200]
+                    conn.auth_detail = f"Chrome no responde en el puerto CDP {port}"
                     conn.state = ST_AUTH_REQUIRED
-                else:
-                    conn.auth = "ok"
+                    return
+
+                try:
+                    text = await conn.call("flow_list_assets", {}, timeout=15.0)
+                    if "not signed in" in text.lower():
+                        conn.auth = "auth_required"
+                        conn.auth_detail = text.strip()[:200]
+                        conn.state = ST_AUTH_REQUIRED
+                    else:
+                        conn.auth = "ok"
+                        conn.auth_detail = "Sesión activa (cookies Google válidas en CDP)" if cdp_alive else "Mock ok"
+                except Exception as ex:
+                    if _AUTHISH_RE.search(str(ex)):
+                        conn.auth = "auth_required"
+                        conn.auth_detail = str(ex)[:200]
+                        conn.state = ST_AUTH_REQUIRED
+                    else:
+                        conn.auth = "ok" if cdp_alive else "unknown"
+                        conn.auth_detail = str(ex)[:160]
             else:
                 probe = str(_cfg("NOTEBOOKLM_PROBE_TOOL", "list_notebooks") or "").strip()
                 names = {t.get("name") for t in conn.tools}
+                if probe not in names:
+                    for cand in _LIST_NOTEBOOK_TOOLS:
+                        if cand in names:
+                            probe = cand
+                            break
                 if probe and probe in names:
                     try:
                         await conn.call(probe, {}, timeout=25.0)

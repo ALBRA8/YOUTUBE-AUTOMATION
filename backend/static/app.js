@@ -1941,6 +1941,7 @@ function mcpGsessHTML() {
       <button class="btn" id="gsess-clean-btn" onclick="gsessCleanLogin()" title="Abre Chrome normal para iniciar sesión en Google sin bloqueos de seguridad">1. 🔑 Abrir Login Seguro Google</button>
       <button class="btn" id="gsess-login-btn" onclick="gsessLogin()" title="Levanta Chrome con puerto CDP 9333 para conectar Flow y NotebookLM">2. 🔌 Conectar Chrome (CDP 9333)</button>
       <button class="btn ghost" id="gsess-capture-btn" onclick="gsessCapture()">3. 📥 Capturar sesión → NotebookLM</button>
+      <button class="btn ghost" onclick="gsessRepairProfile()" title="Sanea el perfil de Chrome (elimina Local State.bad y repara bloqueos/cierres inesperados)">🔧 Reparar Perfil</button>
       <button class="btn ghost" onclick="gsessRefresh()">🔄 Refrescar estado</button>
     </div>
     <p class="hintline" id="gsess-hint">💡 Paso 1: Inicia sesión en Google sin bloqueo de seguridad. Si Windows bloquea la ventana, haz doble clic en <code>VINCULAR-GOOGLE.bat</code> en tu <b>Escritorio</b>. Paso 2: Conecta CDP. Paso 3: Captura sesión.</p>
@@ -1988,6 +1989,14 @@ async function gsessCapture() {
       mcpListNotebooks({ silent: true });
   } catch (e) { toast('Capturar sesión: ' + e.message, 'err'); }
   finally { if (btn) { btn.disabled = false; btn.textContent = '📥 Capturar sesión → NotebookLM'; } }
+}
+
+async function gsessRepairProfile() {
+  try {
+    const res = await api('/mcp/repair-profile', { method: 'POST', body: {} });
+    const acts = (res.actions || []).length ? res.actions.join(', ') : 'perfil en estado óptimo';
+    toast('Perfil saneado ✅: ' + acts, 'ok');
+  } catch (e) { toast('Reparar perfil: ' + e.message, 'err'); }
 }
 
 function gsessApply(js) {

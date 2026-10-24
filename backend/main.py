@@ -1928,17 +1928,22 @@ async def mcp_launch_auth_browser():
 async def mcp_launch_clean_login():
     """🔑 Abre Chrome en modo limpio (sin CDP) para login humano sin bloqueo de Google."""
     try:
-        profile = Path(str(getattr(config, "GOOGLE_PROFILE_GLOBAL", "")))
-        lockfile = profile / "lockfile"
-        if lockfile.is_file():
-            try:
-                lockfile.unlink()
-            except OSError:
-                pass
-        pages = ["https://accounts.google.com/", "https://flow.google.com/", "https://notebooklm.google.com/"]
+        pages = list(getattr(config, "GOOGLE_LOGIN_PAGES", [])) or [
+            "https://accounts.google.com/ServiceLogin?continue=https://labs.google/fx/tools/flow",
+            "https://notebooklm.google.com/"
+        ]
         return await _mcpm.manager.launch_google_login(pages, cdp=False)
     except _mcpm.MCPManagerError as e:
         raise HTTPException(502, f"[{e.code}] {e}") from e
+
+
+@app.post("/api/mcp/repair-profile")
+async def mcp_repair_profile():
+    """🔧 Sanea el perfil de Chrome (elimina Local State.bad, bloqueos y repara exit_type)."""
+    try:
+        return _mcpm.manager.repair_profile()
+    except Exception as e:
+        raise HTTPException(500, f"Error al reparar perfil: {e}") from e
 
 
 @app.post("/api/mcp/login-google")

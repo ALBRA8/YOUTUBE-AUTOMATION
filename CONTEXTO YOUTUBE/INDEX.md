@@ -55,6 +55,7 @@ Esta separación es una regla estable del flujo de trabajo, no una excepción te
 - No integrar directamente, no sustituir componentes ALBRA ni crear otro agente audiovisual. Licencia MIT verificada en el clon; cero código copiado; el repo externo no se ejecutó.
 - **INT-022** · MCP Connection Manager: panel ↔ GoogleFlowMCP/notebooklm-mcp (badges, toggles, notebookId dinámico, Test Pipeline, preflight AUTH_REQUIRED). [Ver integración](06_INTEGRATIONS/INT-022_MCP_CONNECTION_MANAGER.md)
 - **INT-035** · Google Unified Login & Decoupled Browser Spawn Fix: resolución de bloqueo Google OAuth, purga de procesos zombis de Chrome y alineación del perfil compartido a FlowImageChrome (%LOCALAPPDATA%). [Ver integración](06_INTEGRATIONS/INT-035_GOOGLE_UNIFIED_LOGIN_AND_BROWSER_SPAWN_FIX.md)
+- **INT-036** · Chrome Profile Auto-Heal, OAuth Direct Landing & Strict Cookie Auth: saneamiento automático de perfiles dañados (Local State.bad, lockfile, exit_type), landing oficial ServiceLogin hacia Flow y NotebookLM en Tab 1 y 2, y verificación estricta de cookies SID / __Secure-1PSID en CDP 9333 eliminando falsos badges positivos. [Ver integración](06_INTEGRATIONS/INT-036_CHROME_PROFILE_AUTO_HEAL_AND_OAUTH_LANDING.md)
 
 
 ## Producción creativa multi-línea — 2026-10-23

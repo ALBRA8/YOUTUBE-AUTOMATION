@@ -7,7 +7,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 
 export const CDP_PORT = Number(process.env.FLOW_CDP_PORT || 9333);
-export const FLOW_URL = 'https://flow.google.com/';
+export const FLOW_URL = process.env.FLOW_URL || 'https://labs.google/fx/tools/flow';
 
 const isWin = process.platform === 'win32';
 const isMac = process.platform === 'darwin';
@@ -69,11 +69,34 @@ export async function ensureChrome({ url = FLOW_URL } = {}) {
   }
   const dir = userDataDir();
   fs.mkdirSync(dir, { recursive: true });
+  // Auto-heal profile before spawn
+  try {
+    const badLs = path.join(dir, 'Local State.bad');
+    if (fs.existsSync(badLs)) fs.unlinkSync(badLs);
+    for (const lock of ['lockfile', 'SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+      const lockPath = path.join(dir, lock);
+      if (fs.existsSync(lockPath)) fs.unlinkSync(lockPath);
+    }
+    const prefPath = path.join(dir, 'Default', 'Preferences');
+    if (fs.existsSync(prefPath)) {
+      try {
+        const pref = JSON.parse(fs.readFileSync(prefPath, 'utf8'));
+        if (pref && pref.profile) {
+          pref.profile.exit_type = 'Normal';
+          pref.profile.exited_cleanly = true;
+          fs.writeFileSync(prefPath, JSON.stringify(pref));
+        }
+      } catch {}
+    }
+  } catch {}
   const child = spawn(chromePath(), [
     `--remote-debugging-port=${CDP_PORT}`,
     `--user-data-dir=${dir}`,
     '--no-first-run',
     '--no-default-browser-check',
+    '--disable-session-crashed-bubble',
+    '--hide-crash-restore-bubble',
+    '--disable-features=SessionCrashedBubble',
     url,
   ], { detached: true, stdio: 'ignore' });
   child.unref();
