@@ -1928,6 +1928,13 @@ async def mcp_launch_auth_browser():
 async def mcp_launch_clean_login():
     """🔑 Abre Chrome en modo limpio (sin CDP) para login humano sin bloqueo de Google."""
     try:
+        profile = Path(str(getattr(config, "GOOGLE_PROFILE_GLOBAL", "")))
+        lockfile = profile / "lockfile"
+        if lockfile.is_file():
+            try:
+                lockfile.unlink()
+            except OSError:
+                pass
         pages = ["https://accounts.google.com/", "https://flow.google.com/", "https://notebooklm.google.com/"]
         return await _mcpm.manager.launch_google_login(pages, cdp=False)
     except _mcpm.MCPManagerError as e:

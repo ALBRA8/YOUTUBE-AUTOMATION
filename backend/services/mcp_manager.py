@@ -590,21 +590,20 @@ class MCPClientManager:
         compartido hace el resto (Chrome singleton reenvía a la instancia
         viva si ya existía). Devuelve el pid."""
         import sys
-        if sys.platform == "win32" and hasattr(os, "startfile"):
+        if sys.platform == "win32":
             chrome = argv[0]
-            args = []
+            cmd_parts = [f'"{chrome}"']
             for a in argv[1:]:
-                if " " in a and not (a.startswith('"') and a.endswith('"')):
-                    args.append(f'"{a}"')
+                if a.startswith("--user-data-dir="):
+                    val = a[len("--user-data-dir="):].strip('"')
+                    cmd_parts.append(f'--user-data-dir="{val}"')
+                elif " " in a and not (a.startswith('"') and a.endswith('"')):
+                    cmd_parts.append(f'"{a}"')
                 else:
-                    args.append(a)
-            args_str = " ".join(args)
-            try:
-                os.startfile(chrome, "open", arguments=args_str)
-                log.info("[mcp] Chrome lanzado con os.startfile: %s %s", chrome, args_str)
-                return 0
-            except Exception as e:
-                log.warning("[mcp] os.startfile fallo: %s, fallback a subprocess", e)
+                    cmd_parts.append(a)
+            full_cmd = 'start "" ' + " ".join(cmd_parts)
+            log.info("[mcp] Lanzando Chrome en Windows via start: %s", full_cmd)
+            return subprocess.Popen(full_cmd, shell=True).pid
         return subprocess.Popen(
             argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL, start_new_session=True).pid
