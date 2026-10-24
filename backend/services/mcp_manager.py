@@ -726,7 +726,7 @@ class MCPClientManager:
 
         if sys.platform == "win32":
             chrome = argv[0]
-            cmd_parts = [f'"{chrome}"']
+            cmd_parts = []
             for a in argv[1:]:
                 if a.startswith("--user-data-dir="):
                     val = a[len("--user-data-dir="):].strip('"')
@@ -735,9 +735,15 @@ class MCPClientManager:
                     cmd_parts.append(f'"{a}"')
                 else:
                     cmd_parts.append(a)
-            full_cmd = 'start "" ' + " ".join(cmd_parts)
-            log.info("[mcp] Lanzando Chrome en Windows via start: %s", full_cmd)
-            return subprocess.Popen(full_cmd, shell=True).pid
+            args_str = " ".join(cmd_parts)
+            try:
+                os.startfile(chrome, "open", arguments=args_str)
+                log.info("[mcp] Lanzando Chrome en Windows via os.startfile: %s %s", chrome, args_str)
+                return 0
+            except Exception as ex:
+                log.warning("[mcp] os.startfile falló (%s), fallback a start...", ex)
+                full_cmd = f'start "" "{chrome}" {args_str}'
+                return subprocess.Popen(full_cmd, shell=True).pid
         return subprocess.Popen(
             argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL, start_new_session=True).pid
@@ -784,12 +790,11 @@ class MCPClientManager:
         already_up = await self._cdp_up(port) if cdp else False
         pid = None
         if not already_up:
-            if cdp:
-                # Si se pide modo CDP pero port no responde, cualquier proceso existente en este perfil
-                # es una instancia sin CDP que bloqueará al nuevo Chrome. Purgar antes del spawn.
-                killed = self.kill_profile_processes(profile)
-                if killed:
-                    heal_res = self.heal_chrome_profile(profile)
+            # Purgar SIEMPRE procesos huérfanos/zombis en profile antes del spawn (tanto CDP como sin CDP)
+            # para evitar que una instancia fantasma capture la petición silenciosamente sin abrir ventana visible.
+            killed = self.kill_profile_processes(profile)
+            if killed:
+                heal_res = self.heal_chrome_profile(profile)
             chrome = self._find_chrome_bin()
             argv = [chrome,
                     f"--user-data-dir={profile}",

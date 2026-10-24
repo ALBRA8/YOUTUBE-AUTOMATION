@@ -168,3 +168,9 @@
 - **Documento:** [INT-036](INT-036_CHROME_PROFILE_AUTO_HEAL_AND_OAUTH_LANDING.md).
 - **Componentes:** `backend/services/mcp_manager.py` · `backend/config.py` · `backend/main.py` · `backend/static/app.js` · `tools/mcp-setup/login-google-unificado.bat` · `tools/GoogleFlowMCP/src/chrome.js` · `tools/GoogleFlowMCP/src/flow.js` · `tests/test_int036_profile_heal_and_strict_auth.py`.
 - **Resultado:** Auto-saneamiento determinista de perfiles de Chrome antes de spawn (`Local State.bad`, `lockfile`, `Singleton*`, `exit_type="Normal"`, `exited_cleanly=true`, flags anti-crash-bubble); redirección directa al formulario oficial de Google `accounts.google.com/ServiceLogin?continue=https://labs.google/fx/tools/flow` en Tab 1 y `notebooklm.google.com` en Tab 2; verificación estricta de cookies de autenticación `.google.com` (`SID` / `__Secure-1PSID`) sobre CDP 9333 eliminando falsos badges positivos de sesión. Endpoint `/api/mcp/repair-profile` y botón UI `🔧 Reparar Perfil`.
+
+## INT-037 — Chrome Desktop GUI Window Display & Zombie Purge Architecture
+- **Estado:** IMPLEMENTADO / VERIFICADO AL 100% (test_int036: 23/23 OK, test_mcp_manager: 38/38 OK).
+- **Documento:** [INT-037](INT-037_CHROME_DESKTOP_GUI_WINDOW_AND_ZOMBIE_PURGE.md).
+- **Componentes:** `backend/services/mcp_manager.py` · `tools/mcp-setup/login-google-unificado.bat` · `VINCULAR-GOOGLE.bat`.
+- **Resultado:** Solución definitiva al problema de apertura de ventanas de Chrome en Windows. Reemplazo de `subprocess.Popen("start ...", shell=True)` por `os.startfile(chrome, "open", arguments=args_str)` (ShellExecuteExW con SW_SHOWNORMAL) para forzar la visualización en la estación de escritorio interactiva en primer plano (`MainWindowHandle != 0`). Purga incondicional de subprocesos Chrome huérfanos/zombis antes de cualquier spawn (evitando delegación invisible por Chromium Single-Instance IPC). Baterías 100% verdes.

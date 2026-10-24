@@ -15,7 +15,8 @@ if not defined CHROME if exist "%LOCALAPPDATA%\Google\Chrome\Application\chrome.
 
 set "PROFILE=%LOCALAPPDATA%\FlowImageChrome"
 
-echo Saneando perfil de Chrome (%PROFILE%)...
+echo Purgando procesos anteriores y saneando perfil (%PROFILE%)...
+powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name = 'chrome.exe'\" | Where-Object { $_.CommandLine -like '*FlowImageChrome*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
 if exist "%PROFILE%\Local State.bad" del /f /q "%PROFILE%\Local State.bad" >nul 2>&1
 if exist "%PROFILE%\lockfile" del /f /q "%PROFILE%\lockfile" >nul 2>&1
 if exist "%PROFILE%\SingletonLock" del /f /q "%PROFILE%\SingletonLock" >nul 2>&1
@@ -49,6 +50,7 @@ echo Chrome se abrira con tu sesion activa en el puerto 9333.
 echo Dejalo abierto o minimizado.
 echo.
 
+powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name = 'chrome.exe'\" | Where-Object { $_.CommandLine -like '*FlowImageChrome*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
 if exist "%PROFILE%\lockfile" del /f /q "%PROFILE%\lockfile" >nul 2>&1
 if exist "%PROFILE%\SingletonLock" del /f /q "%PROFILE%\SingletonLock" >nul 2>&1
 
