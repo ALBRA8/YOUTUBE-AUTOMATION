@@ -1938,8 +1938,9 @@ function mcpGsessHTML() {
       (<code>google_profile_global</code>) en el puerto CDP de Flow — Flow lo reutiliza y NotebookLM recibe
       sus cookies con «📥 Capturar sesión». Nada de scripts .bat, terminales ni logins separados.</p>
     <div class="mcp-row btns">
-      <button class="btn" id="gsess-login-btn" onclick="gsessLogin()" title="Abre el navegador con tu perfil unificado y las pestañas de Flow y NotebookLM — un único login de Google">🔑 Vincular Sesión Google (Login Único)</button>
-      <button class="btn ghost" id="gsess-capture-btn" onclick="gsessCapture()">📥 Capturar sesión → NotebookLM</button>
+      <button class="btn" id="gsess-clean-btn" onclick="gsessCleanLogin()" title="Abre Chrome normal para iniciar sesión en Google sin bloqueos de seguridad">1. 🔑 Abrir Login Seguro Google</button>
+      <button class="btn" id="gsess-login-btn" onclick="gsessLogin()" title="Levanta Chrome con puerto CDP 9333 para conectar Flow y NotebookLM">2. 🔌 Conectar Chrome (CDP 9333)</button>
+      <button class="btn ghost" id="gsess-capture-btn" onclick="gsessCapture()">3. 📥 Capturar sesión → NotebookLM</button>
       <button class="btn ghost" onclick="gsessRefresh()">🔄 Refrescar estado</button>
     </div>
     <p class="hintline" id="gsess-hint">💡 Haz clic aquí para abrir el navegador con tu perfil unificado,
@@ -1947,6 +1948,19 @@ function mcpGsessHTML() {
       pondrán verdes al validar las cookies activas.</p>
     <div id="gsess-zone"><p class="hintline">Estado: sin verificar — pulsa «🔄 Refrescar estado» o «🔑 Vincular Sesión Google (Login Único)».</p></div>
   </div>`;
+}
+
+async function gsessCleanLogin() {
+  const btn = $('#gsess-clean-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Abriendo Chrome…'; }
+  try {
+    await api('/mcp/launch-clean-login', { method: 'POST', body: {} });
+    toast('Se abrió Chrome en modo seguro 🌐. Inicia sesión en Google con tu cuenta, verifica Flow/NotebookLM, CIERRA esa ventana de Chrome y pulsa «2. 🔌 Conectar Chrome (CDP 9333)».');
+  } catch (e) {
+    toast('Error al abrir Chrome: ' + e.message, 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '1. 🔑 Abrir Login Seguro Google'; }
+  }
 }
 
 async function gsessLogin() {

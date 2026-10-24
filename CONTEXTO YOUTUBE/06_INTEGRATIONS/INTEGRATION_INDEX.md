@@ -157,3 +157,8 @@
 
 | INT-022 | MCP Connection Manager — cliente MCP persistente en el backend + panel (badges/toggles/notebookId/Test Pipeline) para GoogleFlowMCP y notebooklm-mcp | `services/mcp_manager.py` · `/api/mcp/*` · `static/app.js renderMCP` · `tools/mcp-setup/` | IMPLEMENTADO — VALIDACIÓN REAL CON SESIÓN GOOGLE PENDIENTE · Doc: [INT-022](INT-022_MCP_CONNECTION_MANAGER.md) |
 | INT-023 | Pipeline Orchestrator — handoff de producción NotebookLM → Agente → Google Flow: pre-flight gatekeeper (aborta sin gastar tokens), Stage 1 contexto vía mcp_manager, Stage 2 blueprint con el motor existente (agent.py/script_gen intactos), Stage 3 despacho por escena con personaje consistente @{ref}, PARTIAL_FAILURES + retry quirúrgico, progreso [1/3]→[3/3] (X/Y) en el panel | `services/pipeline_orchestrator.py` · `/api/pipeline/*` · `static/app.js pipeRun/pipeApply` · `.env.example §INT-023` | IMPLEMENTADO — batería 55/55, regresión verde; validación real con sesiones Google pendiente · Doc: [INT-023](INT-023_PIPELINE_ORCHESTRATOR.md) |
+
+## INT-035 — Google Unified Login & Decoupled Browser Spawn Fix (Windows)
+- **Estado:** IMPLEMENTADO / VERIFICADO.
+- **Documento:** `INT-035_GOOGLE_UNIFIED_LOGIN_AND_BROWSER_SPAWN_FIX.md`.
+- **Resultado:** Resolución de bloqueo Google OAuth en navegadores con puerto de depuración mediante flujo de 2 fases (Modo Limpio + Modo CDP), lanzamiento nativo en Windows vía `os.startfile` (ShellExecuteW) para evitar fallos de escape en `cmd.exe /c start`, endpoints `/api/mcp/launch-clean-login` y botones frontend actualizados.

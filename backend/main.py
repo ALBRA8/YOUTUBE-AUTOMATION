@@ -1924,6 +1924,16 @@ async def mcp_launch_auth_browser():
         raise HTTPException(502, f"[{e.code}] {e}") from e
 
 
+@app.post("/api/mcp/launch-clean-login")
+async def mcp_launch_clean_login():
+    """🔑 Abre Chrome en modo limpio (sin CDP) para login humano sin bloqueo de Google."""
+    try:
+        pages = ["https://accounts.google.com/", "https://flow.google.com/", "https://notebooklm.google.com/"]
+        return await _mcpm.manager.launch_google_login(pages, cdp=False)
+    except _mcpm.MCPManagerError as e:
+        raise HTTPException(502, f"[{e.code}] {e}") from e
+
+
 @app.post("/api/mcp/login-google")
 async def mcp_login_google():
     """🔑 Lanza (o reutiliza) el Chrome REAL con el user-data-dir global

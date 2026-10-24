@@ -95,3 +95,5 @@ backend/data/biblioteca/
 .server_log.txt
 .server.lock
 __pycache__/
+# Perfil Chrome unificado (runtime local, cookies y cache)
+backend/data/google_profile_global/

@@ -589,6 +589,22 @@ class MCPClientManager:
         start_new_session → sobrevive al reinicio de uvicorn; el perfil
         compartido hace el resto (Chrome singleton reenvía a la instancia
         viva si ya existía). Devuelve el pid."""
+        import sys
+        if sys.platform == "win32" and hasattr(os, "startfile"):
+            chrome = argv[0]
+            args = []
+            for a in argv[1:]:
+                if " " in a and not (a.startswith('"') and a.endswith('"')):
+                    args.append(f'"{a}"')
+                else:
+                    args.append(a)
+            args_str = " ".join(args)
+            try:
+                os.startfile(chrome, "open", arguments=args_str)
+                log.info("[mcp] Chrome lanzado con os.startfile: %s %s", chrome, args_str)
+                return 0
+            except Exception as e:
+                log.warning("[mcp] os.startfile fallo: %s, fallback a subprocess", e)
         return subprocess.Popen(
             argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL, start_new_session=True).pid
@@ -617,7 +633,7 @@ class MCPClientManager:
                 "size_bytes": existing.stat().st_size if existing else 0,
                 "mtime": existing.stat().st_mtime if existing else 0.0}
 
-    async def launch_google_login(self, urls: list[str] | None = None) -> dict:
+    async def launch_google_login(self, urls: list[str] | None = None, cdp: bool = True) -> dict:
         """🔑 Abre (o reutiliza) el Chrome REAL con el perfil global y la URL
         de login de Google. UNA vez el humano loguea: Flow hereda la sesión
         (mismo Chrome por CDP) y NotebookLM la captura («📥 Capturar sesión»).
@@ -629,20 +645,30 @@ class MCPClientManager:
         profile.mkdir(parents=True, exist_ok=True)
         pages = [u.strip() for u in (urls or []) if u and u.strip()] or [
             str(_cfg("GOOGLE_LOGIN_URL", "https://accounts.google.com/"))]
-        already_up = await self._cdp_up(port)
+        already_up = await self._cdp_up(port) if cdp else False
         pid = None
         if not already_up:
             chrome = self._find_chrome_bin()
             argv = [chrome,
                     f"--user-data-dir={profile}",
-                    f"--remote-debugging-port={port}",
                     "--no-first-run", "--no-default-browser-check",
-                    "--disable-session-crashed-bubble"] + pages
+                    "--disable-session-crashed-bubble"]
+            if cdp:
+                argv.insert(2, f"--remote-debugging-port={port}")
+            argv += pages
             try:
                 pid = self._spawn_chrome(argv)
             except OSError as e:
                 raise MCPManagerError(f"no se pudo lanzar Chrome: {e}",
                                       "CHROME_SPAWN_FAILED") from e
+        else:
+            import httpx
+            for p_url in pages:
+                try:
+                    async with httpx.AsyncClient() as client:
+                        await client.put(f"http://127.0.0.1:{port}/json/new?{p_url}", timeout=2.0)
+                except Exception:
+                    pass
         st = self.nb_storage_state()
         return {"ok": True, "already_up": already_up, "pid": pid,
                 "cdp_port": port,

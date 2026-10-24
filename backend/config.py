@@ -77,7 +77,7 @@ MCP_LOGIN_CHROME_BIN = os.getenv("MCP_LOGIN_CHROME_BIN", "").strip()
 # Flow + NotebookLM — el único login humano cubre ambos productos.
 GOOGLE_LOGIN_PAGES = [u.strip() for u in os.getenv(
     "GOOGLE_LOGIN_PAGES",
-    "https://flow.google.com/,https://notebooklm.google.com/").split(",")
+    "https://accounts.google.com/,https://flow.google.com/,https://notebooklm.google.com/").split(",")
     if u.strip()]
 
 # ── Pipeline Orchestrator (INT-023) — NotebookLM → Agent → Flow ──────────
