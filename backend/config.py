@@ -57,9 +57,11 @@ NOTEBOOKLM_PROFILE = os.getenv("NOTEBOOKLM_PROFILE", "").strip()
 #   · NotebookLM MCP   → tras el login, «📥 Capturar sesión» extrae las
 #     cookies .google.com del MISMO Chrome vía CDP y las escribe en el
 #     storage_state.json que notebooklm-py usa para autenticar.
-# User-data-dir compartido (default: backend/data/google_profile_global).
+# User-data-dir compartido (default: %LOCALAPPDATA%/FlowImageChrome alineado con GoogleFlowMCP y sin espacios en Windows).
 GOOGLE_PROFILE_GLOBAL = Path(os.getenv(
-    "GOOGLE_PROFILE_GLOBAL", str(DATA_DIR / "google_profile_global")))
+    "GOOGLE_PROFILE_GLOBAL",
+    str(Path(os.environ["LOCALAPPDATA"]) / "FlowImageChrome") if "LOCALAPPDATA" in os.environ
+    else str(DATA_DIR / "google_profile_global")))
 # URL que abre el Chrome de login (el continue deja también la cookie de
 # NotebookLM lista y facilita el flujo humano).
 GOOGLE_LOGIN_URL = os.getenv(

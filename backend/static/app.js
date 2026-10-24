@@ -1943,9 +1943,7 @@ function mcpGsessHTML() {
       <button class="btn ghost" id="gsess-capture-btn" onclick="gsessCapture()">3. 📥 Capturar sesión → NotebookLM</button>
       <button class="btn ghost" onclick="gsessRefresh()">🔄 Refrescar estado</button>
     </div>
-    <p class="hintline" id="gsess-hint">💡 Haz clic aquí para abrir el navegador con tu perfil unificado,
-      inicia sesión en Google una sola vez, y luego presiona «Refrescar estado» — los badges MCP se
-      pondrán verdes al validar las cookies activas.</p>
+    <p class="hintline" id="gsess-hint">💡 Paso 1: Inicia sesión en Google sin bloqueo de seguridad. Si Windows bloquea la ventana, haz doble clic en <code>VINCULAR-GOOGLE.bat</code> en tu <b>Escritorio</b>. Paso 2: Conecta CDP. Paso 3: Captura sesión.</p>
     <div id="gsess-zone"><p class="hintline">Estado: sin verificar — pulsa «🔄 Refrescar estado» o «🔑 Vincular Sesión Google (Login Único)».</p></div>
   </div>`;
 }
