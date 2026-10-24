@@ -2032,6 +2032,49 @@ async def pipeline_retry_scenes(body: dict):
         raise HTTPException(status, f"[{e.code}] {e}") from e
 
 
+# ────── 🎯 Generador A/B de Hooks Virales (3 segundos de impacto) ─────────
+@app.post("/api/pipeline/generate-hooks")
+async def pipeline_generate_hooks(payload: dict):
+    """🎯 Genera 3 variantes psicológicas de hooks para los primeros 3 segundos:
+    A: Curiosidad (pregunta provocativa), B: Contradicción (mito común desmentido),
+    C: Dato Chocante (impacto inmediato / tensión extrema)."""
+    from pipeline import script_gen
+    topic = (payload.get("topic") or "").strip()
+    if not topic:
+        raise HTTPException(400, "El campo 'topic' es requerido para generar hooks")
+    niche = (payload.get("niche") or "").strip() or None
+    count = int(payload.get("count", 3))
+    custom_prompt = (payload.get("custom_prompt") or "").strip() or None
+    hooks = await script_gen.generate_viral_hooks(topic, niche=niche, count=count, custom_prompt=custom_prompt)
+    return {"ok": True, "topic": topic, "niche": niche, "hooks": hooks}
+
+
+@app.post("/api/projects/{pid}/select-hook")
+async def project_select_hook(pid: str, payload: dict):
+    """Aplica la variante de hook seleccionada al guion del proyecto:
+    actualiza el hook principal y la narración de la Escena 1 (0-3s)."""
+    _pid(pid)
+    p = db.get_project(pid)
+    if not p:
+        raise HTTPException(404, "Proyecto no encontrado")
+    hook_text = (payload.get("hook_text") or "").strip()
+    hook_id = (payload.get("hook_id") or "A").strip()
+    if not hook_text:
+        raise HTTPException(400, "El campo 'hook_text' es requerido")
+
+    meta = p.get("meta") or {}
+    meta["selected_hook_id"] = hook_id
+    meta["hook"] = hook_text
+    db.update_project(pid, meta=meta)
+
+    scenes = db.get_scenes(pid)
+    if scenes:
+        scenes[0]["narration"] = hook_text
+        db.replace_scenes(pid, scenes)
+
+    return {"ok": True, "pid": pid, "selected_hook_id": hook_id, "hook": hook_text}
+
+
 # ────── 🎞️ INT-024 · Stage 3.5 (harvest) + Stage 4 (FFmpeg assembler) ──────
 # Stage 3.5 consolida los assets de Flow en rutas deterministas
 # (scenes/scene_XXX.mp4) y genera el manifest.json estricto. Stage 4 ensambla

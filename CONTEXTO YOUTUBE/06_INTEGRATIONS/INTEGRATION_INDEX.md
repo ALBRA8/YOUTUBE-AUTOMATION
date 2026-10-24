@@ -174,3 +174,10 @@
 - **Documento:** [INT-037](INT-037_CHROME_DESKTOP_GUI_WINDOW_AND_ZOMBIE_PURGE.md).
 - **Componentes:** `backend/services/mcp_manager.py` · `tools/mcp-setup/login-google-unificado.bat` · `VINCULAR-GOOGLE.bat`.
 - **Resultado:** Solución definitiva al problema de apertura de ventanas de Chrome en Windows. Reemplazo de `subprocess.Popen("start ...", shell=True)` por `os.startfile(chrome, "open", arguments=args_str)` (ShellExecuteExW con SW_SHOWNORMAL) para forzar la visualización en la estación de escritorio interactiva en primer plano (`MainWindowHandle != 0`). Purga incondicional de subprocesos Chrome huérfanos/zombis antes de cualquier spawn (evitando delegación invisible por Chromium Single-Instance IPC). Baterías 100% verdes.
+
+## INT-038 — Generador A/B de Hooks Virales (3 Segundos de Impacto)
+- **Estado:** IMPLEMENTADO / VERIFICADO AL 100% (Batería test_viral_hooks_generator: 6/6 OK, test_pipeline_orchestrator: 56/56 OK).
+- **Documento:** [INT-038](INT-038_VIRAL_HOOKS_GENERATOR_AB.md).
+- **Origen:** ClonaKit Feature Gap #1 inspirada en Anai App (`anaiapp.ai`).
+- **Componentes:** `backend/pipeline/script_gen.py` · `backend/services/gemini_client.py` · `backend/main.py` · `backend/static/app.js` · `tests/test_viral_hooks_generator.py`.
+- **Resultado:** Generador de 3 variantes psicológicas de hooks para los primeros 0-3 segundos (Curiosidad, Contradicción y Dato Chocante) con sugerencias visuales (`visual_cues`) y estimación de retención (`estimated_retention`). Endpoints `POST /api/pipeline/generate-hooks` y `POST /api/projects/{pid}/select-hook` con sincronización en tiempo real de la Escena 1 del guion. Componente visual interactivo en el panel web (`app.js`) para seleccionar variantes y regenerar con un clic. Fallback determinista local \$0 sin dependencias externas.

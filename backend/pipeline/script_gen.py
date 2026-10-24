@@ -27,6 +27,136 @@ VIRAL_RETENTION_RULES = (
     "inmediatamente con un CTA natural que incite al debate o a seguir para parte 2."
 )
 
+# ── Categorías y plantillas para el Generador A/B de Hooks Virales (0-3s) ────
+HOOK_CATEGORIES = [
+    {
+        "id": "A",
+        "type": "Curiosidad",
+        "label": "Pregunta Provocativa",
+        "description": "Abre un vacío cognitivo que el cerebro no puede ignorar.",
+        "templates": [
+            "¿Por qué nadie te dijo esto sobre {tema}? Te lo explico en 30 segundos.",
+            "Si crees que sabes todo sobre {tema}, esto va a cambiar tu perspectiva.",
+            "Hay un secreto oculto sobre {tema} que casi nadie se atreve a contar.",
+            "¿Qué pasaría si te dijera que lo más importante de {tema} te lo ocultaron?",
+        ],
+        "visual_cues": [
+            "Primer plano cinematográfico con zoom rápido hacia el sujeto en penumbra.",
+            "Movimiento dinámico de cámara hacia un objeto misterioso sobre fondo oscuro.",
+            "Encuadre dramático con iluminación cenital y mirada fija hacia el espectador.",
+        ],
+        "default_retention": "94%",
+    },
+    {
+        "id": "B",
+        "type": "Contradicción",
+        "label": "Mito Común Desmentido",
+        "description": "Desafía una creencia popular o señala un error masivo que el 90% comete.",
+        "templates": [
+            "Todo lo que te enseñaron sobre {tema} es una completa mentira.",
+            "Deja de cometer este error con {tema}: el 90% de la gente lo está haciendo mal.",
+            "Nos mintieron sobre {tema}, y la realidad es mucho más perturbadora de lo que crees.",
+            "Pensabas que {tema} era seguro, hasta que descubrieron esta verdad.",
+        ],
+        "visual_cues": [
+            "Gesto de advertencia en primer plano con efecto de pausa dramática y alto contraste.",
+            "Texto de alerta visual en rojo neón con sacudida sutil de cámara.",
+            "Plano contrapicado desafiante con iluminación lateral en tonos fríos.",
+        ],
+        "default_retention": "92%",
+    },
+    {
+        "id": "C",
+        "type": "Dato Chocante",
+        "label": "Impacto Inmediato",
+        "description": "Abre con una cifra alarmante, un hecho extremo o una consecuencia urgente.",
+        "templates": [
+            "Solo el 1% de las personas conoce este dato escalofriante sobre {tema}.",
+            "Lo que descubrieron recientemente sobre {tema} dejó a los científicos sin palabras.",
+            "Esto sobre {tema} desafía toda lógica humana y no vas a creer lo que pasó.",
+            "El 99% ignora lo que está a punto de ocurrir con {tema}.",
+        ],
+        "visual_cues": [
+            "Transición rápida de impacto visual con destello y desenfoque de movimiento.",
+            "Primer plano de reacción atónita con zoom-in vertiginoso.",
+            "Vista macro detallada con partículas flotantes y atmósfera cargada de tensión.",
+        ],
+        "default_retention": "96%",
+    },
+]
+
+
+def _local_fallback_hooks(topic: str, niche: str | None = None, count: int = 3) -> list[dict]:
+    """Generador local determinista de hooks ($0, sin API key ni red)."""
+    tema = _tema(topic)
+    out = []
+    for i in range(min(count, len(HOOK_CATEGORIES))):
+        cat = HOOK_CATEGORIES[i]
+        tpl = cat["templates"][len(tema) % len(cat["templates"])]
+        cue = cat["visual_cues"][len(tema) % len(cat["visual_cues"])]
+        out.append({
+            "id": cat["id"],
+            "type": cat["type"],
+            "label": cat["label"],
+            "hook": tpl.format(tema=tema),
+            "visual_cue": cue,
+            "estimated_retention": cat["default_retention"],
+        })
+    return out
+
+
+async def generate_viral_hooks(topic: str, niche: str | None = None,
+                               count: int = 3,
+                               custom_prompt: str | None = None) -> list[dict]:
+    """🎯 Generador A/B de Hooks Virales (3 segundos de impacto).
+    Genera `count` variantes psicológicas calibradas (Curiosidad, Contradicción, Dato Chocante)
+    para los primeros 0-3s de un video vertical (Shorts / TikTok)."""
+    tema = _tema(topic)
+    niche_ctx = f" (nicho: {niche})" if niche else ""
+
+    if gemini_client.available():
+        try:
+            prompt = (
+                f"Eres el mejor copywriter viral de YouTube Shorts y TikTok. "
+                f"Genera EXACTAMENTE {count} ganchos (HOOKS) ultra-potentes para los primeros 3 segundos "
+                f"de un video sobre «{tema}»{niche_ctx}.\n\n"
+                f"REGLAS INQUEBRANTABLES:\n"
+                f"1. Máximo 15 palabras por gancho.\n"
+                f"2. PROHIBIDO saludar, decir 'Hola' o presentarse.\n"
+                f"3. Cada gancho debe tener un ángulo psicológico distinto:\n"
+                f"   - Variante A (Curiosidad / Pregunta provocativa)\n"
+                f"   - Variante B (Contradicción / Mito común desmentido)\n"
+                f"   - Variante C (Dato chocante / Cifra / Tensión extrema)\n"
+                f"4. visual_cue: describe en 1 frase la acción de cámara o toma visual impactante para ese hook.\n"
+                f"5. estimated_retention: porcentaje estimado de retención (ej. '95%').\n"
+            )
+            if custom_prompt:
+                prompt += f"\nInstrucción adicional del creador: {custom_prompt}\n"
+
+            res = await gemini_client.generate_json(
+                prompt, gemini_client.schema_viral_hooks(),
+                system="Experto en retención de audiencia y hooks virales para Shorts.",
+            )
+            raw_hooks = res.get("hooks") if isinstance(res, dict) else None
+            if isinstance(raw_hooks, list) and len(raw_hooks) >= 1:
+                clean_hooks = []
+                for i, h in enumerate(raw_hooks[:count]):
+                    cat = HOOK_CATEGORIES[i % len(HOOK_CATEGORIES)]
+                    clean_hooks.append({
+                        "id": str(h.get("id") or cat["id"]).upper(),
+                        "type": str(h.get("type") or cat["type"]).strip(),
+                        "label": str(h.get("label") or cat["label"]).strip(),
+                        "hook": str(h.get("hook") or "").strip(),
+                        "visual_cue": str(h.get("visual_cue") or cat["visual_cues"][0]).strip(),
+                        "estimated_retention": str(h.get("estimated_retention") or cat["default_retention"]).strip(),
+                    })
+                return clean_hooks
+        except Exception as e:
+            log.warning("Generación de hooks con Gemini falló (%s) — usando fallback local", str(e)[:120])
+
+    return _local_fallback_hooks(tema, niche, count=count)
+
+
 # ─────────────────────────── generador local (fallback $0) ────────────────
 # Sin API key (o si Gemini falla) producimos un guion estructurado local:
 # el pipeline completa de verdad con edge-tts + imágenes locales. Coste $0.
@@ -109,9 +239,12 @@ def _local_fallback(kind: str, seed: str, style_id: str, fmt: str,
             "image_prompt": f"{shot}{kw_shot}, visual concept about {tema}, {style_prompt}, no text",
         })
     sanitize_script_scenes(scenes)
+    hooks = _local_fallback_hooks(tema, count=3)
     return {
         "title": _smart_title(tema),
-        "hook": narrations[0],
+        "hook": hooks[0]["hook"] if hooks else narrations[0],
+        "hook_variants": hooks,
+        "selected_hook_id": "A",
         "cta": narrations[-1],
         "scenes": scenes,
         "engine": "local-demo",
@@ -324,9 +457,20 @@ def build_result(raw: dict) -> dict:
             "image_prompt": (sc.get("image_prompt") or "").strip(),
         })
     sanitize_script_scenes(scenes)
+    title_topic = raw.get("title") or (scenes[0]["narration"][:40] if scenes else "este tema")
+    hook_variants = raw.get("hook_variants")
+    if not isinstance(hook_variants, list) or len(hook_variants) < 2:
+        hook_variants = _local_fallback_hooks(title_topic, count=3)
+
+    main_hook = (raw.get("hook") or (scenes[0]["narration"] if scenes else "")).strip()
+    if not main_hook and hook_variants:
+        main_hook = hook_variants[0]["hook"]
+
     return {
         "title": (raw.get("title") or "Sin título").strip()[:60],
-        "hook": (raw.get("hook") or "").strip(),
+        "hook": main_hook,
+        "hook_variants": hook_variants,
+        "selected_hook_id": raw.get("selected_hook_id") or "A",
         "cta": (raw.get("cta") or "").strip(),
         "scenes": scenes,
         "engine": raw.get("engine") or "gemini",

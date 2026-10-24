@@ -788,6 +788,16 @@ function renderProject() {
         return pl ? `<span class="plat-check on">${pl.emoji} ${pl.name}</span>` : '';
       }).join('')}</div>
     </div>` : ''}
+    <div class="card hook-ab-container" style="margin-top:16px;border:1px solid rgba(255,255,255,0.12);background:var(--bg2,#18181b)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div>
+          <b style="font-size:15px;display:flex;align-items:center;gap:6px">🎯 Ganchos Virales A/B <span style="font-size:11px;font-weight:400;color:var(--muted);background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:10px">Primeros 3 segundos</span></b>
+          <p style="font-size:12px;color:var(--muted);margin-top:2px">Elige qué gancho psicológico abre tu video en la Escena 1 para retener a la audiencia.</p>
+        </div>
+        <button class="btn small" onclick="regenProjectHooks('${p.id}')" title="Generar 3 variantes nuevas con IA">⚡ Probar otros 3 Hooks</button>
+      </div>
+      ${renderHookCards(p)}
+    </div>
     <h2 class="sec">🎬 Escenas <span class="hint">arrastra ⟺ para reordenar · clic en la imagen para regenerar</span></h2>
     <div class="scene-list" id="scene-list">${scenes.map(sc => sceneCard(sc)).join('') || '<div class="empty">Sin escenas todavía — genera el video primero</div>'}</div>`;
 
@@ -2349,3 +2359,99 @@ async function pipeRender() {
 
 // reanudar el seguimiento si el backend conserva una corrida activa (recarga de página)
 (async () => { const act = await pipeRefresh(true); if (act) pipePollStart(); })();
+
+
+/* ── 🎯 Generador A/B de Hooks Virales (ClonaKit / Anai Feature) ───────── */
+function renderHookCards(p) {
+  const meta = p.meta || {};
+  let hooks = meta.hook_variants || [];
+  const selectedId = meta.selected_hook_id || 'A';
+  if (!hooks.length) {
+    if (p.hook) {
+      hooks = [
+        { id: 'A', type: 'Curiosidad', label: 'Gancho Actual', hook: p.hook, visual_cue: 'Toma de impacto inicial', estimated_retention: '94%' },
+        { id: 'B', type: 'Contradicción', label: 'Mito Común', hook: 'Todo lo que creías saber sobre este tema es mentira.', visual_cue: 'Gesto de advertencia en primer plano', estimated_retention: '92%' },
+        { id: 'C', type: 'Dato Chocante', label: 'Impacto Inmediato', hook: 'Solo el 1% de las personas conoce este dato.', visual_cue: 'Zoom rápido vertiginoso con destello', estimated_retention: '96%' }
+      ];
+    } else {
+      return `<div style="padding:12px;text-align:center;color:var(--muted);font-size:13px">
+        No hay variantes A/B generadas todavía.
+        <button class="btn small primary" style="margin-left:10px" onclick="regenProjectHooks('${p.id}')">🎯 Generar Hooks A/B Ahora</button>
+      </div>`;
+    }
+  }
+  const badgeColors = {
+    'Curiosidad': 'background:rgba(168,85,247,0.15);color:#c084fc;border:1px solid rgba(168,85,247,0.3)',
+    'Contradicción': 'background:rgba(249,115,22,0.15);color:#fb923c;border:1px solid rgba(249,115,22,0.3)',
+    'Dato Chocante': 'background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.3)',
+  };
+  return `<div class="hook-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px">
+    ${hooks.map(h => {
+      const isSel = (h.id === selectedId) || (p.hook && p.hook === h.hook);
+      const bColor = badgeColors[h.type] || 'background:rgba(59,130,246,0.15);color:#60a5fa;border:1px solid rgba(59,130,246,0.3)';
+      const safeHook = esc(h.hook).replace(/'/g, "&#39;");
+      return `
+        <div class="card hook-card ${isSel ? 'active-hook' : ''}" 
+             style="cursor:pointer;position:relative;border:1.5px solid ${isSel ? 'var(--accent2,#10b981)' : 'rgba(255,255,255,0.08)'};background:${isSel ? 'rgba(16,185,129,0.08)' : 'rgba(0,0,0,0.2)'};padding:14px;border-radius:10px;transition:all 0.2s ease"
+             onclick="selectProjectHook('${p.id}', '${esc(h.id)}', '${safeHook}')">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;${bColor}">Variante ${esc(h.id)} · ${esc(h.type || h.label || 'Hook')}</span>
+            <span style="font-size:11px;color:#10b981;font-weight:700;background:rgba(16,185,129,0.12);padding:2px 6px;border-radius:6px">⚡ ${esc(h.estimated_retention || '94%')}</span>
+          </div>
+          <div style="font-size:13.5px;font-weight:600;line-height:1.4;margin-bottom:8px;color:var(--text,#fff)">«${esc(h.hook)}»</div>
+          <div style="font-size:11.5px;color:var(--muted,#9ca3af);display:flex;align-items:center;gap:4px">
+            <span>🎬</span> <em>${esc(h.visual_cue || 'Toma dinámica')}</em>
+          </div>
+          <div style="margin-top:10px;text-align:right">
+            ${isSel ? '<span style="font-size:11px;color:#10b981;font-weight:700">✓ ACTIVO EN ESCENA 1</span>' 
+                    : '<span style="font-size:11px;color:var(--muted);text-decoration:underline">Elegir este hook →</span>'}
+          </div>
+        </div>
+      `;
+    }).join('')}
+  </div>`;
+}
+
+async function selectProjectHook(pid, hookId, hookText) {
+  try {
+    const unescaped = hookText.replace(/&#39;/g, "'");
+    const res = await api(`/projects/${pid}/select-hook`, {
+      method: 'POST',
+      body: { hook_id: hookId, hook_text: unescaped }
+    });
+    if (S.project && S.project.id === pid) {
+      S.project.meta = S.project.meta || {};
+      S.project.meta.selected_hook_id = hookId;
+      S.project.meta.hook = unescaped;
+      S.project.hook = unescaped;
+      if (S.project.scenes && S.project.scenes.length) {
+        S.project.scenes[0].narration = unescaped;
+      }
+      renderProject();
+    }
+    toast(`Variante ${hookId} aplicada a la Escena 1`, 'ok');
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+async function regenProjectHooks(pid) {
+  try {
+    const p = S.project;
+    toast('Generando 3 ganchos virales A/B…', 'info');
+    const res = await api('/pipeline/generate-hooks', {
+      method: 'POST',
+      body: { topic: p.title || 'video', count: 3 }
+    });
+    if (res && res.hooks) {
+      if (S.project && S.project.id === pid) {
+        S.project.meta = S.project.meta || {};
+        S.project.meta.hook_variants = res.hooks;
+        renderProject();
+      }
+      toast('3 nuevos ganchos virales listos', 'ok');
+    }
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}

@@ -180,12 +180,27 @@ def pcm_to_wav_bytes(pcm: bytes, rate: int = 24000) -> bytes:
 
 # ───────────────────────────────────────────────────── Utilidades JSON ──
 def schema_scenes() -> dict:
-    """Esquema para guiones escena por escena."""
+    """Esquema para guiones escena por escena con soporte para variantes A/B de hook."""
     return {
         "type": "object",
         "properties": {
             "title": {"type": "string"},
             "hook": {"type": "string"},
+            "hook_variants": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "type": {"type": "string"},
+                        "label": {"type": "string"},
+                        "hook": {"type": "string"},
+                        "visual_cue": {"type": "string"},
+                        "estimated_retention": {"type": "string"},
+                    },
+                    "required": ["id", "type", "label", "hook", "visual_cue"],
+                },
+            },
             "scenes": {
                 "type": "array",
                 "items": {
@@ -201,6 +216,31 @@ def schema_scenes() -> dict:
             "cta": {"type": "string"},
         },
         "required": ["title", "scenes"],
+    }
+
+
+def schema_viral_hooks() -> dict:
+    """Esquema dedicado para el generador A/B de hooks virales (3 segundos de impacto)."""
+    return {
+        "type": "object",
+        "properties": {
+            "hooks": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "type": {"type": "string"},
+                        "label": {"type": "string"},
+                        "hook": {"type": "string"},
+                        "visual_cue": {"type": "string"},
+                        "estimated_retention": {"type": "string"},
+                    },
+                    "required": ["id", "type", "label", "hook", "visual_cue", "estimated_retention"],
+                },
+            },
+        },
+        "required": ["hooks"],
     }
 
 
