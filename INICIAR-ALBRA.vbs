@@ -17,5 +17,5 @@ If fso.FileExists(py) Then
     sh.Run """" & py & """ lanzador_albra.py", 0, False
 Else
     ' Primera vez: asistente visible (crea venv + dependencias + arranca)
-    sh.Run "cmd /c """ & carpeta & "\INICIAR-DEBUG-con-ventana.bat""", 1, False
+    sh.Run "cmd /c """ & carpeta & "\start.bat""", 1, False
 End If

@@ -29,7 +29,6 @@ ARCHIVOS DE APOYO (no los toques)
 - backend\_dev_wait_open.py   Helper de start.bat: espera /api/health y
                               abre el navegador sin bloquear el servidor.
 - lanzador_albra.py           el cerebro del arranque silencioso
-- INICIAR-DEBUG-con-ventana.bat   asistente clasico con ventanas (debug)
 - DETENER-con-ventana.bat         detencion visible, SOLO para depurar
 
 SI ALGO SALE MAL
@@ -37,8 +36,10 @@ SI ALGO SALE MAL
 - El servidor guarda su registro en .server_log.txt (en la raiz del
   proyecto). Si en 2 minutos no arranca, el propio lanzador te abre
   ese archivo en el Bloc de notas para que veas el error.
-- Modo depuracion: doble click en INICIAR-DEBUG-con-ventana.bat
-  (ahi SI ves la ventana del servidor con los logs en vivo).
+- Modo dev/depuracion: doble click en start.bat
+  (ahi SI ves la ventana del servidor con los logs en vivo y hot-reload).
+- INICIAR-ALBRA.vbs delega en start.bat la primera vez (crea el .venv
+  e instala dependencias).
 - Si Windows bloquea el .vbs al descargarlo: click derecho >
   Propiedades > "Desbloquear" > Aceptar (solo se hace una vez).
 
