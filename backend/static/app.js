@@ -1984,16 +1984,43 @@ function mcpGsessHTML() {
     <p class="hintline">UN solo login manual: se abre tu Chrome con un perfil compartido
       (<code>google_profile_global</code>) en el puerto CDP de Flow — Flow lo reutiliza y NotebookLM recibe
       sus cookies con «📥 Capturar sesión». Nada de scripts .bat, terminales ni logins separados.</p>
-    <div class="mcp-row btns">
-      <button class="btn" id="gsess-clean-btn" onclick="gsessCleanLogin()" title="Abre Chrome normal para iniciar sesión en Google sin bloqueos de seguridad">1. 🔑 Abrir Login Seguro Google</button>
-      <button class="btn" id="gsess-login-btn" onclick="gsessLogin()" title="Levanta Chrome con puerto CDP 9333 para conectar Flow y NotebookLM">2. 🔌 Conectar Chrome (CDP 9333)</button>
-      <button class="btn ghost" id="gsess-capture-btn" onclick="gsessCapture()">3. 📥 Capturar sesión → NotebookLM</button>
-      <button class="btn ghost" onclick="gsessRepairProfile()" title="Sanea el perfil de Chrome (elimina Local State.bad y repara bloqueos/cierres inesperados)">🔧 Reparar Perfil</button>
+    <div class="mcp-row btns" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+      <button class="btn btn-primary" id="gsess-all-btn" onclick="gsessConnectAll()" style="font-weight:700; background:linear-gradient(135deg,#10b981,#059669); color:#fff; border:none; padding:8px 16px; box-shadow:0 2px 8px rgba(16,185,129,0.35);" title="Acción automática: abre Chrome interactivo con tu sesión, conecta Flow y NotebookLM y pone ambos badges en verde">🚀 Iniciar Chrome y Conectar Todo (1 Clic)</button>
+      <button class="btn" id="gsess-clean-btn" onclick="gsessCleanLogin()" title="Abre una ventana visible de Chrome para iniciar sesión si tus cookies han expirado">🌐 Abrir Ventana de Chrome</button>
+      <button class="btn ghost" id="gsess-capture-btn" onclick="gsessCapture()" title="Captura las cookies de Chrome para NotebookLM">📥 Capturar sesión → NotebookLM</button>
+      <button class="btn ghost" onclick="gsessRepairProfile()" title="Sanea el perfil de Chrome (elimina procesos colgados y repara bloqueos)">🔧 Reparar Perfil</button>
       <button class="btn ghost" onclick="gsessRefresh()">🔄 Refrescar estado</button>
     </div>
-    <p class="hintline" id="gsess-hint">💡 Paso 1: Inicia sesión en Google sin bloqueo de seguridad. Si Windows bloquea la ventana, haz doble clic en <code>VINCULAR-GOOGLE.bat</code> en tu <b>Escritorio</b>. Paso 2: Conecta CDP. Paso 3: Captura sesión.</p>
+    <p class="hintline" id="gsess-hint">💡 <b>Recomendado:</b> Pulsa <b>«🚀 Iniciar Chrome y Conectar Todo»</b>. Se abrirá una ventana de Chrome con tu sesión y se vincularán Google Flow y NotebookLM en verde automáticamente.</p>
     <div id="gsess-zone"><p class="hintline">Estado: sin verificar — pulsa «🔄 Refrescar estado» o «🔑 Vincular Sesión Google (Login Único)».</p></div>
   </div>`;
+}
+
+async function gsessConnectAll() {
+  const btn = $('#gsess-all-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Conectando todo…'; }
+  try {
+    toast('Iniciando Chrome y conectando Google Flow + NotebookLM…');
+    const res = await api('/mcp/connect-all-google', { method: 'POST', body: {} });
+    if (res.ok) {
+      toast('¡Google Flow y NotebookLM conectados exitosamente! 🚀 Ambos servicios están en VERDE.', 'ok');
+    } else {
+      let msg = 'Chrome iniciado en puerto 9333. ';
+      if (res.flow && res.flow.state === 'connected') msg += 'Flow: ✅ Conectado. ';
+      else if (res.flow && res.flow.state === 'auth_required') msg += 'Flow: 🔑 Sesión pendiente en la ventana de Chrome. ';
+      if (res.notebooklm && res.notebooklm.state === 'connected') msg += 'NotebookLM: ✅ Conectado. ';
+      toast(msg, 'info');
+    }
+    await gsessRefresh(true);
+    await mcpRefresh(true);
+    if (res.notebooklm && res.notebooklm.state === 'connected') {
+      mcpListNotebooks({ silent: true });
+    }
+  } catch (e) {
+    toast('Error al conectar Google: ' + e.message, 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🚀 Iniciar Chrome y Conectar Todo (1 Clic)'; }
+  }
 }
 
 async function gsessCleanLogin() {

@@ -647,13 +647,13 @@ class MCPClientManager:
                     f"Select-Object -ExpandProperty ProcessId"
                 )
                 res = subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd],
-                                     capture_output=True, text=True, timeout=5)
+                                     capture_output=True, text=True, timeout=12)
                 for line in res.stdout.strip().splitlines():
                     line = line.strip()
                     if line.isdigit():
                         pid = int(line)
                         subprocess.run(["taskkill", "/F", "/PID", str(pid)],
-                                       capture_output=True, timeout=5)
+                                       capture_output=True, timeout=8)
                         killed.append(pid)
                 if killed:
                     log.info("[mcp-profile] Procesos zombis de Chrome purgados en %s: %s", p_str, killed)
@@ -736,14 +736,20 @@ class MCPClientManager:
                 else:
                     cmd_parts.append(a)
             args_str = " ".join(cmd_parts)
+            # cmd.exe /c start "" delega al shell de Windows (Explorer), garantizando
+            # una ventana interactiva visible en el escritorio activo del usuario.
+            full_cmd = f'cmd.exe /c start "" "{chrome}" {args_str}'
+            log.info("[mcp] Lanzando Chrome interactivo en Windows: %s", full_cmd)
             try:
-                os.startfile(chrome, "open", arguments=args_str)
-                log.info("[mcp] Lanzando Chrome en Windows via os.startfile: %s %s", chrome, args_str)
-                return 0
+                p = subprocess.Popen(full_cmd, shell=True)
+                return p.pid
             except Exception as ex:
-                log.warning("[mcp] os.startfile falló (%s), fallback a start...", ex)
-                full_cmd = f'start "" "{chrome}" {args_str}'
-                return subprocess.Popen(full_cmd, shell=True).pid
+                log.warning("[mcp] cmd start falló (%s), fallback a os.startfile...", ex)
+                try:
+                    os.startfile(chrome, "open", arguments=args_str)
+                    return 0
+                except Exception:
+                    return 0
         return subprocess.Popen(
             argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL, start_new_session=True).pid
@@ -798,6 +804,9 @@ class MCPClientManager:
             chrome = self._find_chrome_bin()
             argv = [chrome,
                     f"--user-data-dir={profile}",
+                    "--new-window",
+                    "--window-size=1280,800",
+                    "--window-position=40,40",
                     "--no-first-run", "--no-default-browser-check",
                     "--disable-session-crashed-bubble",
                     "--hide-crash-restore-bubble",
@@ -839,6 +848,75 @@ class MCPClientManager:
                "shared_with_flow": port == int(_cfg("FLOW_CDP_PORT", 9333)),
                "notebooklm_storage": self.nb_storage_state()}
         return out
+
+    async def connect_all_google(self) -> dict:
+        """🚀 Conexión Google en 1 solo clic:
+        1. Purgar procesos zombis y sanear el perfil FlowImageChrome.
+        2. Si Chrome no está activo en puerto 9333, levantarlo en modo interactivo (--new-window).
+        3. Esperar a que el puerto 9333 esté listo.
+        4. Si NotebookLM no tiene storage_state.json capturado, capturar cookies del Chrome activo.
+        5. Conectar servidores MCP de Google Flow y NotebookLM.
+        """
+        port = int(_cfg("FLOW_CDP_PORT", 9333))
+        profile = Path(str(_cfg("GOOGLE_PROFILE_GLOBAL", "")))
+
+        # 1. Purga defensiva y auto-heal
+        killed = self.kill_profile_processes(profile)
+        heal_res = self.heal_chrome_profile(profile)
+        if killed:
+            heal_res.setdefault("actions", []).insert(0, f"{len(killed)} procesos zombis terminados")
+
+        # 2. Verificar o levantar Chrome
+        is_up = await self._cdp_up(port)
+        if not is_up:
+            pages = [
+                "https://labs.google/fx/tools/flow",
+                "https://notebooklm.google.com/"
+            ]
+            await self.launch_google_login(pages, cdp=True)
+            for _ in range(12):
+                await asyncio.sleep(0.5)
+                if await self._cdp_up(port):
+                    is_up = True
+                    break
+
+        # 3. Captura preventiva si falta storage_state de NotebookLM
+        nb_storage = self.nb_storage_state()
+        if is_up and (not nb_storage.get("exists") or nb_storage.get("size_bytes", 0) < 100):
+            try:
+                await self.capture_google_session()
+            except Exception as e:
+                log.debug("[connect_all_google] auto-captura omitida: %s", e)
+
+        # 4. Conectar ambos servicios MCP
+        flow_st = {}
+        flow_err = None
+        try:
+            flow_st = await self.connect("google-flow")
+        except Exception as e:
+            flow_err = str(e)
+            conn = self._conns.get("google-flow")
+            flow_st = self._conn_status(conn) if conn else {"service": "google-flow", "state": ST_ERROR, "last_error": flow_err}
+
+        nb_st = {}
+        nb_err = None
+        try:
+            nb_st = await self.connect("notebooklm")
+        except Exception as e:
+            nb_err = str(e)
+            conn = self._conns.get("notebooklm")
+            nb_st = self._conn_status(conn) if conn else {"service": "notebooklm", "state": ST_ERROR, "last_error": nb_err}
+
+        return {
+            "ok": (flow_st.get("state") == ST_CONNECTED and nb_st.get("state") == ST_CONNECTED),
+            "chrome_up": is_up,
+            "cdp_port": port,
+            "flow": flow_st,
+            "notebooklm": nb_st,
+            "flow_error": flow_err,
+            "notebooklm_error": nb_err,
+            "heal_actions": heal_res.get("actions", []),
+        }
 
     async def _cdp_fetch_cookies_raw(self, port: int, timeout: float = 4.0) -> list[dict]:
         """Consulta cookies reales del Chrome vía CDP WebSocket (Storage.getCookies o Network.getAllCookies).

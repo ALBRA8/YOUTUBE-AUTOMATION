@@ -2079,6 +2079,15 @@ async def mcp_launch_clean_login():
         raise HTTPException(502, f"[{e.code}] {e}") from e
 
 
+@app.post("/api/mcp/connect-all-google")
+async def mcp_connect_all_google():
+    """🚀 1-Clic: Sanea perfil, levanta Chrome interactivo en puerto 9333 y conecta Flow + NotebookLM."""
+    try:
+        return await _mcpm.manager.connect_all_google()
+    except Exception as e:
+        raise HTTPException(500, f"Error al conectar servicios Google: {e}") from e
+
+
 @app.post("/api/mcp/repair-profile")
 async def mcp_repair_profile():
     """🔧 Sanea el perfil de Chrome (elimina Local State.bad, bloqueos y repara exit_type)."""
