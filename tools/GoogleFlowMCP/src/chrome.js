@@ -69,6 +69,14 @@ export async function ensureChrome({ url = FLOW_URL } = {}) {
   }
   const dir = userDataDir();
   fs.mkdirSync(dir, { recursive: true });
+  // Kill orphan/non-CDP chrome processes holding this dir before spawn
+  if (isWin) {
+    try {
+      const { execSync } = await import('node:child_process');
+      const dirName = path.basename(dir);
+      execSync(`powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name = 'chrome.exe'\" | Where-Object { $_.CommandLine -like '*${dirName}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"`, { stdio: 'ignore' });
+    } catch {}
+  }
   // Auto-heal profile before spawn
   try {
     const badLs = path.join(dir, 'Local State.bad');

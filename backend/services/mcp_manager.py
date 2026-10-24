@@ -631,9 +631,44 @@ class MCPClientManager:
 
         return {"ok": True, "profile": str(p), "actions": actions}
 
+    @staticmethod
+    def kill_profile_processes(profile_path: Path | str | None = None) -> list[int]:
+        """Busca y termina cualquier proceso Chrome huérfano/zombi que esté bloqueando
+        profile_path para permitir que el nuevo Chrome con CDP se enlace sin conflictos."""
+        import sys
+        p_str = str(profile_path if profile_path else _cfg("GOOGLE_PROFILE_GLOBAL", ""))
+        p_name = Path(p_str).name
+        killed = []
+        if sys.platform == "win32":
+            try:
+                ps_cmd = (
+                    f"Get-CimInstance Win32_Process -Filter \"Name = 'chrome.exe'\" | "
+                    f"Where-Object {{ $_.CommandLine -like '*{p_name}*' }} | "
+                    f"Select-Object -ExpandProperty ProcessId"
+                )
+                res = subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd],
+                                     capture_output=True, text=True, timeout=5)
+                for line in res.stdout.strip().splitlines():
+                    line = line.strip()
+                    if line.isdigit():
+                        pid = int(line)
+                        subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                                       capture_output=True, timeout=5)
+                        killed.append(pid)
+                if killed:
+                    log.info("[mcp-profile] Procesos zombis de Chrome purgados en %s: %s", p_str, killed)
+            except Exception as e:
+                log.warning("[mcp-profile] Error al purgar procesos de %s: %s", p_str, e)
+        return killed
+
     def repair_profile(self, profile_path: Path | str | None = None) -> dict:
-        """Alias público de saneamiento del perfil Chrome."""
-        return self.heal_chrome_profile(profile_path)
+        """Alias público de saneamiento del perfil Chrome con purga de zombis."""
+        p = Path(profile_path if profile_path else str(_cfg("GOOGLE_PROFILE_GLOBAL", "")))
+        killed = self.kill_profile_processes(p)
+        res = self.heal_chrome_profile(p)
+        if killed:
+            res["actions"].insert(0, f"{len(killed)} procesos zombis terminados ({', '.join(map(str, killed))})")
+        return res
 
     def _find_chrome_bin(self) -> str:
         """Binario Chrome real para el login humano (parcheable en tests vía
@@ -749,6 +784,12 @@ class MCPClientManager:
         already_up = await self._cdp_up(port) if cdp else False
         pid = None
         if not already_up:
+            if cdp:
+                # Si se pide modo CDP pero port no responde, cualquier proceso existente en este perfil
+                # es una instancia sin CDP que bloqueará al nuevo Chrome. Purgar antes del spawn.
+                killed = self.kill_profile_processes(profile)
+                if killed:
+                    heal_res = self.heal_chrome_profile(profile)
             chrome = self._find_chrome_bin()
             argv = [chrome,
                     f"--user-data-dir={profile}",
