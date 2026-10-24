@@ -181,3 +181,10 @@
 - **Origen:** ClonaKit Feature Gap #1 inspirada en Anai App (`anaiapp.ai`).
 - **Componentes:** `backend/pipeline/script_gen.py` · `backend/services/gemini_client.py` · `backend/main.py` · `backend/static/app.js` · `tests/test_viral_hooks_generator.py`.
 - **Resultado:** Generador de 3 variantes psicológicas de hooks para los primeros 0-3 segundos (Curiosidad, Contradicción y Dato Chocante) con sugerencias visuales (`visual_cues`) y estimación de retención (`estimated_retention`). Endpoints `POST /api/pipeline/generate-hooks` y `POST /api/projects/{pid}/select-hook` con sincronización en tiempo real de la Escena 1 del guion. Componente visual interactivo en el panel web (`app.js`) para seleccionar variantes y regenerar con un clic. Fallback determinista local \$0 sin dependencias externas.
+
+## INT-039 — Tarjetas de Escenas con Regeneración Quirúrgica (Google Flow)
+- **Estado:** IMPLEMENTADO / VERIFICADO AL 100% (Batería test_scene_surgical_regen: 17/17 OK, test_pipeline_orchestrator: 56/56 OK).
+- **Documento:** [INT-039](INT-039_SCENE_CARDS_SURGICAL_REGEN.md).
+- **Origen:** ClonaKit Feature Gap #3 inspirada en Anai App (`anaiapp.ai`).
+- **Componentes:** `backend/services/pipeline_orchestrator.py` · `backend/main.py` · `backend/static/app.js` · `tests/test_scene_surgical_regen.py`.
+- **Resultado:** Re-despacho y regeneración quirúrgica de tomas individuales de Google Flow sin rehacer el video completo ni relanzar etapas previas (NotebookLM/guion). Soporte de `force=True` en `retry_scenes` y endpoint `POST /api/pipeline/retry-scenes` para reintentar escenas ya finalizadas; endpoint `POST /api/scenes/{scene_id}/regenerate-flow` con persistencia en SQLite para el editor de proyectos Studio; botones interactivos `🔄 Toma Flow` en tarjetas de escenas (`sceneCard`) y `🔄` en chips del pipeline runner (`pipeStepsHTML`). Baterías 100% verdes.

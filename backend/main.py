@@ -3,6 +3,7 @@ YOUTUBE AUTOMATION v2.0 — Servidor principal (FastAPI)
 Dashboard en http://127.0.0.1:8000  ·  progreso por SSE  ·  coste $0/video
 """
 import asyncio
+import time
 import io
 import json
 import logging
@@ -1214,6 +1215,26 @@ async def regen_image(scene_id: str, body: dict):
     return {"image": f"/api/scenes/{scene_id}/image?project_id={pid}&v={path}", "method": method}
 
 
+@app.post("/api/scenes/{scene_id}/regenerate-flow")
+async def regen_flow_scene(scene_id: str, body: dict):
+    """🎬 Tarjetas de Escenas con Regeneración Quirúrgica:
+    Regenera una toma individual directamente mediante Google Flow MCP."""
+    pid = _pid((body or {}).get("project_id") or "")  # M4: nunca KeyError→500
+    scene = db.get_scene_for_project(pid, scene_id)   # M3: scoped al proyecto
+    if not scene:
+        raise HTTPException(404, "escena no existe")
+    project = db.get_project(pid)
+    path, method = await imgs_pipeline.generate_scene_image(scene, project, int(scene["idx"]))
+    db.update_scene(scene_id, image_path=str(path))
+    return {
+        "ok": True,
+        "scene_id": scene_id,
+        "project_id": pid,
+        "method": method,
+        "image": f"/api/scenes/{scene_id}/image?project_id={pid}&v={int(time.time())}"
+    }
+
+
 @app.get("/api/scenes/{scene_id}/image")
 async def scene_image(scene_id: str, project_id: str = ""):
     # M3: el asset de una escena solo se sirve con el project_id correcto.
@@ -2021,12 +2042,13 @@ async def pipeline_status(run_id: str = ""):
 
 @app.post("/api/pipeline/retry-scenes")
 async def pipeline_retry_scenes(body: dict):
-    """Re-despacha SOLO las escenas fallidas de Stage 3 usando el blueprint
+    """Re-despacha SOLO las escenas fallidas (o forzadas quirúrgicamente) de Stage 3 usando el blueprint
     persistido — nunca repite Stage 1 (NotebookLM) ni Stage 2 (LLM)."""
     run_id = (body.get("run_id") or "").strip()
     scene_ids = body.get("scene_ids") if isinstance(body.get("scene_ids"), list) else None
+    force = bool((body or {}).get("force", False))
     try:
-        return await _pipe.orchestrator.retry_scenes(run_id, scene_ids)
+        return await _pipe.orchestrator.retry_scenes(run_id, scene_ids, force=force)
     except _pipe.PipelineError as e:
         status = 409 if e.code == "PIPELINE_BUSY" else 400
         raise HTTPException(status, f"[{e.code}] {e}") from e

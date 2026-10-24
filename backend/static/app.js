@@ -819,6 +819,7 @@ function sceneCard(sc) {
       <textarea rows="2" style="color:var(--muted)" placeholder="prompt de imagen (inglés)" onchange="saveScene('${sc.id}','image_prompt',this.value)">${esc(sc.image_prompt)}</textarea>
       <div class="tools">
         <button class="btn small ghost" onclick="regenImage('${sc.id}')">🎨 Imagen</button>
+        <button class="btn small ghost" onclick="regenFlowScene('${sc.id}')" title="Regenerar solo esta toma quirúrgicamente con Google Flow">🔄 Toma Flow</button>
         ${sc.audio_path ? `<button class="btn small ghost" onclick="playAudio('${sc.id}',this)">🔊 Escuchar</button>` : ''}
       </div>
     </div></div>`;
@@ -834,6 +835,17 @@ async function regenImage(sid) {
   try { await api(`/scenes/${sid}/regenerate-image`, { method: 'POST', body: { project_id: S.project.id } });
         await openProject(S.project.id); toast('Imagen nueva lista 🎨', 'ok'); }
   catch (e) { toast(e.message, 'err'); }
+}
+
+async function regenFlowScene(sid) {
+  toast('Regenerando toma quirúrgica con Google Flow… 🎬');
+  try {
+    const res = await api(`/scenes/${sid}/regenerate-flow`, { method: 'POST', body: { project_id: S.project.id } });
+    await openProject(S.project.id);
+    toast(`Toma regenerada exitosamente (${res.method || 'Flow'}) 🎬`, 'ok');
+  } catch (e) {
+    toast('Error al regenerar toma: ' + e.message, 'err');
+  }
 }
 
 function playAudio(sid, btn) {
@@ -2225,7 +2237,8 @@ function pipeStepsHTML(run) {
       const tip = s.detail ? ` title="${esc(s.detail)}"` : (s.video_file ? ` title="${esc(s.video_file)}"` : '');
       const mark = s.status === 'done' ? '✓' : s.status === 'failed' ? '✗'
                  : s.status === 'dispatched' ? '…' : '·';
-      h += `<span class="pipe-chip ${cls}"${tip}>${mark} ${esc(s.scene_id)} ${esc((s.title || '').slice(0, 26))}</span>`;
+      const regenBtn = run.run_id && !pipeActive(run) ? ` <a href="javascript:void(0)" onclick="event.stopPropagation();pipeRetryScene('${run.run_id}','${s.scene_id}')" title="Regenerar solo la toma ${esc(s.scene_id)} con Google Flow" style="text-decoration:none;font-weight:bold;padding:0 3px;opacity:0.85">🔄</a>` : '';
+      h += `<span class="pipe-chip ${cls}"${tip}>${mark} ${esc(s.scene_id)} ${esc((s.title || '').slice(0, 24))}${regenBtn}</span>`;
     });
     h += '</div>';
   }
@@ -2341,6 +2354,23 @@ async function pipeRetry() {
     pipePollStart();
     toast('Re-despachando solo las escenas fallidas 🔁');
   } catch (e) { toast('Retry escenas: ' + e.message, 'err'); }
+}
+
+async function pipeRetryScene(runId, sceneId) {
+  if (!runId || !sceneId) return;
+  toast(`Re-despachando toma ${sceneId} a Google Flow… 🔄`);
+  try {
+    const run = await api('/pipeline/retry-scenes', {
+      method: 'POST',
+      body: { run_id: runId, scene_ids: [sceneId], force: true }
+    });
+    S.pipeRun = run;
+    pipeApply(run);
+    pipePollStart();
+    toast(`Toma ${sceneId} en regeneración quirúrgica 🎬`, 'ok');
+  } catch (e) {
+    toast(`Error al regenerar toma ${sceneId}: ` + e.message, 'err');
+  }
 }
 
 // INT-024 · Stage 4: ensambla el MP4 final con FFmpeg (harvest + manifest + render)

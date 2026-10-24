@@ -216,8 +216,9 @@ class PipelineOrchestrator:
         return self._load(run_id)
 
     async def retry_scenes(self, run_id: str,
-                           scene_ids: list[str] | None = None) -> dict:
-        """Re-despacha SOLO escenas fallidas de Stage 3 (§2 del mandato).
+                           scene_ids: list[str] | None = None,
+                           force: bool = False) -> dict:
+        """Re-despacha SOLO escenas fallidas (o forzadas quirúrgicamente) de Stage 3 (§2 del mandato).
         Nunca repite Stage 1/2: usa el blueprint persistido."""
         run = self._load(run_id)
         # ST_QUEUED = creada y nunca lanzada: no está "en marcha"
@@ -227,11 +228,26 @@ class PipelineOrchestrator:
             raise PipelineError(
                 "no hay blueprint persistido — relanza el pipeline completo",
                 "RETRY_NO_BLUEPRINT")
-        failed = {s["scene_id"] for s in run["scenes"] if s["status"] == "failed"}
-        targets = set(scene_ids or []) & failed if scene_ids else failed
-        if not targets:
-            raise PipelineError("no hay escenas fallidas que reintentar",
-                                "NO_FAILED_SCENES")
+
+        if force and scene_ids:
+            all_ids = {s["scene_id"] for s in run["scenes"]}
+            targets = set(scene_ids) & all_ids
+            if not targets:
+                raise PipelineError("las escenas indicadas no existen en la corrida",
+                                    "NO_TARGET_SCENES")
+            # Preparar las escenas objetivo para regeneración quirúrgica
+            for s in run["scenes"]:
+                if s["scene_id"] in targets:
+                    if s["status"] == "done":
+                        run["done_count"] = max(0, run["done_count"] - 1)
+                    s["status"] = "pending"
+                    s["detail"] = "Regeneración quirúrgica solicitada"
+        else:
+            failed = {s["scene_id"] for s in run["scenes"] if s["status"] == "failed"}
+            targets = set(scene_ids or []) & failed if scene_ids else failed
+            if not targets:
+                raise PipelineError("no hay escenas fallidas que reintentar",
+                                    "NO_FAILED_SCENES")
         if self._busy:
             raise PipelineError(
                 f"ya hay un pipeline en marcha ({self._busy})", "PIPELINE_BUSY")
