@@ -20,10 +20,17 @@ SOLO NECESITAS 2 ARCHIVOS:
 
 ARCHIVOS DE APOYO (no los toques)
 --------------------------------
+- start.bat                   MODO DEV "npm run dev": una sola ventana con
+                              logs en vivo y hot-reload; crea el .venv e
+                              instala dependencias solo la primera vez.
+                              Flags: --no-browser / --fresh. Recomendado
+                              para desarrollar.
+- start.sh                    Equivalente de start.bat en Linux/Mac/WSL.
+- backend\_dev_wait_open.py   Helper de start.bat: espera /api/health y
+                              abre el navegador sin bloquear el servidor.
 - lanzador_albra.py           el cerebro del arranque silencioso
-- INICIAR-DEBUG-con-ventana.bat   modo con ventanas, SOLO para depurar
+- INICIAR-DEBUG-con-ventana.bat   asistente clasico con ventanas (debug)
 - DETENER-con-ventana.bat         detencion visible, SOLO para depurar
-- start.bat                   compatibilidad con versiones anteriores
 
 SI ALGO SALE MAL
 ----------------
