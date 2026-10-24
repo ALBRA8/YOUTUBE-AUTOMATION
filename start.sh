@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════
 #  ALBRA - START · experiencia "npm run dev" — Linux/Mac/WSL
-#  ./start.sh  →  venv (con spinner) + deps (barras reales de pip,
-#  auto-reparación si faltan módulos) + uvicorn --reload primer plano
+#  ./start.sh  →  venv (con spinner) + salud de pip (ensurepip → recrear
+#  .venv corrupto) + deps (barras reales, auto-reparación, upgrade pip)
+#  + uvicorn --reload primer plano
 #  Flags:  --fresh   fuerza reinstalar dependencias
 # ════════════════════════════════════════════════════════════════
 set -e
@@ -41,6 +42,21 @@ else
     echo "[1/4] Entorno virtual OK — backend/.venv"
 fi
 
+# [1b/4] salud de pip: un .venv puede existir y aun así estar cojo (sin pip
+# dentro, p.ej. creación interrumpida) → "No module named pip" al instalar.
+if ! "$PY" -m pip --version >/dev/null 2>&1; then
+    echo "  [AUTO-REPARACIÓN] pip falta o está roto en .venv — probando ensurepip..."
+    "$PY" -m ensurepip --upgrade >/dev/null 2>&1 || true
+fi
+if ! "$PY" -m pip --version >/dev/null 2>&1; then
+    echo "  [AUTO-REPARACIÓN] ensurepip falló: .venv corrupto — recreando desde cero..."
+    rm -f .venv/.deps_ok
+    rm -rf .venv
+    python3 -m venv .venv --upgrade-deps 2>/dev/null || { rm -rf .venv; python3 -m venv .venv; } || {
+        echo "[ERROR] No se pudo recrear el .venv (disco/permisos/antivirus)"; exit 1; }
+    "$PY" -m pip --version >/dev/null 2>&1 || { echo "[ERROR] pip sigue sin responder tras recrear el .venv"; exit 1; }
+fi
+
 # [2/4] dependencias: marker sha256 + verificación 14 módulos + auto-reparación
 SIG=$(sha256sum requirements.txt | cut -d' ' -f1)
 OLD=""
@@ -57,7 +73,10 @@ if [ "$NEED" = "1" ]; then
     else
         echo "[2/4] Instalando dependencias — solo la 1a vez o si requirements.txt cambió..."
     fi
-    "$PY" -m pip install --progress-bar on --disable-pip-version-check -r requirements.txt
+    echo "  Actualizando pip del venv (evita cuelgues compilando wheels en Python 3.14)..."
+    "$PY" -m pip install --upgrade pip --progress-bar on --disable-pip-version-check || \
+        echo "  [AVISO] pip no se actualizó — continúo con el pip actual"
+    "$PY" -m pip install --progress-bar on --prefer-binary --disable-pip-version-check -r requirements.txt
     if ! verify_deps; then
         echo "[ERROR] pip terminó pero faltan módulos. Ejecuta: ./start.sh --fresh"
         exit 1

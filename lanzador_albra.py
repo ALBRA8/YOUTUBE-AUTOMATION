@@ -105,7 +105,9 @@ def launch():
     try:
         # 3. Arrancar servidor oculto con log
         log = open(LOG, "w", encoding="utf-8", errors="replace")
-        exe = PYW if os.path.exists(PYW) else sys.executable
+        # Fallback SIEMPRE al python del venv (nunca al del sistema: no tiene
+        # dotenv/fastapi y reproduciria ModuleNotFoundError en main.py)
+        exe = PYW if os.path.exists(PYW) else os.path.join(BACKEND, ".venv", "Scripts", "python.exe")
         subprocess.Popen(
             [exe, "main.py"],
             cwd=BACKEND,

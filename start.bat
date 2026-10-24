@@ -5,10 +5,13 @@ REM ------------------------------------------------------------
 REM  Doble click en start.bat (o `start.bat` en una terminal) y
 REM  TODO queda corriendo:
 REM    [1/5] Localiza Python (py -3 / python / python3)
-REM    [2/5] Crea backend\.venv con SPINNER de progreso animado
+REM    [2/5] Crea backend\.venv con SPINNER + SALUD DE PIP: si pip falta
+REM          lo repara con ensurepip y, si el .venv esta corrupto, lo
+REM          borra y lo recrea solo (cero intervencion manual)
 REM    [3/5] Instala dependencias SOLO si requirements.txt cambio,
 REM          con BARRAS DE PROGRESO REALES de pip - y AUTO-REPARACION:
-REM          si faltan modulos (p.ej. ModuleNotFoundError) reinstala solo
+REM          si faltan modulos (p.ej. ModuleNotFoundError) reinstala solo.
+REM          Antes actualiza pip: wheels binarios fluidos en Python 3.14
 REM    [4/5] Respeta HOST y PORT de backend\.env
 REM    [5/5] uvicorn con HOT-RELOAD en PRIMER PLANO (logs vivos)
 REM          + abre el navegador cuando /api/health responde
@@ -101,6 +104,62 @@ if not exist ".venv\Scripts\python.exe" (
 )
 set "VPY=%CD%\.venv\Scripts\python.exe"
 
+REM ---------- 3b. Salud de pip: check -> ensurepip -> recrear .venv -------
+REM  Un .venv puede existir y aun asi estar COJO: sin pip dentro
+REM  (creacion interrumpida o creado por otra herramienta). Resultado:
+REM  "python.exe: No module named pip" al instalar. Este bloque deja el
+REM  venv SIEMPRE operativo sin intervencion manual:
+REM    a) pip responde?                        -> seguir
+REM    b) no -> ensurepip --upgrade            -> reparado
+REM    c) ensurepip falla (.venv corrupto)     -> borrar y recrear
+"%VPY%" -m pip --version >nul 2>&1
+if not errorlevel 1 goto pip_ready
+echo       [AUTO-REPARACION] pip falta o esta roto en .venv - probando ensurepip...
+"%VPY%" -m ensurepip --upgrade >nul 2>&1
+"%VPY%" -m pip --version >nul 2>&1
+if not errorlevel 1 goto pip_ready
+echo       [AUTO-REPARACION] ensurepip fallo: el .venv esta corrupto.
+echo       Recreandolo desde cero - las dependencias se reinstalaran en [3/5]...
+del ".venv\.deps_ok" >nul 2>&1
+rmdir /s /q ".venv"
+if not exist ".venv" goto recreate_updeps
+echo.
+echo [ERROR] No se pudo borrar backend\.venv: esta en uso o sin permisos.
+echo         Cierra otras terminales, el servidor o el explorador sobre esa
+echo         carpeta y vuelve a lanzar start.bat
+pause
+exit /b 1
+
+:recreate_updeps
+del "%VDONE%" >nul 2>&1
+start "" /b cmd /c "%PY% -m venv .venv --upgrade-deps & if exist ".venv\Scripts\python.exe" (echo ok>"%VDONE%") else (echo fail>"%VDONE%")"
+call :spinner "Recreando .venv (con --upgrade-deps)" "%VDONE%" 240
+del "%VDONE%" >nul 2>&1
+if exist ".venv\Scripts\python.exe" goto recreate_verify
+echo       Reintento sin --upgrade-deps (por si falta red)...
+if exist ".venv" rmdir /s /q ".venv"
+del "%VDONE%" >nul 2>&1
+start "" /b cmd /c "%PY% -m venv .venv & if exist ".venv\Scripts\python.exe" (echo ok>"%VDONE%") else (echo fail>"%VDONE%")"
+call :spinner "Recreando .venv (2o intento)" "%VDONE%" 180
+del "%VDONE%" >nul 2>&1
+if exist ".venv\Scripts\python.exe" goto recreate_verify
+echo.
+echo [ERROR] No se pudo recrear el entorno virtual.
+echo         Revisa espacio en disco, antivirus o permisos de escritura.
+pause
+exit /b 1
+
+:recreate_verify
+"%VPY%" -m pip --version >nul 2>&1
+if not errorlevel 1 goto pip_ready
+echo.
+echo [ERROR] El .venv se recreo pero pip sigue sin responder.
+echo         Prueba manual:  py -3 -m venv --clear .venv --upgrade-deps
+pause
+exit /b 1
+
+:pip_ready
+
 REM ---------- 4. Dependencias: barras reales + auto-reparacion ----------
 if "%FRESH%"=="1" if exist ".venv\.deps_ok" del ".venv\.deps_ok" >nul 2>&1
 for %%F in (requirements.txt) do set "REQSIG=%%~zF_%%~tF"
@@ -118,8 +177,11 @@ if "%DEPS_SIG%"=="%REQSIG%" (
     echo [3/5] Instalando dependencias - solo la 1a vez o si requirements.txt cambio...
 )
 echo       Barras de descarga reales abajo - los proximos arranques saltan esto.
+echo       Actualizando pip del venv (evita cuelgues compilando wheels en 3.14)...
+"%VPY%" -m pip install --upgrade pip --progress-bar on --no-input --disable-pip-version-check
+if errorlevel 1 echo       [AVISO] pip no se actualizo (sin red?). Sigo con el pip actual.
 echo.
-"%VPY%" -m pip install --progress-bar on --no-input --disable-pip-version-check -r requirements.txt
+"%VPY%" -m pip install --progress-bar on --prefer-binary --no-input --disable-pip-version-check -r requirements.txt
 if errorlevel 1 (
     echo.
     echo [ERROR] Fallo pip install. Revisa tu conexion y vuelve a lanzar start.bat

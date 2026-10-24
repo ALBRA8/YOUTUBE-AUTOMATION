@@ -35,8 +35,11 @@ SI ALGO SALE MAL
 ----------------
 - start.bat SE AUTO-REPARA: si faltan modulos (p.ej. el error
   ModuleNotFoundError: No module named 'dotenv'), detecta el entorno
-  roto y reinstala solo con barras de progreso. Fuerza manual:
-  start.bat --fresh
+  roto y reinstala solo con barras de progreso. Si el .venv existe
+  pero pip falta o esta roto ("No module named pip"), lo repara con
+  ensurepip y, si el .venv esta corrupto, lo borra y lo recrea solo.
+  Antes de instalar actualiza pip (wheels fluidos en Python 3.14).
+  Fuerza manual: start.bat --fresh
 - El servidor guarda su registro en .server_log.txt (en la raiz del
   proyecto). Si en 2 minutos no arranca, el propio lanzador te abre
   ese archivo en el Bloc de notas para que veas el error.
