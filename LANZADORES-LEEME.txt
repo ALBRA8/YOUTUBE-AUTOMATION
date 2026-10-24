@@ -38,8 +38,11 @@ SI ALGO SALE MAL
   roto y reinstala solo con barras de progreso. Si el .venv existe
   pero pip falta o esta roto ("No module named pip"), lo repara con
   ensurepip y, si el .venv esta corrupto, lo borra y lo recrea solo.
-  Antes de instalar actualiza pip (wheels fluidos en Python 3.14).
-  Fuerza manual: start.bat --fresh
+  Y si el .venv fue creado con OTRO Python (p.ej. 3.14) que el
+  seleccionado (3.12/3.11/3.10), lo detecta y lo recrea con el bueno.
+  pip ya NO se auto-actualiza (el venv ya trae pip y en Windows podia
+  colgarse) y corre anti-cuelgue: --timeout 30 --retries 2, sin keyring
+  de Windows y sin comprobacion de version. Fuerza manual: --fresh
 - Hacer click en la ventana de start.bat YA NO congela la instalacion:
   QuickEdit se desactiva solo al arrancar (0x40 via ctypes). Y pip imprime
   TODO en vivo (-v sin buffer): si ves mucho texto, NO esta congelado,

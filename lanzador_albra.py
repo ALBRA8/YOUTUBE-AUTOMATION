@@ -21,6 +21,14 @@ LOG = os.path.join(BASE, ".server_log.txt")
 LOCK = os.path.join(BASE, ".server.lock")
 CREATE_NO_WINDOW = 0x08000000
 
+# Anti-cuelgue (Windows): sin version-check de pip, sin input, sin keyring.
+# Se heredan si delegamos en start.bat (consola visible auto-reparadora).
+os.environ.setdefault("PYTHONUNBUFFERED", "1")
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+os.environ.setdefault("PIP_DISABLE_PIP_VERSION_CHECK", "1")
+os.environ.setdefault("PIP_NO_INPUT", "1")
+os.environ.setdefault("PYTHON_KEYRING_BACKEND", "keyring.backends.null.Keyring")
+
 
 def host_port():
     host, port = "127.0.0.1", 8000

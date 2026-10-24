@@ -10,11 +10,12 @@ REM          + QuickEdit OFF (ctypes 0x40): un click NO pausa pip/uvicorn
 REM          + PYTHONUNBUFFERED=1: salida en streaming, nunca parece colgado
 REM    [2/5] Crea backend\.venv con SPINNER + SALUD DE PIP: si pip falta
 REM          lo repara con ensurepip y, si el .venv esta corrupto, lo
-REM          borra y lo recrea solo (cero intervencion manual)
-REM    [3/5] Instala dependencias SOLO si requirements.txt cambio,
-REM          con BARRAS DE PROGRESO REALES de pip - y AUTO-REPARACION:
-REM          si faltan modulos (p.ej. ModuleNotFoundError) reinstala solo.
-REM          Antes actualiza pip: wheels binarios fluidos en Python 3.14
+REM          borra y lo recrea solo (cero intervencion manual).
+REM          PURGE DE VERSION: si el .venv es de OTRO Python (p.ej. 3.14)
+REM          que el seleccionado en [1/5], se borra y se recrea con el bueno
+REM    [3/5] Instala dependencias SOLO si requirements.txt cambio, con
+REM          BARRAS REALES de pip, AUTO-REPARACION de modulos faltantes y
+REM          banderas anti-cuelgue: --timeout 30 --retries 2, sin keyring
 REM    [4/5] Respeta HOST y PORT de backend\.env
 REM    [5/5] uvicorn con HOT-RELOAD en PRIMER PLANO (logs vivos)
 REM          + abre el navegador cuando /api/health responde
@@ -28,6 +29,11 @@ setlocal EnableExtensions
 chcp 65001 >nul
 title ALBRA - modo dev (npm run dev)
 set "PYTHONUNBUFFERED=1"
+REM anti-cuelgue de pip en Windows: sin version-check, sin input, sin keyring
+set "PYTHONIOENCODING=utf-8"
+set "PIP_DISABLE_PIP_VERSION_CHECK=1"
+set "PIP_NO_INPUT=1"
+set "PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring"
 set "SELF=%~f0"
 set "NO_BROWSER=0"
 set "FRESH=0"
@@ -126,57 +132,48 @@ if not exist ".venv\Scripts\python.exe" (
 )
 set "VPY=%CD%\.venv\Scripts\python.exe"
 
-REM ---------- 3b. Salud de pip: check -> ensurepip -> recrear .venv -------
+REM ---------- 3a. El venv debe ser del MISMO Python que el elegido --------
+REM  Si [1/5] eligio py -3.12 pero el .venv viejo fue creado con otro
+REM  Python (p.ej. 3.14), pip instala con la version equivocada y puede
+REM  colgarse compilando. Purge: se borra y se recrea con el seleccionado.
+set "BASEVER="
+set "VENVVER="
+%PY% -c "import sys;print(*sys.version_info[:2],sep='.')" > "%TEMP%\_albra_bv.txt" 2>nul
+set /p BASEVER=<"%TEMP%\_albra_bv.txt"
+"%VPY%" -c "import sys;print(*sys.version_info[:2],sep='.')" > "%TEMP%\_albra_vv.txt" 2>nul
+set /p VENVVER=<"%TEMP%\_albra_vv.txt"
+del "%TEMP%\_albra_bv.txt" "%TEMP%\_albra_vv.txt" >nul 2>&1
+if "%BASEVER%"=="%VENVVER%" goto ver_ok
+echo       [AUTO-REPARACION] el .venv es Python %VENVVER% pero el arranque
+echo       selecciono %BASEVER%. Recreandolo con el Python correcto...
+call :rebuild_venv "Recreando .venv (Python %BASEVER%)"
+if errorlevel 1 goto rebuild_fail
+echo       .venv recreado con Python %BASEVER% - sin binarios incompatibles.
+:ver_ok
+
+REM -------------- 3b. Salud de pip: check -> ensurepip -> recrear .venv -----------
 REM  Un .venv puede existir y aun asi estar COJO: sin pip dentro
 REM  (creacion interrumpida o creado por otra herramienta). Resultado:
 REM  "python.exe: No module named pip" al instalar. Este bloque deja el
 REM  venv SIEMPRE operativo sin intervencion manual:
-REM    a) pip responde?                        -> seguir
-REM    b) no -> ensurepip --upgrade            -> reparado
-REM    c) ensurepip falla (.venv corrupto)     -> borrar y recrear
+REM    a) pip responde?                      -> seguir
+REM    b) no -> ensurepip --upgrade          -> reparado
+REM    c) ensurepip falla (.venv corrupto)   -> borrar y recrear
 "%VPY%" -m pip --version >nul 2>&1
 if not errorlevel 1 goto pip_ready
 echo       [AUTO-REPARACION] pip falta o esta roto en .venv - probando ensurepip...
 "%VPY%" -m ensurepip --upgrade >nul 2>&1
 "%VPY%" -m pip --version >nul 2>&1
 if not errorlevel 1 goto pip_ready
-echo       [AUTO-REPARACION] ensurepip fallo: el .venv esta corrupto.
-echo       Recreandolo desde cero - las dependencias se reinstalaran en [3/5]...
-del ".venv\.deps_ok" >nul 2>&1
-rmdir /s /q ".venv"
-if not exist ".venv" goto recreate_updeps
-echo.
-echo [ERROR] No se pudo borrar backend\.venv: esta en uso o sin permisos.
-echo         Cierra otras terminales, el servidor o el explorador sobre esa
-echo         carpeta y vuelve a lanzar start.bat
-pause
-exit /b 1
-
-:recreate_updeps
-del "%VDONE%" >nul 2>&1
-start "" /b cmd /c "%PY% -m venv .venv --upgrade-deps & if exist ".venv\Scripts\python.exe" (echo ok>"%VDONE%") else (echo fail>"%VDONE%")"
-call :spinner "Recreando .venv (con --upgrade-deps)" "%VDONE%" 240
-del "%VDONE%" >nul 2>&1
-if exist ".venv\Scripts\python.exe" goto recreate_verify
-echo       Reintento sin --upgrade-deps (por si falta red)...
-if exist ".venv" rmdir /s /q ".venv"
-del "%VDONE%" >nul 2>&1
-start "" /b cmd /c "%PY% -m venv .venv & if exist ".venv\Scripts\python.exe" (echo ok>"%VDONE%") else (echo fail>"%VDONE%")"
-call :spinner "Recreando .venv (2o intento)" "%VDONE%" 180
-del "%VDONE%" >nul 2>&1
-if exist ".venv\Scripts\python.exe" goto recreate_verify
-echo.
-echo [ERROR] No se pudo recrear el entorno virtual.
-echo         Revisa espacio en disco, antivirus o permisos de escritura.
-pause
-exit /b 1
-
-:recreate_verify
-"%VPY%" -m pip --version >nul 2>&1
+echo       [AUTO-REPARACION] ensurepip fallo: el .venv esta corrupto. Recreandolo...
+call :rebuild_venv "Recreando .venv (corrupto)"
 if not errorlevel 1 goto pip_ready
+:rebuild_fail
 echo.
-echo [ERROR] El .venv se recreo pero pip sigue sin responder.
-echo         Prueba manual:  py -3 -m venv --clear .venv --upgrade-deps
+echo [ERROR] No se pudo borrar/recrear backend\.venv automaticamente.
+echo         Cierra otras terminales, el servidor o el explorador sobre esa
+echo         carpeta, revisa espacio en disco y antivirus, y vuelve a
+echo         lanzar start.bat
 pause
 exit /b 1
 
@@ -199,11 +196,9 @@ if "%DEPS_SIG%"=="%REQSIG%" (
     echo [3/5] Instalando dependencias - solo la 1a vez o si requirements.txt cambio...
 )
 echo       Barras de descarga reales abajo - los proximos arranques saltan esto.
-echo       Actualizando pip del venv (evita cuelgues compilando wheels en 3.14)...
-"%VPY%" -u -m pip install --upgrade pip --progress-bar on --no-input --disable-pip-version-check -v
-if errorlevel 1 echo       [AVISO] pip no se actualizo (sin red?). Sigo con el pip actual.
-echo.
-"%VPY%" -u -m pip install --no-input --progress-bar on --prefer-binary --disable-pip-version-check -v -r requirements.txt
+REM sin auto-upgrade de pip (ya viene en el venv y en Windows colgaba);
+REM anti-cuelgue: timeout 30s, 2 reintentos, binarios primero, sin keyring
+"%VPY%" -u -m pip install --prefer-binary --timeout 30 --retries 2 -v -r requirements.txt
 if errorlevel 1 (
     echo.
     echo [ERROR] Fallo pip install. Revisa tu conexion y vuelve a lanzar start.bat
@@ -258,6 +253,27 @@ exit /b 0
 REM ---------- Verificacion de 14 modulos de arranque (find_spec = instantaneo) ----------
 :verify_deps
 "%VPY%" -c "import importlib.util as u,sys;mods='fastapi uvicorn dotenv multipart httpx google.genai PIL apscheduler edge_tts yt_dlp googleapiclient google_auth_oauthlib faster_whisper av'.split();sys.exit(0) if all(u.find_spec(m) for m in mods) else sys.exit(1)" 2>nul
+exit /b %errorlevel%
+
+REM ---------- Reconstruir .venv: borrar + crear + verificar pip ----------
+REM %1 = etiqueta del spinner. Devuelve errorlevel 1 si algo fallo.
+:rebuild_venv
+del ".venv\.deps_ok" >nul 2>&1
+rmdir /s /q ".venv"
+if not exist ".venv" goto rb_create
+echo       backend\.venv esta en uso o sin permisos: no se pudo borrar.
+exit /b 1
+:rb_create
+del "%VDONE%" >nul 2>&1
+start "" /b cmd /c "%PY% -m venv .venv & if exist ".venv\Scripts\python.exe" (echo ok>"%VDONE%") else (echo fail>"%VDONE%")"
+call :spinner "%~1" "%VDONE%" 180
+del "%VDONE%" >nul 2>&1
+if not exist ".venv\Scripts\python.exe" (
+    echo       No se pudo crear el .venv nuevo.
+    exit /b 1
+)
+set "VPY=%CD%\.venv\Scripts\python.exe"
+"%VPY%" -m pip --version >nul 2>&1
 exit /b %errorlevel%
 
 REM ---------- Spinner animado: %1=etiqueta %2=archivo-senal %3=max-segundos ----------
