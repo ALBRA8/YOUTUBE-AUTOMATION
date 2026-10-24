@@ -5,9 +5,10 @@ REM ------------------------------------------------------------
 REM  Doble click en start.bat (o `start.bat` en una terminal) y
 REM  TODO queda corriendo:
 REM    [1/5] Localiza Python (py -3 / python / python3)
-REM    [2/5] Crea backend\.venv solo la primera vez
+REM    [2/5] Crea backend\.venv con SPINNER de progreso animado
 REM    [3/5] Instala dependencias SOLO si requirements.txt cambio,
-REM          con progreso visible (nunca parece congelado)
+REM          con BARRAS DE PROGRESO REALES de pip - y AUTO-REPARACION:
+REM          si faltan modulos (p.ej. ModuleNotFoundError) reinstala solo
 REM    [4/5] Respeta HOST y PORT de backend\.env
 REM    [5/5] uvicorn con HOT-RELOAD en PRIMER PLANO (logs vivos)
 REM          + abre el navegador cuando /api/health responde
@@ -20,6 +21,7 @@ REM ============================================================
 setlocal EnableExtensions
 chcp 65001 >nul
 title ALBRA - modo dev (npm run dev)
+set "SELF=%~f0"
 set "NO_BROWSER=0"
 set "FRESH=0"
 
@@ -33,6 +35,12 @@ goto parse_args
 :args_done
 
 cd /d "%~dp0backend"
+
+REM CR para refrescar lineas del spinner (receta copy /Z)
+for /f %%a in ('copy /Z "%SELF%" nul') do set "CR=%%a"
+if not defined CR set "CR=."
+set "SPN_FRAMES=|/-\"
+set "VDONE=%CD%\_albra_venv.tmp"
 
 REM ---------- HOST/PORT desde .env (mismos defaults que config.py) ----------
 set "HOST=127.0.0.1"
@@ -74,12 +82,17 @@ if not errorlevel 1 (
     exit /b 0
 )
 
-REM ---------- 3. Entorno virtual (solo la primera vez) ----------
+REM ---------- 3. Entorno virtual con spinner animado ----------
 if not exist ".venv\Scripts\python.exe" (
-    echo [2/5] Creando entorno virtual backend\.venv - solo la primera vez...
-    %PY% -m venv .venv
-    if errorlevel 1 (
+    del "%VDONE%" >nul 2>&1
+    echo [2/5] Preparando entorno virtual - avance abajo...
+    start "" /b cmd /c "%PY% -m venv .venv & if exist ".venv\Scripts\python.exe" (echo ok>"%VDONE%") else (echo fail>"%VDONE%")"
+    call :spinner "Creando entorno virtual" "%VDONE%" 180
+    del "%VDONE%" >nul 2>&1
+    if not exist ".venv\Scripts\python.exe" (
+        echo.
         echo [ERROR] No se pudo crear el entorno virtual.
+        echo         Cierra antivirus temporalmente o revisa espacio en disco.
         pause
         exit /b 1
     )
@@ -88,26 +101,41 @@ if not exist ".venv\Scripts\python.exe" (
 )
 set "VPY=%CD%\.venv\Scripts\python.exe"
 
-REM ---------- 4. Dependencias (solo si requirements.txt cambio) ----------
+REM ---------- 4. Dependencias: barras reales + auto-reparacion ----------
 if "%FRESH%"=="1" if exist ".venv\.deps_ok" del ".venv\.deps_ok" >nul 2>&1
 for %%F in (requirements.txt) do set "REQSIG=%%~zF_%%~tF"
 set "DEPS_SIG="
 if exist .venv\.deps_ok set /p DEPS_SIG=<.venv\.deps_ok
-if not "%REQSIG%"=="%DEPS_SIG%" (
-    echo [3/5] Instalando dependencias - solo la 1a vez o si requirements.txt cambio...
-    echo        Con progreso visible abajo; los proximos arranques saltan esto al instante.
-    echo.
-    "%VPY%" -m pip install --no-input --disable-pip-version-check -r requirements.txt
-    if errorlevel 1 (
-        echo.
-        echo [ERROR] Fallo pip install. Revisa tu conexion y vuelve a lanzar start.bat
-        pause
-        exit /b 1
-    )
-    echo %REQSIG%>".venv\.deps_ok"
-) else (
-    echo [3/5] Dependencias OK - sin cambios, instalacion omitida
+call :verify_deps
+set "VOK=%errorlevel%"
+if "%DEPS_SIG%"=="%REQSIG%" if "%VOK%"=="0" (
+    echo [3/5] Dependencias OK - 14/14 modulos verificados, instalacion omitida
+    goto deps_ready
 )
+if "%DEPS_SIG%"=="%REQSIG%" (
+    echo [3/5] AVISO: entorno incompleto detectado - AUTO-REPARACION...
+) else (
+    echo [3/5] Instalando dependencias - solo la 1a vez o si requirements.txt cambio...
+)
+echo       Barras de descarga reales abajo - los proximos arranques saltan esto.
+echo.
+"%VPY%" -m pip install --progress-bar on --no-input --disable-pip-version-check -r requirements.txt
+if errorlevel 1 (
+    echo.
+    echo [ERROR] Fallo pip install. Revisa tu conexion y vuelve a lanzar start.bat
+    pause
+    exit /b 1
+)
+call :verify_deps
+if errorlevel 1 (
+    echo.
+    echo [ERROR] pip termino pero faltan modulos. Ejecuta: start.bat --fresh
+    pause
+    exit /b 1
+)
+echo %REQSIG%>".venv\.deps_ok"
+echo   [OK] 14/14 modulos verificados tras la instalacion
+:deps_ready
 
 REM ---------- 5. Aviso .env ----------
 if not exist .env (
@@ -141,6 +169,31 @@ if errorlevel 1 (
     echo [OK] Servidor detenido. Hasta la proxima.
     timeout /t 3 >nul
 )
+exit /b 0
+
+REM ---------- Verificacion de 14 modulos de arranque (find_spec = instantaneo) ----------
+:verify_deps
+"%VPY%" -c "import importlib.util as u,sys;mods='fastapi uvicorn dotenv multipart httpx google.genai PIL apscheduler edge_tts yt_dlp googleapiclient google_auth_oauthlib faster_whisper av'.split();sys.exit(0) if all(u.find_spec(m) for m in mods) else sys.exit(1)" 2>nul
+exit /b %errorlevel%
+
+REM ---------- Spinner animado: %1=etiqueta %2=archivo-senal %3=max-segundos ----------
+:spinner
+set "SPN_LABEL=%~1"
+set "SPN_DONE=%~2"
+set /a SPN_MAX=%~3
+set /a SPN_T=0
+:spin_loop
+if exist "%SPN_DONE%" goto spin_end
+if %SPN_T% geq %SPN_MAX% goto spin_end
+set /a SPN_I=SPN_T %% 4
+call set "SPN_F=%%SPN_FRAMES:~%SPN_I%,1%%"
+<nul set /p "=%CR%  %SPN_F% %SPN_LABEL% - %SPN_T%s transcurridos...    "
+timeout /t 1 /nobreak >nul
+set /a SPN_T+=1
+goto spin_loop
+:spin_end
+<nul set /p "=%CR%  [OK] %SPN_LABEL% - %SPN_T%s                       "
+echo.
 exit /b 0
 
 REM ---------- Subrutina de health check ----------

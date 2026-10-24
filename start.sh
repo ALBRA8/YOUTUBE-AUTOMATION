@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════
 #  ALBRA - START · experiencia "npm run dev" — Linux/Mac/WSL
-#  ./start.sh  →  venv + deps + uvicorn --reload en primer plano
+#  ./start.sh  →  venv (con spinner) + deps (barras reales de pip,
+#  auto-reparación si faltan módulos) + uvicorn --reload primer plano
 #  Flags:  --fresh   fuerza reinstalar dependencias
 # ════════════════════════════════════════════════════════════════
 set -e
@@ -9,26 +10,60 @@ FRESH=0
 [ "${1:-}" = "--fresh" ] && FRESH=1
 cd "$(dirname "$0")/backend"
 
-# [1/4] entorno virtual (solo la primera vez)
+# ── verify_deps: 14 módulos de arranque vía find_spec (instantáneo) ──
+verify_deps() {
+    "$PY" - <<'PYEOF' 2>/dev/null
+import importlib.util as u, sys
+mods = ("fastapi uvicorn dotenv multipart httpx google.genai PIL apscheduler "
+        "edge_tts yt_dlp googleapiclient google_auth_oauthlib faster_whisper "
+        "av").split()
+sys.exit(0) if all(u.find_spec(m) for m in mods) else sys.exit(1)
+PYEOF
+}
+
+# [1/4] entorno virtual con SPINNER animado (solo la primera vez)
+PY=.venv/bin/python
 if [ ! -x .venv/bin/python ]; then
-    echo "[1/4] Creando entorno virtual backend/.venv — solo la primera vez..."
-    python3 -m venv .venv
+    echo "[1/4] Preparando entorno virtual — avance abajo..."
+    python3 -m venv .venv & VP=$!
+    SPIN='|/-\'; i=0
+    while kill -0 "$VP" 2>/dev/null; do
+        printf '\r  %c Creando entorno virtual — %ss transcurridos...   ' \
+            "${SPIN:$((i % 4)):1}" "$i"
+        i=$((i + 1)); sleep 1
+    done
+    if ! wait "$VP"; then
+        printf '\r  [ERROR] No se pudo crear el entorno virtual.            \n'
+        exit 1
+    fi
+    printf '\r  [OK] Entorno virtual creado — %ss                      \n' "$i"
 else
     echo "[1/4] Entorno virtual OK — backend/.venv"
 fi
-PY=.venv/bin/python
 
-# [2/4] dependencias (solo si requirements.txt cambió — marker sha256)
+# [2/4] dependencias: marker sha256 + verificación 14 módulos + auto-reparación
 SIG=$(sha256sum requirements.txt | cut -d' ' -f1)
 OLD=""
 [ -f .venv/.deps_ok ] && OLD=$(cat .venv/.deps_ok)
-if [ "$FRESH" = "1" ]; then OLD="x"; fi
-if [ "$SIG" != "$OLD" ]; then
-    echo "[2/4] Instalando dependencias — solo la 1a vez o si requirements.txt cambió..."
-    "$PY" -m pip install --disable-pip-version-check -r requirements.txt
+[ "$FRESH" = "1" ] && OLD="x"
+NEED=1
+if [ "$SIG" = "$OLD" ] && verify_deps; then
+    echo "[2/4] Dependencias OK — 14/14 módulos verificados, instalación omitida"
+    NEED=0
+fi
+if [ "$NEED" = "1" ]; then
+    if [ "$SIG" = "$OLD" ]; then
+        echo "[2/4] AVISO: entorno incompleto detectado — AUTO-REPARACIÓN..."
+    else
+        echo "[2/4] Instalando dependencias — solo la 1a vez o si requirements.txt cambió..."
+    fi
+    "$PY" -m pip install --progress-bar on --disable-pip-version-check -r requirements.txt
+    if ! verify_deps; then
+        echo "[ERROR] pip terminó pero faltan módulos. Ejecuta: ./start.sh --fresh"
+        exit 1
+    fi
     echo "$SIG" > .venv/.deps_ok
-else
-    echo "[2/4] Dependencias OK — sin cambios, instalación omitida"
+    echo "  [OK] 14/14 módulos verificados tras la instalación"
 fi
 
 # [3/4] HOST/PORT desde .env (mismos defaults que config.py)

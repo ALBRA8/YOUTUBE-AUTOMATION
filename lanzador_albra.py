@@ -49,6 +49,28 @@ def healthy(timeout=2.0):
         return False
 
 
+REQUIRED = ("fastapi uvicorn dotenv multipart httpx google.genai PIL "
+            "apscheduler edge_tts yt_dlp googleapiclient google_auth_oauthlib "
+            "faster_whisper av").split()
+
+
+def deps_ok(timeout=120):
+    """True si el .venv tiene los 14 modulos de arranque (find_spec: instantaneo).
+    Si el entorno esta roto (p.ej. ModuleNotFoundError de dotenv), devuelve False
+    y launch() delega en start.bat, que auto-repara con barras de progreso."""
+    exe = os.path.join(BACKEND, ".venv", "Scripts", "python.exe")
+    if not os.path.exists(exe):
+        return False
+    code = ("import importlib.util as u,sys;mods=" + repr(REQUIRED) +
+            ";sys.exit(0) if all(u.find_spec(m) for m in mods) else sys.exit(1)")
+    try:
+        r = subprocess.run([exe, "-c", code], cwd=BACKEND, timeout=timeout,
+                           capture_output=True)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 def launch():
     # 1. Ya corriendo -> abrir y salir
     if healthy():
@@ -67,6 +89,15 @@ def launch():
                 os.remove(LOCK)
             except Exception:
                 pass
+
+    # 2b. Entorno virtual roto/incompleto -> asistente visible auto-reparador
+    #     (start.bat verifica 14 modulos, reinstala con barras y deja el server)
+    if not deps_ok():
+        subprocess.Popen(
+            ["cmd", "/c", os.path.join(BASE, "start.bat")],
+            creationflags=0x00000010,  # CREATE_NEW_CONSOLE: ventana visible
+        )
+        return 0
 
     with open(LOCK, "w") as f:
         f.write(str(os.getpid()))
