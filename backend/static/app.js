@@ -249,12 +249,19 @@ function renderCreate() {
         </div>
         <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
           <div style="flex:1;min-width:180px"><label style="font-size:12px;color:var(--muted)">Estilo de subtítulos</label>
-            <select onchange="W.subtitles=this.value">
-              <option value="shorts" ${W.subtitles === 'shorts' ? 'selected' : ''}>Shorts · Montserrat dinámico</option>
-              <option value="hormozi" ${W.subtitles === 'hormozi' ? 'selected' : ''}>Hormozi · amarillo gigante</option>
-              <option value="tiktok" ${W.subtitles === 'tiktok' ? 'selected' : ''}>TikTok · blanco clásico</option>
-              <option value="karaoke" ${W.subtitles === 'karaoke' ? 'selected' : ''}>Karaoke · verde lima</option>
-            </select></div>
+            <div style="display:flex;gap:6px">
+              <select id="wiz-sub-select" onchange="W.subtitles=this.value" style="flex:1">
+                <option value="shorts" ${W.subtitles === 'shorts' ? 'selected' : ''}>📱 Shorts · Montserrat dinámico</option>
+                <option value="hormozi" ${W.subtitles === 'hormozi' ? 'selected' : ''}>⚡ Hormozi · Amarillo gigante</option>
+                <option value="mrbeast" ${W.subtitles === 'mrbeast' ? 'selected' : ''}>🔴 MrBeast · Impacto mayúsculas</option>
+                <option value="neon" ${W.subtitles === 'neon' ? 'selected' : ''}>🟢 Neon Cyber · Resplandor</option>
+                <option value="tiktok" ${W.subtitles === 'tiktok' ? 'selected' : ''}>💬 TikTok · Blanco clásico</option>
+                <option value="boxed" ${W.subtitles === 'boxed' ? 'selected' : ''}>📦 Boxed UGC · Fondo caja</option>
+                <option value="minimal" ${W.subtitles === 'minimal' ? 'selected' : ''}>🎬 Cinema · Minimal elegante</option>
+                <option value="karaoke" ${W.subtitles === 'karaoke' ? 'selected' : ''}>🎤 Karaoke · Verde lima</option>
+              </select>
+              <button type="button" class="btn small ghost" onclick="openSubtitleSwitcher({target:'wizard'})" title="Ver catálogo visual de subtítulos">🎨 Presets</button>
+            </div></div>
           ${W.mode === 'url' ? `<div style="flex:1;min-width:180px"><label style="font-size:12px;color:var(--muted)">Cookies del navegador (anti-bloqueo viral)</label>
             <select onchange="W.cookies=this.value">
               <option value="" ${!W.cookies ? 'selected' : ''}>— sin cookies —</option>
@@ -775,6 +782,7 @@ function renderProject() {
           <button class="btn ghost" onclick="copyFlowJson('${p.id}')" title="Copia el JSON para pegarlo en la extensión (plan B sin autodetección)">📋 Copiar JSON</button>
           <button class="btn" onclick="importFlow('${p.id}')" title="Importa el ZIP de carpetas Escena_XX que deja tu extensión en el disco">📥 Importar Escena_XX</button>
           ${scenes.length && scenes.every(sc => sc.image_path) ? `<button class="btn primary" onclick="renderFlow('${p.id}')" title="Ensambla el MP4 final con las imágenes reales de Flow (voz + subtítulos incluidos)">🎞️ Renderizar con Flow</button>` : ''}
+          <button class="btn ghost" onclick="openSubtitleSwitcher({target:'project', project_id: '${p.id}'})" title="Cambiar preset visual de subtítulos">🎨 Subtítulos: <b style="margin-left:4px">${esc(((p.meta||{}).subtitle_style || 'shorts').toUpperCase())}</b></button>
           <a class="btn ghost" href="/api/projects/${p.id}/subtitles.srt" download>💬 Subtítulos SRT</a>
           <button class="btn ghost" onclick="downloadProjectScriptTxt('${p.id}')" title="Guarda el guion completo (narración + prompts de imagen) en un .txt en la carpeta que elijas de tu PC">💾 Guardar Guión (.txt)</button>
           <button class="btn danger" onclick="delProject('${p.id}')">🗑️</button>
@@ -2723,5 +2731,182 @@ async function selectVoiceFromGallery(voiceId) {
     if (S.view === 'settings') renderSettings();
   } catch (err) {
     toast('Error guardando voz: ' + err.message, 'err');
+  }
+}
+
+
+
+/* ══════════════════════════════════════════════════════════════════
+   INT-041 · Presets Visuales de Subtítulos (Shorts Style Switcher)
+   ══════════════════════════════════════════════════════════════════ */
+let SS_STATE = {
+  presets: [],
+  selectedId: 'shorts',
+  sampleText: 'ESTO CAMBIA TODO',
+  target: 'global',
+  projectId: null,
+};
+
+async function openSubtitleSwitcher(opts = {}) {
+  SS_STATE.target = opts.target || 'global';
+  SS_STATE.projectId = opts.project_id || null;
+
+  if (opts.current_style) {
+    SS_STATE.selectedId = opts.current_style;
+  } else if (opts.project_id && S.project && S.project.id === opts.project_id) {
+    SS_STATE.selectedId = (S.project.meta || {}).subtitle_style || 'shorts';
+  } else if (opts.target === 'wizard') {
+    SS_STATE.selectedId = W.subtitles || 'shorts';
+  }
+
+  if (!SS_STATE.presets.length) {
+    try {
+      const res = await api('/subtitles/presets');
+      SS_STATE.presets = res.presets || [];
+    } catch (e) {
+      toast('Error cargando catálogo de subtítulos: ' + e.message, 'err');
+      return;
+    }
+  }
+
+  $('#overlay-root').innerHTML = `
+    <div class="overlay subs-switcher-overlay" onclick="if(event.target===this)closeSubtitleSwitcher()">
+      <div class="box card">
+        <div class="ss-header">
+          <div>
+            <h3>🎨 Presets Visuales de Subtítulos (Shorts Style Switcher)</h3>
+            <p>Elige el estilo tipográfico de alta retención para tus subtítulos dinámicos.</p>
+          </div>
+          <button class="modal-x" onclick="closeSubtitleSwitcher()" title="Cerrar">✕</button>
+        </div>
+
+        <div class="ss-preview-stage" id="ss-stage">
+          <div class="ss-stage-badge" id="ss-stage-badge">Estilo Activo</div>
+          <div class="ss-stage-text" id="ss-stage-text">${esc(SS_STATE.sampleText)}</div>
+        </div>
+
+        <div class="ss-custom-input-row">
+          <label style="font-size:12px;color:var(--muted);white-space:nowrap">Texto de muestra:</label>
+          <input type="text" class="ss-custom-input" id="ss-custom-text"
+            value="${esc(SS_STATE.sampleText)}"
+            placeholder="Escribe una frase para previsualizar..."
+            oninput="ssUpdateSample(this.value)">
+        </div>
+
+        <div class="ss-grid" id="ss-grid"></div>
+
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:6px">
+          <button class="btn ghost" onclick="closeSubtitleSwitcher()">Cancelar</button>
+          <button class="btn primary" onclick="applySelectedSubtitleStyle()">✓ Aplicar estilo</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.addEventListener('keydown', ssEscClose);
+  renderSubtitleGrid();
+  updateSubtitleStage();
+}
+
+function ssEscClose(e) {
+  if (e.key === 'Escape') closeSubtitleSwitcher();
+}
+
+function closeSubtitleSwitcher() {
+  document.removeEventListener('keydown', ssEscClose);
+  closeOverlay();
+}
+
+function ssUpdateSample(text) {
+  SS_STATE.sampleText = text || 'ESTO CAMBIA TODO';
+  updateSubtitleStage();
+  renderSubtitleGrid();
+}
+
+function selectSubtitlePreset(presetId) {
+  SS_STATE.selectedId = presetId;
+  updateSubtitleStage();
+  renderSubtitleGrid();
+}
+
+function updateSubtitleStage() {
+  const p = SS_STATE.presets.find(x => x.id === SS_STATE.selectedId) || SS_STATE.presets[0];
+  if (!p) return;
+  const badge = $('#ss-stage-badge');
+  if (badge) badge.textContent = `${p.emoji} ${p.name} · ${p.font}`;
+  const textEl = $('#ss-stage-text');
+  if (textEl) {
+    const isUpper = p.id === 'mrbeast' || p.id === 'hormozi' || p.id === 'neon';
+    const txt = isUpper ? SS_STATE.sampleText.toUpperCase() : SS_STATE.sampleText;
+    textEl.textContent = txt;
+    textEl.style.cssText = p.preview_css;
+  }
+}
+
+function renderSubtitleGrid() {
+  const container = $('#ss-grid');
+  if (!container) return;
+
+  container.innerHTML = SS_STATE.presets.map(p => {
+    const isSel = p.id === SS_STATE.selectedId;
+    const isUpper = p.id === 'mrbeast' || p.id === 'hormozi' || p.id === 'neon';
+    const sample = isUpper ? SS_STATE.sampleText.toUpperCase() : SS_STATE.sampleText;
+    return `
+      <div class="ss-card ${isSel ? 'selected' : ''}" onclick="selectSubtitlePreset('${p.id}')">
+        <div class="ss-card-top">
+          <span class="ss-name">${p.emoji} ${esc(p.name)}</span>
+          ${isSel ? '<span style="color:var(--accent);font-size:12px;font-weight:700">✓ ACTIVO</span>' : ''}
+        </div>
+        <div class="ss-sample-box">
+          <div style="${p.preview_css};font-size:14px;pointer-events:none">${esc(sample.slice(0, 22))}</div>
+        </div>
+        <div class="ss-desc">${esc(p.description)}</div>
+        <div class="ss-tags">
+          ${(p.tags || []).map(t => `<span class="ss-tag">${esc(t)}</span>`).join('')}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function applySelectedSubtitleStyle() {
+  const sid = SS_STATE.selectedId;
+  const p = SS_STATE.presets.find(x => x.id === sid);
+  const name = p ? `${p.emoji} ${p.name}` : sid;
+
+  if (SS_STATE.target === 'wizard') {
+    W.subtitles = sid;
+    const sel = $('#wiz-sub-select');
+    if (sel) sel.value = sid;
+    closeSubtitleSwitcher();
+    toast(`Estilo de subtítulo seleccionado: ${name}`, 'ok');
+    return;
+  }
+
+  if (SS_STATE.target === 'project' && SS_STATE.projectId) {
+    try {
+      await api('/subtitles/apply', {
+        method: 'POST',
+        body: { style_id: sid, project_id: SS_STATE.projectId }
+      });
+      if (S.project && S.project.id === SS_STATE.projectId) {
+        S.project.meta = S.project.meta || {};
+        S.project.meta.subtitle_style = sid;
+        renderProject();
+      }
+      closeSubtitleSwitcher();
+      toast(`Estilo de subtítulo actualizado en el proyecto: ${name}`, 'ok');
+      return;
+    } catch (e) {
+      toast('Error al aplicar subtítulos: ' + e.message, 'err');
+      return;
+    }
+  }
+
+  // Global default
+  try {
+    await api('/subtitles/apply', { method: 'POST', body: { style_id: sid } });
+    closeSubtitleSwitcher();
+    toast(`Estilo de subtítulo predeterminado guardado: ${name}`, 'ok');
+  } catch (e) {
+    toast('Error: ' + e.message, 'err');
   }
 }

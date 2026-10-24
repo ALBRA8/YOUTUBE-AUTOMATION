@@ -869,7 +869,7 @@ async def create_project(body: dict):
             if g.get("camara"):
                 pmeta["camara"] = g["camara"]
             sub = (body.get("subtitle_style") or "shorts").lower()
-            if sub in ("shorts", "hormozi", "tiktok", "karaoke"):
+            if sub in video_pipeline.subs_mod.SUB_STYLES:
                 pmeta["subtitle_style"] = sub
             return db.create_project(
                 title=(g.get("titulo") or "Video desde Production JSON"),
@@ -941,7 +941,7 @@ async def create_project(body: dict):
     meta["transitions"] = bool(body.get("transitions", True))
     meta["style_reference"] = bool(body.get("style_reference", True))
     sub_style = (body.get("subtitle_style") or "shorts").lower()
-    if sub_style in ("shorts", "hormozi", "tiktok", "karaoke"):
+    if sub_style in video_pipeline.subs_mod.SUB_STYLES:
         meta["subtitle_style"] = sub_style
     cookies = (body.get("cookies_from_browser") or "").strip().lower()
     if cookies in ("chrome", "firefox", "edge", "brave", "safari", "vivaldi"):
@@ -2160,6 +2160,45 @@ async def pipeline_generate_hooks(payload: dict):
     custom_prompt = (payload.get("custom_prompt") or "").strip() or None
     hooks = await script_gen.generate_viral_hooks(topic, niche=niche, count=count, custom_prompt=custom_prompt)
     return {"ok": True, "topic": topic, "niche": niche, "hooks": hooks}
+
+
+
+
+
+# ────── 🎨 Presets Visuales de Subtítulos de Alta Retención (INT-041) ────
+@app.get("/api/subtitles/presets")
+async def list_subtitle_presets():
+    """Devuelve el catálogo de presets de subtítulos con previsualización CSS."""
+    from pipeline import subtitles as subs_mod
+    return {
+        "ok": True,
+        "current_default": getattr(config, "DEFAULT_SUBTITLE_STYLE", "shorts"),
+        "presets": subs_mod.SUBTITLE_PRESETS_CATALOG,
+    }
+
+
+@app.post("/api/subtitles/apply")
+async def apply_subtitle_style(body: dict):
+    """Aplica un estilo de subtítulo a nivel global o a un proyecto específico."""
+    from pipeline import subtitles as subs_mod
+    style_id = (body.get("style_id") or "").strip().lower()
+    if style_id not in subs_mod.SUB_STYLES:
+        raise HTTPException(400, f"Estilo de subtítulo inválido: '{style_id}'")
+
+    project_id = (body.get("project_id") or "").strip()
+    if project_id:
+        pid = _pid(project_id)
+        p = db.get_project(pid)
+        if not p:
+            raise HTTPException(404, "Proyecto no encontrado")
+        meta = p.get("meta") or {}
+        meta["subtitle_style"] = style_id
+        db.update_project(pid, meta=meta)
+        return {"ok": True, "scope": "project", "project_id": pid, "style_id": style_id}
+
+    config.DEFAULT_SUBTITLE_STYLE = style_id
+    config.save_env({"DEFAULT_SUBTITLE_STYLE": style_id})
+    return {"ok": True, "scope": "global", "style_id": style_id}
 
 
 @app.post("/api/projects/{pid}/select-hook")

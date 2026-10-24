@@ -195,3 +195,10 @@
 - **Origen:** ClonaKit Feature Gap #2 inspirada en Anai App (`anaiapp.ai`).
 - **Componentes:** `backend/services/voices_catalog.py` · `backend/main.py` · `backend/static/app.js` · `backend/static/style.css` · `tests/test_voice_gallery.py`.
 - **Resultado:** Catálogo curado de 17 voces neuronales (Edge TTS \$0 ilimitado + Google Gemini TTS Studio) con metadatos de país/bandera, género, estilo vocal y frases de muestra contextuales. Módulo de preescucha interactiva con síntesis bajo demanda y caché local en disco para reproducción instantánea (<1ms); endpoints REST `GET /api/voices`, `POST /api/voices/preview`, `GET /api/voices/audio/{filename}` y `POST /api/voices/select` (asignación global o por proyecto). Interfaz web interactiva en modal con búsqueda reactiva, filtros por país/género, reproductor de audio integrado y botones de acceso en Ajustes, Wizard de creación y Avatar Studio PRO. Baterías 100% verdes.
+
+## INT-041 — Presets Visuales de Subtítulos de Alta Retención (Shorts Style Switcher)
+- **Estado:** IMPLEMENTADO / VERIFICADO AL 100% (Batería test_subtitle_presets: 30/30 OK, test_voice_gallery: 25/25 OK).
+- **Documento:** [INT-041](INT-041_SUBTITLE_PRESETS_AND_SHORTS_STYLE_SWITCHER.md).
+- **Origen:** ClonaKit Feature Gap #4 inspirada en Anai App (`anaiapp.ai`).
+- **Componentes:** `backend/pipeline/subtitles.py` · `backend/main.py` · `backend/static/app.js` · `backend/static/style.css` · `tests/test_subtitle_presets.py`.
+- **Resultado:** Catálogo y motor de generación ASS para 8 presets tipográficos de alta retención para Shorts y TikTok (Shorts Dinámico, Hormozi Gold, MrBeast Bold con mayúsculas y pop +25%, Neon Cyberpunk con resplandor glow, TikTok Fast, Boxed UGC con caja de fondo BorderStyle=3, Cinema Minimal con centrado inferior y Karaoke Pop). Endpoints REST `GET /api/subtitles/presets` y `POST /api/subtitles/apply` (global y por proyecto). Modal visual interactivo con escenario de previsualización en vivo (mockup en tiempo real), entrada para frases de muestra personalizadas y botones de acceso rápido en el editor de proyectos Studio (`renderProject`) y en el Wizard de creación de video. Baterías 100% verdes.
