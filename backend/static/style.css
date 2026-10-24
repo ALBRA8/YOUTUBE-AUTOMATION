@@ -594,3 +594,57 @@ code.mini { background: var(--bg2); border: 1px solid var(--border); border-radi
 .ss-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 2px; }
 .ss-tag { font-size: 9.5px; background: rgba(127,127,127,.12); color: var(--muted); padding: 1px 6px; border-radius: 4px; }
 .ss-sample-box { height: 42px; border-radius: 8px; background: #000; border: 1px solid rgba(255,255,255,.08); display: flex; align-items: center; justify-content: center; margin: 4px 0; overflow: hidden; }
+
+
+/* ═══ INT-042 · Brand Profiles Persistentes (Canales / Marca) ═══ */
+.bp-wiz-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  padding: 10px 16px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,.15);
+}
+.bp-wiz-info { display: flex; align-items: center; gap: 10px; }
+.bp-wiz-icon { font-size: 20px; }
+.bp-wiz-sub { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); font-weight: 700; }
+.bp-wiz-name { font-size: 14px; color: var(--accent2); }
+.bp-wiz-actions { display: flex; align-items: center; gap: 8px; }
+.bp-wiz-select { max-width: 210px; font-size: 12.5px; padding: 5px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg2); color: var(--text); }
+
+.bp-overlay .box {
+  width: min(920px, 95vw); max-height: 90vh; text-align: left; padding: 22px 26px;
+  display: flex; flex-direction: column; gap: 16px; overflow: hidden;
+}
+.bp-layout {
+  display: grid; grid-template-columns: 260px 1fr; gap: 18px; max-height: 62vh; overflow: hidden;
+}
+@media (max-width: 768px) {
+  .bp-layout { grid-template-columns: 1fr; max-height: 70vh; overflow-y: auto; }
+}
+.bp-sidebar {
+  border-right: 1px solid var(--border); padding-right: 14px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto;
+}
+.bp-item {
+  padding: 10px 12px; border-radius: 10px; border: 1px solid transparent; background: var(--bg2);
+  cursor: pointer; transition: all .15s; display: flex; flex-direction: column; gap: 4px;
+}
+.bp-item:hover { border-color: var(--accent2); }
+.bp-item.selected { border-color: var(--accent); background: rgba(99, 102, 241, .09); }
+.bp-item-header { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.bp-item-title { font-weight: 700; font-size: 13px; color: var(--text); }
+.bp-item-niche { font-size: 11px; color: var(--muted); }
+.bp-default-badge { font-size: 10px; color: #eab308; font-weight: 700; background: rgba(234, 179, 8, .12); padding: 1px 6px; border-radius: 4px; }
+
+.bp-form {
+  overflow-y: auto; padding-right: 6px; display: flex; flex-direction: column; gap: 12px;
+}
+.bp-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 600px) { .bp-form-row { grid-template-columns: 1fr; } }
+.bp-form-field { display: flex; flex-direction: column; gap: 4px; }
+.bp-form-field label { font-size: 11.5px; font-weight: 700; color: var(--muted); }
+.bp-form-field input, .bp-form-field select, .bp-form-field textarea {
+  padding: 8px 10px; font-size: 12.5px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--bg2); color: var(--text); outline: none; font-family: inherit;
+}
+.bp-form-field textarea { resize: vertical; min-height: 60px; line-height: 1.4; }
+.bp-form-field input:focus, .bp-form-field select:focus, .bp-form-field textarea:focus { border-color: var(--accent); }
+.bp-input-with-btn { display: flex; gap: 6px; align-items: center; }
+.bp-input-with-btn select { flex: 1; }

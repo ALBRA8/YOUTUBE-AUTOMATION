@@ -964,6 +964,30 @@ async def create_project(body: dict):
         voice = voice or av.get("voice")
         tts_provider = tts_provider or av.get("tts_provider")
         style = style or av.get("style") or style
+    brand_pid = (body.get("brand_profile_id") or "").strip()
+    if brand_pid:
+        from services import brand_profiles as bp_svc
+        bp = bp_svc.get_brand_profile(brand_pid)
+        if bp:
+            meta["brand_profile_id"] = bp["id"]
+            meta["brand_profile"] = bp
+            if bp.get("prompt_rules"):
+                meta["prompt_rules"] = bp["prompt_rules"]
+            if bp.get("tone"):
+                meta["tone"] = bp["tone"]
+            if bp.get("audience"):
+                meta["audience"] = bp["audience"]
+            if not niche_label and bp.get("niche"):
+                niche_label = bp["niche"]
+            if not body.get("voice") and bp.get("voice"):
+                voice = bp["voice"]
+            if not body.get("tts_provider") and bp.get("tts_provider"):
+                tts_provider = bp["tts_provider"]
+            if (not body.get("style") or body.get("style") == "auto") and bp.get("visual_style") and bp.get("visual_style") != "auto":
+                style = bp["visual_style"]
+            if not body.get("subtitle_style") and bp.get("subtitle_style"):
+                meta["subtitle_style"] = bp["subtitle_style"]
+
     platforms = body.get("platforms")
     if not isinstance(platforms, list):
         platforms = ["youtube"]
@@ -975,6 +999,12 @@ async def create_project(body: dict):
         tts_provider=tts_provider, meta=meta,
         avatar_id=avatar_id, platforms=platforms,
         niche=niche_label)
+    if brand_pid:
+        with db.connect() as con:
+            cols = [r[1] for r in con.execute("PRAGMA table_info(projects)").fetchall()]
+            if "brand_profile_id" in cols:
+                con.execute("UPDATE projects SET brand_profile_id = ? WHERE id = ?", (brand_pid, project["id"]))
+        project["brand_profile_id"] = brand_pid
     if mode == "nicho" and body.get("auto_start"):
         # flujo de un clic: crea el proyecto Y lanza el pipeline completo
         job_id = await orchestrator.start_pipeline(project["id"], autopublish=False)
@@ -2225,6 +2255,104 @@ async def project_select_hook(pid: str, payload: dict):
         db.replace_scenes(pid, scenes)
 
     return {"ok": True, "pid": pid, "selected_hook_id": hook_id, "hook": hook_text}
+
+
+# ────── 🏢 Brand Profiles Persistentes (INT-042) ──────────────────────────
+@app.get("/api/brand-profiles")
+async def list_brand_profiles():
+    """Lista todos los perfiles de marca/canal registrados."""
+    from services import brand_profiles as bp_svc
+    profiles = bp_svc.list_brand_profiles()
+    return {"ok": True, "profiles": profiles, "total": len(profiles)}
+
+
+@app.post("/api/brand-profiles")
+async def create_brand_profile(payload: dict):
+    """Crea un nuevo perfil de canal/marca."""
+    from services import brand_profiles as bp_svc
+    try:
+        profile = bp_svc.create_brand_profile(payload)
+        return {"ok": True, "profile": profile}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/brand-profiles/default")
+async def get_default_brand_profile():
+    """Obtiene el perfil por defecto activo."""
+    from services import brand_profiles as bp_svc
+    profile = bp_svc.get_default_brand_profile()
+    if not profile:
+        raise HTTPException(404, "No hay ningún perfil de marca configurado")
+    return {"ok": True, "profile": profile}
+
+
+@app.get("/api/brand-profiles/{pid}")
+async def get_brand_profile(pid: str):
+    """Obtiene el detalle de un perfil de marca por su ID."""
+    from services import brand_profiles as bp_svc
+    profile = bp_svc.get_brand_profile(pid)
+    if not profile:
+        raise HTTPException(404, f"Perfil de marca '{pid}' no encontrado")
+    return {"ok": True, "profile": profile}
+
+
+@app.patch("/api/brand-profiles/{pid}")
+async def update_brand_profile(pid: str, payload: dict):
+    """Actualiza datos de un perfil de marca existente."""
+    from services import brand_profiles as bp_svc
+    try:
+        updated = bp_svc.update_brand_profile(pid, payload)
+        if not updated:
+            raise HTTPException(404, f"Perfil de marca '{pid}' no encontrado")
+        return {"ok": True, "profile": updated}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/brand-profiles/{pid}")
+async def delete_brand_profile(pid: str):
+    """Elimina un perfil de marca existente."""
+    from services import brand_profiles as bp_svc
+    ok = bp_svc.delete_brand_profile(pid)
+    if not ok:
+        raise HTTPException(404, f"Perfil de marca '{pid}' no encontrado")
+    return {"ok": True, "deleted": pid}
+
+
+@app.post("/api/brand-profiles/{pid}/default")
+async def set_default_brand_profile(pid: str):
+    """Establece un perfil de marca como predeterminado activo."""
+    from services import brand_profiles as bp_svc
+    profile = bp_svc.set_default_brand_profile(pid)
+    if not profile:
+        raise HTTPException(404, f"Perfil de marca '{pid}' no encontrado")
+    return {"ok": True, "default_profile": profile}
+
+
+@app.post("/api/brand-profiles/{pid}/apply")
+async def apply_brand_profile(pid: str, payload: dict):
+    """Aplica la configuración del perfil a un proyecto."""
+    from services import brand_profiles as bp_svc
+    project_id = (payload.get("project_id") or "").strip()
+    if not project_id:
+        raise HTTPException(400, "El campo 'project_id' es requerido")
+    try:
+        proj = bp_svc.apply_brand_profile_to_project(pid, project_id)
+        return {"ok": True, "project": proj, "applied_profile_id": pid}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/brand-profiles/{pid}/directives")
+async def get_brand_profile_directives(pid: str):
+    """Devuelve las directivas de guion/prompt formateadas para el LLM."""
+    from services import brand_profiles as bp_svc
+    profile = bp_svc.get_brand_profile(pid)
+    if not profile:
+        raise HTTPException(404, f"Perfil de marca '{pid}' no encontrado")
+    directives = bp_svc.format_prompt_directives(profile)
+    return {"ok": True, "directives": directives, "profile": profile}
 
 
 # ────── 🎞️ INT-024 · Stage 3.5 (harvest) + Stage 4 (FFmpeg assembler) ──────

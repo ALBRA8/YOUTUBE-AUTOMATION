@@ -202,3 +202,11 @@
 - **Origen:** ClonaKit Feature Gap #4 inspirada en Anai App (`anaiapp.ai`).
 - **Componentes:** `backend/pipeline/subtitles.py` · `backend/main.py` · `backend/static/app.js` · `backend/static/style.css` · `tests/test_subtitle_presets.py`.
 - **Resultado:** Catálogo y motor de generación ASS para 8 presets tipográficos de alta retención para Shorts y TikTok (Shorts Dinámico, Hormozi Gold, MrBeast Bold con mayúsculas y pop +25%, Neon Cyberpunk con resplandor glow, TikTok Fast, Boxed UGC con caja de fondo BorderStyle=3, Cinema Minimal con centrado inferior y Karaoke Pop). Endpoints REST `GET /api/subtitles/presets` y `POST /api/subtitles/apply` (global y por proyecto). Modal visual interactivo con escenario de previsualización en vivo (mockup en tiempo real), entrada para frases de muestra personalizadas y botones de acceso rápido en el editor de proyectos Studio (`renderProject`) y en el Wizard de creación de video. Baterías 100% verdes.
+
+## INT-042 — Perfiles de Marca y Canales Persistentes (Brand Profile Engine)
+- **Estado:** IMPLEMENTADO / VERIFICADO AL 100% (Batería test_brand_profiles: 9/9 OK, test_subtitle_presets: 30/30 OK, test_voice_gallery: 25/25 OK).
+- **Documento:** [INT-042](INT-042_PERSISTENT_BRAND_PROFILES.md).
+- **Origen:** ClonaKit Feature Gap #5 inspirada en Anai App (`anaiapp.ai`).
+- **Componentes:** `backend/services/brand_profiles.py` · `backend/database.py` · `backend/main.py` · `backend/static/app.js` · `backend/static/style.css` · `tests/test_brand_profiles.py`.
+- **Resultado:** Motor de identidades persistentes para canales de YouTube y TikTok. Permite registrar y gestionar perfiles de marca completos: nombre de canal, nicho/categoría, público objetivo, tono de voz, estilo visual de imágenes, voz neuronal y proveedor TTS preferidos, preset de subtítulos de alta retención y directivas estrictas de prompt para guiones. Tabla relacional `brand_profiles` e indexación de proyecto vía `brand_profile_id`. Suite completa de endpoints REST (`/api/brand-profiles`). Integración UI en el Wizard de Creación de Videos con barra interactiva de canal activo (`bp-wiz-bar`) y autofill reactivo en 1 clic de todos los parámetros de producción; modal administrativo de gestión multicanal y tarjeta dedicada en Ajustes. Baterías 100% verdes.
+

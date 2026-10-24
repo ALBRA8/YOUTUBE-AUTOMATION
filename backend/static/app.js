@@ -144,7 +144,7 @@ function renderProjectCards(list) {
 const W = { step: 1, mode: 'idea', format: 'short', style: 'auto',
             title: '', idea: '', script: '', url: '', custom: '', voice: '', tts: '',
             avatar: '', platforms: ['youtube', 'tiktok'],
-            transitions: true, styleReference: true, subtitles: 'shorts',
+            transitions: true, styleReference: true, subtitles: 'shorts', brandProfile: '',
             cookies: '', nicho: '', nichoAdjust: '' };
 
 function renderCreate() {
@@ -275,6 +275,7 @@ function renderCreate() {
   }
 
   $('#view').innerHTML = `<div class="wizard">
+    ${renderWizardBrandProfileBar()}
     <div class="steps">${stepName.map((n, i) => `
       <div class="step ${i + 1 === W.step ? 'active' : i + 1 < W.step ? 'done' : ''}">${i + 1 < W.step ? '✓ ' : ''}${i + 1}. ${n}</div>`).join('')}</div>
     <div class="card">${body}</div>
@@ -395,7 +396,8 @@ async function createProject() {
                    platforms: W.platforms.length ? W.platforms : ['youtube'],
                    transitions: W.transitions, style_reference: W.styleReference,
                    subtitle_style: W.subtitles,
-                   cookies_from_browser: W.cookies || null };
+                   cookies_from_browser: W.cookies || null,
+                   brand_profile_id: W.brandProfile || null };
     if (W.mode === 'idea') body.idea = W.idea;
     if (W.mode === 'script') { body.script = W.script; body.title = W.title || W.script.slice(0, 50); }
     if (W.mode === 'url') body.url = W.url;
@@ -1154,6 +1156,17 @@ async function renderSettings() {
           onclick="saveCfg({TTS_PROVIDER: document.getElementById('cfg-tts').value, EDGE_TTS_VOICE: document.getElementById('cfg-edge-voice').value, GEMINI_TTS_VOICE: document.getElementById('cfg-gemini-voice').value, TTS_RATE: document.getElementById('cfg-rate').value}, 'Voz guardada')">💾 Guardar voz</button>
           <button class="btn small" onclick="openVoiceGallery({target:'global'})" title="Abrir Galería de Voces con Preescucha">🎙️ Galería de Voces</button></div>
         <div class="hintline">Si un proveedor falla, el sistema cae automáticamente al otro. Nunca se bloquea el render.</div>
+      </div>
+
+      <div class="card">
+        <b>🏢 Perfil de Canal / Marca</b> <span class="badge" style="float:right;background:rgba(99,102,241,.15);color:var(--accent2);border:1px solid rgba(99,102,241,.3)">INT-042</span>
+        <div style="margin-top:12px;font-size:13px;color:var(--muted);line-height:1.5">
+          Configura identidades fijas para cada uno de tus canales: tono de voz, audiencia, estilo visual, voz neuronal, preset de subtítulos y directivas estrictas de guion.
+        </div>
+        <div class="cfg-actions" style="margin-top:14px">
+          <button class="btn primary small" onclick="openBrandProfilesModal({target:'settings'})">🏢 Administrar Canales y Marcas</button>
+        </div>
+        <div class="hintline">Se autocompleta con 1 clic en el asistente de creación para mantener la consistencia de cada canal.</div>
       </div>
 
       <div class="card">
@@ -2704,6 +2717,16 @@ async function selectVoiceFromGallery(voiceId) {
   const v = VG_STATE.voices.find(x => x.id === voiceId);
   if (!v) return;
 
+  if (VG_STATE.target === 'brand_form') {
+    const inp = $('#bpf-voice');
+    if (inp) inp.value = voiceId;
+    const ttsSel = $('#bpf-tts');
+    if (ttsSel) ttsSel.value = v.provider === 'gemini' ? 'gemini' : 'edge-tts';
+    closeVoiceGallery();
+    toast(`Voz asignada al canal: ${v.flag} ${v.name}`, 'ok');
+    return;
+  }
+
   if (VG_STATE.target === 'wizard') {
     W.voice = voiceId;
     W.tts = v.provider;
@@ -2871,6 +2894,14 @@ async function applySelectedSubtitleStyle() {
   const sid = SS_STATE.selectedId;
   const p = SS_STATE.presets.find(x => x.id === sid);
   const name = p ? `${p.emoji} ${p.name}` : sid;
+
+  if (SS_STATE.target === 'brand_form') {
+    const sel = $('#bpf-subtitles');
+    if (sel) sel.value = sid;
+    closeSubtitleSwitcher();
+    toast(`Subtítulo asignado al canal: ${name}`, 'ok');
+    return;
+  }
 
   if (SS_STATE.target === 'wizard') {
     W.subtitles = sid;

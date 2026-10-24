@@ -139,6 +139,23 @@ CREATE TABLE IF NOT EXISTS flow_jobs (    -- Flow Bridge: cola de assets para la
     updated_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_flow_jobs_project ON flow_jobs(project_id, status);
+CREATE TABLE IF NOT EXISTS brand_profiles (  -- INT-042: Identidad persistente de marca / canal
+    id             TEXT PRIMARY KEY,
+    name           TEXT NOT NULL,
+    niche          TEXT NOT NULL DEFAULT '',
+    audience       TEXT NOT NULL DEFAULT '',
+    tone           TEXT NOT NULL DEFAULT '',
+    visual_style   TEXT NOT NULL DEFAULT 'auto',
+    voice          TEXT NOT NULL DEFAULT 'es-ES-AlvaroNeural',
+    tts_provider   TEXT NOT NULL DEFAULT 'edge-tts',
+    subtitle_style TEXT NOT NULL DEFAULT 'hormozi',
+    prompt_rules   TEXT NOT NULL DEFAULT '',
+    is_default     INTEGER NOT NULL DEFAULT 0,
+    meta           TEXT NOT NULL DEFAULT '{}',
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_brand_profiles_default ON brand_profiles(is_default);
 """
 
 
@@ -157,6 +174,8 @@ def _migrate(con: sqlite3.Connection) -> None:
         con.execute("ALTER TABLE projects ADD COLUMN platforms TEXT NOT NULL DEFAULT '[]'")
     if "niche" not in cols:
         con.execute("ALTER TABLE projects ADD COLUMN niche TEXT")
+    if "brand_profile_id" not in cols:
+        con.execute("ALTER TABLE projects ADD COLUMN brand_profile_id TEXT")
     # v2.19 · flow_jobs.lease_cycles: el barrido de leases vencidos cicla este
     # contador y manda a dead al agotar MAX_LEASE_CYCLES — sin él, un worker
     # que muriera en cada claim reciclaría el job infinitamente.
