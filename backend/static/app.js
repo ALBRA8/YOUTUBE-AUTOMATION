@@ -102,13 +102,36 @@ function renderHome() {
       <div class="card kpi"><div class="num zero">$0.00</div><div class="lbl">Coste total · Labsia cobraría €${(st.total * 0.6).toFixed(2)}</div></div>
     </div>
 
-    <h2 class="sec">✨ Crear nuevo video</h2>
-    <div class="modes">
-      <div class="card mode-card" onclick="openNicheCreator()"><span class="tag new2">NUEVO</span><div class="emoji">🗂️</div><h3>Desde Nicho</h3><p>Elige un nicho con su plantilla y el video se fabrica SOLO: guion, imágenes, animación y montaje — directo a su carpeta.</p></div>
-      <div class="card mode-card" onclick="nav('create');W.mode='script';W.step=1;renderCreate()"><div class="emoji">📜</div><h3>Desde Guion</h3><p>Pega tu guion y lo convertimos en video escena por escena.</p></div>
-      <div class="card mode-card" onclick="nav('create');W.mode='idea';W.step=1;renderCreate()"><div class="emoji">💡</div><h3>Desde Idea</h3><p>Una frase basta. Gemini escribe el guion viral completo.</p></div>
-      <div class="card mode-card" onclick="nav('create');W.mode='url';W.step=1;renderCreate()"><span class="tag">KILLER</span><div class="emoji">🔗</div><h3>Desde URL</h3><p>Pega un link viral de TikTok/YouTube y recrea su estructura con contenido 100% original.</p></div>
-      <div class="card mode-card" onclick="nav('create');W.mode='audio';W.step=1;renderCreate()"><span class="tag new2">V2</span><div class="emoji">🎙️</div><h3>Desde Audio</h3><p>Sube tu voz: la transcribimos, estructuramos y producimos.</p></div>
+    <h2 class="sec" style="display:flex; justify-content:space-between; align-items:center;">
+      <span># ¿Cómo quieres empezar hoy?</span>
+      <span class="hint" style="font-size:12px; color:var(--muted); font-weight:normal;">4 Modalidades Rápidas · 1-Clic</span>
+    </h2>
+    <div class="modes labsia-modes" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px; margin-bottom:28px;">
+      <div class="card mode-card labsia-card" onclick="startDirectCreation('script')" style="cursor:pointer; border-radius:12px; transition:transform 0.15s, border-color 0.15s;">
+        <div style="font-size:28px; margin-bottom:8px;">📄</div>
+        <h3 style="font-size:16px; margin:0 0 6px 0; font-weight:700;">Desde Guion</h3>
+        <p style="font-size:12px; color:var(--muted); margin:0; line-height:1.45;">Pega tu texto y genera el video escena por escena.</p>
+        <span style="display:inline-block; margin-top:12px; color:var(--accent); font-weight:700; font-size:12px;">Comenzar →</span>
+      </div>
+      <div class="card mode-card labsia-card" onclick="startDirectCreation('idea')" style="cursor:pointer; border-radius:12px; transition:transform 0.15s, border-color 0.15s;">
+        <div style="font-size:28px; margin-bottom:8px;">💡</div>
+        <h3 style="font-size:16px; margin:0 0 6px 0; font-weight:700;">Desde Idea</h3>
+        <p style="font-size:12px; color:var(--muted); margin:0; line-height:1.45;">Convierte un concepto en un guion viral completo.</p>
+        <span style="display:inline-block; margin-top:12px; color:var(--accent); font-weight:700; font-size:12px;">Comenzar →</span>
+      </div>
+      <div class="card mode-card labsia-card" onclick="startDirectCreation('url')" style="cursor:pointer; border-radius:12px; transition:transform 0.15s, border-color 0.15s;">
+        <span class="tag" style="position:absolute; top:12px; right:12px; font-size:9px; padding:3px 7px;">KILLER</span>
+        <div style="font-size:28px; margin-bottom:8px;">🔗</div>
+        <h3 style="font-size:16px; margin:0 0 6px 0; font-weight:700;">Desde URL</h3>
+        <p style="font-size:12px; color:var(--muted); margin:0; line-height:1.45;">Usa un artículo o video web y crea su versión original.</p>
+        <span style="display:inline-block; margin-top:12px; color:var(--accent); font-weight:700; font-size:12px;">Comenzar →</span>
+      </div>
+      <div class="card mode-card labsia-card" onclick="startDirectCreation('audio')" style="cursor:pointer; border-radius:12px; transition:transform 0.15s, border-color 0.15s;">
+        <div style="font-size:28px; margin-bottom:8px;">🎙️</div>
+        <h3 style="font-size:16px; margin:0 0 6px 0; font-weight:700;">Desde Audio</h3>
+        <p style="font-size:12px; color:var(--muted); margin:0; line-height:1.45;">Sincroniza y alinea la animación con tu propia voz.</p>
+        <span style="display:inline-block; margin-top:12px; color:var(--accent); font-weight:700; font-size:12px;">Comenzar →</span>
+      </div>
     </div>
 
     <h2 class="sec">🗂️ Proyectos recientes <a class="hint" href="#" onclick="nav('projects');return false">ver todos →</a></h2>
@@ -138,6 +161,12 @@ function renderProjectCards(list) {
         <div class="meta">${badge}<span>${esc(p.format === 'short' ? '9:16 Short' : '16:9 Largo')}</span>${platformIcons(p.platforms)}${av ? `<span class="plat-badge" title="Avatar: ${esc(av.name)}">🎭</span>` : ''}</div>
       </div></div>`;
   }).join('');
+}
+
+function startDirectCreation(mode) {
+  W.mode = mode;
+  W.step = 4;
+  nav('create');
 }
 
 /* ── vista: WIZARD CREAR (4 pasos como Labsia) ───────────── */
@@ -207,6 +236,17 @@ function renderCreate() {
   }
 
   if (W.step === 4) {
+    const formatPills = `
+      <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap; align-items:center; background:rgba(255,255,255,0.03); padding:10px 14px; border-radius:10px; border:1px solid var(--border);">
+        <span style="font-size:12.5px; font-weight:700; color:var(--muted);">Formato:</span>
+        <button type="button" class="btn small ${W.format === 'short' ? 'btn-primary' : 'ghost'}" onclick="W.format='short';renderCreate()" style="padding:4px 10px; font-size:11.5px;">📱 9:16 Short (Recomendado)</button>
+        <button type="button" class="btn small ${W.format === 'long' ? 'btn-primary' : 'ghost'}" onclick="W.format='long';renderCreate()" style="padding:4px 10px; font-size:11.5px;">🖥️ 16:9 Largo</button>
+        <span style="font-size:12.5px; font-weight:700; color:var(--muted); margin-left:12px;">Estilo visual:</span>
+        <select style="padding:4px 8px; font-size:11.5px; max-width:210px; border-radius:6px;" onchange="W.style=this.value">
+          ${S.styles.map(s => `<option value="${s.id}" ${W.style === s.id ? 'selected' : ''}>${s.emoji} ${esc(s.name)}</option>`).join('')}
+        </select>
+      </div>`;
+
     const f = W.mode === 'idea'
       ? `<div class="field"><label>💡 Tu idea (una frase basta)</label><input type="text" value="${esc(W.idea)}" oninput="W.idea=this.value" placeholder="El imperio romano explicado en 60s"></div>`
       : W.mode === 'script'
@@ -214,7 +254,7 @@ function renderCreate() {
       : W.mode === 'url'
       ? `<div class="field"><label>🔗 URL del video viral (TikTok / YouTube)</label><input type="text" value="${esc(W.url)}" oninput="W.url=this.value" placeholder="https://www.tiktok.com/@user/video/..."><small style="color:var(--muted);display:block;margin-top:6px">Analizamos su estructura y creamos una versión 100% original. No copiamos contenido.</small></div>`
       : `<div class="field"><label>🎙️ Grabación de voz (mp3/wav/m4a)</label><input type="file" id="audio-file" accept="audio/*"></div>`;
-    body = f + `
+    body = formatPills + f + `
       <div class="row">
         <div class="field"><label>🎭 Avatar (personaje consistente)</label>
           <select onchange="W.avatar=this.value">
