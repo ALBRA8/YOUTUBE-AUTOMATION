@@ -226,13 +226,24 @@ function renderCreate() {
   }
 
   if (W.step === 3) {
-    body = `<div class="field" style="max-width:480px"><label>🎨 Estilo visual de las imágenes</label>
-      <select onchange="W.style=this.value;renderCreate()">
-        ${S.styles.map(s => `<option value="${s.id}" ${W.style === s.id ? 'selected' : ''}>${s.emoji} ${esc(s.name)} — ${esc(s.desc)}</option>`).join('')}
-      </select>
-      <small style="color:var(--muted);display:block;margin-top:8px">Auto deja que la IA elija una estética coherente según el tema — es lo recomendado. Los presets solo afinan el look de las imágenes: nunca tocan tu narración ni los subtítulos.</small></div>
-    ${W.style === 'custom-studio' ? `<div class="field" style="margin-top:16px"><label>Describe tu estilo (en inglés, estilo de imagen)</label>
-      <input type="text" value="${esc(W.custom)}" oninput="W.custom=this.value" placeholder="dark cinematic photography, moody fog..."></div>` : ''}`;
+    body = `
+      <div style="margin-bottom:16px;">
+        <h3 style="font-size:18px; font-weight:700; margin:0 0 4px 0;">🎨 Estilo visual</h3>
+        <p style="color:var(--muted); font-size:13px; margin:0;">El estilo define los colores, filtros y energía visual de cada escena de tu video.</p>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(210px, 1fr)); gap:12px; max-height:490px; overflow-y:auto; padding-right:6px; margin-bottom:16px;">
+        ${S.styles.map(s => `
+          <div class="card" onclick="W.style='${s.id}';renderCreate()" style="cursor:pointer; padding:14px; border-radius:12px; border:2px solid ${W.style === s.id ? 'var(--accent)' : 'rgba(255,255,255,0.08)'}; background:${W.style === s.id ? 'rgba(16,185,129,0.09)' : 'rgba(255,255,255,0.02)'}; transition:all 0.15s; position:relative;">
+            <div style="width:100%; height:75px; border-radius:8px; background:${s.grad || 'linear-gradient(135deg,#1f2937,#374151)'}; display:flex; align-items:center; justify-content:center; font-size:32px; margin-bottom:10px; box-shadow:inset 0 0 20px rgba(0,0,0,0.5);">
+              ${s.emoji || '🎨'}
+            </div>
+            <b style="display:block; font-size:13.5px; margin-bottom:4px; font-weight:700;">${esc(s.name)}</b>
+            <p style="font-size:11.5px; color:var(--muted); line-height:1.4; margin:0;">${esc(s.desc || '')}</p>
+            ${W.style === s.id ? `<span style="position:absolute; top:8px; right:8px; background:var(--accent); color:#000; border-radius:50%; width:18px; height:18px; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:bold;">✓</span>` : ''}
+          </div>`).join('')}
+      </div>
+      ${W.style === 'custom-studio' ? `<div class="field" style="margin-top:16px"><label>Describe tu estilo (en inglés, estilo de imagen)</label>
+        <input type="text" value="${esc(W.custom)}" oninput="W.custom=this.value" placeholder="dark cinematic photography, moody fog..."></div>` : ''}`;
   }
 
   if (W.step === 4) {
