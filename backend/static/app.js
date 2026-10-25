@@ -107,26 +107,26 @@ function renderHome() {
       <span class="hint" style="font-size:12px; color:var(--muted); font-weight:normal;">4 Modalidades Rápidas · 1-Clic</span>
     </h2>
     <div class="modes labsia-modes" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px; margin-bottom:28px;">
-      <div class="card mode-card labsia-card" onclick="startDirectCreation('script')" style="cursor:pointer; border-radius:12px; transition:transform 0.15s, border-color 0.15s;">
+      <div class="card mode-card labsia-card" onclick="openQuickCreateModal('script')" style="cursor:pointer; border-radius:12px; transition:transform 0.15s, border-color 0.15s;">
         <div style="font-size:28px; margin-bottom:8px;">📄</div>
         <h3 style="font-size:16px; margin:0 0 6px 0; font-weight:700;">Desde Guion</h3>
         <p style="font-size:12px; color:var(--muted); margin:0; line-height:1.45;">Pega tu texto y genera el video escena por escena.</p>
         <span style="display:inline-block; margin-top:12px; color:var(--accent); font-weight:700; font-size:12px;">Comenzar →</span>
       </div>
-      <div class="card mode-card labsia-card" onclick="startDirectCreation('idea')" style="cursor:pointer; border-radius:12px; transition:transform 0.15s, border-color 0.15s;">
+      <div class="card mode-card labsia-card" onclick="openQuickCreateModal('idea')" style="cursor:pointer; border-radius:12px; transition:transform 0.15s, border-color 0.15s;">
         <div style="font-size:28px; margin-bottom:8px;">💡</div>
         <h3 style="font-size:16px; margin:0 0 6px 0; font-weight:700;">Desde Idea</h3>
         <p style="font-size:12px; color:var(--muted); margin:0; line-height:1.45;">Convierte un concepto en un guion viral completo.</p>
         <span style="display:inline-block; margin-top:12px; color:var(--accent); font-weight:700; font-size:12px;">Comenzar →</span>
       </div>
-      <div class="card mode-card labsia-card" onclick="startDirectCreation('url')" style="cursor:pointer; border-radius:12px; transition:transform 0.15s, border-color 0.15s;">
+      <div class="card mode-card labsia-card" onclick="openQuickCreateModal('url')" style="cursor:pointer; border-radius:12px; transition:transform 0.15s, border-color 0.15s;">
         <span class="tag" style="position:absolute; top:12px; right:12px; font-size:9px; padding:3px 7px;">KILLER</span>
         <div style="font-size:28px; margin-bottom:8px;">🔗</div>
         <h3 style="font-size:16px; margin:0 0 6px 0; font-weight:700;">Desde URL</h3>
         <p style="font-size:12px; color:var(--muted); margin:0; line-height:1.45;">Usa un artículo o video web y crea su versión original.</p>
         <span style="display:inline-block; margin-top:12px; color:var(--accent); font-weight:700; font-size:12px;">Comenzar →</span>
       </div>
-      <div class="card mode-card labsia-card" onclick="startDirectCreation('audio')" style="cursor:pointer; border-radius:12px; transition:transform 0.15s, border-color 0.15s;">
+      <div class="card mode-card labsia-card" onclick="openQuickCreateModal('audio')" style="cursor:pointer; border-radius:12px; transition:transform 0.15s, border-color 0.15s;">
         <div style="font-size:28px; margin-bottom:8px;">🎙️</div>
         <h3 style="font-size:16px; margin:0 0 6px 0; font-weight:700;">Desde Audio</h3>
         <p style="font-size:12px; color:var(--muted); margin:0; line-height:1.45;">Sincroniza y alinea la animación con tu propia voz.</p>
@@ -163,11 +163,259 @@ function renderProjectCards(list) {
   }).join('');
 }
 
-function startDirectCreation(mode) {
-  W.mode = mode;
+/* ── MODAL DE CREACIÓN RÁPIDA 1-CLIC (Estilo LabsIA · $0.00) ── */
+const QC_STATE = {
+  mode: 'idea',
+  format: 'short',
+  pacing: 'normal',
+  style: 'auto',
+  subtitles: 'shorts',
+  voice: '',
+  title: '',
+  text: '',
+  url: '',
+  audioFile: null
+};
+
+function openQuickCreateModal(mode) {
+  QC_STATE.mode = mode || 'idea';
+  QC_STATE.text = '';
+  QC_STATE.url = '';
+  QC_STATE.audioFile = null;
+
+  renderQuickCreateModal();
+  document.addEventListener('keydown', qcEscClose);
+}
+
+function qcEscClose(e) {
+  if (e.key === 'Escape') closeOverlay();
+}
+
+function renderQuickCreateModal() {
+  const m = QC_STATE.mode;
+  const modes = [
+    { id: 'script', emoji: '📜', name: 'Desde Guion' },
+    { id: 'idea', emoji: '💡', name: 'Desde Idea' },
+    { id: 'url', emoji: '🔗', name: 'Desde URL' },
+    { id: 'audio', emoji: '🎙️', name: 'Desde Audio' },
+  ];
+
+  const tabButtons = modes.map(item => `
+    <button type="button" class="qc-tab ${m === item.id ? 'active' : ''}" onclick="qcSwitchMode('${item.id}')">
+      <span>${item.emoji}</span> <span>${item.name}</span>
+    </button>
+  `).join('');
+
+  let inputField = '';
+  if (m === 'script') {
+    inputField = `
+      <div class="field" style="margin-bottom:14px;">
+        <label style="font-size:13px; font-weight:700; margin-bottom:6px; display:block;">📜 Pega tu guion completo</label>
+        <textarea id="qc-input-text" rows="6" placeholder="Escribe o pega aquí tu guion escena por escena..." style="width:100%; border-radius:10px; padding:12px; font-size:13.5px; line-height:1.5;">${esc(QC_STATE.text)}</textarea>
+      </div>`;
+  } else if (m === 'idea') {
+    inputField = `
+      <div class="field" style="margin-bottom:14px;">
+        <label style="font-size:13px; font-weight:700; margin-bottom:6px; display:block;">💡 Tu idea o concepto viral (1 frase)</label>
+        <input type="text" id="qc-input-text" placeholder="Ej: 5 errores mortales al invertir tu primer sueldo" value="${esc(QC_STATE.text)}" style="width:100%; border-radius:10px; padding:12px; font-size:13.5px;">
+        <small style="color:var(--muted); display:block; margin-top:5px;">La IA estructurará el gancho viral, escenas y llamada a la acción.</small>
+      </div>`;
+  } else if (m === 'url') {
+    inputField = `
+      <div class="field" style="margin-bottom:14px;">
+        <label style="font-size:13px; font-weight:700; margin-bottom:6px; display:block;">🔗 URL de TikTok o YouTube para recrear</label>
+        <input type="text" id="qc-input-text" placeholder="https://www.tiktok.com/@usuario/video/..." value="${esc(QC_STATE.url)}" style="width:100%; border-radius:10px; padding:12px; font-size:13.5px;">
+        <small style="color:var(--muted); display:block; margin-top:5px;">Analizamos la estructura y creamos una versión 100% original.</small>
+      </div>`;
+  } else if (m === 'audio') {
+    inputField = `
+      <div class="field" style="margin-bottom:14px;">
+        <label style="font-size:13px; font-weight:700; margin-bottom:6px; display:block;">🎙️ Selecciona tu archivo de audio (MP3/WAV/M4A)</label>
+        <input type="file" id="qc-input-file" accept="audio/*" style="width:100%; padding:10px; border-radius:10px; background:rgba(255,255,255,0.03); border:1px dashed var(--border);">
+        <small style="color:var(--muted); display:block; margin-top:5px;">Sincronizaremos los subtítulos dinámicos y escenas con tu propia voz.</small>
+      </div>`;
+  }
+
+  const stylesOptions = (S.styles || []).map(s => `
+    <option value="${s.id}" ${QC_STATE.style === s.id ? 'selected' : ''}>${s.emoji || '🎨'} ${esc(s.name)}</option>
+  `).join('');
+
+  $('#overlay-root').innerHTML = `
+    <div class="overlay" onclick="if(event.target===this)closeOverlay()">
+      <div class="qc-box card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:22px;">⚡</span>
+            <h3 style="margin:0; font-size:18px; font-weight:800;">Crear Video en 1-Clic</h3>
+            <span class="badge" style="background:rgba(16,185,129,0.15); color:var(--accent); font-weight:700;">$0.00 Ilimitado</span>
+          </div>
+          <button class="modal-x" onclick="closeOverlay()" style="background:transparent; border:none; color:var(--muted); font-size:20px; cursor:pointer;">✕</button>
+        </div>
+
+        <div class="qc-tabs">${tabButtons}</div>
+
+        ${inputField}
+
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:16px; background:rgba(255,255,255,0.02); padding:14px; border-radius:12px; border:1px solid var(--border);">
+          <div class="field" style="margin:0;">
+            <label style="font-size:11.5px; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">Formato</label>
+            <div style="display:flex; gap:6px;">
+              <button type="button" class="btn small ${QC_STATE.format === 'short' ? 'primary' : 'ghost'}" onclick="QC_STATE.format='short';renderQuickCreateModal()" style="flex:1; padding:6px 8px; font-size:11px;">📱 9:16 Short</button>
+              <button type="button" class="btn small ${QC_STATE.format === 'long' ? 'primary' : 'ghost'}" onclick="QC_STATE.format='long';renderQuickCreateModal()" style="flex:1; padding:6px 8px; font-size:11px;">🖥️ 16:9 Largo</button>
+            </div>
+          </div>
+
+          <div class="field" style="margin:0;">
+            <label style="font-size:11.5px; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">Ritmo de cortes</label>
+            <div style="display:flex; gap:4px;">
+              <button type="button" class="btn small ${QC_STATE.pacing === 'fast' ? 'primary' : 'ghost'}" onclick="QC_STATE.pacing='fast';renderQuickCreateModal()" style="flex:1; padding:6px 4px; font-size:10.5px;" title="Cortes dinámicos cada ~2.5s">⚡ Rápido</button>
+              <button type="button" class="btn small ${(QC_STATE.pacing === 'normal' || !QC_STATE.pacing) ? 'primary' : 'ghost'}" onclick="QC_STATE.pacing='normal';renderQuickCreateModal()" style="flex:1; padding:6px 4px; font-size:10.5px;" title="Cortes fluidos cada ~4.0s">⏱️ Normal</button>
+              <button type="button" class="btn small ${QC_STATE.pacing === 'slow' ? 'primary' : 'ghost'}" onclick="QC_STATE.pacing='slow';renderQuickCreateModal()" style="flex:1; padding:6px 4px; font-size:10.5px;" title="Cortes pausados cada ~6.0s">🧘 Pausado</button>
+            </div>
+          </div>
+
+          <div class="field" style="margin:0;">
+            <label style="font-size:11.5px; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">Estilo visual</label>
+            <select style="width:100%; padding:6px 8px; font-size:12px; border-radius:6px;" onchange="QC_STATE.style=this.value">
+              ${stylesOptions}
+            </select>
+          </div>
+
+          <div class="field" style="margin:0;">
+            <label style="font-size:11.5px; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">Subtítulos</label>
+            <select style="width:100%; padding:6px 8px; font-size:12px; border-radius:6px;" onchange="QC_STATE.subtitles=this.value">
+              <option value="shorts" ${QC_STATE.subtitles === 'shorts' ? 'selected' : ''}>📱 Shorts · Montserrat</option>
+              <option value="hormozi" ${QC_STATE.subtitles === 'hormozi' ? 'selected' : ''}>⚡ Hormozi · Amarillo</option>
+              <option value="mrbeast" ${QC_STATE.subtitles === 'mrbeast' ? 'selected' : ''}>🔴 MrBeast · Impacto</option>
+              <option value="karaoke" ${QC_STATE.subtitles === 'karaoke' ? 'selected' : ''}>🎤 Karaoke ASS · Verde Lima</option>
+              <option value="minimal" ${QC_STATE.subtitles === 'minimal' ? 'selected' : ''}>🎬 Cinema · Minimal</option>
+              <option value="neon" ${QC_STATE.subtitles === 'neon' ? 'selected' : ''}>🟢 Neon Cyber</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:10px; align-items:center;">
+          <button type="button" class="btn primary" id="qc-submit-btn" onclick="executeQuickCreate()" style="flex:1; padding:12px 18px; font-size:14px; font-weight:800; border-radius:10px; background:linear-gradient(135deg, #10b981, #059669); box-shadow:0 4px 14px rgba(16,185,129,0.35);">
+            🚀 Fabricar Video Ahora ($0.00)
+          </button>
+          <button type="button" class="btn ghost" onclick="openWizardFromQC()" style="padding:12px 14px; font-size:12.5px;" title="Abrir asistente paso a paso avanzado">
+            Asistente Completo →
+          </button>
+        </div>
+      </div>
+    </div>`;
+
+  setTimeout(() => {
+    const el = $('#qc-input-text') || $('#qc-input-file');
+    if (el) el.focus();
+  }, 60);
+}
+
+function qcSwitchMode(newMode) {
+  const cur = $('#qc-input-text');
+  if (cur && cur.value) QC_STATE.text = cur.value;
+  QC_STATE.mode = newMode;
+  renderQuickCreateModal();
+}
+
+function openWizardFromQC() {
+  const inp = $('#qc-input-text');
+  if (inp && inp.value) {
+    if (QC_STATE.mode === 'script') W.script = inp.value;
+    else if (QC_STATE.mode === 'idea') W.idea = inp.value;
+    else if (QC_STATE.mode === 'url') W.url = inp.value;
+  }
+  W.mode = QC_STATE.mode;
+  W.format = QC_STATE.format;
+  W.style = QC_STATE.style;
+  W.pacing = QC_STATE.pacing;
+  W.subtitles = QC_STATE.subtitles;
   W.step = 4;
+  closeOverlay();
   nav('create');
 }
+
+async function executeQuickCreate() {
+  if (guardDemo()) return;
+  const m = QC_STATE.mode;
+  const textInput = $('#qc-input-text');
+  const val = textInput ? textInput.value.trim() : '';
+
+  if (m === 'script' && !val) {
+    toast('Pega tu guion antes de generar', 'err');
+    if (textInput) textInput.focus();
+    return;
+  }
+  if (m === 'idea' && !val) {
+    toast('Escribe una idea o frase antes de generar', 'err');
+    if (textInput) textInput.focus();
+    return;
+  }
+  if (m === 'url' && !val) {
+    toast('Pega la URL de TikTok o YouTube antes de generar', 'err');
+    if (textInput) textInput.focus();
+    return;
+  }
+
+  let audioPath = null;
+  if (m === 'audio') {
+    const file = $('#qc-input-file')?.files?.[0];
+    if (!file) return toast('Selecciona tu archivo de audio primero', 'err');
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      toast('Subiendo archivo de voz...');
+      const r = await fetch('/api/import/audio', { method: 'POST', body: fd });
+      if (!r.ok) throw new Error('Error al subir audio');
+      audioPath = (await r.json()).path;
+    } catch (err) {
+      return toast('Error subiendo audio: ' + err.message, 'err');
+    }
+  }
+
+  const btn = $('#qc-submit-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Creando proyecto...'; }
+
+  try {
+    const body = {
+      mode: m,
+      style: QC_STATE.style === 'custom-studio' ? 'cinematic' : QC_STATE.style,
+      format: QC_STATE.format,
+      pacing: QC_STATE.pacing || 'normal',
+      subtitle_style: QC_STATE.subtitles || 'shorts',
+      platforms: ['youtube', 'tiktok'],
+      transitions: true,
+      style_reference: true,
+      auto_start: true
+    };
+    if (m === 'idea') body.idea = val;
+    if (m === 'script') { body.script = val; body.title = val.slice(0, 48); }
+    if (m === 'url') body.url = val;
+
+    const p = await api('/projects', { method: 'POST', body });
+    if (audioPath) {
+      await fetch('/api/projects/' + p.id, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meta_patch: { audio_path: audioPath } })
+      });
+    }
+
+    closeOverlay();
+    toast('¡Fabricación iniciada! 🚀 El motor IA está creando tu video', 'ok');
+    startJob(p.id);
+  } catch (err) {
+    toast('Error: ' + err.message, 'err');
+    if (btn) { btn.disabled = false; btn.textContent = '🚀 Fabricar Video Ahora ($0.00)'; }
+  }
+}
+
+window.openQuickCreateModal = openQuickCreateModal;
+window.startDirectCreation = openQuickCreateModal;
+window.qcSwitchMode = qcSwitchMode;
+window.executeQuickCreate = executeQuickCreate;
+window.openWizardFromQC = openWizardFromQC;
+
 
 /* ── vista: WIZARD CREAR (4 pasos como Labsia) ───────────── */
 const W = { step: 1, mode: 'idea', format: 'short', style: 'auto',
@@ -3151,6 +3399,7 @@ function renderClipper() {
             <select id="clipper-style">
               <option value="blur_bg" selected>Podcast con fondo difuminado (Recomendado)</option>
               <option value="center_crop">Recorte centrado directo 9:16</option>
+              <option value="split_screen">👥 Split-Screen (Podcast 2 Hablantes: Arriba/Abajo)</option>
             </select>
           </div>
           <div class="clipper-field">

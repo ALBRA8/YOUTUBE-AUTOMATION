@@ -509,7 +509,16 @@ async def render_vertical_moment(
             cmd.extend(["-i", str(broll_file)])
             b_s = broll_interval["start"]
             b_e = broll_interval["end"]
-            if style == "blur_bg":
+            if style == "split_screen":
+                vf = (
+                    "[0:v]split=2[in_top][in_bot];"
+                    "[in_top]crop=iw/2:ih:0:0,scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960[top];"
+                    "[in_bot]crop=iw/2:ih:iw/2:0,scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960[bot];"
+                    "[top][bot]vstack=inputs=2,drawbox=x=0:y=958:w=1080:h=4:color=0x000000@0.8:t=fill[base];"
+                    "[1:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[br];"
+                    f"[base][br]overlay=enable='between(t,{b_s},{b_e})':x=0:y=0{sub_clause}[outv]"
+                )
+            elif style == "blur_bg":
                 vf = (
                     "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,"
                     "crop=1080:1920,boxblur=25:5[bg];"
@@ -525,7 +534,14 @@ async def render_vertical_moment(
                     f"[base][br]overlay=enable='between(t,{b_s},{b_e})':x=0:y=0{sub_clause}[outv]"
                 )
         else:
-            if style == "blur_bg":
+            if style == "split_screen":
+                vf = (
+                    "[0:v]split=2[in_top][in_bot];"
+                    "[in_top]crop=iw/2:ih:0:0,scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960[top];"
+                    "[in_bot]crop=iw/2:ih:iw/2:0,scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960[bot];"
+                    f"[top][bot]vstack=inputs=2,drawbox=x=0:y=958:w=1080:h=4:color=0x000000@0.8:t=fill{sub_clause}[outv]"
+                )
+            elif style == "blur_bg":
                 vf = (
                     "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,"
                     "crop=1080:1920,boxblur=25:5[bg];"
