@@ -3088,6 +3088,13 @@ function renderClipper() {
               <option value="none">Sin subtítulos quemados</option>
             </select>
           </div>
+          <div class="clipper-field" style="display:flex; flex-direction:column; justify-content:center;">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:600; margin-top:14px;">
+              <input type="checkbox" id="clipper-broll-toggle" checked style="width:16px; height:16px; accent-color:var(--accent);">
+              <span>🎥 Auto B-Roll Cutaway</span>
+            </label>
+            <span style="font-size:10.5px; color:var(--muted);">Pexels overlay anti-aburrimiento</span>
+          </div>
         </div>
       </div>
 
@@ -3143,9 +3150,10 @@ async function clipperRenderMoment(momentId) {
 
   const style = $('#clipper-style') ? $('#clipper-style').value : 'blur_bg';
   const subsStyle = $('#clipper-subs-style') ? $('#clipper-subs-style').value : 'hormozi';
+  const broll = $('#clipper-broll-toggle') ? $('#clipper-broll-toggle').checked : false;
 
   try {
-    toast(`Descargando, reencuadrando y aplicando subtítulos Karaoke a "${m.title}"…`);
+    toast(`Descargando, reencuadrando, insertando B-Roll y quemando Karaoke a "${m.title}"…`);
     const res = await api('/clipper/render', {
       method: 'POST',
       body: {
@@ -3155,7 +3163,8 @@ async function clipperRenderMoment(momentId) {
         title: m.title,
         style: style,
         subtitle_text: m.quote || '',
-        subtitle_style: subsStyle
+        subtitle_style: subsStyle,
+        broll: broll
       }
     });
 

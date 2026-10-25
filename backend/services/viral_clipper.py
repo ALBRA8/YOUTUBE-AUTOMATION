@@ -393,6 +393,8 @@ async def render_vertical_moment(
     style: str = "blur_bg",
     subtitle_text: str | None = None,
     subtitle_style: str = "none",
+    broll: bool = False,
+    broll_query: str | None = None,
     cookies: str | None = None
 ) -> dict:
     """Descarga el segmento exacto y lo reencuadra con FFmpeg a vertical 9:16 (1080x1920)."""
@@ -472,7 +474,29 @@ async def render_vertical_moment(
             except Exception as ex:
                 log.warning("[viral_clipper] Fallo al generar karaoke ASS: %s", ex)
 
-    # 3. Reencuadrar a 9:16 con FFmpeg y quemar subtítulos
+    # 3. Preparar clip de apoyo B-Roll si se solicita
+    broll_file = None
+    broll_interval = None
+    if broll:
+        try:
+            from services import broll_overlay
+            dur_m = max(1.0, end - start)
+            intervals = broll_overlay.plan_broll_intervals(dur_m, count=1, broll_duration=3.0)
+            if intervals:
+                broll_interval = intervals[0]
+                q = (broll_query or "").strip()
+                if not q:
+                    kws = await broll_overlay.extract_broll_keywords_ai(sub_text or title, max_keywords=1)
+                    q = kws[0] if kws else "modern dynamic"
+                broll_dest = TMP_DIR / f"{clip_id}_broll.mp4"
+                ok_br = await broll_overlay.prepare_broll_clip(q, duration=broll_interval["duration"], out_path=broll_dest)
+                if ok_br and broll_dest.is_file():
+                    broll_file = broll_dest
+                    log.info("[viral_clipper] B-Roll '%s' listo para [%.1fs - %.1fs]", q, broll_interval["start"], broll_interval["end"])
+        except Exception as ex:
+            log.warning("[viral_clipper] Omitiendo B-Roll por error: %s", ex)
+
+    # 4. Reencuadrar a 9:16 con FFmpeg, superponer B-Roll y quemar subtítulos en top layer
     def _ffmpeg_render():
         sub_clause = ""
         if ass_file and ass_file.is_file():
@@ -480,20 +504,38 @@ async def render_vertical_moment(
             esc_ass = str(ass_file).replace("\\", "/").replace(":", r"\:")
             sub_clause = f",subtitles='{esc_ass}'"
 
-        if style == "blur_bg":
-            vf = (
-                "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,"
-                "crop=1080:1920,boxblur=25:5[bg];"
-                "[0:v]scale=1080:1080:force_original_aspect_ratio=decrease[fg];"
-                f"[bg][fg]overlay=(W-w)/2:(H-h)/2{sub_clause}[outv]"
-            )
+        cmd = [ffmpeg, "-y", "-i", str(raw_dest)]
+        if broll_file and broll_file.is_file():
+            cmd.extend(["-i", str(broll_file)])
+            b_s = broll_interval["start"]
+            b_e = broll_interval["end"]
+            if style == "blur_bg":
+                vf = (
+                    "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,"
+                    "crop=1080:1920,boxblur=25:5[bg];"
+                    "[0:v]scale=1080:1080:force_original_aspect_ratio=decrease[fg];"
+                    "[bg][fg]overlay=(W-w)/2:(H-h)/2[base];"
+                    "[1:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[br];"
+                    f"[base][br]overlay=enable='between(t,{b_s},{b_e})':x=0:y=0{sub_clause}[outv]"
+                )
+            else:
+                vf = (
+                    "scale=ih*16/9:-1,crop=ih*9/16:ih,scale=1080:1920[base];"
+                    "[1:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[br];"
+                    f"[base][br]overlay=enable='between(t,{b_s},{b_e})':x=0:y=0{sub_clause}[outv]"
+                )
         else:
-            # Recorte centrado directo 9:16
-            vf = f"scale=ih*16/9:-1,crop=ih*9/16:ih,scale=1080:1920{sub_clause}[outv]"
+            if style == "blur_bg":
+                vf = (
+                    "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,"
+                    "crop=1080:1920,boxblur=25:5[bg];"
+                    "[0:v]scale=1080:1080:force_original_aspect_ratio=decrease[fg];"
+                    f"[bg][fg]overlay=(W-w)/2:(H-h)/2{sub_clause}[outv]"
+                )
+            else:
+                vf = f"scale=ih*16/9:-1,crop=ih*9/16:ih,scale=1080:1920{sub_clause}[outv]"
 
-        cmd = [
-            ffmpeg, "-y",
-            "-i", str(raw_dest),
+        cmd.extend([
             "-filter_complex", vf,
             "-map", "[outv]",
             "-map", "0:a?",
@@ -504,7 +546,7 @@ async def render_vertical_moment(
             "-b:a", "192k",
             "-movflags", "+faststart",
             str(final_dest)
-        ]
+        ])
         log.info("[viral_clipper] Renderizando vertical 9:16 con FFmpeg...")
         return subprocess.run(cmd, capture_output=True, text=True, timeout=180)
 
@@ -513,6 +555,8 @@ async def render_vertical_moment(
         raw_dest.unlink(missing_ok=True)
         if ass_file:
             ass_file.unlink(missing_ok=True)
+        if broll_file:
+            broll_file.unlink(missing_ok=True)
     except Exception:
         pass
 
@@ -531,5 +575,6 @@ async def render_vertical_moment(
         "duration": round(duration, 1),
         "format": "9:16",
         "style": style,
-        "subtitle_style": clean_sub_style
+        "subtitle_style": clean_sub_style,
+        "broll_overlay": bool(broll_file)
     }

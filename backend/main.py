@@ -2168,17 +2168,32 @@ async def clipper_render(body: dict):
     style = (body.get("style") or "blur_bg").strip()
     subtitle_text = (body.get("subtitle_text") or "").strip() or None
     subtitle_style = (body.get("subtitle_style") or "none").strip()
+    broll = bool(body.get("broll", False))
+    broll_query = (body.get("broll_query") or "").strip() or None
     cookies = (body.get("cookies") or "").strip() or None
     try:
         return await viral_clipper.render_vertical_moment(
             url, start=start, end=end, title=title, style=style,
             subtitle_text=subtitle_text, subtitle_style=subtitle_style,
+            broll=broll, broll_query=broll_query,
             cookies=cookies
         )
     except viral_clipper.ViralClipperError as e:
         raise HTTPException(400, f"[{e.code}] {e}") from e
     except Exception as e:
         raise HTTPException(500, f"Error al renderizar short vertical: {e}") from e
+
+
+@app.post("/api/clipper/suggest-broll")
+async def clipper_suggest_broll(body: dict):
+    """🎥 Sugiere palabras clave visuales para B-Roll de apoyo a partir del texto."""
+    text = (body.get("text") or "").strip()
+    try:
+        from services import broll_overlay
+        kws = await broll_overlay.extract_broll_keywords_ai(text, max_keywords=3)
+        return {"ok": True, "keywords": kws}
+    except Exception as e:
+        return {"ok": False, "keywords": ["modern cinematic", "technology dynamic"], "error": str(e)}
 
 
 @app.post("/api/clipper/create-project")

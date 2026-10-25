@@ -124,6 +124,8 @@ RENDER_CRF = int(os.getenv("RENDER_CRF", "20"))
 # ── NVIDIA NIM (Agente General · cerebros · OpenAI-compatible) ── ───────────────────────
 # kimi-k3: planificación del agente, entiende el proyecto y ejecuta acciones
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()
+PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "").strip()
+PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY", "").strip()
 NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "moonshotai/kimi-k3").strip()
 NVIDIA_BASE_URL = os.getenv(
     "NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").strip().rstrip("/")
@@ -211,9 +213,9 @@ def ffmpeg() -> str:
 EDITABLE_KEYS = (
     "GEMINI_API_KEY", "NVIDIA_API_KEY", "NVIDIA_MODEL", "TTS_PROVIDER",
     "EDGE_TTS_VOICE", "GEMINI_TTS_VOICE", "TTS_RATE", "WHISPER_MODEL",
-    "WHISPER_DEVICE", "FPS",
+    "WHISPER_DEVICE", "FPS", "PEXELS_API_KEY", "PIXABAY_API_KEY",
 )
-SECRET_KEYS = {"GEMINI_API_KEY", "NVIDIA_API_KEY"}
+SECRET_KEYS = {"GEMINI_API_KEY", "NVIDIA_API_KEY", "PEXELS_API_KEY", "PIXABAY_API_KEY"}
 
 
 def reload() -> None:
