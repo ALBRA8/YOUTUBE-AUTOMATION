@@ -2128,6 +2128,95 @@ async def mcp_capture_google_session():
         raise HTTPException(502, f"[{e.code}] {e}") from e
 
 
+# ─────────────────────────── VIRAL CLIPPER (INT-044) ──────────────────────
+# Inspirado en OpenShorts (mutonby/openshorts): Detección de momentos virales con
+# Virality Score (0-100), recorte 9:16 vertical con FFmpeg y conversión a proyectos.
+from services import viral_clipper  # noqa: E402
+
+
+@app.post("/api/clipper/analyze")
+async def clipper_analyze(body: dict):
+    """🔍 Analiza un video largo/podcast y detecta los mejores momentos virales con Virality Score."""
+    url = (body.get("url") or "").strip()
+    if not url:
+        raise HTTPException(400, "Se requiere una URL válida de video o podcast")
+    count = int(body.get("count", 5))
+    min_dur = int(body.get("min_duration", 20))
+    max_dur = int(body.get("max_duration", 65))
+    cookies = (body.get("cookies") or "").strip() or None
+    try:
+        return await viral_clipper.detect_viral_moments(
+            url, count=count, min_duration=min_dur, max_duration=max_dur, cookies=cookies
+        )
+    except viral_clipper.ViralClipperError as e:
+        raise HTTPException(400, f"[{e.code}] {e}") from e
+    except Exception as e:
+        raise HTTPException(500, f"Error al analizar video: {e}") from e
+
+
+@app.post("/api/clipper/render")
+async def clipper_render(body: dict):
+    """🎬 Recorta un fragmento exacto y lo reencuadra con FFmpeg a vertical 9:16 (blur_bg)."""
+    url = (body.get("url") or "").strip()
+    if not url:
+        raise HTTPException(400, "URL requerida")
+    start = float(body.get("start", 0))
+    end = float(body.get("end", 0))
+    if end <= start:
+        raise HTTPException(400, "El tiempo de fin debe ser mayor al de inicio")
+    title = (body.get("title") or "Short").strip()
+    style = (body.get("style") or "blur_bg").strip()
+    cookies = (body.get("cookies") or "").strip() or None
+    try:
+        return await viral_clipper.render_vertical_moment(
+            url, start=start, end=end, title=title, style=style, cookies=cookies
+        )
+    except viral_clipper.ViralClipperError as e:
+        raise HTTPException(400, f"[{e.code}] {e}") from e
+    except Exception as e:
+        raise HTTPException(500, f"Error al renderizar short vertical: {e}") from e
+
+
+@app.post("/api/clipper/create-project")
+async def clipper_create_project(body: dict):
+    """🗂️ Convierte un momento viral seleccionado en un proyecto listo para editar."""
+    title = (body.get("title") or "Short Viral").strip()[:100]
+    hook = (body.get("hook") or "").strip()
+    summary = (body.get("summary") or "").strip()
+    source_url = (body.get("url") or "").strip()
+    video_url = (body.get("video_url") or "").strip()
+    start = body.get("start")
+    end = body.get("end")
+
+    proj = db.create_project(
+        title=title,
+        mode="url",
+        format="short",
+        status="ready" if video_url else "draft",
+        source_url=source_url,
+        video_url=video_url,
+        niche="clips virales",
+        meta={
+            "hook": hook,
+            "summary": summary,
+            "clipper_start": start,
+            "clipper_end": end,
+            "source": "viral_clipper"
+        }
+    )
+    return {"ok": True, "project": proj}
+
+
+@app.get("/api/renders/{file_name}")
+async def get_rendered_file(file_name: str):
+    """Reproduce o descarga un video vertical renderizado."""
+    safe_name = Path(file_name).name
+    path = viral_clipper.RENDERS_DIR / safe_name
+    if not path.is_file():
+        raise HTTPException(404, "El video renderizado no existe")
+    return FileResponse(path, media_type="video/mp4", filename=safe_name)
+
+
 # ─────────────── Pipeline Orchestrator (INT-023) · NotebookLM → Agent → Flow ──
 # Coordina las 3 etapas con mcp_manager sin tocar agent.py ni script_gen
 # (regla del mandato: generación de prompts/blueprints INTACTA). Pre-flight

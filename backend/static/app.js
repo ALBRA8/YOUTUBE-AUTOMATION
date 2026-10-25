@@ -64,7 +64,7 @@ function nav(view) {
   const views = { home: renderHome, create: renderCreate, projects: renderProjects,
                   factory: renderFactory, publish: renderPublish, settings: renderSettings,
                   project: renderProject, agent: renderAgent, avatars: renderAvatars,
-                  trends: renderTrends, mcp: renderMCP };
+                  trends: renderTrends, mcp: renderMCP, clipper: renderClipper };
   (views[view] || renderHome)();
 }
 
@@ -2966,5 +2966,226 @@ async function applySelectedSubtitleStyle() {
     toast(`Estilo de subtítulo predeterminado guardado: ${name}`, 'ok');
   } catch (e) {
     toast('Error: ' + e.message, 'err');
+  }
+}
+
+
+/* ══ INT-044 · VIRAL CLIPPER (LONG-TO-SHORTS) ══════════════════════════════
+   Inspirado en OpenShorts: Transforma videos largos de YouTube en Shorts 9:16
+   con detección de momentos virales, Virality Score (0-100) y recorte FFmpeg. */
+let CLIPPER_STATE = {
+  url: '',
+  source: null,
+  moments: [],
+  loading: false,
+  renderingId: null
+};
+
+function renderClipper() {
+  const S_c = CLIPPER_STATE;
+  let resultsHTML = '';
+
+  if (S_c.loading) {
+    resultsHTML = `
+      <div class="card" style="text-align:center; padding:40px 20px;">
+        <div style="font-size:32px; animation:spin 1s infinite linear;">⏳</div>
+        <h3 style="margin:12px 0 6px;">Analizando video y transcribiendo timestamps…</h3>
+        <p class="hintline">El Estratega Viral de IA está evaluando el gancho de retención y calculando el Virality Score de cada momento.</p>
+      </div>`;
+  } else if (S_c.source && S_c.moments.length) {
+    const src = S_c.source;
+    resultsHTML = `
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:16px;">
+          <div>
+            <h3 style="margin:0;">🎬 Video origen: ${esc(src.title)}</h3>
+            <span class="hintline">Canal: <b>${esc(src.channel)}</b> · Duración: <b>${esc(src.duration_fmt)}</b> · <b>${S_c.moments.length} momentos virales</b> detectados</span>
+          </div>
+          <button class="btn ghost" onclick="clipperReset()">🔄 Analizar otro video</button>
+        </div>
+
+        <div class="clipper-moments-grid">
+          ${S_c.moments.map(m => {
+            const isRendering = S_c.renderingId === m.id;
+            const scoreClass = m.virality_score >= 90 ? 'score-ultra' : (m.virality_score >= 80 ? 'score-high' : 'score-good');
+            return `
+              <div class="clipper-moment-card" id="card-${m.id}">
+                <div class="clipper-card-header">
+                  <div class="clipper-card-title">#${m.rank} ${esc(m.title)}</div>
+                  <span class="clipper-score-badge ${scoreClass}">${m.virality_score}/100</span>
+                </div>
+                <div class="clipper-meta-bar">
+                  <span>⏱️ <b>${esc(m.start_fmt)} - ${esc(m.end_fmt)}</b> (${m.duration}s)</span>
+                  <span>🏷️ ${esc(m.category)}</span>
+                </div>
+                <div class="clipper-hook-box">
+                  <b>🎯 Hook Inicial:</b>
+                  ${esc(m.hook || m.summary)}
+                </div>
+                <div class="clipper-reason-box">
+                  💡 <b>Por qué engancha:</b> ${esc(m.reason)}
+                </div>
+                <div id="preview-${m.id}"></div>
+                <div class="clipper-card-actions">
+                  <button class="btn btn-primary" id="btn-render-${m.id}" onclick="clipperRenderMoment('${m.id}')" ${isRendering ? 'disabled' : ''}>
+                    ${isRendering ? '⏳ Cortando…' : '🎬 Cortar Short 9:16'}
+                  </button>
+                  <button class="btn ghost" onclick="clipperSaveProject('${m.id}')">🗂️ Guardar Proyecto</button>
+                </div>
+              </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+  }
+
+  $('#view').innerHTML = `
+    <div class="clipper-container">
+      <div class="clipper-hero">
+        <h2>✂️ Clipper Viral <span class="hint" style="color:var(--accent); font-weight:700;">Long-to-Shorts (OpenShorts Engine)</span></h2>
+        <p>Pega un enlace de YouTube de cualquier podcast, entrevista o video largo. La IA detectará los momentos con mayor probabilidad de volverse virales con su <b>Virality Score</b> y los recortará a formato vertical 9:16 con fondo difuminado en 1 clic.</p>
+      </div>
+
+      <div class="clipper-form-card">
+        <div class="clipper-input-row">
+          <input type="text" id="clipper-url-input" placeholder="https://www.youtube.com/watch?v=... o video largo" value="${esc(S_c.url)}" oninput="CLIPPER_STATE.url = this.value">
+          <button class="btn btn-primary" id="clipper-analyze-btn" onclick="clipperRunAnalysis()" ${S_c.loading ? 'disabled' : ''} style="font-weight:700; padding:10px 18px;">
+            ${S_c.loading ? '⏳ Analizando…' : '🔍 Detectar Momentos Virales'}
+          </button>
+        </div>
+
+        <div class="clipper-selects-row">
+          <div class="clipper-field">
+            <label for="clipper-count">Cantidad de momentos</label>
+            <select id="clipper-count">
+              <option value="3">3 momentos</option>
+              <option value="5" selected>5 momentos (Recomendado)</option>
+              <option value="8">8 momentos</option>
+              <option value="10">10 momentos</option>
+            </select>
+          </div>
+          <div class="clipper-field">
+            <label for="clipper-dur">Rango de duración</label>
+            <select id="clipper-dur">
+              <option value="20-65" selected>Short estándar (20s - 65s)</option>
+              <option value="15-35">Ultra rápido (15s - 35s)</option>
+              <option value="40-90">Extendido (40s - 90s)</option>
+            </select>
+          </div>
+          <div class="clipper-field">
+            <label for="clipper-style">Estilo de reencuadre 9:16</label>
+            <select id="clipper-style">
+              <option value="blur_bg" selected>Podcast con fondo difuminado (Recomendado)</option>
+              <option value="center_crop">Recorte centrado directo 9:16</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div id="clipper-results-zone">
+        ${resultsHTML}
+      </div>
+    </div>`;
+}
+
+async function clipperRunAnalysis() {
+  const urlEl = $('#clipper-url-input');
+  const url = (urlEl ? urlEl.value : CLIPPER_STATE.url).trim();
+  if (!url) { toast('Pega una URL válida de YouTube o podcast', 'err'); return; }
+
+  const count = parseInt($('#clipper-count') ? $('#clipper-count').value : '5', 10);
+  const durVal = ($('#clipper-dur') ? $('#clipper-dur').value : '20-65').split('-');
+  const minDur = parseInt(durVal[0], 10);
+  const maxDur = parseInt(durVal[1], 10);
+
+  CLIPPER_STATE.url = url;
+  CLIPPER_STATE.loading = true;
+  CLIPPER_STATE.source = null;
+  CLIPPER_STATE.moments = [];
+  renderClipper();
+
+  try {
+    const res = await api('/clipper/analyze', {
+      method: 'POST',
+      body: { url, count, min_duration: minDur, max_duration: maxDur }
+    });
+    CLIPPER_STATE.source = res.source;
+    CLIPPER_STATE.moments = res.moments || [];
+    toast(`¡Análisis completado! Se detectaron ${CLIPPER_STATE.moments.length} momentos virales 🎯`, 'ok');
+  } catch (e) {
+    toast('Error al analizar video: ' + e.message, 'err');
+  } finally {
+    CLIPPER_STATE.loading = false;
+    renderClipper();
+  }
+}
+
+function clipperReset() {
+  CLIPPER_STATE = { url: '', source: null, moments: [], loading: false, renderingId: null };
+  renderClipper();
+}
+
+async function clipperRenderMoment(momentId) {
+  const m = CLIPPER_STATE.moments.find(x => x.id === momentId);
+  if (!m) return;
+  const btn = $(`#btn-render-${momentId}`);
+  const previewZone = $(`#preview-${momentId}`);
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Cortando y exportando…'; }
+
+  const style = $('#clipper-style') ? $('#clipper-style').value : 'blur_bg';
+
+  try {
+    toast(`Descargando y reencuadrando "${m.title}" a vertical 9:16…`);
+    const res = await api('/clipper/render', {
+      method: 'POST',
+      body: {
+        url: CLIPPER_STATE.url,
+        start: m.start,
+        end: m.end,
+        title: m.title,
+        style: style
+      }
+    });
+
+    toast(`¡Short 9:16 generado con éxito! 🎬`, 'ok');
+    m.video_url = res.url;
+    m.file_name = res.file_name;
+
+    if (previewZone) {
+      previewZone.innerHTML = `
+        <div class="clipper-video-preview">
+          <video controls autoplay muted src="${esc(res.url)}"></video>
+          <div style="display:flex; justify-content:space-between; width:100%; margin-top:6px; font-size:11.5px;">
+            <a href="${esc(res.url)}" download="${esc(res.file_name)}" class="btn" style="padding:4px 10px; font-size:11px;">⬇️ Descargar MP4</a>
+            <span style="color:var(--muted); align-self:center;">Vertical 9:16 (${res.duration}s)</span>
+          </div>
+        </div>`;
+    }
+  } catch (e) {
+    toast('Error al renderizar momento: ' + e.message, 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🎬 Recortar de nuevo'; }
+  }
+}
+
+async function clipperSaveProject(momentId) {
+  const m = CLIPPER_STATE.moments.find(x => x.id === momentId);
+  if (!m) return;
+  try {
+    const res = await api('/clipper/create-project', {
+      method: 'POST',
+      body: {
+        title: m.title,
+        hook: m.hook,
+        summary: m.summary,
+        url: CLIPPER_STATE.url,
+        video_url: m.video_url || '',
+        start: m.start,
+        end: m.end
+      }
+    });
+    toast('¡Proyecto guardado en tu biblioteca! 🗂️', 'ok');
+    await refreshAll();
+  } catch (e) {
+    toast('Error al guardar proyecto: ' + e.message, 'err');
   }
 }
