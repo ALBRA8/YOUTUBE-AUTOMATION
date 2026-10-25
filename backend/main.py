@@ -2166,10 +2166,14 @@ async def clipper_render(body: dict):
         raise HTTPException(400, "El tiempo de fin debe ser mayor al de inicio")
     title = (body.get("title") or "Short").strip()
     style = (body.get("style") or "blur_bg").strip()
+    subtitle_text = (body.get("subtitle_text") or "").strip() or None
+    subtitle_style = (body.get("subtitle_style") or "none").strip()
     cookies = (body.get("cookies") or "").strip() or None
     try:
         return await viral_clipper.render_vertical_moment(
-            url, start=start, end=end, title=title, style=style, cookies=cookies
+            url, start=start, end=end, title=title, style=style,
+            subtitle_text=subtitle_text, subtitle_style=subtitle_style,
+            cookies=cookies
         )
     except viral_clipper.ViralClipperError as e:
         raise HTTPException(400, f"[{e.code}] {e}") from e

@@ -391,6 +391,8 @@ async def render_vertical_moment(
     end: float,
     title: str = "Short",
     style: str = "blur_bg",
+    subtitle_text: str | None = None,
+    subtitle_style: str = "none",
     cookies: str | None = None
 ) -> dict:
     """Descarga el segmento exacto y lo reencuadra con FFmpeg a vertical 9:16 (1080x1920)."""
@@ -441,20 +443,53 @@ async def render_vertical_moment(
         if res_full.returncode != 0 or not raw_dest.exists():
             raise ViralClipperError("No se pudo descargar el fragmento del video original", "DOWNLOAD_FAILED")
 
-    # 2. Reencuadrar a 9:16 con FFmpeg
+    # 2. Preparar subtítulos Karaoke ASS si se solicita estilo
+    ass_file = None
+    clean_sub_style = (subtitle_style or "none").strip().lower()
+    if clean_sub_style not in ("none", "off", "no"):
+        sub_text = (subtitle_text or "").strip()
+        if not sub_text:
+            try:
+                from services import whisper_service
+                if whisper_service.available():
+                    res_tr = whisper_service.transcribe_file(str(raw_dest))
+                    sub_text = res_tr.get("text", "")
+            except Exception as ex:
+                log.debug("[viral_clipper] Auto-transcripción Whisper omitida: %s", ex)
+
+        if sub_text:
+            try:
+                from services import karaoke_subtitles
+                dur = max(1.0, end - start)
+                ass_content = karaoke_subtitles.build_ass_from_scenes(
+                    [{"duration_sec": dur, "subtitle_text": sub_text}],
+                    style_name=clean_sub_style,
+                    resolution="1080x1920"
+                )
+                ass_file = TMP_DIR / f"{clip_id}_captions.ass"
+                ass_file.write_text(ass_content, encoding="utf-8")
+                log.info("[viral_clipper] Generado karaoke ASS (%s) para el momento", clean_sub_style)
+            except Exception as ex:
+                log.warning("[viral_clipper] Fallo al generar karaoke ASS: %s", ex)
+
+    # 3. Reencuadrar a 9:16 con FFmpeg y quemar subtítulos
     def _ffmpeg_render():
-        # Filtro podcast con fondo desenfocado (blur_bg):
-        # Escala y desenfoca fondo a 1080x1920 y centra el video original nítido
+        sub_clause = ""
+        if ass_file and ass_file.is_file():
+            # Escapar ruta para filtro libass de ffmpeg
+            esc_ass = str(ass_file).replace("\\", "/").replace(":", r"\:")
+            sub_clause = f",subtitles='{esc_ass}'"
+
         if style == "blur_bg":
             vf = (
                 "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,"
                 "crop=1080:1920,boxblur=25:5[bg];"
                 "[0:v]scale=1080:1080:force_original_aspect_ratio=decrease[fg];"
-                "[bg][fg]overlay=(W-w)/2:(H-h)/2[outv]"
+                f"[bg][fg]overlay=(W-w)/2:(H-h)/2{sub_clause}[outv]"
             )
         else:
             # Recorte centrado directo 9:16
-            vf = "scale=ih*16/9:-1,crop=ih*9/16:ih,scale=1080:1920[outv]"
+            vf = f"scale=ih*16/9:-1,crop=ih*9/16:ih,scale=1080:1920{sub_clause}[outv]"
 
         cmd = [
             ffmpeg, "-y",
@@ -476,6 +511,8 @@ async def render_vertical_moment(
     res_ff = await asyncio.to_thread(_ffmpeg_render)
     try:
         raw_dest.unlink(missing_ok=True)
+        if ass_file:
+            ass_file.unlink(missing_ok=True)
     except Exception:
         pass
 
@@ -493,5 +530,6 @@ async def render_vertical_moment(
         "file_size": file_size,
         "duration": round(duration, 1),
         "format": "9:16",
-        "style": style
+        "style": style,
+        "subtitle_style": clean_sub_style
     }

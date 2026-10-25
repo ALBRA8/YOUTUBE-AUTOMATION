@@ -358,11 +358,21 @@ def plan_render(manifest: dict, run_dir: Path, music_path: str = "",
     # 4) subtítulos burn → soft → off
     final = run_dir / FINAL_NAME
     srt_path = None
+    ass_path = None
     if subs_mode in ("burn", "soft"):
         srt_path = write_srt(run_dir, usable)
+        style_name = str(manifest.get("subtitle_style") or _cfg("SUBTITLE_STYLE", "")).strip().lower()
+        if style_name and style_name not in ("srt", "classic", "none", "off"):
+            try:
+                from services import karaoke_subtitles
+                res_str = str(manifest.get("resolution") or "1080x1920")
+                ass_path = karaoke_subtitles.write_ass(run_dir, usable, style_name=style_name, resolution=res_str)
+            except Exception as ex:
+                log.debug("[video_assembler] karaoke ass fallback a srt: %s", ex)
     if subs_mode == "burn" and has_filter("subtitles"):
-        steps.append({"stage": "subtitles", "desc": "quema .srt (libass)",
-                      "cmd": build_burn_cmd(current, srt_path, final)["cmd"]})
+        cap_file = ass_path if (ass_path and ass_path.is_file()) else srt_path
+        steps.append({"stage": "subtitles", "desc": f"quema {cap_file.name} (libass)",
+                      "cmd": build_burn_cmd(current, cap_file, final)["cmd"]})
     elif subs_mode in ("burn", "soft"):
         steps.append({"stage": "subtitles", "desc": "mux .srt soft (mov_text)",
                       "cmd": build_soft_cmd(current, srt_path, final)["cmd"]})

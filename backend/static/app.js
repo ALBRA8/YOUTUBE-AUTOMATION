@@ -3078,6 +3078,16 @@ function renderClipper() {
               <option value="center_crop">Recorte centrado directo 9:16</option>
             </select>
           </div>
+          <div class="clipper-field">
+            <label for="clipper-subs-style">Subtítulos Karaoke Dinámicos</label>
+            <select id="clipper-subs-style">
+              <option value="hormozi" selected>🔥 Hormozi Pop (Amarillo Impacto)</option>
+              <option value="mrbeast">⚡ MrBeast Neon (Verde Eléctrico)</option>
+              <option value="cyberpunk">👾 Cyberpunk Glitch (Magenta Neon)</option>
+              <option value="minimal">✨ Clean Minimal (Blanco Suave)</option>
+              <option value="none">Sin subtítulos quemados</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -3132,9 +3142,10 @@ async function clipperRenderMoment(momentId) {
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Cortando y exportando…'; }
 
   const style = $('#clipper-style') ? $('#clipper-style').value : 'blur_bg';
+  const subsStyle = $('#clipper-subs-style') ? $('#clipper-subs-style').value : 'hormozi';
 
   try {
-    toast(`Descargando y reencuadrando "${m.title}" a vertical 9:16…`);
+    toast(`Descargando, reencuadrando y aplicando subtítulos Karaoke a "${m.title}"…`);
     const res = await api('/clipper/render', {
       method: 'POST',
       body: {
@@ -3142,7 +3153,9 @@ async function clipperRenderMoment(momentId) {
         start: m.start,
         end: m.end,
         title: m.title,
-        style: style
+        style: style,
+        subtitle_text: m.quote || '',
+        subtitle_style: subsStyle
       }
     });
 

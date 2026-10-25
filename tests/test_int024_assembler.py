@@ -345,7 +345,7 @@ def s4_ffmpeg_construction(tmp: Path):
     check("S4 s1: -t exacto = duration_sec del manifest",
           f"-t {manifest['scenes'][0]['duration_sec']:.3f}" in c1)
     check("S4 s1: salida determinista norm/scene_001.mp4",
-          "norm/scene_001.mp4" in c1)
+          "norm/scene_001.mp4" in c1 or "norm\\scene_001.mp4" in c1)
     c2 = " ".join(sc_cmds[1]["cmd"])
     check("S4 s2 imagen → zoompan Ken Burns con frames=target*fps",
           "zoompan=" in c2 and "min(zoom+0.0015,1.15)" in c2
