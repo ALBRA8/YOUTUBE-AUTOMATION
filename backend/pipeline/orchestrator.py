@@ -593,7 +593,7 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
             if project["mode"] == "script" and meta.get("script_text"):
                 raw = await script_gen.from_script(
                     meta["script_text"], project["style"], project["format"],
-                    meta.get("custom_style_prompt"), avatar)
+                    meta.get("custom_style_prompt"), avatar, pacing=meta.get("pacing", "normal"))
             elif project["mode"] == "url" and viral_ctx:
                 raw = await script_gen.from_url_transcript(
                     viral_ctx["metadata"], viral_ctx["transcript"],
@@ -602,12 +602,12 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
             elif project["mode"] == "audio" and meta.get("audio_text"):
                 raw = await script_gen.from_audio_transcript(
                     meta["audio_text"], project["style"], project["format"],
-                    meta.get("custom_style_prompt"), avatar)
+                    meta.get("custom_style_prompt"), avatar, pacing=meta.get("pacing", "normal"))
             else:
                 await _emit(job_id, project_id, "scripting", 10, "Generando guion viral…")
                 raw = await script_gen.from_idea(
                     meta.get("idea") or project["title"], project["style"],
-                    project["format"], meta.get("custom_style_prompt"), avatar)
+                    project["format"], meta.get("custom_style_prompt"), avatar, pacing=meta.get("pacing", "normal"))
 
             result = script_gen.build_result(raw)
             if not result["scenes"]:

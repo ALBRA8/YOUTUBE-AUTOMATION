@@ -174,7 +174,7 @@ const W = { step: 1, mode: 'idea', format: 'short', style: 'auto',
             title: '', idea: '', script: '', url: '', custom: '', voice: '', tts: '',
             avatar: '', platforms: ['youtube', 'tiktok'],
             transitions: true, styleReference: true, subtitles: 'shorts', brandProfile: '',
-            cookies: '', nicho: '', nichoAdjust: '' };
+            cookies: '', nicho: '', nichoAdjust: '', pacing: 'normal' };
 
 function renderCreate() {
   const modes = [
@@ -266,6 +266,30 @@ function renderCreate() {
       ? `<div class="field"><label>🔗 URL del video viral (TikTok / YouTube)</label><input type="text" value="${esc(W.url)}" oninput="W.url=this.value" placeholder="https://www.tiktok.com/@user/video/..."><small style="color:var(--muted);display:block;margin-top:6px">Analizamos su estructura y creamos una versión 100% original. No copiamos contenido.</small></div>`
       : `<div class="field"><label>🎙️ Grabación de voz (mp3/wav/m4a)</label><input type="file" id="audio-file" accept="audio/*"></div>`;
     body = formatPills + f + `
+      <div class="field" style="margin-bottom:20px; background:rgba(255,255,255,0.02); padding:14px; border-radius:12px; border:1px solid var(--border);">
+        <label style="font-size:13px; font-weight:700; margin-bottom:8px; display:block;">⏱️ Ritmo de cortes visuales</label>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px;">
+          <div class="card" onclick="W.pacing='fast';renderCreate()" style="cursor:pointer; padding:10px 12px; text-align:center; border-radius:10px; border:2px solid ${W.pacing==='fast' ? 'var(--accent)' : 'rgba(255,255,255,0.08)'}; background:${W.pacing==='fast' ? 'rgba(16,185,129,0.1)' : 'transparent'};">
+            <b style="display:block; font-size:13px;">⚡ Rápido</b>
+            <span style="color:var(--muted); font-size:11px; display:block;">~2.5s / imagen</span>
+            <small style="color:var(--accent); font-size:9.5px; font-weight:700;">TikTok / Shorts Viral</small>
+          </div>
+          <div class="card" onclick="W.pacing='normal';renderCreate()" style="cursor:pointer; padding:10px 12px; text-align:center; border-radius:10px; border:2px solid ${(W.pacing==='normal'||!W.pacing) ? 'var(--accent)' : 'rgba(255,255,255,0.08)'}; background:${(W.pacing==='normal'||!W.pacing) ? 'rgba(16,185,129,0.1)' : 'transparent'};">
+            <b style="display:block; font-size:13px;">⏱️ Normal</b>
+            <span style="color:var(--muted); font-size:11px; display:block;">~4.0s / imagen</span>
+            <small style="color:var(--muted); font-size:9.5px;">Recomendado</small>
+          </div>
+          <div class="card" onclick="W.pacing='slow';renderCreate()" style="cursor:pointer; padding:10px 12px; text-align:center; border-radius:10px; border:2px solid ${W.pacing==='slow' ? 'var(--accent)' : 'rgba(255,255,255,0.08)'}; background:${W.pacing==='slow' ? 'rgba(16,185,129,0.1)' : 'transparent'};">
+            <b style="display:block; font-size:13px;">🧘 Pausado</b>
+            <span style="color:var(--muted); font-size:11px; display:block;">~6.0s / imagen</span>
+            <small style="color:var(--muted); font-size:9.5px;">Documental / Historia</small>
+          </div>
+        </div>
+        <div style="margin-top:8px; font-size:11px; color:var(--muted); display:flex; justify-content:space-between;">
+          <span>El ritmo controla cuándo cambia el plano visual sin alterar la voz.</span>
+          <span style="color:var(--accent); font-weight:700;">$0.00 Ilimitado</span>
+        </div>
+      </div>
       <div class="row">
         <div class="field"><label>🎭 Avatar (personaje consistente)</label>
           <select onchange="W.avatar=this.value">
@@ -440,7 +464,7 @@ async function createProject() {
   }
 
   try {
-    const body = { mode: W.mode, style: W.style, format: W.format,
+    const body = { mode: W.mode, style: W.style, format: W.format, pacing: W.pacing || 'normal',
                    title: W.title || null, voice: W.voice || null,
                    tts_provider: W.tts || null,
                    avatar_id: W.avatar || null,

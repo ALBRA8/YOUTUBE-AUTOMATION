@@ -888,7 +888,7 @@ async def create_project(body: dict):
                 auto_start_override=body.get("auto_start"))
         except ValueError as e:
             raise HTTPException(400, str(e))
-    meta = {}
+    meta = {"pacing": (body.get("pacing") or "normal").strip().lower()}
     title = (body.get("title") or "Nuevo proyecto")[:60]
     if mode == "script":
         script = (body.get("script") or "").strip()

@@ -251,6 +251,19 @@ def _local_fallback(kind: str, seed: str, style_id: str, fmt: str,
     }
 
 
+def resolve_scene_count(fmt: str, pacing: str = "normal") -> int:
+    """Calcula el número de escenas según el ritmo de cortes (Labsia Pacing Controller)."""
+    p = str(pacing or "normal").strip().lower()
+    if p in ("fast", "rapido", "rápido"):
+        # ~2.5s por imagen (ultra-dinámico para TikTok / Shorts)
+        return 16 if fmt == "short" else 36
+    elif p in ("slow", "pausado", "lento"):
+        # ~6.0s por imagen (documental / narración relajada)
+        return 7 if fmt == "short" else 16
+    else:
+        # ~4.0s por imagen (ritmo normal equilibrado)
+        return 10 if fmt == "short" else 24
+
 def _smart_title(tema: str) -> str:
     """Capitaliza el título del proyecto respetando mayúsculas propias del usuario.
 
@@ -276,7 +289,8 @@ SYSTEM = (
 
 def _base_instructions(style_prompt: str, n_scenes: int, fmt: str,
                        custom_prompt: str | None = None,
-                       avatar: dict | None = None) -> str:
+                       avatar: dict | None = None,
+                       pacing: str = "normal") -> str:
     dur = "30-50 segundos" if fmt == "short" else "2-4 minutos"
     effective = (custom_prompt or style_prompt or "").strip()
     if effective:
@@ -302,12 +316,13 @@ def _base_instructions(style_prompt: str, n_scenes: int, fmt: str,
 
 async def from_script(script_text: str, style_id: str, fmt: str,
                       custom_prompt: str | None = None,
-                      avatar: dict | None = None) -> dict:
+                      avatar: dict | None = None,
+                      pacing: str = "normal") -> dict:
     if not gemini_client.available():
         return _local_fallback("script", script_text, style_id, fmt, custom_prompt)
     try:
         style = get_style(style_id)
-        n = 6 if fmt == "short" else 12
+        n = resolve_scene_count(fmt, pacing)
         prompt = (
             "Convierte el siguiente guion en un guion escena por escena para video viral. "
             + _base_instructions(style["prompt"], n, fmt, custom_prompt, avatar)
@@ -322,12 +337,13 @@ async def from_script(script_text: str, style_id: str, fmt: str,
 
 async def from_idea(idea: str, style_id: str, fmt: str,
                     custom_prompt: str | None = None,
-                    avatar: dict | None = None) -> dict:
+                    avatar: dict | None = None,
+                    pacing: str = "normal") -> dict:
     if not gemini_client.available():
         return _local_fallback("idea", idea, style_id, fmt, custom_prompt)
     try:
         style = get_style(style_id)
-        n = 6 if fmt == "short" else 12
+        n = resolve_scene_count(fmt, pacing)
         prompt = (
             f"Crea desde cero un guion viral a partir de esta idea: «{idea}». "
             + _base_instructions(style["prompt"], n, fmt, custom_prompt, avatar)
@@ -349,7 +365,8 @@ def _narration_text(result: dict) -> str:
 
 async def from_url_transcript(viral_meta: dict, transcript: str, style_id: str,
                               fmt: str, custom_prompt: str | None = None,
-                              avatar: dict | None = None) -> dict:
+                              avatar: dict | None = None,
+                              pacing: str = "normal") -> dict:
     """Killer feature: recrear la ESTRUCTURA ganadora del viral con contenido
     original — "similar pero NO igual", y AHORA VERIFICABLE: se mide el
     solape de 5-gramas del guion contra la transcripción y, si supera el
@@ -388,7 +405,7 @@ async def from_url_transcript(viral_meta: dict, transcript: str, style_id: str,
         )
 
     style = get_style(style_id)
-    n = 6 if fmt == "short" else 12
+    n = resolve_scene_count(fmt, pacing)
     try:
         raw = await gemini_client.generate_json(_prompt(False),
                                                 gemini_client.schema_scenes(),
@@ -419,13 +436,14 @@ async def from_url_transcript(viral_meta: dict, transcript: str, style_id: str,
 
 async def from_audio_transcript(transcript: str, style_id: str, fmt: str,
                                 custom_prompt: str | None = None,
-                                avatar: dict | None = None) -> dict:
+                                avatar: dict | None = None,
+                                pacing: str = "normal") -> dict:
     """El usuario grabó su voz (modo Audio): pulimos y estructuramos su narración."""
     if not gemini_client.available():
         return _local_fallback("audio", transcript, style_id, fmt, custom_prompt)
     try:
         style = get_style(style_id)
-        n = 6 if fmt == "short" else 12
+        n = resolve_scene_count(fmt, pacing)
         prompt = (
             "La siguiente transcripción es la narración hablada por el propio creador. "
             "Respeta su contenido y estilo personal: solo divídela en escenas y genera los "
