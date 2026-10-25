@@ -810,7 +810,8 @@ class MCPClientManager:
                     "--no-first-run", "--no-default-browser-check",
                     "--disable-session-crashed-bubble",
                     "--hide-crash-restore-bubble",
-                    "--disable-features=SessionCrashedBubble"]
+                    "--disable-features=SessionCrashedBubble",
+                    "--disable-blink-features=AutomationControlled"]
             if cdp:
                 argv.insert(2, f"--remote-debugging-port={port}")
             argv += pages
