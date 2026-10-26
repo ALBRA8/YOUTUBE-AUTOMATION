@@ -521,7 +521,16 @@ async def render_vertical_moment(
             cmd.extend(["-i", str(broll_file)])
             b_s = broll_interval["start"]
             b_e = broll_interval["end"]
-            if style == "speaker_switch":
+            if style == "face_tracking":
+                from services import face_tracker
+                traj = face_tracker.track_face_trajectory(raw_dest)
+                ft_filter = face_tracker.build_face_tracking_filter(traj)
+                vf = (
+                    f"[0:v]{ft_filter}[base];"
+                    "[1:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[br];"
+                    f"[base][br]overlay=enable='between(t,{b_s},{b_e})':x=0:y=0{sub_clause}{pb_clause}[outv]"
+                )
+            elif style == "speaker_switch":
                 from services import speaker_switcher
                 turns = speaker_switcher.detect_speaker_turns(None, total_duration=max(1.0, end - start))
                 sw_filter = speaker_switcher.build_speaker_switch_filter(turns)
@@ -555,7 +564,12 @@ async def render_vertical_moment(
                     f"[base][br]overlay=enable='between(t,{b_s},{b_e})':x=0:y=0{sub_clause}{pb_clause}[outv]"
                 )
         else:
-            if style == "speaker_switch":
+            if style == "face_tracking":
+                from services import face_tracker
+                traj = face_tracker.track_face_trajectory(raw_dest)
+                ft_filter = face_tracker.build_face_tracking_filter(traj)
+                vf = f"[0:v]{ft_filter}{sub_clause}{pb_clause}[outv]"
+            elif style == "speaker_switch":
                 from services import speaker_switcher
                 turns = speaker_switcher.detect_speaker_turns(None, total_duration=max(1.0, end - start))
                 sw_filter = speaker_switcher.build_speaker_switch_filter(turns)
