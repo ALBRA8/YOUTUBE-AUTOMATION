@@ -100,3 +100,4 @@ backend/data/google_profile_global/
 
 # Scratch temporary files
 scratch/
+backend/static/assets/
