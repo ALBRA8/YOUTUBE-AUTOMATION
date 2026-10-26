@@ -3385,23 +3385,72 @@ function renderClipper() {
           ${S_c.moments.map(m => {
             const isRendering = S_c.renderingId === m.id;
             const scoreClass = m.virality_score >= 90 ? 'score-ultra' : (m.virality_score >= 80 ? 'score-high' : 'score-good');
+            const hookS = m.hook_score || m.virality_score;
+            const flowS = m.flow_score || Math.max(60, m.virality_score - 2);
+            const valS = m.value_score || m.virality_score;
+            const tags = m.hashtags || ['#viral', '#podcast', '#shorts'];
+
             return `
               <div class="clipper-moment-card" id="card-${m.id}">
                 <div class="clipper-card-header">
                   <div class="clipper-card-title">#${m.rank} ${esc(m.title)}</div>
-                  <span class="clipper-score-badge ${scoreClass}">${m.virality_score}/100</span>
+                  <span class="clipper-score-badge ${scoreClass}">🔥 ${m.virality_score}/100</span>
                 </div>
-                <div class="clipper-meta-bar">
-                  <span>⏱️ <b>${esc(m.start_fmt)} - ${esc(m.end_fmt)}</b> (${m.duration}s)</span>
-                  <span>🏷️ ${esc(m.category)}</span>
+
+                <!-- INT-057: Matriz de 3 Pilares OpusClip -->
+                <div class="clipper-score-pillars">
+                  <div class="clipper-pillar-item">
+                    <span>🎯 Hook</span>
+                    <b>${hookS}%</b>
+                  </div>
+                  <div class="clipper-pillar-item">
+                    <span>📈 Ritmo</span>
+                    <b>${flowS}%</b>
+                  </div>
+                  <div class="clipper-pillar-item">
+                    <span>💡 Valor</span>
+                    <b>${valS}%</b>
+                  </div>
                 </div>
+
+                <!-- INT-057: Ajustador Fino de Tiempos (Trim +/-2s estilo Klap) -->
+                <div class="clipper-trim-bar">
+                  <div>
+                    <span style="color:var(--muted); font-size:10.5px; display:block;">Inicio:</span>
+                    <button type="button" class="clipper-trim-btn" onclick="clipperAdjustStart('${m.id}', -2)">-2s</button>
+                    <b id="start-disp-${m.id}" style="color:var(--text); margin:0 4px;">${esc(m.start_fmt)}</b>
+                    <button type="button" class="clipper-trim-btn" onclick="clipperAdjustStart('${m.id}', 2)">+2s</button>
+                  </div>
+                  <div style="text-align:center;">
+                    <span style="color:var(--muted); font-size:10.5px; display:block;">Duración:</span>
+                    <b id="dur-disp-${m.id}" style="color:var(--accent); font-size:12.5px;">${m.duration}s</b>
+                  </div>
+                  <div>
+                    <span style="color:var(--muted); font-size:10.5px; display:block;">Fin:</span>
+                    <button type="button" class="clipper-trim-btn" onclick="clipperAdjustEnd('${m.id}', -2)">-2s</button>
+                    <b id="end-disp-${m.id}" style="color:var(--text); margin:0 4px;">${esc(m.end_fmt)}</b>
+                    <button type="button" class="clipper-trim-btn" onclick="clipperAdjustEnd('${m.id}', 2)">+2s</button>
+                  </div>
+                </div>
+
                 <div class="clipper-hook-box">
                   <b>🎯 Hook Inicial:</b>
                   ${esc(m.hook || m.summary)}
                 </div>
+
                 <div class="clipper-reason-box">
                   💡 <b>Por qué engancha:</b> ${esc(m.reason)}
                 </div>
+
+                <!-- INT-057: Consejo Táctico y Hashtags Virales -->
+                <div class="clipper-advice-box">
+                  🚀 <b>Estrategia:</b> ${esc(m.viral_advice || 'Publicar en horas pico de TikTok con subtítulos llamativos.')}
+                </div>
+
+                <div>
+                  ${tags.map(t => `<span class="clipper-tag-pill" onclick="navigator.clipboard.writeText('${t}');toast('Copiado: ${t}')">${t}</span>`).join('')}
+                </div>
+
                 <div id="preview-${m.id}"></div>
                 <div class="clipper-card-actions">
                   <button class="btn btn-primary" id="btn-render-${m.id}" onclick="clipperRenderMoment('${m.id}')" ${isRendering ? 'disabled' : ''}>
@@ -3529,6 +3578,45 @@ async function clipperRunAnalysis() {
     renderClipper();
   }
 }
+
+function clipperFormatTs(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+}
+
+function clipperAdjustStart(momentId, delta) {
+  const m = CLIPPER_STATE.moments.find(x => x.id === momentId);
+  if (!m) return;
+  const newStart = Math.max(0, Math.round((m.start + delta) * 10) / 10);
+  if (m.end - newStart < 5.0) {
+    toast('La duración mínima de clip es de 5 segundos', 'err');
+    return;
+  }
+  m.start = newStart;
+  m.duration = Math.round((m.end - m.start) * 10) / 10;
+  m.start_fmt = clipperFormatTs(m.start);
+  const startEl = $(`#start-disp-${momentId}`);
+  const durEl = $(`#dur-disp-${momentId}`);
+  if (startEl) startEl.textContent = m.start_fmt;
+  if (durEl) durEl.textContent = `${m.duration}s`;
+}
+
+function clipperAdjustEnd(momentId, delta) {
+  const m = CLIPPER_STATE.moments.find(x => x.id === momentId);
+  if (!m) return;
+  const newEnd = Math.max(m.start + 5.0, Math.round((m.end + delta) * 10) / 10);
+  m.end = newEnd;
+  m.duration = Math.round((m.end - m.start) * 10) / 10;
+  m.end_fmt = clipperFormatTs(m.end);
+  const endEl = $(`#end-disp-${momentId}`);
+  const durEl = $(`#dur-disp-${momentId}`);
+  if (endEl) endEl.textContent = m.end_fmt;
+  if (durEl) durEl.textContent = `${m.duration}s`;
+}
+
+window.clipperAdjustStart = clipperAdjustStart;
+window.clipperAdjustEnd = clipperAdjustEnd;
 
 function clipperReset() {
   CLIPPER_STATE = { url: '', source: null, moments: [], loading: false, renderingId: null };

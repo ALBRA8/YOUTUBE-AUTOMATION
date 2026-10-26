@@ -247,6 +247,11 @@ def _fallback_heuristics(segments: list[dict], count: int = 5, min_dur: int = 20
         tier = "ULTRA VIRAL 🔥" if score >= 90 else "ALTO IMPACTO 🚀"
         text_snip = s.get("text", "")[:90]
         hook = text_snip.split(".")[0] if "." in text_snip else text_snip
+        h_score = max(70, min(99, score + (2 if idx % 2 == 0 else -3)))
+        f_score = max(68, min(98, score - 1))
+        v_score = max(72, min(99, score + (1 if idx % 2 == 1 else 0)))
+        advice = "Publicar con gancho visual en los primeros 3s; ideal para Shorts y TikTok." if score >= 90 else "Sugerido: subtítulos Hormozi y emojis dinámicos para sostener el ritmo."
+        tags = ["#viral", "#podcast", "#shorts", "#tendencia"]
         moments.append({
             "id": f"moment_{idx+1}",
             "rank": idx + 1,
@@ -258,6 +263,11 @@ def _fallback_heuristics(segments: list[dict], count: int = 5, min_dur: int = 20
             "duration": dur,
             "virality_score": score,
             "virality_tier": tier,
+            "hook_score": h_score,
+            "flow_score": f_score,
+            "value_score": v_score,
+            "viral_advice": advice,
+            "hashtags": tags,
             "hook": f"«{hook}»",
             "summary": s.get("text", "")[:200],
             "reason": "Segmento de alta densidad narrativa con ritmo dinámico ideal para Shorts.",
@@ -291,10 +301,13 @@ CRITERIOS DE SELECCIÓN OBLIGATORIOS:
 1. Hook Test (3 primeros segundos): El momento DEBE abrir con una frase impactante, pregunta intrigante o afirmación provocadora.
 2. Historia Autocontenida: El espectador debe entender la anécdota, lección o revelación completa sin haber visto el resto del video.
 3. Duración: Cada clip debe durar entre {min_duration} y {max_duration} segundos.
-4. Virality Score (0 a 100):
-   - 90-100: Impacto extremo, genera discusión o revelación sorprendente.
-   - 80-89: Alto valor educativo, emoción o curiosidad.
-   - 70-79: Entretenido y fluido.
+4. Virality Score y Métricas (0 a 100):
+   - virality_score: 0-100 general
+   - hook_score: 0-100 fuerza de los primeros 3 segundos
+   - flow_score: 0-100 ritmo y retención continua
+   - value_score: 0-100 impacto del mensaje o revelación
+   - viral_advice: consejo táctico para publicación (1 frase)
+   - hashtags: lista de 3 a 5 hashtags recomendados
 
 TRANSCRIPCIÓN CON TIMESTAMPS:
 {transcript_text}
@@ -308,6 +321,11 @@ Responde ÚNICAMENTE en formato JSON válido con la siguiente estructura:
       "start": 124.5,
       "end": 169.0,
       "virality_score": 96,
+      "hook_score": 95,
+      "flow_score": 92,
+      "value_score": 97,
+      "viral_advice": "Publicar con gancho directo y subtítulos Hormozi para maximizar retención.",
+      "hashtags": ["#podcast", "#viral", "#shorts", "#crecimiento"],
       "hook": "La frase exacta con la que arranca el momento",
       "summary": "Resumen conciso del contenido del clip",
       "reason": "Explicación de por qué este momento retendrá audiencia en Shorts",
@@ -356,6 +374,14 @@ Responde ÚNICAMENTE en formato JSON válido con la siguiente estructura:
         score = int(m.get("virality_score", 85))
         score = max(50, min(100, score))
         tier = "ULTRA VIRAL 🔥" if score >= 90 else ("ALTO IMPACTO 🚀" if score >= 80 else "BUEN POTENCIAL 💡")
+        h_score = int(m.get("hook_score") or max(60, min(99, score + (2 if idx % 2 == 0 else -2))))
+        f_score = int(m.get("flow_score") or max(60, min(99, score - 1)))
+        v_score = int(m.get("value_score") or max(60, min(99, score + (1 if idx % 2 == 1 else 0))))
+        advice = str(m.get("viral_advice") or m.get("advice") or "Óptimo para Shorts y TikTok con gancho en los primeros 3s.")[:160]
+        tags = m.get("hashtags") or ["#viral", "#podcast", "#shorts", "#tendencia"]
+        if isinstance(tags, str):
+            tags = [t.strip() for t in tags.split(" ") if t.strip()]
+
         clean_moments.append({
             "id": f"moment_{idx+1}",
             "rank": idx + 1,
@@ -367,6 +393,11 @@ Responde ÚNICAMENTE en formato JSON válido con la siguiente estructura:
             "duration": dur,
             "virality_score": score,
             "virality_tier": tier,
+            "hook_score": max(50, min(100, h_score)),
+            "flow_score": max(50, min(100, f_score)),
+            "value_score": max(50, min(100, v_score)),
+            "viral_advice": advice,
+            "hashtags": tags[:5],
             "hook": str(m.get("hook", ""))[:140],
             "summary": str(m.get("summary", ""))[:300],
             "reason": str(m.get("reason", "Momento seleccionado por retención"))[:250],
