@@ -2169,6 +2169,7 @@ async def clipper_render(body: dict):
     subtitle_text = (body.get("subtitle_text") or "").strip() or None
     subtitle_style = (body.get("subtitle_style") or "none").strip()
     auto_emojis = bool(body.get("auto_emojis", True))
+    progress_bar = bool(body.get("progress_bar", True))
     broll = bool(body.get("broll", False))
     broll_query = (body.get("broll_query") or "").strip() or None
     cookies = (body.get("cookies") or "").strip() or None
@@ -2177,7 +2178,8 @@ async def clipper_render(body: dict):
             url, start=start, end=end, title=title, style=style,
             subtitle_text=subtitle_text, subtitle_style=subtitle_style,
             broll=broll, broll_query=broll_query,
-            cookies=cookies, auto_emojis=auto_emojis
+            cookies=cookies, auto_emojis=auto_emojis,
+            progress_bar=progress_bar
         )
     except viral_clipper.ViralClipperError as e:
         raise HTTPException(400, f"[{e.code}] {e}") from e

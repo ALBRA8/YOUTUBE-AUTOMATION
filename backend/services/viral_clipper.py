@@ -396,7 +396,8 @@ async def render_vertical_moment(
     broll: bool = False,
     broll_query: str | None = None,
     cookies: str | None = None,
-    auto_emojis: bool = True
+    auto_emojis: bool = True,
+    progress_bar: bool = True
 ) -> dict:
     """Descarga el segmento exacto y lo reencuadra con FFmpeg a vertical 9:16 (1080x1920)."""
     url = url_mode.clean_url(url)
@@ -506,6 +507,15 @@ async def render_vertical_moment(
             esc_ass = str(ass_file).replace("\\", "/").replace(":", r"\:")
             sub_clause = f",subtitles='{esc_ass}'"
 
+        pb_clause = ""
+        if progress_bar:
+            try:
+                from services import progress_overlay
+                dur_pb = max(0.5, end - start)
+                pb_clause = f",{progress_overlay.build_progress_bar_filter(dur_pb)}"
+            except Exception as ex:
+                log.debug("[viral_clipper] Omitiendo progress bar: %s", ex)
+
         cmd = [ffmpeg, "-y", "-i", str(raw_dest)]
         if broll_file and broll_file.is_file():
             cmd.extend(["-i", str(broll_file)])
@@ -518,7 +528,7 @@ async def render_vertical_moment(
                     "[in_bot]crop=iw/2:ih:iw/2:0,scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960[bot];"
                     "[top][bot]vstack=inputs=2,drawbox=x=0:y=958:w=1080:h=4:color=0x000000@0.8:t=fill[base];"
                     "[1:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[br];"
-                    f"[base][br]overlay=enable='between(t,{b_s},{b_e})':x=0:y=0{sub_clause}[outv]"
+                    f"[base][br]overlay=enable='between(t,{b_s},{b_e})':x=0:y=0{sub_clause}{pb_clause}[outv]"
                 )
             elif style == "blur_bg":
                 vf = (
@@ -527,13 +537,13 @@ async def render_vertical_moment(
                     "[0:v]scale=1080:1080:force_original_aspect_ratio=decrease[fg];"
                     "[bg][fg]overlay=(W-w)/2:(H-h)/2[base];"
                     "[1:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[br];"
-                    f"[base][br]overlay=enable='between(t,{b_s},{b_e})':x=0:y=0{sub_clause}[outv]"
+                    f"[base][br]overlay=enable='between(t,{b_s},{b_e})':x=0:y=0{sub_clause}{pb_clause}[outv]"
                 )
             else:
                 vf = (
                     "scale=ih*16/9:-1,crop=ih*9/16:ih,scale=1080:1920[base];"
                     "[1:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[br];"
-                    f"[base][br]overlay=enable='between(t,{b_s},{b_e})':x=0:y=0{sub_clause}[outv]"
+                    f"[base][br]overlay=enable='between(t,{b_s},{b_e})':x=0:y=0{sub_clause}{pb_clause}[outv]"
                 )
         else:
             if style == "split_screen":
@@ -541,17 +551,17 @@ async def render_vertical_moment(
                     "[0:v]split=2[in_top][in_bot];"
                     "[in_top]crop=iw/2:ih:0:0,scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960[top];"
                     "[in_bot]crop=iw/2:ih:iw/2:0,scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960[bot];"
-                    f"[top][bot]vstack=inputs=2,drawbox=x=0:y=958:w=1080:h=4:color=0x000000@0.8:t=fill{sub_clause}[outv]"
+                    f"[top][bot]vstack=inputs=2,drawbox=x=0:y=958:w=1080:h=4:color=0x000000@0.8:t=fill{sub_clause}{pb_clause}[outv]"
                 )
             elif style == "blur_bg":
                 vf = (
                     "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,"
                     "crop=1080:1920,boxblur=25:5[bg];"
                     "[0:v]scale=1080:1080:force_original_aspect_ratio=decrease[fg];"
-                    f"[bg][fg]overlay=(W-w)/2:(H-h)/2{sub_clause}[outv]"
+                    f"[bg][fg]overlay=(W-w)/2:(H-h)/2{sub_clause}{pb_clause}[outv]"
                 )
             else:
-                vf = f"scale=ih*16/9:-1,crop=ih*9/16:ih,scale=1080:1920{sub_clause}[outv]"
+                vf = f"scale=ih*16/9:-1,crop=ih*9/16:ih,scale=1080:1920{sub_clause}{pb_clause}[outv]"
 
         cmd.extend([
             "-filter_complex", vf,
