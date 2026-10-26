@@ -2325,6 +2325,61 @@ async def product_badge(body: dict):
     return {"ok": True, "badge_url": f"/static/assets/{p.name}"}
 
 
+@app.get("/api/dubbing/languages")
+async def dubbing_languages():
+    """🌍 INT-068: Catálogo de idiomas y voces neuronales para doblaje multi-idioma (MrBeast Style)."""
+    from services import multilang_dubber
+    return {"ok": True, "languages": multilang_dubber.DUB_LANGUAGES}
+
+
+@app.post("/api/dubbing/translate")
+async def dubbing_translate(body: dict):
+    """🌐 INT-068: Traduce el guion al idioma objetivo manteniendo ganchos y cifras."""
+    from services import multilang_dubber
+    text = (body.get("text") or "").strip()
+    target_lang = (body.get("target_lang") or "en").strip().lower()
+    translated = await multilang_dubber.translate_text(text, target_lang)
+    return {"ok": True, "target_lang": target_lang, "translated_text": translated}
+
+
+@app.post("/api/dubbing/dub-video")
+async def dubbing_dub_video(body: dict):
+    """🎬 INT-068: Genera versión doblada de video sustituyendo la pista de audio con FFmpeg."""
+    from services import multilang_dubber
+    video_url_or_path = (body.get("video_path") or "").strip()
+    script = (body.get("script") or "").strip()
+    target_lang = (body.get("target_lang") or "en").strip().lower()
+
+    if not script:
+        raise HTTPException(400, "Guion requerido para síntesis doblada")
+
+    # Traducir guion
+    translated_text = await multilang_dubber.translate_text(script, target_lang)
+
+    out_dir = STATIC_DIR / "dubbed_videos"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    import hashlib
+    h = hashlib.md5(f"{translated_text}_{target_lang}".encode()).hexdigest()[:8]
+    dubbed_audio = out_dir / f"dub_audio_{target_lang}_{h}.wav"
+
+    await multilang_dubber.synthesize_dubbed_speech(translated_text, target_lang, dubbed_audio)
+
+    # Si hay video original, sustituir audio con FFmpeg
+    output_video_url = None
+    if video_url_or_path and Path(video_url_or_path).is_file():
+        dubbed_video = out_dir / f"video_{target_lang}_{h}.mp4"
+        multilang_dubber.swap_video_audio(Path(video_url_or_path), dubbed_audio, dubbed_video)
+        output_video_url = f"/static/dubbed_videos/{dubbed_video.name}"
+
+    return {
+        "ok": True,
+        "target_lang": target_lang,
+        "translated_text": translated_text,
+        "dubbed_audio_url": f"/static/dubbed_videos/{dubbed_audio.name}",
+        "dubbed_video_url": output_video_url
+    }
+
+
 @app.post("/api/invideo/auto-dress")
 async def invideo_auto_dress(body: dict):
     """🎬 INT-064: Planifica e inyecta B-Roll y SFX automáticos de retención (InVideo AI & OpusClip Cloned)."""
