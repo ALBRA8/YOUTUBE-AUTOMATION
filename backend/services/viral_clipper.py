@@ -521,7 +521,16 @@ async def render_vertical_moment(
             cmd.extend(["-i", str(broll_file)])
             b_s = broll_interval["start"]
             b_e = broll_interval["end"]
-            if style == "split_screen":
+            if style == "speaker_switch":
+                from services import speaker_switcher
+                turns = speaker_switcher.detect_speaker_turns(None, total_duration=max(1.0, end - start))
+                sw_filter = speaker_switcher.build_speaker_switch_filter(turns)
+                vf = (
+                    f"{sw_filter};"
+                    "[1:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[br];"
+                    f"[base][br]overlay=enable='between(t,{b_s},{b_e})':x=0:y=0{sub_clause}{pb_clause}[outv]"
+                )
+            elif style == "split_screen":
                 vf = (
                     "[0:v]split=2[in_top][in_bot];"
                     "[in_top]crop=iw/2:ih:0:0,scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960[top];"
@@ -546,7 +555,12 @@ async def render_vertical_moment(
                     f"[base][br]overlay=enable='between(t,{b_s},{b_e})':x=0:y=0{sub_clause}{pb_clause}[outv]"
                 )
         else:
-            if style == "split_screen":
+            if style == "speaker_switch":
+                from services import speaker_switcher
+                turns = speaker_switcher.detect_speaker_turns(None, total_duration=max(1.0, end - start))
+                sw_filter = speaker_switcher.build_speaker_switch_filter(turns)
+                vf = f"{sw_filter};[base]null{sub_clause}{pb_clause}[outv]"
+            elif style == "split_screen":
                 vf = (
                     "[0:v]split=2[in_top][in_bot];"
                     "[in_top]crop=iw/2:ih:0:0,scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960[top];"

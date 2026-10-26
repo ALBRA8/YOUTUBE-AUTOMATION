@@ -3400,6 +3400,7 @@ function renderClipper() {
               <option value="blur_bg" selected>Podcast con fondo difuminado (Recomendado)</option>
               <option value="center_crop">Recorte centrado directo 9:16</option>
               <option value="split_screen">👥 Split-Screen (Podcast 2 Hablantes: Arriba/Abajo)</option>
+              <option value="speaker_switch">🎙️ Active Speaker Switch (Corte dinámico al que habla)</option>
             </select>
           </div>
           <div class="clipper-field">
