@@ -356,6 +356,32 @@ async def burn_subtitles(project: dict, video_raw: Path, words_path: Path) -> Pa
         (proj_dir / "subs_status.json").write_text(json.dumps(
             {"burned": True, "reason": "ok"},
             ensure_ascii=False), encoding="utf8")
+
+    # INT-055: Overlay de Badge de Conversión E-Commerce (Rating, Descuento, Envío)
+    badge_cfg = (project.get("meta") or {}).get("ecommerce_badge")
+    if project.get("mode") == "product" or badge_cfg:
+        try:
+            from services.ecommerce_overlays import generate_ecommerce_badge, build_ecommerce_ffmpeg_filter
+            b_type = (badge_cfg.get("type") if isinstance(badge_cfg, dict) else badge_cfg) or "rating"
+            badge_png = proj_dir / f"badge_{b_type}.png"
+            generate_ecommerce_badge(badge_type=b_type, out_path=badge_png)
+
+            overlay_filter = build_ecommerce_ffmpeg_filter(badge_png, start_sec=0.5, duration_sec=6.0, position="top")
+            badged_video = proj_dir / f"{project['id']}_badged.mp4"
+            badge_cmd = [
+                "ffmpeg", "-y", "-i", str(final), "-i", str(badge_png),
+                "-filter_complex", f"[0:v][1:v]{overlay_filter}[v]",
+                "-map", "[v]", "-map", "0:a?",
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                "-c:a", "copy", str(badged_video)
+            ]
+            pb = await asyncio.to_thread(lambda: _run_ffmpeg(badge_cmd, timeout=300))
+            if pb.returncode == 0 and badged_video.is_file():
+                import shutil
+                shutil.move(badged_video, final)
+        except Exception as e_badge:
+            log.warning("ecommerce badge overlay falló: %s", e_badge)
+
     return final
 
 

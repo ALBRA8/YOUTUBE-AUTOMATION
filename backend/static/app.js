@@ -242,6 +242,26 @@ function renderQuickCreateModal() {
             <option value="honest_review" ${QC_STATE.ugcAngle==='honest_review'?'selected':''}>📦 Review Honesta / Unboxing</option>
           </select>
         </div>
+        <div style="display:flex; gap:10px; margin-top:12px; flex-wrap:wrap; background:rgba(255,255,255,0.02); padding:10px; border-radius:10px; border:1px solid var(--border);">
+          <div style="flex:1; min-width:180px;">
+            <label style="font-size:11.5px; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">🏷️ Sticker de Conversión (INT-055)</label>
+            <select id="qc-badge-type" style="width:100%; padding:6px 10px; font-size:12px; border-radius:6px;" onchange="QC_STATE.badgeType=this.value">
+              <option value="rating" selected>⭐ Rating 4.9★ (+14k Reviews)</option>
+              <option value="discount">🔥 -50% OFF Flash Sale</option>
+              <option value="shipping">🚚 Envío Gratis 24/48h</option>
+              <option value="guarantee">🛡️ Garantía Total 30 Días</option>
+              <option value="none">Sin sticker</option>
+            </select>
+          </div>
+          <div style="flex:1; min-width:180px;">
+            <label style="font-size:11.5px; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">🎬 Set de Estudio 9:16 (INT-056 AI Cutout)</label>
+            <select id="qc-studio-style" style="width:100%; padding:6px 10px; font-size:12px; border-radius:6px;" onchange="QC_STATE.studioStyle=this.value">
+              <option value="luxury_dark" selected>🌌 Luxury Dark Pedestal</option>
+              <option value="pastel_clean">🤍 Clean Minimalist Studio</option>
+              <option value="neon_cyber">⚡ Neon Cyber Light</option>
+            </select>
+          </div>
+        </div>
       </div>`;
   } else if (m === 'url') {
     inputField = `
@@ -419,7 +439,12 @@ async function executeQuickCreate() {
     if (m === 'idea') body.idea = val;
     if (m === 'script') { body.script = val; body.title = val.slice(0, 48); }
     if (m === 'url') body.url = val;
-    if (m === 'product') { body.url = val; body.angle = QC_STATE.ugcAngle || '3_reasons'; }
+    if (m === 'product') {
+      body.url = val;
+      body.angle = QC_STATE.ugcAngle || '3_reasons';
+      body.ecommerce_badge = QC_STATE.badgeType || 'rating';
+      body.studio_style = QC_STATE.studioStyle || 'luxury_dark';
+    }
 
     const p = await api('/projects', { method: 'POST', body });
     if (audioPath) {

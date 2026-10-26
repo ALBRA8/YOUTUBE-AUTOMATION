@@ -174,6 +174,33 @@ async def generate_scene_image(scene: dict, project: dict, idx: int,
     if ref_image:
         prompt += STYLE_REF_SUFFIX
 
+    # 0a) Modo Producto / E-Commerce (INT-056: AI Product Cutout & Studio Background)
+    if project.get("mode") == "product":
+        p_info = (project.get("meta") or {}).get("product_data") or {}
+        img_url = p_info.get("image_url")
+        if img_url and (idx == 0 or idx == 3 or str(scene.get("title", "")).lower() in ("hook", "cta", "scene_01", "scene_04")):
+            try:
+                from services.ecommerce_overlays import remove_product_background, composite_product_on_studio
+                import urllib.request
+                s_dir = scene_dir(project["id"])
+                s_dir.mkdir(parents=True, exist_ok=True)
+                raw_prod = s_dir / "product_raw.png"
+                if not raw_prod.is_file():
+                    req = urllib.request.Request(img_url, headers={"User-Agent": "Mozilla/5.0"})
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        raw_prod.write_bytes(resp.read())
+
+                cutout_png = s_dir / "product_cutout.png"
+                if not cutout_png.is_file():
+                    remove_product_background(raw_prod, cutout_png)
+
+                style = (project.get("meta") or {}).get("studio_style") or "luxury_dark"
+                composite_product_on_studio(cutout_png, background_style=style, output_path=out)
+                _save_style_method(str(out), "product_studio_cutout")
+                return out, "product_studio_cutout"
+            except Exception as ex:
+                log.warning("Fallo al generar estudio de producto e-commerce en escena %d: %s", idx, ex)
+
     # 0) Google Flow MCP (Nano Banana — coste $0, alta calidad)
     if flow_mcp_client.available():
         try:

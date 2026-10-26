@@ -589,6 +589,29 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
                         f"Production JSON listo: {len(scenes)} unidades · "
                         f"«{project['title']}» (Creative Engine → Adapter)",
                         {"title": project["title"]})
+        elif project["mode"] == "product":
+            # v2.30 · INT-054: Modo Producto & UGC Video Ads (v4v.ai Cloned)
+            from services import ugc_ad_generator
+            p_info = meta.get("product_data") or {}
+            ugc = ugc_ad_generator.generate_ugc_script(p_info, angle=meta.get("ugc_angle", "3_reasons"))
+            raw_scenes = []
+            for sc in ugc["scenes"]:
+                raw_scenes.append({
+                    "title": sc.get("type", "Scene"),
+                    "narration": sc["narration"],
+                    "image_prompt": sc["visual_prompt"],
+                })
+            result = script_gen.build_result({
+                "title": ugc["title"],
+                "scenes": raw_scenes,
+                "engine": "v4v-ugc",
+            })
+            db.replace_scenes(project_id, result["scenes"])
+            db.update_project(project_id, title=result["title"])
+            scenes = db.get_scenes(project_id)
+            await _emit(job_id, project_id, "scripting", 18,
+                        f"Guion UGC listo: {len(scenes)} escenas · «{result['title']}» (v4v.ai Cloned)",
+                        {"title": result["title"]})
         else:
             if project["mode"] == "script" and meta.get("script_text"):
                 raw = await script_gen.from_script(

@@ -97,3 +97,6 @@ backend/data/biblioteca/
 __pycache__/
 # Perfil Chrome unificado (runtime local, cookies y cache)
 backend/data/google_profile_global/
+
+# Scratch temporary files
+scratch/

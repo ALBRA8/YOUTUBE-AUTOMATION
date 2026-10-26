@@ -924,6 +924,8 @@ async def create_project(body: dict):
         meta["product_data"] = p_info
         meta["ugc_angle"] = angle
         meta["script"] = script
+        meta["ecommerce_badge"] = body.get("ecommerce_badge") or body.get("badge_type") or "rating"
+        meta["studio_style"] = body.get("studio_style") or "luxury_dark"
     # v2.6 — modo "nicho": plantilla predeterminada del nicho compone la idea
     # (plantilla + ángulo aleatorio + ajuste opcional) y hereda estilo/formato/
     # voz/subtítulos de la plantilla salvo que el usuario elija otros.
@@ -2208,6 +2210,63 @@ async def product_scrape(body: dict):
     from services import ugc_ad_generator
     info = ugc_ad_generator.scrape_product_info(target)
     return {"ok": True, "product": info}
+
+
+@app.post("/api/product/badge")
+async def product_badge(body: dict):
+    """🛍️ INT-055: Genera un badge de conversión e-commerce en PNG transparente."""
+    from services import ecommerce_overlays
+    badge_type = body.get("type") or "rating"
+    text_main = body.get("text")
+    tag = body.get("tag")
+    out_dir = STATIC_DIR / "assets"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_file = out_dir / f"badge_{badge_type}.png"
+    p = ecommerce_overlays.generate_ecommerce_badge(
+        badge_type=badge_type,
+        text_main=text_main,
+        tag=tag,
+        out_path=out_file
+    )
+    return {"ok": True, "badge_url": f"/static/assets/{p.name}"}
+
+
+@app.post("/api/product/studio-preview")
+async def product_studio_preview(body: dict):
+    """🛍️ INT-056: Previsualización de recorte AI de producto y set de estudio cinemático."""
+    from services import ecommerce_overlays
+    image_url = body.get("image_url")
+    style = body.get("style") or "luxury_dark"
+    if not image_url:
+        raise HTTPException(400, "image_url requerida")
+
+    out_dir = STATIC_DIR / "studio_previews"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    import urllib.request
+    import time
+    timestamp = int(time.time())
+    raw_img = out_dir / f"raw_{timestamp}.png"
+    req = urllib.request.Request(image_url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        raw_img.write_bytes(resp.read())
+
+    cutout = out_dir / f"cutout_{timestamp}.png"
+    ecommerce_overlays.remove_product_background(raw_img, cutout)
+
+    studio_final = out_dir / f"studio_{timestamp}.jpg"
+    ecommerce_overlays.composite_product_on_studio(
+        cutout,
+        background_style=style,
+        output_path=studio_final,
+        width=540,
+        height=960
+    )
+    return {
+        "ok": True,
+        "studio_preview_url": f"/static/studio_previews/{studio_final.name}",
+        "cutout_url": f"/static/studio_previews/{cutout.name}"
+    }
 
 @app.post("/api/clipper/suggest-broll")
 async def clipper_suggest_broll(body: dict):
