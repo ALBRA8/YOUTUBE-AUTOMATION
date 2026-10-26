@@ -2252,6 +2252,34 @@ async def product_badge(body: dict):
     return {"ok": True, "badge_url": f"/static/assets/{p.name}"}
 
 
+@app.post("/api/product/callout-layer")
+async def product_callout_layer(body: dict):
+    """🏷️ INT-062: Genera capa PNG con pines/callouts flotantes dinámicos del producto (JoggAI/InVideo)."""
+    from services import ecommerce_overlays
+    import time
+    callouts = body.get("callouts") or []
+    if not callouts:
+        # Default 2 callouts si no se especifican
+        callouts = [
+            {"preset": "battery", "target_x": 420, "target_y": 850, "direction": "top_right"},
+            {"preset": "power", "target_x": 580, "target_y": 1150, "direction": "bottom_left"}
+        ]
+    out_dir = STATIC_DIR / "assets"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_file = out_dir / f"callouts_{int(time.time())}.png"
+    p = ecommerce_overlays.generate_product_callout_layer(
+        callouts=callouts,
+        canvas_size=(1080, 1920),
+        output_path=out_file
+    )
+    return {
+        "ok": True,
+        "callouts_url": f"/static/assets/{p.name}",
+        "callouts_count": len(callouts),
+        "presets_available": list(ecommerce_overlays.FEATURE_PRESETS.keys())
+    }
+
+
 @app.post("/api/product/studio-preview")
 async def product_studio_preview(body: dict):
     """🛍️ INT-056: Previsualización de recorte AI de producto y set de estudio cinemático."""

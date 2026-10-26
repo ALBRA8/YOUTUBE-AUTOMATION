@@ -254,3 +254,168 @@ def build_ecommerce_ffmpeg_filter(
         y_pos = "main_h-overlay_h-220"
 
     return f"overlay=x=(main_w-overlay_w)/2:y={y_pos}:enable='{enable_expr}'"
+
+
+# ── INT-062: Dynamic Product Feature Callout Badges (JoggAI & InVideo Cloned) ──
+
+FEATURE_PRESETS: dict[str, dict[str, Any]] = {
+    "battery": {
+        "icon": "🔋",
+        "title": "Batería 48 Horas",
+        "subtitle": "Carga rápida USB-C",
+        "color": (52, 211, 153, 255)   # Emerald
+    },
+    "waterproof": {
+        "icon": "💧",
+        "title": "Resistencia IP68",
+        "subtitle": "Sumergible hasta 2m",
+        "color": (56, 189, 248, 255)   # Cyan
+    },
+    "power": {
+        "icon": "⚡",
+        "title": "Motor Turbo 1200W",
+        "subtitle": "Máxima potencia continua",
+        "color": (251, 191, 36, 255)   # Gold
+    },
+    "anc": {
+        "icon": "🔇",
+        "title": "Cancelación Ruido -45dB",
+        "subtitle": "Aislamiento acústico total",
+        "color": (168, 85, 247, 255)   # Purple
+    },
+    "materials": {
+        "icon": "💎",
+        "title": "Aluminio Aeroespacial",
+        "subtitle": "Ultra resistente y ligero",
+        "color": (244, 63, 94, 255)   # Rose
+    }
+}
+
+
+def draw_callout_pin(
+    draw: ImageDraw.ImageDraw,
+    target_x: int,
+    target_y: int,
+    badge_x: int,
+    badge_y: int,
+    badge_w: int,
+    badge_h: int,
+    title: str,
+    subtitle: str,
+    accent_rgb: tuple[int, int, int] = (56, 189, 248)
+) -> None:
+    """Dibuja un pin flotante con halo radiante, línea conectora biselada y tarjeta glassmorphism."""
+    # 1. Halo radiante y punto objetivo sobre el producto
+    dot_color = (*accent_rgb, 255)
+    halo_color = (*accent_rgb, 70)
+    outer_halo = (*accent_rgb, 30)
+
+    draw.ellipse([target_x - 16, target_y - 16, target_x + 16, target_y + 16], fill=outer_halo)
+    draw.ellipse([target_x - 10, target_y - 10, target_x + 10, target_y + 10], fill=halo_color)
+    draw.ellipse([target_x - 5, target_y - 5, target_x + 5, target_y + 5], fill=dot_color)
+
+    # 2. Línea conectora angular
+    # Punto de conexión al badge (el extremo más cercano al target)
+    if badge_x > target_x:
+        conn_x = badge_x
+        conn_y = badge_y + badge_h // 2
+        elbow_x = target_x + 40
+        elbow_y = conn_y
+    else:
+        conn_x = badge_x + badge_w
+        conn_y = badge_y + badge_h // 2
+        elbow_x = target_x - 40
+        elbow_y = conn_y
+
+    # Dibujar línea con grosor
+    draw.line([(target_x, target_y), (elbow_x, elbow_y), (conn_x, conn_y)], fill=(*accent_rgb, 180), width=3)
+    draw.ellipse([elbow_x - 3, elbow_y - 3, elbow_x + 3, elbow_y + 3], fill=(*accent_rgb, 240))
+
+    # 3. Tarjeta Glassmorphic Badge
+    card_bg = (15, 23, 42, 220)  # Slate 900 translúcido
+    card_border = (*accent_rgb, 200)
+
+    draw.rounded_rectangle(
+        [badge_x, badge_y, badge_x + badge_w, badge_y + badge_h],
+        radius=14,
+        fill=card_bg,
+        outline=card_border,
+        width=2
+    )
+
+    # Título en negrita
+    draw.text((badge_x + 16, badge_y + 10), title, fill=(255, 255, 255, 255))
+    # Subtítulo descriptivo en gris claro / acento
+    draw.text((badge_x + 16, badge_y + 36), subtitle, fill=(*accent_rgb, 230))
+
+
+def generate_product_callout_layer(
+    callouts: list[dict[str, Any]],
+    canvas_size: tuple[int, int] = (1080, 1920),
+    output_path: Path | None = None
+) -> Path:
+    """Genera una capa PNG transparente 1080x1920 con múltiples callouts flotantes para el producto."""
+    im = Image.new("RGBA", canvas_size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(im)
+
+    for item in callouts:
+        preset_key = item.get("preset")
+        preset = FEATURE_PRESETS.get(preset_key, {})
+
+        title = item.get("title") or preset.get("title") or "Característica Pro"
+        subtitle = item.get("subtitle") or preset.get("subtitle") or "Tecnología de última generación"
+        accent_color = item.get("color") or preset.get("color") or (56, 189, 248, 255)
+        if isinstance(accent_color, str):
+            accent_rgb = (56, 189, 248)
+        else:
+            accent_rgb = accent_color[:3]
+
+        target_x = int(item.get("target_x", canvas_size[0] // 2))
+        target_y = int(item.get("target_y", canvas_size[1] // 2))
+
+        # Tamaño del badge
+        badge_w = max(320, len(title) * 11 + 60)
+        badge_h = 68
+
+        direction = item.get("direction", "top_right")
+        if direction == "top_right":
+            badge_x = min(canvas_size[0] - badge_w - 40, target_x + 90)
+            badge_y = max(80, target_y - 120)
+        elif direction == "top_left":
+            badge_x = max(40, target_x - badge_w - 90)
+            badge_y = max(80, target_y - 120)
+        elif direction == "bottom_right":
+            badge_x = min(canvas_size[0] - badge_w - 40, target_x + 90)
+            badge_y = min(canvas_size[1] - badge_h - 160, target_y + 80)
+        else: # bottom_left
+            badge_x = max(40, target_x - badge_w - 90)
+            badge_y = min(canvas_size[1] - badge_h - 160, target_y + 80)
+
+        draw_callout_pin(
+            draw=draw,
+            target_x=target_x,
+            target_y=target_y,
+            badge_x=badge_x,
+            badge_y=badge_y,
+            badge_w=badge_w,
+            badge_h=badge_h,
+            title=title,
+            subtitle=subtitle,
+            accent_rgb=accent_rgb
+        )
+
+    out = output_path or Path("backend/static/assets/product_callouts.png")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    im.save(out)
+    return out
+
+
+def build_callouts_ffmpeg_filter(
+    callout_png: Path,
+    start_sec: float = 1.0,
+    duration_sec: float = 5.0
+) -> str:
+    """Genera la expresión FFmpeg para superponer la capa de callouts animados sobre el video vertical."""
+    path_escaped = str(callout_png).replace("\\", "/").replace(":", "\\:")
+    end_sec = round(start_sec + duration_sec, 2)
+    return f"overlay=0:0:enable='between(t,{start_sec},{end_sec})'"
