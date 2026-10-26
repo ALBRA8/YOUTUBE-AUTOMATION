@@ -2289,6 +2289,63 @@ async def product_studio_preview(body: dict):
         "cutout_url": f"/static/studio_previews/{cutout.name}"
     }
 
+
+@app.post("/api/ugc/multi-angle-hooks")
+async def ugc_multi_angle_hooks(body: dict):
+    """🎭 INT-061: Genera 5 ganchos psicológicos UGC multi-ángulo (Arcads/CreateUGC Cloned)."""
+    from services import ugc_hooks
+    name = (body.get("product_name") or body.get("name") or "").strip()
+    problem = (body.get("problem") or "").strip()
+    benefit = (body.get("benefit") or "").strip()
+    action = (body.get("action") or "").strip()
+    target_audience = (body.get("target_audience") or "").strip()
+    hooks = ugc_hooks.generate_multi_angle_hooks(
+        name=name,
+        problem=problem,
+        benefit=benefit,
+        action=action,
+        target_audience=target_audience
+    )
+    return {"ok": True, "product_name": name, "hooks": hooks}
+
+
+@app.post("/api/ugc/ab-variants")
+async def ugc_ab_variants(body: dict):
+    """🎭 INT-061: Construye variantes de producción A/B combinando ganchos con cuerpo y CTA."""
+    from services import ugc_hooks
+    name = (body.get("product_name") or body.get("name") or "").strip()
+    base_body = (body.get("base_body") or body.get("body") or "").strip()
+    base_cta = (body.get("base_cta") or body.get("cta") or "").strip()
+    hooks = body.get("hooks")
+    variants = ugc_hooks.build_ab_variants(
+        product_name=name,
+        base_body=base_body,
+        base_cta=base_cta,
+        hooks=hooks
+    )
+    return {"ok": True, "product_name": name, "variants": variants}
+
+
+@app.post("/api/ugc/preview-tts-hook")
+async def ugc_preview_tts_hook(body: dict):
+    """🎧 INT-061: Genera audio instantáneo gratuito del gancho para preescucha (Edge-TTS)."""
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "Texto requerido")
+    voice = (body.get("voice") or "es-ES-AlvaroNeural").strip()
+    import hashlib
+    h = hashlib.md5(f"{text}_{voice}".encode()).hexdigest()[:10]
+    out_dir = STATIC_DIR / "hook_previews"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_file = out_dir / f"hook_{h}.mp3"
+
+    if not out_file.is_file():
+        import edge_tts
+        comm = edge_tts.Communicate(text, voice)
+        await comm.save(str(out_file))
+
+    return {"ok": True, "audio_url": f"/static/hook_previews/{out_file.name}"}
+
 @app.post("/api/clipper/suggest-broll")
 async def clipper_suggest_broll(body: dict):
     """🎥 Sugiere palabras clave visuales para B-Roll de apoyo a partir del texto."""

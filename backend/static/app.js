@@ -262,6 +262,22 @@ function renderQuickCreateModal() {
             </select>
           </div>
         </div>
+
+        <div style="margin-top:14px; padding:12px; border-radius:10px; background:rgba(99,102,241,0.06); border:1px dashed rgba(99,102,241,0.35);">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:20px;">🎭</span>
+              <div>
+                <strong style="font-size:13px; color:#fff;">Hooks Multi-Ángulo (Arcads / CreateUGC)</strong>
+                <p style="font-size:11px; color:var(--muted); margin:0;">Genera 5 variantes de ganchos psicológicos con predicción de retención (Stop-Rate).</p>
+              </div>
+            </div>
+            <button type="button" class="btn" style="padding:6px 14px; font-size:11.5px; background:linear-gradient(135deg,#6366f1,#8b5cf6); color:#fff; font-weight:700; border-radius:8px; border:none; cursor:pointer;" onclick="generateQCHooks()">
+              ⚡ Generar Hooks A/B
+            </button>
+          </div>
+          <div id="qc-hooks-container" style="margin-top:12px; display:none;"></div>
+        </div>
       </div>`;
   } else if (m === 'url') {
     inputField = `
@@ -3718,5 +3734,130 @@ async function clipperSaveProject(momentId) {
     await refreshAll();
   } catch (e) {
     toast('Error al guardar proyecto: ' + e.message, 'err');
+  }
+}
+
+
+/* ── INT-061: Multi-Angle UGC Hooks Generator (Arcads / CreateUGC Style) ── */
+let CURRENT_QC_HOOKS = [];
+
+async function generateQCHooks() {
+  const inp = document.getElementById('qc-input-text');
+  const prodName = inp ? inp.value.trim() : '';
+  const container = document.getElementById('qc-hooks-container');
+  if (!container) return;
+
+  container.style.display = 'block';
+  container.innerHTML = `
+    <div style="text-align:center; padding:18px; color:var(--muted);">
+      <div style="font-size:24px; animation:spin 1s linear infinite; display:inline-block;">⚡</div>
+      <p style="margin-top:8px; font-size:12px;">Generando 5 ganchos psicológicos con IA (Arcads & CreateUGC formulas)...</p>
+    </div>
+  `;
+
+  try {
+    const res = await api('/api/ugc/multi-angle-hooks', {
+      method: 'POST',
+      body: JSON.stringify({ product_name: prodName })
+    });
+    if (!res || !res.ok || !res.hooks) throw new Error('No se pudieron generar los ganchos');
+    CURRENT_QC_HOOKS = res.hooks;
+    renderQCHooksList(CURRENT_QC_HOOKS, prodName);
+  } catch (err) {
+    container.innerHTML = `<div style="color:var(--danger); padding:10px; font-size:12px;">❌ Error: ${esc(err.message)}</div>`;
+  }
+}
+
+function renderQCHooksList(hooks, prodName) {
+  const container = document.getElementById('qc-hooks-container');
+  if (!container) return;
+
+  const html = hooks.map((h, i) => `
+    <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:12px; margin-bottom:10px; transition:border-color 0.2s;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-weight:700; font-size:13px; color:#fff;">${esc(h.badge)}</span>
+          <span class="badge" style="background:rgba(99,102,241,0.2); color:#a5b4fc; font-size:10px; padding:2px 6px; border-radius:4px;">${esc(h.tag)}</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span style="font-size:11px; color:var(--muted);">Stop-Rate:</span>
+          <span class="badge" style="background:rgba(16,185,129,0.2); color:#34d399; font-weight:800; font-size:11px; padding:2px 6px; border-radius:4px;">${h.predicted_stop_rate}%</span>
+        </div>
+      </div>
+      <p style="font-size:12.5px; line-height:1.45; color:var(--text); margin:0 0 8px 0; font-style:italic;">"${esc(h.hook_text)}"</p>
+      <div style="font-size:11px; color:var(--muted); margin-bottom:10px; display:flex; align-items:center; gap:4px;">
+        <span>🎬 <b>Visual Cue:</b></span> <span>${esc(h.visual_cue)}</span>
+      </div>
+      <div style="display:flex; gap:8px; justify-content:flex-end;">
+        <button type="button" class="btn ghost small" style="padding:4px 10px; font-size:11px;" onclick="playHookTTSPreview('${esc(h.hook_text.replace(/'/g, "\\'"))}', this)">
+          🎧 Escuchar Gancho
+        </button>
+        <button type="button" class="btn primary small" style="padding:4px 12px; font-size:11px;" onclick="selectQCHook('${esc(h.hook_text.replace(/'/g, "\\'"))}')">
+          ✅ Usar este Gancho
+        </button>
+      </div>
+    </div>
+  `).join('');
+
+  container.innerHTML = `
+    <div style="margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
+      <span style="font-size:11.5px; font-weight:700; color:var(--muted);">Fórmulas ordenadas por Retención (Stop-Rate):</span>
+      <button type="button" class="btn ghost small" style="padding:4px 10px; font-size:11px; color:#a5b4fc; border:1px solid rgba(165,180,252,0.3);" onclick="generateABVariantsModal('${esc((prodName || '').replace(/'/g, "\\'"))}')">
+        📦 Matriz A/B (5 Variantes)
+      </button>
+    </div>
+    ${html}
+  `;
+}
+
+async function playHookTTSPreview(text, btn) {
+  const origText = btn.innerHTML;
+  btn.innerHTML = '⏳ Cargando...';
+  btn.disabled = true;
+  try {
+    const res = await api('/api/ugc/preview-tts-hook', {
+      method: 'POST',
+      body: JSON.stringify({ text })
+    });
+    if (res && res.ok && res.audio_url) {
+      const audio = new Audio(res.audio_url);
+      audio.play();
+      btn.innerHTML = '🔊 Reproduciendo...';
+      audio.onended = () => {
+        btn.innerHTML = origText;
+        btn.disabled = false;
+      };
+    } else {
+      throw new Error('No se pudo generar el audio');
+    }
+  } catch (err) {
+    toast('Error en preview TTS: ' + err.message, 'error');
+    btn.innerHTML = origText;
+    btn.disabled = false;
+  }
+}
+
+function selectQCHook(hookText) {
+  QC_STATE.selectedHook = hookText;
+  toast('¡Gancho fijado con éxito para tu anuncio!', 'success');
+}
+
+async function generateABVariantsModal(prodName) {
+  try {
+    toast('Construyendo matriz A/B de 5 variantes...', 'info');
+    const res = await api('/api/ugc/ab-variants', {
+      method: 'POST',
+      body: JSON.stringify({
+        product_name: prodName || 'Producto Viral',
+        hooks: CURRENT_QC_HOOKS
+      })
+    });
+    if (!res || !res.ok) throw new Error('Error al construir variantes');
+    const variants = res.variants;
+    alert(`🎉 Matriz A/B UGC lista con ${variants.length} variantes (Arcads Cloned):\n\n` +
+      variants.map(v => `${v.variant_letter}) [${v.badge}] Stop-Rate: ${v.predicted_stop_rate}% | Duración: ${v.total_duration_sec}s`).join('\n') +
+      '\n\nCada variante tiene su propio gancho inicial y comparte el cuerpo demostrativo y llamada a la acción para testeo A/B rápido.');
+  } catch (err) {
+    toast('Error: ' + err.message, 'error');
   }
 }
