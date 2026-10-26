@@ -2252,6 +2252,53 @@ async def product_badge(body: dict):
     return {"ok": True, "badge_url": f"/static/assets/{p.name}"}
 
 
+@app.post("/api/invideo/auto-dress")
+async def invideo_auto_dress(body: dict):
+    """🎬 INT-064: Planifica e inyecta B-Roll y SFX automáticos de retención (InVideo AI & OpusClip Cloned)."""
+    from services import invideo_dress
+    scenes = body.get("scenes") or []
+    if not scenes:
+        # Default mock scenes si viene vacío
+        scenes = [
+            {"scene_id": "scene_1", "duration_sec": 3.8, "narration": "¡Cuidado! Este error te está costando más de $500 al mes sin saberlo."},
+            {"scene_id": "scene_2", "duration_sec": 4.5, "narration": "La mayoría de personas invierte su dinero en cosas que se devalúan de inmediato."},
+            {"scene_id": "scene_3", "duration_sec": 3.5, "narration": "El truco está en automatizar tus ahorros en activos con interés compuesto."},
+            {"scene_id": "scene_4", "duration_sec": 4.0, "narration": "Haz clic en el enlace para aprender el sistema paso a paso hoy mismo."}
+        ]
+    total_dur = body.get("total_duration_sec")
+    enable_sfx = body.get("enable_sfx", True)
+    enable_broll = body.get("enable_broll", True)
+
+    manifest = invideo_dress.auto_dress_timeline(
+        scenes=scenes,
+        total_duration_sec=total_dur,
+        enable_sfx=enable_sfx,
+        enable_broll=enable_broll
+    )
+    return manifest
+
+
+@app.post("/api/invideo/preview-sfx")
+async def invideo_preview_sfx(body: dict):
+    """🔊 INT-064: Devuelve la ruta o URL del efecto de sonido para preescucha en navegador."""
+    from services import sfx_manager
+    sfx_type = (body.get("type") or "whoosh").strip().lower()
+    lib = sfx_manager.ensure_sfx_library()
+    if sfx_type not in lib or not lib[sfx_type].is_file():
+        raise HTTPException(404, f"Efecto de sonido '{sfx_type}' no disponible")
+    
+    # Copiar a static/assets si no está accesible directamente por web
+    sfx_path = lib[sfx_type]
+    out_dir = STATIC_DIR / "assets" / "sfx"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    web_file = out_dir / sfx_path.name
+    if not web_file.is_file() or web_file.stat().st_size != sfx_path.stat().st_size:
+        import shutil
+        shutil.copy2(sfx_path, web_file)
+
+    return {"ok": True, "type": sfx_type, "sfx_url": f"/static/assets/sfx/{web_file.name}"}
+
+
 @app.post("/api/product/callout-layer")
 async def product_callout_layer(body: dict):
     """🏷️ INT-062: Genera capa PNG con pines/callouts flotantes dinámicos del producto (JoggAI/InVideo)."""
