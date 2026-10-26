@@ -2233,6 +2233,79 @@ async def avatar_circle_pip(avatar_id: str, body: dict | None = None):
     return {"ok": True, "pip_url": f"/static/assets/{out_path.name}"}
 
 
+@app.post("/api/avatars/{avatar_id}/animate-liveportrait")
+async def avatar_animate_liveportrait(avatar_id: str, body: dict | None = None):
+    """🎭 INT-066: Anima la foto del avatar con parpadeo y micro-movimientos LivePortrait."""
+    av = db.get_avatar(avatar_id)
+    if not av:
+        raise HTTPException(404, "Avatar no encontrado")
+    img_p = av.get("image_path")
+    if not img_p or not Path(img_p).is_file():
+        raise HTTPException(400, "El avatar no tiene un retrato generado")
+
+    duration = float((body or {}).get("duration_sec", 4.0))
+    from services.avatar_motion import animate_liveportrait_local
+    out_dir = STATIC_DIR / "assets"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"avatar_lp_{avatar_id}.mp4"
+
+    animate_liveportrait_local(Path(img_p), output_video=out_path, duration_sec=duration)
+    db.update_avatar(avatar_id, video_path=str(out_path))
+
+    return {
+        "ok": True,
+        "engine": "LivePortrait",
+        "video_url": f"/static/assets/{out_path.name}",
+        "duration_sec": duration
+    }
+
+
+@app.post("/api/avatars/{avatar_id}/lipsync-musetalk")
+async def avatar_lipsync_musetalk(avatar_id: str, body: dict):
+    """👄 INT-066: Genera sincronización labial fonética con audio/texto MuseTalk."""
+    av = db.get_avatar(avatar_id)
+    if not av:
+        raise HTTPException(404, "Avatar no encontrado")
+    img_p = av.get("image_path")
+    if not img_p or not Path(img_p).is_file():
+        raise HTTPException(400, "El avatar no tiene un retrato generado")
+
+    text = (body.get("text") or "").strip()
+    voice = (body.get("voice") or av.get("voice") or "es-ES-AlvaroNeural").strip()
+
+    if not text:
+        text = f"Hola, soy tu presentador virtual generado con inteligencia artificial. ¿Qué video fabricamos hoy?"
+
+    out_dir = STATIC_DIR / "assets"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    import hashlib
+    text_hash = hashlib.md5(text.encode()).hexdigest()[:8]
+    wav_path = out_dir / f"audio_{avatar_id}_{text_hash}.wav"
+    mp3_path = wav_path.with_suffix(".mp3")
+
+    # Sintetizar audio con edge-tts
+    import edge_tts
+    comm = edge_tts.Communicate(text, voice)
+    await comm.save(str(mp3_path))
+
+    # Convertir a WAV 16-bit PCM estándar para el análisis fonético
+    cmd = ["ffmpeg", "-y", "-i", str(mp3_path), "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le", str(wav_path)]
+    subprocess.run(cmd, capture_output=True, check=True)
+
+    from services.avatar_motion import lipsync_musetalk_local
+    out_video = out_dir / f"avatar_mt_{avatar_id}_{text_hash}.mp4"
+    lipsync_musetalk_local(Path(img_p), wav_path, out_video)
+
+    return {
+        "ok": True,
+        "engine": "MuseTalk",
+        "video_url": f"/static/assets/{out_video.name}",
+        "audio_url": f"/static/assets/{mp3_path.name}",
+        "spoken_text": text
+    }
+
+
 @app.post("/api/product/badge")
 async def product_badge(body: dict):
     """🛍️ INT-055: Genera un badge de conversión e-commerce en PNG transparente."""

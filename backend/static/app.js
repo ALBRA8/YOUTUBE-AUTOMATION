@@ -2011,6 +2011,10 @@ async function renderAvatars() {
           <button class="btn small ghost" onclick="showAvatarPrompt('${a.id}')">📄 Prompt</button>
           <button class="btn small danger ghost" onclick="delAvatar('${a.id}')">🗑</button>
         </div>
+        <div style="display:flex; gap:6px; margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06);">
+          <button class="btn small" style="flex:1; padding:4px 6px; font-size:11px; background:rgba(168,85,247,0.15); color:#c084fc; border:1px solid rgba(168,85,247,0.3); font-weight:700;" onclick="animateAvatarLivePortrait('${a.id}', this)" title="Anima parpadeo y micro-movimiento facial LivePortrait">🎬 LivePortrait</button>
+          <button class="btn small" style="flex:1; padding:4px 6px; font-size:11px; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); font-weight:700;" onclick="lipsyncAvatarMuseTalk('${a.id}')" title="Genera habla y sincronización labial exacta con MuseTalk">👄 MuseTalk</button>
+        </div>
       </div></div>`;
   }).join('');
   $('#view').innerHTML = `
@@ -3860,4 +3864,70 @@ async function generateABVariantsModal(prodName) {
   } catch (err) {
     toast('Error: ' + err.message, 'error');
   }
+}
+
+
+/* ── INT-066: LivePortrait & MuseTalk Motion Handlers ── */
+async function animateAvatarLivePortrait(aid, btn) {
+  const orig = btn.innerHTML;
+  btn.innerHTML = '⏳ Animando...';
+  btn.disabled = true;
+  try {
+    const res = await api(`/api/avatars/${aid}/animate-liveportrait`, {
+      method: 'POST',
+      body: JSON.stringify({ duration_sec: 4.0 })
+    });
+    if (res && res.ok && res.video_url) {
+      toast('¡Avatar animado con éxito con LivePortrait!', 'success');
+      showVideoModal(res.video_url, '🎭 Animación Facial LivePortrait');
+    } else {
+      throw new Error('Error al animar avatar');
+    }
+  } catch (err) {
+    toast('Error LivePortrait: ' + err.message, 'error');
+  } finally {
+    btn.innerHTML = orig;
+    btn.disabled = false;
+  }
+}
+
+async function lipsyncAvatarMuseTalk(aid) {
+  const text = prompt('Escribe la frase que dirá el avatar con sincronización labial MuseTalk:', 'Hola, soy tu presentador virtual y este video fue generado con inteligencia artificial a cero costo.');
+  if (!text) return;
+  toast('Sintetizando voz y sincronización labial MuseTalk...', 'info');
+  try {
+    const res = await api(`/api/avatars/${aid}/lipsync-musetalk`, {
+      method: 'POST',
+      body: JSON.stringify({ text })
+    });
+    if (res && res.ok && res.video_url) {
+      toast('¡Sincronización labial MuseTalk completada!', 'success');
+      showVideoModal(res.video_url, '👄 Sincronización Labial MuseTalk');
+    } else {
+      throw new Error('Error en sincronización labial');
+    }
+  } catch (err) {
+    toast('Error MuseTalk: ' + err.message, 'error');
+  }
+}
+
+function showVideoModal(videoUrl, title) {
+  const root = document.getElementById('overlay-root');
+  if (!root) return;
+  root.innerHTML = `
+    <div class="overlay" onclick="if(event.target===this)closeOverlay()">
+      <div class="qc-box card" style="max-width:540px; text-align:center; padding:18px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="margin:0; font-size:16px;">${esc(title)}</h3>
+          <button class="modal-x" onclick="closeOverlay()" style="background:transparent; border:none; color:var(--muted); font-size:18px; cursor:pointer;">✕</button>
+        </div>
+        <div style="aspect-ratio:1/1; max-width:380px; margin:0 auto; overflow:hidden; border-radius:12px; background:#000; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
+          <video src="${videoUrl}?t=${Date.now()}" controls autoplay loop style="width:100%; height:100%; object-fit:cover;"></video>
+        </div>
+        <div style="margin-top:14px;">
+          <button class="btn primary small" onclick="closeOverlay()">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  `;
 }
