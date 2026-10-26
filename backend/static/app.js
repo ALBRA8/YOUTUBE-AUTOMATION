@@ -335,6 +335,24 @@ function renderQuickCreateModal() {
               <option value="neon" ${QC_STATE.subtitles === 'neon' ? 'selected' : ''}>🟢 Neon Cyber</option>
             </select>
           </div>
+
+          <!-- INT-058: Presentador Flotante Circular (HeyGen Style) -->
+          <div class="field" style="margin:0;">
+            <label style="font-size:11.5px; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">🔘 Avatar Flotante PiP (HeyGen)</label>
+            <div style="display:flex; gap:6px;">
+              <select style="flex:1; padding:6px 8px; font-size:12px; border-radius:6px;" onchange="QC_STATE.avatar=this.value">
+                <option value="">— Sin avatar —</option>
+                ${(S.avatars || []).map(a => `<option value="${a.id}" ${QC_STATE.avatar === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}
+              </select>
+              <select style="width:90px; padding:6px 8px; font-size:11.5px; border-radius:6px;" onchange="QC_STATE.pipBorder=this.value" title="Color del borde circular">
+                <option value="cyan" ${(QC_STATE.pipBorder==='cyan'||!QC_STATE.pipBorder)?'selected':''}>🔵 Cyan</option>
+                <option value="gold" ${QC_STATE.pipBorder==='gold'?'selected':''}>🟡 Oro</option>
+                <option value="emerald" ${QC_STATE.pipBorder==='emerald'?'selected':''}>🟢 Verde</option>
+                <option value="purple" ${QC_STATE.pipBorder==='purple'?'selected':''}>🟣 Morado</option>
+                <option value="white" ${QC_STATE.pipBorder==='white'?'selected':''}>⚪ Blanco</option>
+              </select>
+            </div>
+          </div>
         </div>
 
         <div style="display:flex; gap:10px; align-items:center;">
@@ -444,6 +462,13 @@ async function executeQuickCreate() {
       body.angle = QC_STATE.ugcAngle || '3_reasons';
       body.ecommerce_badge = QC_STATE.badgeType || 'rating';
       body.studio_style = QC_STATE.studioStyle || 'luxury_dark';
+    }
+    if (QC_STATE.avatar) {
+      body.avatar_id = QC_STATE.avatar;
+      body.circle_avatar_pip = {
+        border_color: QC_STATE.pipBorder || 'cyan',
+        position: 'bottom_right'
+      };
     }
 
     const p = await api('/projects', { method: 'POST', body });

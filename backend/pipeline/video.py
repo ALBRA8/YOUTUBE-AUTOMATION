@@ -382,6 +382,43 @@ async def burn_subtitles(project: dict, video_raw: Path, words_path: Path) -> Pa
         except Exception as e_badge:
             log.warning("ecommerce badge overlay falló: %s", e_badge)
 
+    # INT-058: Overlay de Presentador Flotante (Circle PiP Avatar estilo HeyGen / Synthesia)
+    meta = project.get("meta") or {}
+    avatar_id = project.get("avatar_id") or meta.get("avatar_id")
+    pip_cfg = meta.get("circle_avatar_pip")
+    if avatar_id and pip_cfg:
+        try:
+            import database as db
+            from services.avatar_pip import create_circle_avatar, build_pip_overlay_filter
+            av = db.get_avatar(avatar_id)
+            if av and av.get("image_path") and Path(av["image_path"]).is_file():
+                b_color = "cyan"
+                pos = "bottom_right"
+                if isinstance(pip_cfg, dict):
+                    b_color = pip_cfg.get("border_color", "cyan")
+                    pos = pip_cfg.get("position", "bottom_right")
+                elif isinstance(pip_cfg, str) and pip_cfg in ("cyan", "gold", "emerald", "purple", "white"):
+                    b_color = pip_cfg
+
+                pip_png = proj_dir / f"avatar_{avatar_id}_circle.png"
+                create_circle_avatar(Path(av["image_path"]), diameter=320, border_color=b_color, output_path=pip_png)
+
+                pip_filter = build_pip_overlay_filter(pip_png, position=pos)
+                pip_video = proj_dir / f"{project['id']}_pip.mp4"
+                pip_cmd = [
+                    "ffmpeg", "-y", "-i", str(final), "-i", str(pip_png),
+                    "-filter_complex", f"[0:v][1:v]{pip_filter}[v]",
+                    "-map", "[v]", "-map", "0:a?",
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                    "-c:a", "copy", str(pip_video)
+                ]
+                pb_pip = await asyncio.to_thread(lambda: _run_ffmpeg(pip_cmd, timeout=300))
+                if pb_pip.returncode == 0 and pip_video.is_file():
+                    import shutil
+                    shutil.move(pip_video, final)
+        except Exception as e_pip:
+            log.warning("circle avatar pip overlay falló: %s", e_pip)
+
     return final
 
 

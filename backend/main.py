@@ -953,6 +953,8 @@ async def create_project(body: dict):
     # v2.4 — toggles de producción expuestos en el dashboard
     meta["transitions"] = bool(body.get("transitions", True))
     meta["style_reference"] = bool(body.get("style_reference", True))
+    if body.get("circle_avatar_pip"):
+        meta["circle_avatar_pip"] = body["circle_avatar_pip"]
     sub_style = (body.get("subtitle_style") or "shorts").lower()
     if sub_style in video_pipeline.subs_mod.SUB_STYLES:
         meta["subtitle_style"] = sub_style
@@ -2210,6 +2212,25 @@ async def product_scrape(body: dict):
     from services import ugc_ad_generator
     info = ugc_ad_generator.scrape_product_info(target)
     return {"ok": True, "product": info}
+
+
+@app.post("/api/avatars/{avatar_id}/circle-pip")
+async def avatar_circle_pip(avatar_id: str, body: dict | None = None):
+    """🔘 INT-058: Genera el recorte circular de presentador flotante estilo HeyGen / Synthesia."""
+    av = db.get_avatar(avatar_id)
+    if not av:
+        raise HTTPException(404, "Avatar no encontrado")
+    img_p = av.get("image_path")
+    if not img_p or not Path(img_p).is_file():
+        raise HTTPException(400, "El avatar no tiene un retrato generado")
+
+    b_color = (body or {}).get("border_color", "cyan")
+    from services.avatar_pip import create_circle_avatar
+    out_dir = STATIC_DIR / "assets"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"avatar_pip_{avatar_id}_{b_color}.png"
+    create_circle_avatar(Path(img_p), diameter=340, border_color=b_color, output_path=out_path)
+    return {"ok": True, "pip_url": f"/static/assets/{out_path.name}"}
 
 
 @app.post("/api/product/badge")
