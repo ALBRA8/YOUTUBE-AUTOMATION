@@ -831,7 +831,7 @@ async def projects():
 async def create_project(body: dict):
     mode = body.get("mode", "idea")
     if mode not in ("script", "idea", "url", "audio", "nicho", "guion_json",
-                    "production_json"):
+                    "production_json", "product"):
         raise HTTPException(400, "modo inválido")
     if mode == "guion_json":
         # v2.10 · contrato guion_json: el guion llega HECHO desde ChatGPT —
@@ -913,6 +913,17 @@ async def create_project(body: dict):
         title = body.get("title") or "Viral recreado"
     if mode == "audio" and body.get("audio_text"):
         meta["audio_text"] = body["audio_text"]
+    if mode == "product":
+        from services import ugc_ad_generator
+        raw_target = str(body.get("url") or body.get("idea") or body.get("product") or "").strip()
+        angle = str(body.get("angle") or "3_reasons").strip()
+        p_info = ugc_ad_generator.scrape_product_info(raw_target)
+        ugc = ugc_ad_generator.generate_ugc_script(p_info, angle=angle)
+        title = body.get("title") or ugc["title"]
+        script = ugc["full_script"]
+        meta["product_data"] = p_info
+        meta["ugc_angle"] = angle
+        meta["script"] = script
     # v2.6 — modo "nicho": plantilla predeterminada del nicho compone la idea
     # (plantilla + ángulo aleatorio + ajuste opcional) y hereda estilo/formato/
     # voz/subtítulos de la plantilla salvo que el usuario elija otros.
@@ -2186,6 +2197,17 @@ async def clipper_render(body: dict):
     except Exception as e:
         raise HTTPException(500, f"Error al renderizar short vertical: {e}") from e
 
+
+
+@app.post("/api/product/scrape")
+async def product_scrape(body: dict):
+    """🛍️ INT-054: Extrae metadatos de producto de una tienda web o texto (v4v.ai Cloned)."""
+    target = (body.get("url") or body.get("text") or "").strip()
+    if not target:
+        raise HTTPException(400, "URL o descripción de producto requerida")
+    from services import ugc_ad_generator
+    info = ugc_ad_generator.scrape_product_info(target)
+    return {"ok": True, "product": info}
 
 @app.post("/api/clipper/suggest-broll")
 async def clipper_suggest_broll(body: dict):

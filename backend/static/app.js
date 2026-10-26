@@ -106,7 +106,7 @@ function renderHome() {
       <span># ¿Cómo quieres empezar hoy?</span>
       <span class="hint" style="font-size:12px; color:var(--muted); font-weight:normal;">4 Modalidades Rápidas · 1-Clic</span>
     </h2>
-    <div class="modes labsia-modes" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px; margin-bottom:28px;">
+    <div class="modes labsia-modes" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:14px; margin-bottom:28px;">
       <div class="card mode-card labsia-card" onclick="openQuickCreateModal('script')" style="cursor:pointer; border-radius:12px; transition:transform 0.15s, border-color 0.15s;">
         <div style="font-size:28px; margin-bottom:8px;">📄</div>
         <h3 style="font-size:16px; margin:0 0 6px 0; font-weight:700;">Desde Guion</h3>
@@ -117,6 +117,13 @@ function renderHome() {
         <div style="font-size:28px; margin-bottom:8px;">💡</div>
         <h3 style="font-size:16px; margin:0 0 6px 0; font-weight:700;">Desde Idea</h3>
         <p style="font-size:12px; color:var(--muted); margin:0; line-height:1.45;">Convierte un concepto en un guion viral completo.</p>
+        <span style="display:inline-block; margin-top:12px; color:var(--accent); font-weight:700; font-size:12px;">Comenzar →</span>
+      </div>
+      <div class="card mode-card labsia-card" onclick="openQuickCreateModal('product')" style="cursor:pointer; border-radius:12px; transition:transform 0.15s, border-color 0.15s; position:relative;">
+        <span class="tag" style="position:absolute; top:12px; right:12px; font-size:9px; padding:3px 7px; background:linear-gradient(135deg,#f59e0b,#d97706); color:#000; font-weight:800;">V4V E-COM</span>
+        <div style="font-size:28px; margin-bottom:8px;">🛍️</div>
+        <h3 style="font-size:16px; margin:0 0 6px 0; font-weight:700;">Desde Producto</h3>
+        <p style="font-size:12px; color:var(--muted); margin:0; line-height:1.45;">Pega el link de tu tienda/Amazon y crea un anuncio UGC viral.</p>
         <span style="display:inline-block; margin-top:12px; color:var(--accent); font-weight:700; font-size:12px;">Comenzar →</span>
       </div>
       <div class="card mode-card labsia-card" onclick="openQuickCreateModal('url')" style="cursor:pointer; border-radius:12px; transition:transform 0.15s, border-color 0.15s;">
@@ -196,6 +203,7 @@ function renderQuickCreateModal() {
   const modes = [
     { id: 'script', emoji: '📜', name: 'Desde Guion' },
     { id: 'idea', emoji: '💡', name: 'Desde Idea' },
+    { id: 'product', emoji: '🛍️', name: 'Desde Producto (UGC Ad)' },
     { id: 'url', emoji: '🔗', name: 'Desde URL' },
     { id: 'audio', emoji: '🎙️', name: 'Desde Audio' },
   ];
@@ -219,6 +227,21 @@ function renderQuickCreateModal() {
         <label style="font-size:13px; font-weight:700; margin-bottom:6px; display:block;">💡 Tu idea o concepto viral (1 frase)</label>
         <input type="text" id="qc-input-text" placeholder="Ej: 5 errores mortales al invertir tu primer sueldo" value="${esc(QC_STATE.text)}" style="width:100%; border-radius:10px; padding:12px; font-size:13.5px;">
         <small style="color:var(--muted); display:block; margin-top:5px;">La IA estructurará el gancho viral, escenas y llamada a la acción.</small>
+      </div>`;
+    } else if (m === 'product') {
+    inputField = `
+      <div class="field" style="margin-bottom:14px;">
+        <label style="font-size:13px; font-weight:700; margin-bottom:6px; display:block;">🛍️ URL de tienda (Shopify, Amazon, MercadoLibre) o Nombre del Producto</label>
+        <input type="text" id="qc-input-text" placeholder="https://mitienda.com/products/zapato-pro o 'Cafetera Espresso Portatil OutIn'" value="${esc(QC_STATE.text)}" style="width:100%; border-radius:10px; padding:12px; font-size:13.5px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+          <small style="color:var(--muted);">Fórmula UGC inspirada en v4v.ai: extrae beneficios y redacta guion de alta conversión.</small>
+          <select id="qc-ugc-angle" style="padding:4px 8px; font-size:11.5px; border-radius:6px;" onchange="QC_STATE.ugcAngle=this.value">
+            <option value="3_reasons" ${(QC_STATE.ugcAngle==='3_reasons'||!QC_STATE.ugcAngle)?'selected':''}>⭐ 3 Razones para comprar</option>
+            <option value="problem_solution" ${QC_STATE.ugcAngle==='problem_solution'?'selected':''}>💡 Problema vs Solución</option>
+            <option value="dont_buy_before" ${QC_STATE.ugcAngle==='dont_buy_before'?'selected':''}>⚠️ No compres antes de ver esto</option>
+            <option value="honest_review" ${QC_STATE.ugcAngle==='honest_review'?'selected':''}>📦 Review Honesta / Unboxing</option>
+          </select>
+        </div>
       </div>`;
   } else if (m === 'url') {
     inputField = `
@@ -351,6 +374,11 @@ async function executeQuickCreate() {
     if (textInput) textInput.focus();
     return;
   }
+  if (m === 'product' && !val) {
+    toast('Pega la URL o nombre del producto antes de generar', 'err');
+    if (textInput) textInput.focus();
+    return;
+  }
   if (m === 'url' && !val) {
     toast('Pega la URL de TikTok o YouTube antes de generar', 'err');
     if (textInput) textInput.focus();
@@ -391,6 +419,7 @@ async function executeQuickCreate() {
     if (m === 'idea') body.idea = val;
     if (m === 'script') { body.script = val; body.title = val.slice(0, 48); }
     if (m === 'url') body.url = val;
+    if (m === 'product') { body.url = val; body.angle = QC_STATE.ugcAngle || '3_reasons'; }
 
     const p = await api('/projects', { method: 'POST', body });
     if (audioPath) {
