@@ -274,6 +274,51 @@ def resolve_music(music_path: str) -> Path | None:
     return p
 
 
+
+def build_sfx_cmd(video_in: Path, scene_durations: list[float], run_dir: Path) -> dict | None:
+    """Inserta micro-efectos de sonido (Whoosh) en los cortes de escena (INT-050)."""
+    try:
+        from services import sfx_manager
+        events = sfx_manager.plan_sfx_events(scene_durations)
+        if not events:
+            return None
+        lib = sfx_manager.ensure_sfx_library()
+        valid_events = [ev for ev in events if ev.get("type") in lib and lib[ev["type"]].is_file()]
+        if not valid_events:
+            return None
+
+        out = run_dir / "sfx_mix.mp4"
+        cmd = [FFMPEG_BIN, "-y", "-hide_banner", "-loglevel", "error", "-i", str(video_in)]
+        filter_parts = []
+        mix_labels = ["[0:a]"]
+
+        for idx, ev in enumerate(valid_events, start=1):
+            sfx_path = lib[ev["type"]]
+            cmd.extend(["-i", str(sfx_path)])
+            delay_ms = int(round(max(0.0, ev["time"]) * 1000))
+            vol = float(ev.get("volume", 0.22))
+            filter_parts.append(f"[{idx}:a]volume={vol},adelay={delay_ms}|{delay_ms}[sfx{idx}];")
+            mix_labels.append(f"[sfx{idx}]")
+
+        num_inputs = len(mix_labels)
+        filter_parts.append(
+            f"{''.join(mix_labels)}amix=inputs={num_inputs}:duration=first:dropout_transition=0:normalize=0[aout]"
+        )
+
+        cmd.extend([
+            "-filter_complex", "".join(filter_parts),
+            "-map", "0:v",
+            "-map", "[aout]",
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            str(out)
+        ])
+        return {"out": out, "cmd": cmd, "count": len(valid_events)}
+    except Exception as ex:
+        log.warning("[video_assembler] Omitiendo SFX por error: %s", ex)
+        return None
+
 def build_mix_cmd(concat_out: Path, music: Path | None,
                   run_dir: Path) -> dict | None:
     """Cama musical ducked -20dB mezclada sobre la voz (amix duration=first:
@@ -355,6 +400,16 @@ def plan_render(manifest: dict, run_dir: Path, music_path: str = "",
                       "desc": f"mezcla música {music.name} ducked {mc['duck_db']:g}dB",
                       "cmd": mc["cmd"]})
         current = mc["out"]
+    # 3.5) INT-050: Sound Effects (SFX) automáticos en cortes
+    use_sfx = bool(manifest.get("sfx", True))
+    if use_sfx and len(usable) > 1:
+        durs = [float(e.get("duration_sec") or 0) for e in usable]
+        sfx_c = build_sfx_cmd(current, durs, run_dir)
+        if sfx_c is not None:
+            steps.append({"stage": "sfx",
+                          "desc": f"micro-efectos SFX en {sfx_c['count']} cortes (whoosh)",
+                          "cmd": sfx_c["cmd"]})
+            current = sfx_c["out"]
     # 4) subtítulos burn → soft → off
     final = run_dir / FINAL_NAME
     srt_path = None
