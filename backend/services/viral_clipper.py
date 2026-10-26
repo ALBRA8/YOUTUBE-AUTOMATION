@@ -395,7 +395,8 @@ async def render_vertical_moment(
     subtitle_style: str = "none",
     broll: bool = False,
     broll_query: str | None = None,
-    cookies: str | None = None
+    cookies: str | None = None,
+    auto_emojis: bool = True
 ) -> dict:
     """Descarga el segmento exacto y lo reencuadra con FFmpeg a vertical 9:16 (1080x1920)."""
     url = url_mode.clean_url(url)
@@ -466,7 +467,8 @@ async def render_vertical_moment(
                 ass_content = karaoke_subtitles.build_ass_from_scenes(
                     [{"duration_sec": dur, "subtitle_text": sub_text}],
                     style_name=clean_sub_style,
-                    resolution="1080x1920"
+                    resolution="1080x1920",
+                    auto_emojis=auto_emojis
                 )
                 ass_file = TMP_DIR / f"{clip_id}_captions.ass"
                 ass_file.write_text(ass_content, encoding="utf-8")

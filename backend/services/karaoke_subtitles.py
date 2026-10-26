@@ -109,6 +109,61 @@ KARAOKE_PRESETS: dict[str, dict[str, Any]] = {
 }
 
 
+
+# ─────────────────────────── CATÁLOGO DE EMOJIS SEMÁNTICOS (INT-049) ────────
+EMOJI_KEYWORDS: dict[str, str] = {
+    # Dinero / Negocios / Riqueza
+    "dinero": "💰", "plata": "💰", "dolares": "💵", "dólares": "💵", "euros": "💶",
+    "millon": "💸", "millones": "💸", "millón": "💸", "rico": "🤑", "riqueza": "🤑",
+    "ventas": "📈", "negocio": "💼", "negocios": "💼", "invertir": "📊", "inversion": "📊",
+    "inversión": "📊", "ganar": "🏆", "ganancias": "📈", "precio": "🏷️", "coste": "🏷️",
+    "comprar": "🛒", "mercado": "🏪", "moneda": "🪙", "cripto": "🪙", "bitcoin": "🪙",
+
+    # Impacto / Viral / Éxito
+    "fuego": "🔥", "viral": "🚀", "top": "🔝", "secreto": "🤫", "secreta": "🤫",
+    "secretos": "🤫", "truco": "✨", "magia": "✨", "boom": "💥", "exploto": "💥",
+    "explotó": "💥", "poder": "⚡", "energia": "⚡", "energía": "⚡", "fuerza": "💪",
+    "locura": "🤯", "increible": "🤯", "increíble": "🤯", "brutal": "🔥", "crack": "👑",
+    "rey": "👑", "exito": "🏆", "éxito": "🏆", "victoria": "🥇", "campeon": "🏆",
+    "campeón": "🏆", "fama": "🌟", "estrella": "⭐",
+
+    # Mente / Ideas / Ciencia
+    "idea": "💡", "ideas": "💡", "mente": "🧠", "cerebro": "🧠", "pensar": "🤔",
+    "pensamiento": "💭", "sabias": "🧐", "sabías": "🧐", "pregunta": "❓", "duda": "❓",
+    "verdad": "👁️", "mentira": "🤥", "aprender": "📚", "estudiar": "📖", "libro": "📕",
+    "clave": "🔑", "claves": "🔑", "estrategia": "🎯", "objetivo": "🎯", "meta": "🎯",
+
+    # Peligro / Alerta / Error
+    "peligro": "⚠️", "cuidado": "⚠️", "atencion": "⚠️", "atención": "⚠️", "error": "❌",
+    "errores": "❌", "falso": "❌", "nunca": "🚫", "jamas": "🚫", "jamás": "🚫",
+    "ojo": "👀", "mira": "👀", "alerta": "🚨", "muerte": "💀", "morir": "💀",
+    "muerto": "💀", "veneno": "☠️", "miedo": "😱", "panico": "😱", "pánico": "😱",
+    "trampa": "🪤", "grave": "⚠️", "prohibido": "🚫",
+
+    # Comunicación / Redes
+    "escucha": "👂", "oir": "👂", "oír": "👂", "voz": "🗣️", "hablar": "🗣️",
+    "podcast": "🎙️", "microfono": "🎙️", "micrófono": "🎙️", "video": "📹",
+    "videos": "📹", "youtube": "▶️", "tiktok": "🎵", "camara": "📷", "cámara": "📷",
+    "mensaje": "📩", "noticia": "📰", "telefono": "📱", "teléfono": "📱",
+
+    # Tiempo / Velocidad
+    "tiempo": "⏱️", "rapido": "⚡", "rápido": "⚡", "horas": "⏳", "hora": "⏱️",
+    "segundos": "⏱️", "minutos": "⏱️", "hoy": "📅", "futuro": "🔮", "historia": "📜",
+    "ano": "🗓️", "año": "🗓️", "anos": "🗓️", "años": "🗓️",
+
+    # Emociones / Personas
+    "amor": "❤️", "corazon": "❤️", "corazón": "❤️", "triste": "😢", "feliz": "😊",
+    "enojo": "😡", "risa": "😂", "gente": "👥", "persona": "👤", "personas": "👥",
+    "amigo": "🤝", "amigos": "🤝", "mundo": "🌍", "tierra": "🌎", "planeta": "🪐",
+    "espacio": "🌌", "dios": "✨"
+}
+
+def detect_emoji(raw_word: str) -> str | None:
+    """Limpia puntuación y retorna emoji semántico viral si existe coincidencia."""
+    clean = re.sub(r"[^a-zA-ZáéíóúÁÉÍÓÚñÑ0-9]", "", raw_word).lower().strip()
+    return EMOJI_KEYWORDS.get(clean)
+
+
 def get_preset(style_name: str | None) -> dict[str, Any]:
     key = str(style_name or "hormozi").lower().strip()
     return KARAOKE_PRESETS.get(key, KARAOKE_PRESETS["hormozi"])
@@ -138,7 +193,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: {preset['name']},{font_name},{fs},{preset['primary_color']},{preset['highlight_color']},{preset['outline_color']},{preset['back_color']},{preset['bold']},0,0,0,100,100,1,0,1,{preset['outline']},{preset['shadow']},{preset['alignment']},30,30,{mv},1
+Style: {preset['name']},{font_name}, Segoe UI Emoji, Apple Color Emoji,{fs},{preset['primary_color']},{preset['highlight_color']},{preset['outline_color']},{preset['back_color']},{preset['bold']},0,0,0,100,100,1,0,1,{preset['outline']},{preset['shadow']},{preset['alignment']},30,30,{mv},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -146,7 +201,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return header
 
 
-def build_karaoke_dialogues(words: list[dict], preset: dict[str, Any]) -> list[str]:
+def build_karaoke_dialogues(words: list[dict], preset: dict[str, Any], auto_emojis: bool = True) -> list[str]:
     """Genera las líneas de diálogo ASS iluminando la palabra activa."""
     if not words:
         return []
@@ -175,7 +230,10 @@ def build_karaoke_dialogues(words: list[dict], preset: dict[str, Any]) -> list[s
                 raw = str(w.get("word", "")).strip()
                 if not raw:
                     continue
+                emoji = detect_emoji(raw) if auto_emojis else None
                 txt = raw.upper() if is_upper else raw
+                if emoji:
+                    txt = f"{txt} {emoji}"
                 if j == active_idx:
                     # Palabra activa: cambia a color de acento y hace pop-in
                     parts.append(f"{{\\c{highlight}\\fscx{pop_scale}\\fscy{pop_scale}}}{txt}{{\\r}}")
@@ -194,7 +252,8 @@ def build_karaoke_dialogues(words: list[dict], preset: dict[str, Any]) -> list[s
 def build_ass_from_scenes(
     entries: list[dict],
     style_name: str = "hormozi",
-    resolution: str = "1080x1920"
+    resolution: str = "1080x1920",
+    auto_emojis: bool = True
 ) -> str:
     """Construye un .ass completo a partir de las escenas consolidadas del manifest."""
     preset = get_preset(style_name)
@@ -244,7 +303,7 @@ def build_ass_from_scenes(
 
         cursor += dur
 
-    dialogues = build_karaoke_dialogues(all_words, preset)
+    dialogues = build_karaoke_dialogues(all_words, preset, auto_emojis=auto_emojis)
     return header + "\n".join(dialogues) + "\n"
 
 
@@ -252,11 +311,12 @@ def write_ass(
     run_dir: Path,
     entries: list[dict],
     style_name: str = "hormozi",
-    resolution: str = "1080x1920"
+    resolution: str = "1080x1920",
+    auto_emojis: bool = True
 ) -> Path:
     """Escribe el archivo final_captions.ass en run_dir."""
     p = Path(run_dir) / ASS_NAME
     p.parent.mkdir(parents=True, exist_ok=True)
-    ass_text = build_ass_from_scenes(entries, style_name, resolution)
+    ass_text = build_ass_from_scenes(entries, style_name, resolution, auto_emojis=auto_emojis)
     p.write_text(ass_text, encoding="utf-8")
     return p

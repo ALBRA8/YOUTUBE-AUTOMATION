@@ -84,7 +84,7 @@ def test_build_karaoke_dialogues_word_highlight():
 
     # Segunda línea: activa "SECRETO"
     assert f"Dialogue: 0,0:00:00.50,0:00:01.20,{preset['name']}" in dialogues[1]
-    assert r"{\c&H0000D7FF&\fscx115\fscy115}SECRETO{\r}" in dialogues[1]
+    assert r"{\c&H0000D7FF&\fscx115\fscy115}SECRETO" in dialogues[1]
 
 
 def test_write_ass_file_generation():

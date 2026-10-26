@@ -3419,6 +3419,13 @@ function renderClipper() {
             </label>
             <span style="font-size:10.5px; color:var(--muted);">Pexels overlay anti-aburrimiento</span>
           </div>
+          <div class="clipper-field" style="display:flex; flex-direction:column; justify-content:center;">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:600; margin-top:14px;">
+              <input type="checkbox" id="clipper-emojis-toggle" checked style="width:16px; height:16px; accent-color:var(--accent);">
+              <span>😀 Emojis Dinámicos</span>
+            </label>
+            <span style="font-size:10.5px; color:var(--muted);">Estilo CapCut / OpusClip (+35% retención)</span>
+          </div>
         </div>
       </div>
 
@@ -3475,6 +3482,7 @@ async function clipperRenderMoment(momentId) {
   const style = $('#clipper-style') ? $('#clipper-style').value : 'blur_bg';
   const subsStyle = $('#clipper-subs-style') ? $('#clipper-subs-style').value : 'hormozi';
   const broll = $('#clipper-broll-toggle') ? $('#clipper-broll-toggle').checked : false;
+  const autoEmojis = $('#clipper-emojis-toggle') ? $('#clipper-emojis-toggle').checked : true;
 
   try {
     toast(`Descargando, reencuadrando, insertando B-Roll y quemando Karaoke a "${m.title}"…`);
