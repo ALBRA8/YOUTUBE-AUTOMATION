@@ -31,7 +31,7 @@ FLOW_MCP_TIMEOUT = float(os.getenv("FLOW_MCP_TIMEOUT", "120.0"))
 # Puerto CDP del Chrome DEDICADO de GoogleFlowMCP (debe coincidir con
 # tools/GoogleFlowMCP/src/chrome.js: CDP_PORT = FLOW_CDP_PORT || 9333).
 FLOW_CDP_PORT = int(os.getenv("FLOW_CDP_PORT", "9333"))
-# notebooklm-mcp (uv tool install "notebooklm-py[browser]"): comando completo.
+# notebooklm-mcp (pin recomendado 0.8.5: el upstream renombró tools/parámetros entre versiones): uv tool install "notebooklm-py[browser]==0.8.5"
 NOTEBOOKLM_MCP_CMD = os.getenv("NOTEBOOKLM_MCP_CMD", "notebooklm-mcp").strip()
 NOTEBOOKLM_MCP_TIMEOUT = float(os.getenv("NOTEBOOKLM_MCP_TIMEOUT", "60.0"))
 # Allowlist opcional de tools de NotebookLM (coma). Vacío = permitir todas
@@ -47,6 +47,21 @@ NOTEBOOKLM_HOME = os.getenv("NOTEBOOKLM_HOME", "").strip()
 # Perfil activo de notebooklm-py (vacío = "default"; estructura verificada:
 # <home>/profiles/<profile>/storage_state.json con fallback legacy <home>/).
 NOTEBOOKLM_PROFILE = os.getenv("NOTEBOOKLM_PROFILE", "").strip()
+
+# ── 🔐 INT-069 · session hardening — refresh automático de cookies ──────
+# Si el preflight del MCP de NotebookLM detecta AUTH_REQUIRED (cookies
+# expiradas), intenta UN `notebooklm auth refresh --quiet` + UN reintento de
+# la sonda. "0" lo desactiva. Fail-open: si falla, todo queda como siempre.
+NLM_AUTH_REFRESH = os.getenv("NLM_AUTH_REFRESH", "1").strip()
+
+# ── 🎬 INT-069 · NotebookLM Studio Bridge (Audio Overview PoC) ──────────
+# Genera un Audio Overview desde un guion vía las tools studio_* del MCP y
+# baja el audio a exports. Interruptor general ("0" = endpoints 404).
+NLM_STUDIO_ENABLED = os.getenv("NLM_STUDIO_ENABLED", "1").strip()
+# Carpeta destino de los audios generados (vacío = DATA_DIR/exports/nlm_studio).
+NLM_STUDIO_EXPORT_DIR = os.getenv("NLM_STUDIO_EXPORT_DIR", "").strip()
+# Timeout (s) del poll del Audio Overview: el genera puede tardar minutos.
+NLM_STUDIO_POLL_TIMEOUT = int(os.getenv("NLM_STUDIO_POLL_TIMEOUT", "900"))
 
 # ── 🔑 Sesión Google unificada (INT-025) — google_profile_global ──────────
 # UN solo login manual humano cubre AMBOS servidores MCP:

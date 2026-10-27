@@ -11,9 +11,20 @@ Servicios soportados:
                 con CDP persistente (FLOW_CDP_PORT + user-data-dir propio de
                 la herramienta); Chrome sobrevive al proceso, así que la
                 sesión de Google persiste entre ejecuciones (§2 del mandato).
-  notebooklm  : servidor `notebooklm-mcp` (uv tool install "notebooklm-py[browser]")
+  notebooklm  : servidor `notebooklm-mcp` (uv tool install
+                "notebooklm-py[browser]==0.8.5" — pin recomendado: el upstream
+                renombró tools/parámetros entre versiones)
                 — sesión vía storage_state.json (0600) en NOTEBOOKLM_HOME;
-                el expirar de cookies se detecta en preflight → AUTH_REQUIRED.
+                el expirar de cookies se detecta en preflight → AUTH_REQUIRED
+                e intenta UN refresh automático (`notebooklm auth refresh
+                --quiet`, INT-069 · gate NLM_AUTH_REFRESH · fail-open).
+
+INT-069 · compat de nombres con notebooklm-py v0.8.5: sus tools declaran el
+parámetro `notebook` (no `notebook_id`) y FastMCP rechaza kwargs desconocidos
+(ValidationError verificado). execute() espeja la clave legacy `notebook_id`
+del §3 → `notebook` SOLO cuando el inputSchema real de la tool lo pide
+(_mirror_notebook_arg), de modo que el panel/orquestador siguen enviando
+notebook_id sin romper servidores legacy.
 
 Framing: JSON-RPC 2.0 delimitado por saltos de línea — el mismo que usa
 flow_mcp_client (no se toca, sigue sirviendo al orquestador) y el transporte
@@ -61,6 +72,9 @@ _UUID_RE = re.compile(
 # Tools de listado del servidor NotebookLM MCP (HOTFIX INT-023.4): no requieren
 # notebook_id y son la fuente del auto-descubrimiento / dropdown del panel.
 _LIST_NOTEBOOK_TOOLS = ("notebook_list", "list_notebooks")
+# Tools que NO aceptan notebook/notebook_id en absoluto (v0.8.5:
+# notebook_create solo toma `title`; usada por el Studio Bridge INT-069).
+_NO_NOTEBOOK_TOOLS = frozenset({"notebook_create"})
 
 
 def parse_notebook_list(text: str) -> list[dict]:
@@ -128,6 +142,51 @@ class MCPManagerError(Exception):
 
 def _cfg(name: str, default: Any) -> Any:
     return getattr(config, name, default)
+
+
+def _auth_refresh_enabled() -> bool:
+    """Gate del refresh automático de sesión (INT-069): NLM_AUTH_REFRESH
+    default "1"; "0"/"false"/"no" lo desactiva (fail-open por diseño)."""
+    return str(_cfg("NLM_AUTH_REFRESH", "1") or "1").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+def auth_refresh_notebooklm(timeout: float = 90.0) -> tuple[bool, str]:
+    """INT-069 · hardening de sesión: ejecuta `notebooklm auth refresh --quiet`
+    (CLI del paquete notebooklm-py; verificado en el upstream v0.8.5,
+    docs/cli-reference.md líneas 76-77 y sección "Authentication: auth refresh")
+    para rotar las cookies del storage_state.json SIN login humano.
+
+    - Subprocess con timeout y captura de stdout/stderr; respeta
+      NOTEBOOKLM_HOME / NOTEBOOKLM_PROFILE del .env.
+    - NUNCA lanza: devuelve (ok, resumen). ok=True solo con rc==0.
+      Cualquier fallo (CLI ausente, OSError, timeout, rc!=0) es un resumen
+      legible — fail-open: el llamante sigue igual que sin refresh.
+    """
+    exe = shutil.which("notebooklm")
+    if not exe:
+        return False, ("CLI 'notebooklm' no está en PATH (instala con: "
+                       "uv tool install \"notebooklm-py[browser]==0.8.5\")")
+    argv = [exe, "auth", "refresh", "--quiet"]
+    env = dict(os.environ)
+    home = str(_cfg("NOTEBOOKLM_HOME", "") or "").strip()
+    if home:
+        env.setdefault("NOTEBOOKLM_HOME", home)
+    profile = str(_cfg("NOTEBOOKLM_PROFILE", "") or "").strip()
+    if profile:
+        env.setdefault("NOTEBOOKLM_PROFILE", profile)
+    try:
+        p = subprocess.run(argv, capture_output=True, text=True,
+                           timeout=timeout, env=env)
+    except subprocess.TimeoutExpired:
+        return False, f"timeout de {timeout:.0f}s en {' '.join(argv)}"
+    except OSError as e:
+        return False, f"no se pudo ejecutar {' '.join(argv)}: {e}"
+    if p.returncode == 0:
+        out = (p.stdout or "").strip().replace("\n", " · ")
+        return True, (out[:160] or "refresh ok (sin salida)")
+    detail = ((p.stderr or "") + " " + (p.stdout or "")).strip().replace("\n", " · ")
+    return False, f"rc={p.returncode}: {detail[:200]}"
 
 
 # ──────────────────────────────── conexión individual ──
@@ -285,7 +344,7 @@ class MCPClientManager:
         if needs_which and not shutil.which(exe):
             raise MCPManagerError(
                 f"'{exe}' no está en PATH — instala con: uv tool install "
-                "\"notebooklm-py[browser]\" (o ajusta NOTEBOOKLM_MCP_CMD)",
+                "\"notebooklm-py[browser]==0.8.5\" (o ajusta NOTEBOOKLM_MCP_CMD)",
                 "CMD_MISSING")
         return argv, None
 
@@ -406,9 +465,10 @@ class MCPClientManager:
                     raise MCPManagerError(
                         f"notebook_id inválido: '{nid[:24]}' (patrón {id_key})", "INVALID_NOTEBOOK_ID")
                 arguments[id_key] = nid            # §3: inyección dinámica
-            elif tool in _LIST_NOTEBOOK_TOOLS or tool == str(
+            elif tool in _LIST_NOTEBOOK_TOOLS or tool in _NO_NOTEBOOK_TOOLS or tool == str(
                     _cfg("NOTEBOOKLM_PROBE_TOOL", "list_notebooks") or "").strip():
-                warn.append(f"notebook_id ausente; '{tool}' es de listado y no lo necesita")
+                warn.append(f"notebook_id ausente; '{tool}' no lo necesita "
+                            f"(listado/creación)")
             else:
                 # HOTFIX INT-023.4 + INT-025: fallo DETERMINISTA con código
                 # estable en vez del TOOL_ERROR críptico del servidor.
@@ -433,6 +493,10 @@ class MCPClientManager:
             raise MCPManagerError(
                 f"el servidor no expone '{tool}' (tools: {', '.join(sorted(n for n in names if n))})",
                 "TOOL_UNKNOWN")
+        if service == "notebooklm":
+            # INT-069: v0.8.5 nombra el parámetro `notebook`; espejar la clave
+            # legacy del §3 según el inputSchema REAL (ver _mirror_notebook_arg).
+            self._mirror_notebook_arg(conn, tool, arguments)
         t0 = time.time()
         try:
             text = await conn.call(tool, arguments, float(
@@ -1060,7 +1124,7 @@ class MCPClientManager:
             except ImportError as e:
                 raise MCPManagerError(
                     "Playwright no está disponible en el backend — instala con: "
-                    'uv tool install "notebooklm-py[browser]" (o pip install '
+                    'uv tool install "notebooklm-py[browser]==0.8.5" (o pip install '
                     "playwright && playwright install chromium)", "PLAYWRIGHT_MISSING") from e
         cookies = self._filter_google_cookies(raw)
         if not cookies:
@@ -1093,6 +1157,23 @@ class MCPClientManager:
 
 
     # ── helpers ──
+    def _mirror_notebook_arg(self, conn: "_Conn", tool: str, arguments: dict) -> None:
+        """INT-069 · compat notebooklm-py ≥0.8.x: sus tools (notebook_describe,
+        source_add, studio_*, chat_ask…) declaran el parámetro `notebook` y
+        FastMCP rechaza kwargs desconocidos con ValidationError (verificado).
+        Si el inputSchema de la tool (tools/list) declara `notebook` y NO
+        `notebook_id`, renombra la clave legacy del §3. Servidores legacy que
+        sí declaran notebook_id (o tools sin schema) quedan intactos."""
+        if "notebook_id" not in arguments:
+            return
+        for t in conn.tools or []:
+            if t.get("name") != tool:
+                continue
+            props = ((t.get("inputSchema") or {}).get("properties") or {})
+            if "notebook" in props and "notebook_id" not in props:
+                arguments["notebook"] = arguments.pop("notebook_id")
+            break
+
     def _allowed_tools(self, service: str) -> set[str] | None:
         """None = todas (default documentado en .env.example)."""
         if service == "google-flow":
@@ -1156,6 +1237,37 @@ class MCPClientManager:
                             conn.auth = "auth_required"
                             conn.auth_detail = str(e)[:200]
                             conn.state = ST_AUTH_REQUIRED
+                            # INT-069 · session hardening: cookies expiradas →
+                            # UN `notebooklm auth refresh --quiet` + UN reintento
+                            # de la sonda. Gate NLM_AUTH_REFRESH (default "1").
+                            # Fail-open: si el refresh falla, el estado queda
+                            # EXACTAMENTE igual que sin refresh (auth_required).
+                            if _auth_refresh_enabled():
+                                try:
+                                    ok, summary = await asyncio.to_thread(
+                                        auth_refresh_notebooklm, 90.0)
+                                except Exception as e:  # noqa: BLE001 — fail-open total
+                                    ok, summary = False, f"refresh crash: {e}"
+                                if ok:
+                                    try:
+                                        await conn.call(probe, {}, timeout=25.0)
+                                        conn.auth = "ok"
+                                        conn.state = ST_CONNECTED
+                                        conn.auth_detail = (
+                                            "auth refresh automático ok "
+                                            f"({summary})"[:200])
+                                        log.info("[%s] cookies refrescadas "
+                                                 "automáticamente (INT-069)",
+                                                 conn.service)
+                                    except MCPManagerError as e2:
+                                        conn.auth_detail = (
+                                            f"refresh ok ({summary}) pero la "
+                                            f"sonda sigue fallando: "
+                                            f"{str(e2)[:140]}")
+                                else:
+                                    conn.auth_detail = (
+                                        f"{str(e)[:120]} · refresh automático "
+                                        f"falló: {summary}")
                         else:
                             conn.auth = "unknown"
                             conn.auth_detail = f"sonda '{probe}' falló sin patrón de auth: {e}"

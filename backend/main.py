@@ -2143,6 +2143,63 @@ async def mcp_capture_google_session():
         raise HTTPException(502, f"[{e.code}] {e}") from e
 
 
+# ───────── NotebookLM Studio Bridge (INT-069) · Audio Overview PoC ──
+# Flujo: garantizar notebook → fuente de texto (guion) → studio_generate
+# (artifact_type="audio") → poll studio_status → studio_download a exports.
+# Tools MCP reales de notebooklm-py v0.8.5 (ver nlm_studio.py docstring).
+@app.post("/api/nlm/studio/audio-overview")
+async def nlm_studio_audio_overview(body: dict):
+    """🎬 INT-069: Arranca la generación de un Audio Overview de NotebookLM
+    con el texto dado (guion/contenido). NO bloquea: garantiza notebook,
+    añade la fuente y devuelve 202 con el job "generating"; el poll y la
+    descarga a exports los hace la tarea de fondo (status/download abajo)."""
+    from services import nlm_studio
+    if not nlm_studio.enabled():
+        raise HTTPException(404, "NotebookLM Studio Bridge deshabilitado "
+                                 "(NLM_STUDIO_ENABLED=0)")
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "campo 'text' requerido (guion/contenido de la fuente)")
+    notebook_id = (body.get("notebook_id") or "").strip() or None
+    title = (body.get("title") or "").strip() or None
+    try:
+        job = await nlm_studio.start_audio_overview(
+            notebook_id=notebook_id, title=title, text=text)
+    except nlm_studio.NLMStudioError as e:
+        status = 409 if e.code == "GENERATION_IN_PROGRESS" else 502
+        raise HTTPException(status, f"[{e.code}] {e}") from e
+    except _mcpm.MCPManagerError as e:
+        raise HTTPException(502, f"[{e.code}] {e}") from e
+    return JSONResponse(status_code=202, content={"ok": True, **job})
+
+
+@app.get("/api/nlm/studio/status/{notebook_id}")
+async def nlm_studio_status(notebook_id: str):
+    """📊 INT-069: Estado del job del Studio Bridge para un notebook
+    (idle | generating | ready | error) con task_id/ruta del fichero."""
+    from services import nlm_studio
+    if not nlm_studio.enabled():
+        raise HTTPException(404, "NotebookLM Studio Bridge deshabilitado "
+                                 "(NLM_STUDIO_ENABLED=0)")
+    return {"ok": True, **nlm_studio.job_status(notebook_id.strip())}
+
+
+@app.get("/api/nlm/studio/download/{notebook_id}")
+async def nlm_studio_download(notebook_id: str):
+    """⬇️ INT-069: Devuelve el ÚLTIMO audio exportado del notebook
+    (.m4a AAC/MP4 en v0.8.5 — upstream #2034) como FileResponse."""
+    from services import nlm_studio
+    if not nlm_studio.enabled():
+        raise HTTPException(404, "NotebookLM Studio Bridge deshabilitado "
+                                 "(NLM_STUDIO_ENABLED=0)")
+    try:
+        p = nlm_studio.latest_audio(notebook_id.strip())
+    except nlm_studio.NLMStudioError as e:
+        raise HTTPException(404, f"[{e.code}] {e}") from e
+    media = "audio/mp4" if p.suffix.lower() == ".m4a" else "audio/mpeg"
+    return FileResponse(p, media_type=media, filename=p.name)
+
+
 # ─────────────────────────── VIRAL CLIPPER (INT-044) ──────────────────────
 # Inspirado en OpenShorts (mutonby/openshorts): Detección de momentos virales con
 # Virality Score (0-100), recorte 9:16 vertical con FFmpeg y conversión a proyectos.
