@@ -243,6 +243,17 @@ def main() -> int:
           res_hot["created"] >= 1, str(res_hot)[:100])
 
     print("── 6. limpieza")
+    # limpieza DB ANTES del rmtree: standalone la SQLite vive DENTRO de _TMP
+    # (self-patch de proceso fresco); bajo pytest es la sesión canónica
+    # compartida. En ambos casos los leases aquí creados (p.ej. worker
+    # 'w-caliente' con lease vigente) son evidencia de runtime REAL para los
+    # doctors (P-EXT-RUNTIME) y rompen sus checks "sin conexión inventada"
+    # si quedan vivos: sin este wipe la batería deja huella en
+    # test_doctor_preflight/test_production_doctor.
+    with db.connect() as con:
+        con.execute("DELETE FROM flow_jobs")
+        con.execute("DELETE FROM scenes")
+        con.execute("DELETE FROM projects")
     shutil.rmtree(_TMP, ignore_errors=True)
     check("tmp eliminado", not _TMP.exists())
 

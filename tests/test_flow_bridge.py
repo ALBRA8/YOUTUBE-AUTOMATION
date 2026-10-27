@@ -14,6 +14,7 @@ Uso:  cd yt_automation_v2 && python3 tests/test_flow_bridge.py
       python3 -m pytest tests/test_flow_bridge.py -q
 """
 import asyncio
+import contextlib
 import io
 import json
 import shutil
@@ -30,18 +31,65 @@ _venv = BACKEND / ".venv" / "Lib" / "site-packages"
 if _venv.exists():
     sys.path.insert(0, str(_venv))
 
-# ── parcheo ANTES de importar la app: DB y OUTPUT a tmp ──────────────────────
-_TMP = Path(tempfile.mkdtemp(prefix="flow_bridge_test_"))
-import config as _cfg  # noqa: E402
-_cfg.DB_PATH = _TMP / "test.db"
-_cfg.OUTPUT_DIR = _TMP / "output"
-_cfg.DATA_DIR = _TMP / "data"
-_cfg.TMP_DIR = _TMP / "tmp"
-for _d in (_cfg.OUTPUT_DIR, _cfg.DATA_DIR, _cfg.TMP_DIR):
-    _d.mkdir(parents=True, exist_ok=True)
+# ── [FIX-C] aislamiento orden-independiente ────────────────────────────────
+# Esta batería PASABA en solitario y fallaba en suite (AttributeError
+# 'SimpleNamespace' / sqlite3.OperationalError) por estado GLOBAL que otras
+# baterías pytest-compatibles mutan sin restaurar:
+#   · tests/test_autopublish_generate.py purga sys.modules (config/database/
+#     services/pipeline/main) e inyecta un `database` FAKE (SimpleNamespace)
+#     sin restaurar → los `import` tardíos (p.ej. `import main` en §10)
+#     resolvían contra el fake o contra módulos partido-en-dos.
+#   · tests/test_live_execution_c1/c2.py fuerzan config.FLOW_MCP_ENABLED=True
+#     y os.environ["FLOW_MCP_ENABLED"]="1" a nivel de MÓDULO (colección).
+# Solución: la batería entera corre dentro de un contexto que purga los
+# módulos de la app, los re-importa FRESCOS con DB/OUTPUT/DATA/TMP en un tmp
+# propio (comportamiento original) y AL SALIR restaura sys.modules EXACTO
+# → sin dependencia del orden y sin huella para los tests que siguen.
+_APP_TOPS = ("config", "database", "security", "main", "mcp_server",
+             "services", "pipeline")
 
-import database as db  # noqa: E402  (lee config.DB_PATH ya parcheado)
-from services import flow_jobs as fj  # noqa: E402
+
+def _is_app_module(name: str) -> bool:
+    return name in _APP_TOPS or name.split(".")[0] in _APP_TOPS
+
+
+@contextlib.contextmanager
+def _isolated_app_state(tmp_root: Path):
+    """Purga los módulos de la app de sys.modules, re-importa config/database
+    con las rutas redirigidas a tmp_root y, al salir, restaura sys.modules
+    exactamente como estaba. Orden-independiente y sin efectos residuales."""
+    saved = {n: m for n, m in list(sys.modules.items()) if _is_app_module(n)}
+    for n in saved:
+        sys.modules.pop(n, None)
+    try:
+        import config as _cfg  # noqa: E402  (fresco: ni fake ni envenenado)
+        _cfg.DB_PATH = tmp_root / "test.db"
+        _cfg.OUTPUT_DIR = tmp_root / "output"
+        _cfg.DATA_DIR = tmp_root / "data"
+        _cfg.TMP_DIR = tmp_root / "tmp"
+        for _d in (_cfg.OUTPUT_DIR, _cfg.DATA_DIR, _cfg.TMP_DIR):
+            _d.mkdir(parents=True, exist_ok=True)
+        import database as _dbmod  # noqa: E402
+        # database hace `from config import DB_PATH` (binding por valor) y un
+        # hook externo (p.ej. conftest de sesión de FIX-A) puede reapuntar las
+        # rutas tras el import: reafirmar AMBAS globals antes de init_db().
+        _cfg.DB_PATH = tmp_root / "test.db"
+        _cfg.OUTPUT_DIR = tmp_root / "output"
+        _cfg.DATA_DIR = tmp_root / "data"
+        _cfg.TMP_DIR = tmp_root / "tmp"
+        _dbmod.DB_PATH = _cfg.DB_PATH
+        _dbmod.init_db()
+        yield
+    finally:
+        for n in [n for n in list(sys.modules)
+                  if _is_app_module(n) and n not in saved]:
+            del sys.modules[n]
+        sys.modules.update(saved)
+
+
+db = None       # módulo database FRESCO (asignado en main(), dentro del ctx)
+fj = None       # módulo services.flow_jobs FRESCO (ídem)
+_TMP: Path | None = None
 
 OK, FAIL = 0, 0
 
@@ -135,7 +183,8 @@ async def _fake_start_flow_render(pid: str) -> str:
     return f"job_render_{pid}"
 
 
-def main() -> int:
+def _battery() -> None:
+    """Batería completa (secciones 1-10) contra el estado fresco del ctx."""
     # limpieza defensiva
     with db.connect() as con:
         con.execute("DELETE FROM flow_jobs")
@@ -379,19 +428,30 @@ def main() -> int:
             check("auto-render disparado (orchestrator mockeado)",
                   _h("proj_bridge_2") in _RENDER_CALLS, str(_RENDER_CALLS))
 
-    asyncio.new_event_loop().run_until_complete(_endpoints())
+    _loop = asyncio.new_event_loop()
+    try:
+        _loop.run_until_complete(_endpoints())
+    finally:
+        _loop.close()
 
-    print("── 11. limpieza")
-    import gc
-    gc.collect()
-    import time
-    time.sleep(0.2)
-    shutil.rmtree(_TMP, ignore_errors=True)
-    if _TMP.exists():
-        time.sleep(0.5)
+
+def main() -> int:
+    """Entrada común (pytest y standalone) con estado aislado y restaurado."""
+    global OK, FAIL, db, fj, _TMP
+    OK, FAIL = 0, 0
+    _TMP = Path(tempfile.mkdtemp(prefix="flow_bridge_test_"))
+    try:
+        with _isolated_app_state(_TMP):
+            import database as _dbmod  # noqa: E402  (fresco, DB en tmp)
+            from services import flow_jobs as _fjmod  # noqa: E402
+            db, fj = _dbmod, _fjmod
+            _battery()
+    finally:
+        import gc
+        import time
+        gc.collect()
+        time.sleep(0.2)
         shutil.rmtree(_TMP, ignore_errors=True)
-    check("tmp eliminado", not _TMP.exists() or True)
-
     print(f"\n═══ {OK} OK · {FAIL} fallos ═══")
     return 0 if FAIL == 0 else 1
 

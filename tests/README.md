@@ -6,6 +6,35 @@ Baterías autoejecutables del proyecto. Sin credenciales y sin red externa
 resuelve el backend relativo al propio repositorio (`tests/../backend`),
 sin rutas absolutas.
 
+## Saneo de la suite (repo-sync FIX, 2026-10-27) — convención de dos niveles
+
+A partir del saneo, la convivencia entre este nivel standalone y los tests
+pytest nativos es explícita (`tests/conftest.py` + `pytest.ini`):
+
+1. **Recolección pytest**: las baterías standalone están en
+   `STANDALONE_BATTERIES` (conftest) y se EXCLUYEN de pytest — un
+   `sys.exit` a nivel de módulo o un parche de config a nivel de módulo
+   rompe la recolección o envenena al resto de la suite. La fuente de
+   verdad de las baterías sigue siendo `python3 tests/run_all.py`.
+2. **Aislamiento de sesión**: bajo pytest, `DATA_DIR`/`OUTPUT_DIR`/`TMP_DIR`/
+   `DB_PATH`/`MUSIC_DIR`/`TEMP_DIR` del backend se redirigen a un tmp de
+   sesión (meta-path hook que re-aplica la redirección tras cada
+   re-import de `config`/`database`). pytest JAMÁS toca `backend/data` real.
+3. **Guardia canónica + hermeticidad**: `os.environ`, attrs de `config`,
+   cwd y los módulos de la app en `sys.modules` se restauran alrededor de
+   cada test (`_canon_guard`, `_hermetic_per_test`).
+4. **Higiene para baterías con wrapper pytest** (aprendida a la mala):
+   self-patch solo standalone (`if "pytest" not in sys.modules:` — patrón
+   en `test_chaos.py`/`test_golden_fixture.py`); wipe de la cola
+   (`flow_jobs/scenes/projects`) al terminar y ANTES de borrar el tmp
+   propio; no parchear módulos compartidos por atributo (parchea el nombre
+   del consumidor: `patch("pipeline.orchestrator.db", fake)`); restaurar
+   `sys.modules` si la batería purga e inyecta fakes (patrón en
+   `test_autopublish_generate.py`).
+
+Estado tras el saneo: `pytest tests/ -q` = **190 passed** (suite nativa),
+sin INTERNALERROR de recolección y sin contaminación cruzada.
+
 ## Qué cubre cada batería
 
 | Batería | Área | Checks |

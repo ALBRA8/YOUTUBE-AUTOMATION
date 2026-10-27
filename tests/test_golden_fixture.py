@@ -37,12 +37,20 @@ FIXTURE = Path(__file__).resolve().parent / "fixtures" / \
     "GOLDEN_PRODUCTION_JSON_EXECUTION_CONTRACT_V1.0.json"
 
 # ── parcheo ANTES de importar: DB y OUTPUT a tmp ─────────────────────────────
+# Bajo pytest NO nos auto-parcheamos: conftest.py ya redirige DB/OUTPUT/DATA/
+# TMP a la sesión canónica y pytest_collection_finish REAFIRMA esa redirección
+# tras la colección. Si parcheáramos aquí, nuestros imports de servicios
+# (production_json…) quedarían ligados POR VALOR a este tmp privado mientras
+# config apunta a la sesión al llegar el test → mismatch de rutas (fallos en
+# cascada en golden/int058/production_doctor). Standalone (run_all.py) sí se
+# auto-parchea como siempre (proceso fresco, cero conftest).
 _TMP = Path(tempfile.mkdtemp(prefix="golden_fixture_test_"))
 import config as _cfg  # noqa: E402
-_cfg.DB_PATH = _TMP / "test.db"
-_cfg.OUTPUT_DIR = _TMP / "output"
-_cfg.DATA_DIR = _TMP / "data"
-_cfg.TMP_DIR = _TMP / "tmp"
+if "pytest" not in sys.modules:
+    _cfg.DB_PATH = _TMP / "test.db"
+    _cfg.OUTPUT_DIR = _TMP / "output"
+    _cfg.DATA_DIR = _TMP / "data"
+    _cfg.TMP_DIR = _TMP / "tmp"
 for _d in (_cfg.OUTPUT_DIR, _cfg.DATA_DIR, _cfg.TMP_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
@@ -252,6 +260,14 @@ def main() -> int:
         check("QA proyecto inexistente → LookupError", True)
 
     print("── 8. limpieza")
+    # limpieza DB ANTES del rmtree (standalone la SQLite vive DENTRO de _TMP):
+    # bajo pytest la sesión comparte la SQLite canónica y las filas de este
+    # proyecto son "cola foránea" para las baterías que corren después
+    # (production_doctor clasifica DOC-D-COLA-INCOMPLETA con pids ajenos).
+    with db.connect() as con:
+        con.execute("DELETE FROM flow_jobs")
+        con.execute("DELETE FROM scenes")
+        con.execute("DELETE FROM projects")
     shutil.rmtree(_TMP, ignore_errors=True)
     check("tmp eliminado", not _TMP.exists())
 

@@ -38,10 +38,16 @@ sys.path.insert(0, str(BACKEND))
 
 _TMP = Path(tempfile.mkdtemp(prefix="chaos_test_"))
 import config as _cfg  # noqa: E402
-_cfg.DB_PATH = _TMP / "test.db"
-_cfg.OUTPUT_DIR = _TMP / "output"
-_cfg.DATA_DIR = _TMP / "data"
-_cfg.TMP_DIR = _TMP / "tmp"
+# Bajo pytest NO nos auto-parcheamos (conftest.py ya da la sesión canónica y
+# pytest_collection_finish la reafirma): parchear aquí liga POR VALOR los
+# servicios de TODOS los ficheros colectados después (golden, int058…) a
+# nuestro tmp privado → mismatch de rutas en cascada. Standalone (run_all)
+# mantiene el auto-parcheo de proceso fresco.
+if "pytest" not in sys.modules:
+    _cfg.DB_PATH = _TMP / "test.db"
+    _cfg.OUTPUT_DIR = _TMP / "output"
+    _cfg.DATA_DIR = _TMP / "data"
+    _cfg.TMP_DIR = _TMP / "tmp"
 for _d in (_cfg.OUTPUT_DIR, _cfg.DATA_DIR, _cfg.TMP_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 

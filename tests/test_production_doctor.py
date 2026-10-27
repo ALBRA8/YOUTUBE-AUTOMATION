@@ -145,6 +145,16 @@ def _borrar_proyecto(pid):
 def main() -> int:
     global OK, FAIL
     OK, FAIL = 0, 0
+    # arranque limpio: bajo pytest la sesión comparte la SQLite canónica y
+    # baterías anteriores (doctor_preflight 'pf_sano', golden, chaos…) dejan
+    # filas foráneas en flow_jobs/scenes/projects que falsean las capas C/D
+    # (DOC-D-COLA-INCOMPLETA con pids ajenos). Standalone (proceso fresco con
+    # su propia DB) el wipe es un no-op seguro.
+    import database as _db
+    with _db.connect() as _con:
+        _con.execute("DELETE FROM flow_jobs")
+        _con.execute("DELETE FROM scenes")
+        _con.execute("DELETE FROM projects")
     from services.production_doctor import audit, fix, verify, SAFE_REPAIRS
     from services.production_doctor.repairs import aplicar_reparaciones
     from services.production_doctor.core import (AuditTrail, Clasificacion,

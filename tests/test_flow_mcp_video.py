@@ -11,12 +11,19 @@ Hermético y sin Chrome:
 - Compatibilidad con flow_import.find_flow_videos().
 """
 import asyncio
+import contextlib
 import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+# Import ESTABLE a nivel de módulo: garantiza que `pipeline.orchestrator`
+# existe en sys.modules DESDE LA COLECCIÓN (así el fixture hermético de
+# conftest lo snapshot-ea y jamás lo purga entre tests — su identidad de
+# módulo es constante y los patches sobre sus nombres permanecen).
+from pipeline import orchestrator as _orch_mod  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BACKEND_DIR = REPO_ROOT / "backend"
@@ -26,6 +33,63 @@ if str(BACKEND_DIR) not in sys.path:
 import config
 from pipeline import flow_import, images as imgs_pipeline
 from services import flow_mcp_client
+
+
+# ── [FIX-C] aislamiento orden-independiente ────────────────────────────────
+# test_generate_video_success y test_generate_scene_video_bridge_and_import
+# PASABAN en solitario y fallaban en suite por estado GLOBAL mutado sin
+# restaurar por otras baterías pytest-compatibles:
+#   · tests/test_live_execution_c1.py:40 / c2.py:31 fijan
+#     config.FLOW_MCP_ENABLED = True a nivel de MÓDULO → pytest lo ejecuta en
+#     COLECCIÓN → available() REAL True en toda la sesión.
+#   · tests/test_autopublish_generate.py purga sys.modules e inyecta un
+#     `database` FAKE sin restaurar → los patch("services.flow_mcp_client.X")
+#     (resueltos vía sys.modules) caían en un objeto DISTINTO del referido
+#     por las capturas `from services import flow_mcp_client` de este módulo
+#     → call_tool/upload_file REALES (spawn de `node mcp.js`, sin Chrome).
+# Solución: los tests sensibles importan services/pipeline FRESCOS dentro de
+# _isolated_app_state (purga + re-import con rutas en tmp + restauración
+# EXACTA de sys.modules al salir) y parchean esos objetos frescos.
+_APP_TOPS = ("config", "database", "security", "main", "mcp_server",
+             "services", "pipeline")
+
+
+def _is_app_module(name: str) -> bool:
+    return name in _APP_TOPS or name.split(".")[0] in _APP_TOPS
+
+
+@contextlib.contextmanager
+def _isolated_app_state(tmp_root: Path):
+    """Purga los módulos de la app de sys.modules, re-importa config/database
+    con DB/OUTPUT/DATA/TMP redirigidos a tmp_root y, al salir, restaura
+    sys.modules exactamente como estaba (cero huella)."""
+    saved = {n: m for n, m in list(sys.modules.items()) if _is_app_module(n)}
+    for n in saved:
+        sys.modules.pop(n, None)
+    try:
+        import config as _cfg  # noqa: E402  (fresco: ni fake ni envenenado)
+        _cfg.DB_PATH = tmp_root / "test.db"
+        _cfg.OUTPUT_DIR = tmp_root / "output"
+        _cfg.DATA_DIR = tmp_root / "data"
+        _cfg.TMP_DIR = tmp_root / "tmp"
+        for _d in (_cfg.OUTPUT_DIR, _cfg.DATA_DIR, _cfg.TMP_DIR):
+            _d.mkdir(parents=True, exist_ok=True)
+        import database as _dbmod  # noqa: E402
+        # database hace `from config import DB_PATH` (binding por valor) y un
+        # hook externo (p.ej. conftest de sesión de FIX-A) puede reapuntar las
+        # rutas tras el import: reafirmar AMBAS globals antes de init_db().
+        _cfg.DB_PATH = tmp_root / "test.db"
+        _cfg.OUTPUT_DIR = tmp_root / "output"
+        _cfg.DATA_DIR = tmp_root / "data"
+        _cfg.TMP_DIR = tmp_root / "tmp"
+        _dbmod.DB_PATH = _cfg.DB_PATH
+        _dbmod.init_db()
+        yield
+    finally:
+        for n in [n for n in list(sys.modules)
+                  if _is_app_module(n) and n not in saved]:
+            del sys.modules[n]
+        sys.modules.update(saved)
 
 
 def _create_dummy_mp4(path: Path, size_bytes: int = 15000) -> Path:
@@ -82,19 +146,22 @@ class TestFlowMCPVideoClient(unittest.IsolatedAsyncioTestCase):
         _create_dummy_mp4(out_vid, size_bytes=25000)
 
         mock_resp = f"Generated video in 120s:\n{out_vid}"
-        with patch("services.flow_mcp_client.call_tool", new_callable=AsyncMock) as mock_call:
-            mock_call.return_value = mock_resp
-            res = await flow_mcp_client.generate_video(
-                prompt="Animate cinematic",
-                start_frame="crystal_orb",
-                aspect="9:16",
-                out_file=out_vid,
-            )
-            mock_call.assert_called_once()
-            args = mock_call.call_args[0][1]
-            self.assertEqual(args["startFrame"], "crystal_orb")
-            self.assertEqual(args["aspect"], "9:16")
-            self.assertEqual(res.resolve(), out_vid.resolve())
+        with _isolated_app_state(self.tmp):
+            from services import flow_mcp_client as fresh_fmc
+            with patch.object(fresh_fmc, "call_tool",
+                              new_callable=AsyncMock) as mock_call:
+                mock_call.return_value = mock_resp
+                res = await fresh_fmc.generate_video(
+                    prompt="Animate cinematic",
+                    start_frame="crystal_orb",
+                    aspect="9:16",
+                    out_file=out_vid,
+                )
+                mock_call.assert_called_once()
+                args = mock_call.call_args[0][1]
+                self.assertEqual(args["startFrame"], "crystal_orb")
+                self.assertEqual(args["aspect"], "9:16")
+                self.assertEqual(res.resolve(), out_vid.resolve())
 
 
 class TestPipelineVideoBridge(unittest.IsolatedAsyncioTestCase):
@@ -132,27 +199,34 @@ class TestPipelineVideoBridge(unittest.IsolatedAsyncioTestCase):
             _create_dummy_mp4(expected_mp4, size_bytes=30000)
             return expected_mp4
 
-        with patch("services.flow_mcp_client.available", return_value=True):
-            with patch("services.flow_mcp_client.upload_file", new_callable=AsyncMock) as mock_up:
-                with patch("services.flow_mcp_client.generate_video", side_effect=_fake_generate) as mock_gen:
-                    mock_up.return_value = {"ok": True}
+        with _isolated_app_state(self.tmp):
+            from pipeline import flow_import as fresh_flow_import
+            from pipeline import images as fresh_imgs
+            from services import flow_mcp_client as fresh_fmc
 
-                    res = await imgs_pipeline.generate_scene_video(
-                        scene=scene,
-                        project=project,
-                        idx=0,
-                        start_frame_path=start_img,
-                        asset_name="orb_c1",
-                    )
-                    self.assertEqual(res, expected_mp4)
-                    mock_up.assert_called_once()
-                    mock_gen.assert_called_once()
+            with patch.object(fresh_fmc, "available", return_value=True):
+                with patch.object(fresh_fmc, "upload_file",
+                                  new_callable=AsyncMock) as mock_up:
+                    with patch.object(fresh_fmc, "generate_video",
+                                      side_effect=_fake_generate) as mock_gen:
+                        mock_up.return_value = {"ok": True}
 
-        # 2. Verificar que flow_import.find_flow_videos lo detecta sin cambios en flow_import
-        with patch("pipeline.video.probe_duration", return_value=8.0):
-            found = flow_import.find_flow_videos(proj_dir, [0])
-            self.assertIn(0, found)
-            self.assertEqual(found[0].resolve(), expected_mp4.resolve())
+                        res = await fresh_imgs.generate_scene_video(
+                            scene=scene,
+                            project=project,
+                            idx=0,
+                            start_frame_path=start_img,
+                            asset_name="orb_c1",
+                        )
+                        self.assertEqual(res, expected_mp4)
+                        mock_up.assert_called_once()
+                        mock_gen.assert_called_once()
+
+            # 2. Verificar que flow_import.find_flow_videos lo detecta sin cambios en flow_import
+            with patch("pipeline.video.probe_duration", return_value=8.0):
+                found = fresh_flow_import.find_flow_videos(proj_dir, [0])
+                self.assertIn(0, found)
+                self.assertEqual(found[0].resolve(), expected_mp4.resolve())
 
 
 
@@ -189,31 +263,87 @@ class TestOrchestratorFlowVideoWiring(unittest.IsolatedAsyncioTestCase):
         self.temp_dir.cleanup()
 
     def _setup_common_patches(self):
-        p_db_get_proj = patch("pipeline.orchestrator.db.get_project", return_value=self.project)
-        p_db_get_sc = patch("pipeline.orchestrator.db.get_scenes", return_value=self.scenes)
-        p_db_up_proj = patch("pipeline.orchestrator.db.update_project")
-        p_db_up_job = patch("pipeline.orchestrator.db.update_job")
+        # ⚠️ NO mutar módulos COMPARTIDOS: los patches antiguos apuntaban a
+        # atributos de `database`/`tts_step`/`video`/`imgs`/`broker` (resueltos
+        # vía pipeline.orchestrator.X). Aunque se restauraran al salir del
+        # test, CUALQUIER import perezoso de servicios ejecutado DURANTE la
+        # ventana del patch (p.ej. services.video_qa con su
+        # `from database import get_scenes` por valor) quedaba ligado PARA
+        # SIEMPRE al mock → envenenaba baterías posteriores (golden fixture:
+        # KeyError 'width'). Ahora se sustituye el nombre DENTRO del
+        # orquestador por namespaces falsos descartables; los parches
+        # anidados de los cuerpos de test (p.ej.
+        # patch("pipeline.orchestrator.video.render_scenes")) resuelven
+        # contra el fake y dejan el módulo real intacto.
+        import types as _types
+
+        import database as _real_db
+        from pipeline import images as _real_imgs
+        from pipeline import tts_step as _real_tts
+        from pipeline import video as _real_video
+        from pipeline.orchestrator import broker as _real_broker  # instancia JobBroker
+
+        def _fake_module(real, **overrides):
+            ns = _types.SimpleNamespace()
+            for k, v in vars(real).items():
+                if not k.startswith("__"):
+                    setattr(ns, k, v)
+            for k, v in overrides.items():
+                setattr(ns, k, v)
+            return ns
+
+        class _InstanceProxy:
+            """Delega TODO en el objeto real salvo los overrides (para
+            instancias p.ej. JobBroker, cuyos métodos viven en la clase)."""
+
+            def __init__(self, real, **overrides):
+                object.__setattr__(self, "_real", real)
+                object.__setattr__(self, "_overrides", overrides)
+
+            def __getattr__(self, name):
+                if name in self._overrides:
+                    return self._overrides[name]
+                return getattr(self._real, name)
+
+        fake_db = _fake_module(
+            _real_db,
+            get_project=MagicMock(return_value=self.project),
+            get_scenes=MagicMock(return_value=self.scenes),
+            update_project=MagicMock(),
+            update_job=MagicMock(),
+        )
+        fake_imgs = _fake_module(_real_imgs, generate_all=AsyncMock())
+        fake_tts = _fake_module(
+            _real_tts,
+            synthesize_scenes=AsyncMock(return_value=([3.0, 3.0], [[], []])),
+            build_full_track=AsyncMock(return_value=self.proj_dir / "voice.mp3"),
+            save_words_timeline=MagicMock(return_value=self.proj_dir / "words.json"),
+        )
+        fake_video = _fake_module(
+            _real_video,
+            concat_clips=AsyncMock(return_value=self.proj_dir / "silent.mp4"),
+            mux_audio_music=AsyncMock(return_value=self.proj_dir / "raw.mp4"),
+            burn_subtitles=AsyncMock(return_value=self.proj_dir / "final.mp4"),
+            make_thumbnail=MagicMock(return_value=self.proj_dir / "thumb.jpg"),
+        )
+        fake_broker = _InstanceProxy(_real_broker, publish=AsyncMock())
+
+        p_db = patch("pipeline.orchestrator.db", fake_db)
         p_emit = patch("pipeline.orchestrator._emit", new_callable=AsyncMock)
-        p_gen_all = patch("pipeline.orchestrator.imgs.generate_all", new_callable=AsyncMock)
+        p_imgs = patch("pipeline.orchestrator.imgs", fake_imgs)
         p_gate_img = patch("pipeline.orchestrator._gate_imagenes_reales")
         p_gate_tts = patch("pipeline.orchestrator._gate_voz_real")
         p_gate_qa = patch("pipeline.orchestrator._gate_qa_final")
-        p_synth = patch("pipeline.orchestrator.tts_step.synthesize_scenes", new_callable=AsyncMock, return_value=([3.0, 3.0], [[], []]))
-        p_track = patch("pipeline.orchestrator.tts_step.build_full_track", new_callable=AsyncMock, return_value=self.proj_dir / "voice.mp3")
-        p_words = patch("pipeline.orchestrator.tts_step.save_words_timeline", return_value=self.proj_dir / "words.json")
+        p_tts = patch("pipeline.orchestrator.tts_step", fake_tts)
         p_dev = patch("pipeline.orchestrator._record_duration_deviations")
-        p_concat = patch("pipeline.orchestrator.video.concat_clips", new_callable=AsyncMock, return_value=self.proj_dir / "silent.mp4")
-        p_mux = patch("pipeline.orchestrator.video.mux_audio_music", new_callable=AsyncMock, return_value=self.proj_dir / "raw.mp4")
-        p_burn = patch("pipeline.orchestrator.video.burn_subtitles", new_callable=AsyncMock, return_value=self.proj_dir / "final.mp4")
-        p_thumb = patch("pipeline.orchestrator.video.make_thumbnail", return_value=self.proj_dir / "thumb.jpg")
+        p_video = patch("pipeline.orchestrator.video", fake_video)
         p_arch = patch("pipeline.orchestrator._archive_library")
-        p_pub = patch("pipeline.orchestrator.broker.publish", new_callable=AsyncMock)
+        p_broker = patch("pipeline.orchestrator.broker", fake_broker)
         p_out = patch("pipeline.orchestrator.OUTPUT_DIR", self.tmp)
 
         patches = [
-            p_db_get_proj, p_db_get_sc, p_db_up_proj, p_db_up_job, p_emit,
-            p_gen_all, p_gate_img, p_gate_tts, p_gate_qa, p_synth, p_track,
-            p_words, p_dev, p_concat, p_mux, p_burn, p_thumb, p_arch, p_pub, p_out
+            p_db, p_emit, p_imgs, p_gate_img, p_gate_tts, p_gate_qa,
+            p_tts, p_dev, p_video, p_arch, p_broker, p_out
         ]
         return patches
 
@@ -221,9 +351,13 @@ class TestOrchestratorFlowVideoWiring(unittest.IsolatedAsyncioTestCase):
         from pipeline import orchestrator
 
         patches = self._setup_common_patches()
-        for p in patches:
+        # un addCleanup(p.stop) POR patch (orden reverso, independiente):
+        # la versión lambda-lista abortaba la cadena al primer stop que
+        # lanzara, dejando patches ACTIVOS (p.ej. database.get_scenes) que
+        # envenenaban las baterías siguientes (golden fixture QA).
+        for p in reversed(patches):
             p.start()
-        self.addCleanup(lambda: [p.stop() for p in patches])
+            self.addCleanup(p.stop)
 
         with patch("config.FLOW_MCP_VIDEO_ENABLED", False):
             with patch("pipeline.orchestrator.imgs.generate_scene_video", new_callable=AsyncMock) as mock_gen_vid:
@@ -242,9 +376,13 @@ class TestOrchestratorFlowVideoWiring(unittest.IsolatedAsyncioTestCase):
         from pipeline import orchestrator
 
         patches = self._setup_common_patches()
-        for p in patches:
+        # un addCleanup(p.stop) POR patch (orden reverso, independiente):
+        # la versión lambda-lista abortaba la cadena al primer stop que
+        # lanzara, dejando patches ACTIVOS (p.ej. database.get_scenes) que
+        # envenenaban las baterías siguientes (golden fixture QA).
+        for p in reversed(patches):
             p.start()
-        self.addCleanup(lambda: [p.stop() for p in patches])
+            self.addCleanup(p.stop)
 
         vid0 = self.proj_dir / "flow" / "Escena_01_video.mp4"
         vid1 = self.proj_dir / "flow" / "Escena_02_video.mp4"
@@ -273,9 +411,13 @@ class TestOrchestratorFlowVideoWiring(unittest.IsolatedAsyncioTestCase):
         from pipeline import orchestrator
 
         patches = self._setup_common_patches()
-        for p in patches:
+        # un addCleanup(p.stop) POR patch (orden reverso, independiente):
+        # la versión lambda-lista abortaba la cadena al primer stop que
+        # lanzara, dejando patches ACTIVOS (p.ej. database.get_scenes) que
+        # envenenaban las baterías siguientes (golden fixture QA).
+        for p in reversed(patches):
             p.start()
-        self.addCleanup(lambda: [p.stop() for p in patches])
+            self.addCleanup(p.stop)
 
         flow_dir = self.proj_dir / "flow"
         flow_dir.mkdir(parents=True, exist_ok=True)
@@ -305,9 +447,13 @@ class TestOrchestratorFlowVideoWiring(unittest.IsolatedAsyncioTestCase):
         from pipeline import orchestrator
 
         patches = self._setup_common_patches()
-        for p in patches:
+        # un addCleanup(p.stop) POR patch (orden reverso, independiente):
+        # la versión lambda-lista abortaba la cadena al primer stop que
+        # lanzara, dejando patches ACTIVOS (p.ej. database.get_scenes) que
+        # envenenaban las baterías siguientes (golden fixture QA).
+        for p in reversed(patches):
             p.start()
-        self.addCleanup(lambda: [p.stop() for p in patches])
+            self.addCleanup(p.stop)
 
         vid1 = self.proj_dir / "flow" / "Escena_02_video.mp4"
         _create_dummy_mp4(vid1)

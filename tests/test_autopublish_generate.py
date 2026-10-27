@@ -582,9 +582,28 @@ def main() -> int:
     return 1 if FAIL else 0
 
 
+def _es_modulo_app(n: str) -> bool:
+    return (n in ("database", "config", "security", "main", "mcp_server")
+            or n.split(".")[0] in ("pipeline", "services"))
+
+
 def test_autopublish_generate():
-    """Entrada pytest: la batería completa debe quedar en verde."""
-    assert main() == 0
+    """Entrada pytest: la batería completa debe quedar en verde.
+
+    La batería PURGA sys.modules e inyecta una `database` FAKE para importar
+    la app aislada (diseño standalone, proceso fresco). Bajo pytest eso deja
+    el main/orchestrator/servicios FALSOS en sys.modules al terminar, y los
+    tests siguientes (p.ej. int058: POST /api/avatars/{id}/circle-pip) ven un
+    `main.db` que NO es la SQLite canónica → 404 'Avatar no encontrado'.
+    El wrapper restaura sys.modules EXACTAMENTE como estaba al terminar."""
+    saved = {n: m for n, m in list(sys.modules.items()) if _es_modulo_app(n)}
+    try:
+        assert main() == 0
+    finally:
+        for n in [n for n in list(sys.modules)
+                  if _es_modulo_app(n) and n not in saved]:
+            del sys.modules[n]
+        sys.modules.update(saved)
 
 
 if __name__ == "__main__":

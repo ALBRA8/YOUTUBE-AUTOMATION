@@ -16,6 +16,7 @@ Cubre de forma hermética y aislada (sin abrir Chrome, sin red, sin generar en F
   8. Preservación estricta de F5.1 (extension/injector.js y manifest intactos).
 """
 import asyncio
+import contextlib
 import io
 import json
 import os
@@ -38,6 +39,67 @@ if str(BACKEND_DIR) not in sys.path:
 import config
 from pipeline import images as imgs_pipeline
 from services import flow_mcp_client
+
+
+# ── [FIX-C] aislamiento orden-independiente ────────────────────────────────
+# Los 6 fallos de esta batería en suite (verdes en solitario) venían de
+# estado GLOBAL mutado sin restaurar por otras baterías pytest-compatibles:
+#   · tests/test_live_execution_c1.py:40 y c2.py:31 fijan
+#     config.FLOW_MCP_ENABLED = True a nivel de MÓDULO → pytest lo ejecuta en
+#     COLECCIÓN y envenena el objeto config compartido de toda la sesión
+#     (rompía test_default_flag_is_disabled y activaba available() real).
+#   · tests/test_live_execution_c2.py:26-27 y test_live_execution*.py fijan
+#     os.environ["FLOW_MCP_ENABLED"]="1" en colección → sobrevive incluso a
+#     re-imports frescos de config (por eso se limpia el env aquí).
+#   · tests/test_autopublish_generate.py purga sys.modules e inyecta un
+#     `database` FAKE sin restaurar → los patch("services.flow_mcp_client.X")
+#     (resueltos vía sys.modules) caían en un objeto DISTINTO del que usaban
+#     las referencias capturadas → available()/call_tool REALES (spawn de
+#     `node mcp.js`) y degradaciones que no ocurrían.
+# Solución: cada test sensible importa config/services/pipeline FRESCOS
+# dentro de _isolated_app_state (purga + re-import con rutas en tmp +
+# restauración EXACTA de sys.modules al salir) y parchea esos objetos
+# frescos, nunca el estado compartido.
+_APP_TOPS = ("config", "database", "security", "main", "mcp_server",
+             "services", "pipeline")
+
+
+def _is_app_module(name: str) -> bool:
+    return name in _APP_TOPS or name.split(".")[0] in _APP_TOPS
+
+
+@contextlib.contextmanager
+def _isolated_app_state(tmp_root: Path):
+    """Purga los módulos de la app de sys.modules, re-importa config/database
+    con DB/OUTPUT/DATA/TMP redirigidos a tmp_root y, al salir, restaura
+    sys.modules exactamente como estaba (cero huella)."""
+    saved = {n: m for n, m in list(sys.modules.items()) if _is_app_module(n)}
+    for n in saved:
+        sys.modules.pop(n, None)
+    try:
+        import config as _cfg  # noqa: E402  (fresco: ni fake ni envenenado)
+        _cfg.DB_PATH = tmp_root / "test.db"
+        _cfg.OUTPUT_DIR = tmp_root / "output"
+        _cfg.DATA_DIR = tmp_root / "data"
+        _cfg.TMP_DIR = tmp_root / "tmp"
+        for _d in (_cfg.OUTPUT_DIR, _cfg.DATA_DIR, _cfg.TMP_DIR):
+            _d.mkdir(parents=True, exist_ok=True)
+        import database as _dbmod  # noqa: E402
+        # database hace `from config import DB_PATH` (binding por valor) y un
+        # hook externo (p.ej. conftest de sesión de FIX-A) puede reapuntar las
+        # rutas tras el import: reafirmar AMBAS globals antes de init_db().
+        _cfg.DB_PATH = tmp_root / "test.db"
+        _cfg.OUTPUT_DIR = tmp_root / "output"
+        _cfg.DATA_DIR = tmp_root / "data"
+        _cfg.TMP_DIR = tmp_root / "tmp"
+        _dbmod.DB_PATH = _cfg.DB_PATH
+        _dbmod.init_db()
+        yield
+    finally:
+        for n in [n for n in list(sys.modules)
+                  if _is_app_module(n) and n not in saved]:
+            del sys.modules[n]
+        sys.modules.update(saved)
 
 
 def _create_valid_png(path: Path, width: int = 120, height: int = 120, min_bytes: int = 4096) -> Path:
@@ -71,28 +133,50 @@ def _create_valid_png(path: Path, width: int = 120, height: int = 120, min_bytes
 
 class TestFlowMCPConfigAndAvailability(unittest.TestCase):
     def test_default_flag_is_disabled(self):
-        """Verifica que por defecto el feature flag esté desactivado."""
-        self.assertFalse(config.FLOW_MCP_ENABLED)
-        self.assertFalse(flow_mcp_client.available())
+        """Verifica que por defecto (sin env que envenene la colección)
+        el feature flag esté desactivado."""
+        with patch.dict(os.environ), _isolated_app_state(self._scratch()):
+            # test_live_execution*.py fijan FLOW_MCP_ENABLED=1 en os.environ a
+            # nivel de módulo (colección): el default REAL es sin env.
+            for k in ("FLOW_MCP_ENABLED", "FLOW_MCP_VIDEO_ENABLED"):
+                os.environ.pop(k, None)
+            import config as fresh_config  # noqa: F401 — re-import fresco
+            from services import flow_mcp_client as fresh_fmc
+            self.assertFalse(fresh_config.FLOW_MCP_ENABLED)
+            self.assertFalse(fresh_fmc.available())
+
+    @staticmethod
+    def _scratch():
+        # directorio efímero para las rutas del ctx (DB nunca tocada aquí)
+        return Path(tempfile.mkdtemp(prefix="flow_mcp_bridge_scratch_"))
 
     def test_available_when_flag_enabled_and_files_exist(self):
         """Verifica que available() sea True solo si el flag está ON y los archivos existen."""
-        with patch.object(config, "FLOW_MCP_ENABLED", True):
-            with patch("services.flow_mcp_client.get_node_bin", return_value="node"):
-                self.assertTrue(flow_mcp_client.available())
+        with _isolated_app_state(self._scratch()):
+            import config as fresh_config
+            from services import flow_mcp_client as fresh_fmc
+            with patch.object(fresh_config, "FLOW_MCP_ENABLED", True):
+                with patch.object(fresh_fmc, "get_node_bin", return_value="node"):
+                    self.assertTrue(fresh_fmc.available())
 
     def test_unavailable_when_node_missing(self):
         """Si node no está disponible, available() debe ser False aunque el flag esté ON."""
-        with patch.object(config, "FLOW_MCP_ENABLED", True):
-            with patch("services.flow_mcp_client.get_node_bin", return_value=None):
-                self.assertFalse(flow_mcp_client.available())
+        with _isolated_app_state(self._scratch()):
+            import config as fresh_config
+            from services import flow_mcp_client as fresh_fmc
+            with patch.object(fresh_config, "FLOW_MCP_ENABLED", True):
+                with patch.object(fresh_fmc, "get_node_bin", return_value=None):
+                    self.assertFalse(fresh_fmc.available())
 
     def test_unavailable_when_script_missing(self):
         """Si el script mcp.js no existe, available() debe ser False."""
-        with patch.object(config, "FLOW_MCP_ENABLED", True):
-            with patch.object(config, "FLOW_MCP_DIR", Path("/ruta/inexistente")):
-                with patch("services.flow_mcp_client.get_node_bin", return_value="node"):
-                    self.assertFalse(flow_mcp_client.available())
+        with _isolated_app_state(self._scratch()):
+            import config as fresh_config
+            from services import flow_mcp_client as fresh_fmc
+            with patch.object(fresh_config, "FLOW_MCP_ENABLED", True):
+                with patch.object(fresh_config, "FLOW_MCP_DIR", Path("/ruta/inexistente")):
+                    with patch.object(fresh_fmc, "get_node_bin", return_value="node"):
+                        self.assertFalse(fresh_fmc.available())
 
 
 class TestFlowMCPFileVerificationAndParsing(unittest.TestCase):
@@ -252,57 +336,93 @@ class TestImagesPipelineFallbackIntegration(unittest.IsolatedAsyncioTestCase):
 
     async def test_flag_disabled_pipeline_preserves_legacy_flow(self):
         """Con FLOW_MCP_ENABLED=False, flow_mcp no se llama y corre el pipeline anterior."""
-        with patch.object(config, "FLOW_MCP_ENABLED", False):
-            with patch.object(imgs_pipeline, "scene_dir", return_value=self.td):
-                with patch("services.gemini_client.available", return_value=False):
-                    with patch("pipeline.images._zai_image", AsyncMock(return_value=False)):
-                        with patch("database.take_ext_image", return_value=None):
-                            out, method = await imgs_pipeline.generate_scene_image(self.scene, self.project, 1)
-                            self.assertEqual(method, "placeholder")
-                            self.assertTrue(out.is_file())
+        with _isolated_app_state(self.td):
+            import config as fresh_config
+            import database as fresh_db
+            from pipeline import images as fresh_imgs
+            from services import flow_mcp_client as fresh_fmc
+            from services import gemini_client as fresh_gem
+            with patch.object(fresh_config, "FLOW_MCP_ENABLED", False):
+                with patch.object(fresh_imgs, "scene_dir", return_value=self.td):
+                    with patch.object(fresh_fmc, "available", return_value=False):
+                        with patch.object(fresh_gem, "available", return_value=False):
+                            with patch.object(fresh_imgs, "_zai_image",
+                                              AsyncMock(return_value=False)):
+                                with patch.object(fresh_db, "take_ext_image",
+                                                  return_value=None):
+                                    out, method = await fresh_imgs.generate_scene_image(
+                                        self.scene, self.project, 1)
+                                    self.assertEqual(method, "placeholder")
+                                    self.assertTrue(out.is_file())
 
     async def test_flag_enabled_success_produces_flow_mcp_method(self):
         """Con FLOW_MCP_ENABLED=True y éxito, se copia el archivo y se registra 'flow_mcp'."""
         valid_generated = self.td / "flow_out.png"
         _create_valid_png(valid_generated, 120, 120)
 
-        with patch.object(config, "FLOW_MCP_ENABLED", True):
-            with patch.object(imgs_pipeline, "scene_dir", return_value=self.td):
-                with patch("services.flow_mcp_client.available", return_value=True):
-                    with patch("services.flow_mcp_client.generate_image", AsyncMock(return_value=[valid_generated])):
-                        out, method = await imgs_pipeline.generate_scene_image(self.scene, self.project, 1)
-                        self.assertEqual(method, "flow_mcp")
-                        self.assertTrue(out.is_file())
-                        self.assertGreater(out.stat().st_size, 4096)
+        with _isolated_app_state(self.td):
+            import config as fresh_config
+            from pipeline import images as fresh_imgs
+            from services import flow_mcp_client as fresh_fmc
+            with patch.object(fresh_config, "FLOW_MCP_ENABLED", True):
+                with patch.object(fresh_imgs, "scene_dir", return_value=self.td):
+                    with patch.object(fresh_fmc, "available", return_value=True):
+                        with patch.object(fresh_fmc, "generate_image",
+                                          AsyncMock(return_value=[valid_generated])):
+                            out, method = await fresh_imgs.generate_scene_image(
+                                self.scene, self.project, 1)
+                            self.assertEqual(method, "flow_mcp")
+                            self.assertTrue(out.is_file())
+                            self.assertGreater(out.stat().st_size, 4096)
 
     async def test_flag_enabled_failure_gracefully_falls_back(self):
         """Con FLOW_MCP_ENABLED=True pero fallo en MCP, se degrada limpiamente a Gemini/Placeholder."""
-        with patch.object(config, "FLOW_MCP_ENABLED", True):
-            with patch.object(imgs_pipeline, "scene_dir", return_value=self.td):
-                with patch("services.flow_mcp_client.available", return_value=True):
-                    with patch("services.flow_mcp_client.generate_image", AsyncMock(side_effect=flow_mcp_client.FlowMCPAuthError("No login"))):
-                        with patch("services.gemini_client.available", return_value=False):
-                            with patch("pipeline.images._zai_image", AsyncMock(return_value=False)):
-                                with patch("database.take_ext_image", return_value=None):
-                                    out, method = await imgs_pipeline.generate_scene_image(self.scene, self.project, 1)
-                                    self.assertEqual(method, "placeholder")
-                                    self.assertTrue(out.is_file())
+        with _isolated_app_state(self.td):
+            import config as fresh_config
+            import database as fresh_db
+            from pipeline import images as fresh_imgs
+            from services import flow_mcp_client as fresh_fmc
+            from services import gemini_client as fresh_gem
+            with patch.object(fresh_config, "FLOW_MCP_ENABLED", True):
+                with patch.object(fresh_imgs, "scene_dir", return_value=self.td):
+                    with patch.object(fresh_fmc, "available", return_value=True):
+                        with patch.object(fresh_fmc, "generate_image",
+                                          AsyncMock(side_effect=fresh_fmc.FlowMCPAuthError("No login"))):
+                            with patch.object(fresh_gem, "available", return_value=False):
+                                with patch.object(fresh_imgs, "_zai_image",
+                                                  AsyncMock(return_value=False)):
+                                    with patch.object(fresh_db, "take_ext_image",
+                                                      return_value=None):
+                                        out, method = await fresh_imgs.generate_scene_image(
+                                            self.scene, self.project, 1)
+                                        self.assertEqual(method, "placeholder")
+                                        self.assertTrue(out.is_file())
 
     async def test_flag_enabled_invalid_file_rejected_and_falls_back(self):
         """Si flow_generate_image devuelve un archivo vacío/corrupto, no se acepta como escena."""
         bad_file = self.td / "bad.png"
         bad_file.write_bytes(b"corrupt junk")
 
-        with patch.object(config, "FLOW_MCP_ENABLED", True):
-            with patch.object(imgs_pipeline, "scene_dir", return_value=self.td):
-                with patch("services.flow_mcp_client.available", return_value=True):
-                    with patch("services.flow_mcp_client.generate_image", AsyncMock(return_value=[bad_file])):
-                        with patch("services.gemini_client.available", return_value=False):
-                            with patch("pipeline.images._zai_image", AsyncMock(return_value=False)):
-                                with patch("database.take_ext_image", return_value=None):
-                                    out, method = await imgs_pipeline.generate_scene_image(self.scene, self.project, 1)
-                                    self.assertEqual(method, "placeholder")
-                                    self.assertTrue(out.is_file())
+        with _isolated_app_state(self.td):
+            import config as fresh_config
+            import database as fresh_db
+            from pipeline import images as fresh_imgs
+            from services import flow_mcp_client as fresh_fmc
+            from services import gemini_client as fresh_gem
+            with patch.object(fresh_config, "FLOW_MCP_ENABLED", True):
+                with patch.object(fresh_imgs, "scene_dir", return_value=self.td):
+                    with patch.object(fresh_fmc, "available", return_value=True):
+                        with patch.object(fresh_fmc, "generate_image",
+                                          AsyncMock(return_value=[bad_file])):
+                            with patch.object(fresh_gem, "available", return_value=False):
+                                with patch.object(fresh_imgs, "_zai_image",
+                                                  AsyncMock(return_value=False)):
+                                    with patch.object(fresh_db, "take_ext_image",
+                                                      return_value=None):
+                                        out, method = await fresh_imgs.generate_scene_image(
+                                            self.scene, self.project, 1)
+                                        self.assertEqual(method, "placeholder")
+                                        self.assertTrue(out.is_file())
 
 
 class TestF51PreservationAndNonRegressions(unittest.TestCase):
