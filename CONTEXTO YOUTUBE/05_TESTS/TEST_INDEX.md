@@ -53,8 +53,6 @@ window.__FLOW_RPC_OBS__
 
 No generar otro vídeo hasta clasificar esta captura.
 
-<<<<<<< HEAD
-
 ## TEST-SUITE-F5-CONSOLIDADA (2026-10-20)
 **Estado:** PASS 100% EN VM/HARNESS (244/244 CHECKS VERIFICADOS).
 
@@ -70,7 +68,7 @@ Resultados de la validación final agrupada:
 
 ### Límite de evidencia:
 Estas 244 pruebas validan con rigor algorítmico y de microtareas la implementación de `extension/injector.js` en V8 (Node.js hermético). No equivalen a una prueba LIVE en Chrome contra la infraestructura real de Google Flow.
-=======
+
 ## GoogleFlowMCP bridge — 2026-10-20
 **Estado:** pruebas reportadas PASS; LIVE pendiente. Los resultados siguientes provienen del informe de Antigravity y no se reejecutaron al actualizar este índice.
 
@@ -80,4 +78,9 @@ Estas 244 pruebas validan con rigor algorítmico y de microtareas la implementac
 - `tools/GoogleFlowMCP`: `npm test`, 3/3 PASS reportado.
 
 **Límite:** los tests aislados y mocks no demuestran una generación real por Google Flow. LIVE TEST 1 sigue pendiente hasta preparar el perfil dedicado y ejecutar una imagen controlada con autorización explícita.
->>>>>>> origin/main
+
+## Gate de producción en Antigravity — 2026-10-28
+**Estado:** checklist creado; ejecución pendiente en la máquina del usuario.
+
+- `CONTEXTO YOUTUBE/05_TESTS/ANTIGRAVITY_VALIDACION_PRODUCCION.md`: sesión de validación paso a paso (backend, sesión NotebookLM con defaults v0.8.5 de INT-069.1, Production Doctor + REAL FLOW PREFLIGHT, LIVE TEST 1 de imagen, E2E video con contrato, primer Audio Overview real del Studio Bridge, humo de la ola INT-029..068).
+- Criterio de cierre de ESTADO_REAL.md §3: los límites «E2E con Google Flow REAL» y «Studio Bridge sin sesión viva» se levantan solo con la evidencia de esa sesión.

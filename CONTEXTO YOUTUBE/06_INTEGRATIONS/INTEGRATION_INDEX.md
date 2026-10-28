@@ -216,3 +216,14 @@
 - **Origen:** evaluación del upstream `teng-lin/notebooklm-py` v0.8.5 (el paquete que ya provee el servidor `notebooklm-mcp` desde INT-022).
 - **Componentes:** `backend/services/nlm_studio.py` · `backend/services/mcp_manager.py` (auth refresh + mirror de `notebook`) · `backend/main.py` (3 endpoints `/api/nlm/studio/*`) · `backend/config.py` (NLM_*) · `tools/mcp-setup/login-notebooklm.bat` (pin `==0.8.5`) · `tests/test_int069_nlm_studio.py`.
 - **Resultado:** generación programática de Audio Overviews (podcast) desde un guion vía `studio_generate/status/download` del MCP, export `.m4a` a `DATA_DIR/exports/nlm_studio/`; refresh automático de cookies en el preflight (fail-open, gate `NLM_AUTH_REFRESH`); versión del upstream pineada para blindar el preflight frente a renombres de tools.
+
+## INT-069.1 — Alineación de defaults de tools NotebookLM a v0.8.5 + mirror `query`→`question`
+- **Estado:** IMPLEMENTADO / tests 18/18 en la batería INT-069 · suite pytest 192/192.
+- **Documento:** [INT-069B](INT-069B_ALINEACION_TOOLS_NOTEBOOKLM_V085.md).
+- **Problema:** tras el pin `==0.8.5` (INT-069), los defaults seguían apuntando a `list_notebooks` / `query_notebook`, nombres que v0.8.5 ya no expone. Hallazgo crítico verificado en el tag: `chat_ask` además renombró el **parámetro** (`question`, no `query` — lo que envía el orquestador INT-023); con FastMCP estricto, renombrar solo la tool habría roto el Stage 1 en la primera corrida real.
+- **Componentes:** `backend/config.py` (defaults `notebook_list` / `chat_ask`) · `mcp_manager.py` (3 call sites del probe + `_mirror_query_arg()` schema-driven, invocado junto a `_mirror_notebook_arg`) · `pipeline_orchestrator.py` (fallback Stage 1) · `.env.example`.
+- **Resultado:** cadena de compat completa — el orquestador sigue enviando su contrato legacy y `mcp_manager` lo adapta al schema real de la tool; servidores legacy intactos. Validación punta a punta con sesión viva → Antigravity.
+
+## Huecos de numeración documentados (auditoría 2026-10-28)
+- **INT-060, INT-063, INT-065, INT-067 NO existen**: verificado en el historial completo (`git log --all`), en `06_INTEGRATIONS/` y en el árbol (`rg`) — ningún commit, ficha o servicio los referencia. La ola INT-059→INT-068 los saltó.
+- **Convención:** no reutilizar esos números sin auditoría previa; los próximos trabajos de integración continúan desde INT-070. Si otra sesión llega a usarlos con contenido real, documentar el re-mapeo aquí.

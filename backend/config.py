@@ -38,7 +38,7 @@ NOTEBOOKLM_MCP_TIMEOUT = float(os.getenv("NOTEBOOKLM_MCP_TIMEOUT", "60.0"))
 # (panel local protegido por auth_guard); ejemplo solo-lectura en .env.example.
 NOTEBOOKLM_MCP_TOOLS = os.getenv("NOTEBOOKLM_MCP_TOOLS", "").strip()
 # Tool liviana de solo-lectura para el preflight de sesión (AUTH_REQUIRED).
-NOTEBOOKLM_PROBE_TOOL = os.getenv("NOTEBOOKLM_PROBE_TOOL", "list_notebooks").strip()
+NOTEBOOKLM_PROBE_TOOL = os.getenv("NOTEBOOKLM_PROBE_TOOL", "notebook_list").strip()
 # notebookId dinámico (§3): clave de argumento + fallback desde .env.
 NOTEBOOKLM_ID_KEY = os.getenv("NOTEBOOKLM_ID_KEY", "notebook_id").strip()
 NOTEBOOKLM_NOTEBOOK_ID = os.getenv("NOTEBOOKLM_NOTEBOOK_ID", "").strip()
@@ -101,7 +101,7 @@ GOOGLE_LOGIN_PAGES = [u.strip() for u in os.getenv(
 # Tool de solo-lectura del servidor notebooklm-mcp que extrae la bíblia de
 # investigación (Stage 1). Si el servidor no la expone, el error llega a la
 # UI con la lista real de tools disponibles (TOOL_UNKNOWN).
-NOTEBOOKLM_CONTEXT_TOOL = os.getenv("NOTEBOOKLM_CONTEXT_TOOL", "query_notebook").strip()
+NOTEBOOKLM_CONTEXT_TOOL = os.getenv("NOTEBOOKLM_CONTEXT_TOOL", "chat_ask").strip()
 # Consulta enviada junto al notebookId (plantilla editable por .env).
 NOTEBOOKLM_CONTEXT_QUERY = os.getenv(
     "NOTEBOOKLM_CONTEXT_QUERY",

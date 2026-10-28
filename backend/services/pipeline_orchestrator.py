@@ -521,7 +521,7 @@ class PipelineOrchestrator:
             # ── Stage 1: contexto de NotebookLM (solo-lectura) ──
             self._set_step(run, ST_STAGE1, "running")
             run["progress_pct"] = 25
-            tool = str(_cfg("NOTEBOOKLM_CONTEXT_TOOL", "query_notebook") or "").strip()
+            tool = str(_cfg("NOTEBOOKLM_CONTEXT_TOOL", "chat_ask") or "").strip()
             query = str(_cfg(
                 "NOTEBOOKLM_CONTEXT_QUERY",
                 "Extrae del notebook la biblia de investigación para producir un "

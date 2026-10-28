@@ -466,7 +466,7 @@ class MCPClientManager:
                         f"notebook_id inválido: '{nid[:24]}' (patrón {id_key})", "INVALID_NOTEBOOK_ID")
                 arguments[id_key] = nid            # §3: inyección dinámica
             elif tool in _LIST_NOTEBOOK_TOOLS or tool in _NO_NOTEBOOK_TOOLS or tool == str(
-                    _cfg("NOTEBOOKLM_PROBE_TOOL", "list_notebooks") or "").strip():
+                    _cfg("NOTEBOOKLM_PROBE_TOOL", "notebook_list") or "").strip():
                 warn.append(f"notebook_id ausente; '{tool}' no lo necesita "
                             f"(listado/creación)")
             else:
@@ -494,9 +494,12 @@ class MCPClientManager:
                 f"el servidor no expone '{tool}' (tools: {', '.join(sorted(n for n in names if n))})",
                 "TOOL_UNKNOWN")
         if service == "notebooklm":
-            # INT-069: v0.8.5 nombra el parámetro `notebook`; espejar la clave
-            # legacy del §3 según el inputSchema REAL (ver _mirror_notebook_arg).
+            # INT-069/069.1: v0.8.5 nombra los parámetros `notebook` (antes
+            # notebook_id) y `question` (antes query en la tool de contexto del
+            # orquestador); espejar claves legacy según el inputSchema REAL
+            # (ver _mirror_notebook_arg / _mirror_query_arg).
             self._mirror_notebook_arg(conn, tool, arguments)
+            self._mirror_query_arg(conn, tool, arguments)
         t0 = time.time()
         try:
             text = await conn.call(tool, arguments, float(
@@ -559,7 +562,7 @@ class MCPClientManager:
             if not conn or conn.state != ST_CONNECTED:
                 raise MCPManagerError("notebooklm no se pudo conectar", "DISCONNECTED")
         names = {t.get("name") for t in conn.tools}
-        probe = str(_cfg("NOTEBOOKLM_PROBE_TOOL", "list_notebooks") or "").strip()
+        probe = str(_cfg("NOTEBOOKLM_PROBE_TOOL", "notebook_list") or "").strip()
         candidates = [t for t in _LIST_NOTEBOOK_TOOLS if t in names]
         if probe and probe in names and probe not in candidates:
             candidates.append(probe)
@@ -1174,6 +1177,24 @@ class MCPClientManager:
                 arguments["notebook"] = arguments.pop("notebook_id")
             break
 
+    def _mirror_query_arg(self, conn: "_Conn", tool: str, arguments: dict) -> None:
+        """INT-069.1 · compat notebooklm-py ≥0.8.x: la tool de contexto del
+        orquestador (chat_ask desde v0.8.5; antes query_notebook) declara el
+        parámetro `question` y el orquestador (INT-023) envía `query` — el
+        nombre de la tool legacy. FastMCP rechaza kwargs desconocidos con
+        ValidationError. Si el inputSchema declara `question` y NO `query`,
+        renombra la clave. Servidores legacy que sí declaran `query` (o tools
+        sin schema) quedan intactos."""
+        if "query" not in arguments:
+            return
+        for t in conn.tools or []:
+            if t.get("name") != tool:
+                continue
+            props = ((t.get("inputSchema") or {}).get("properties") or {})
+            if "question" in props and "query" not in props:
+                arguments["question"] = arguments.pop("query")
+            break
+
     def _allowed_tools(self, service: str) -> set[str] | None:
         """None = todas (default documentado en .env.example)."""
         if service == "google-flow":
@@ -1221,7 +1242,7 @@ class MCPClientManager:
                         conn.auth = "ok" if cdp_alive else "unknown"
                         conn.auth_detail = str(ex)[:160]
             else:
-                probe = str(_cfg("NOTEBOOKLM_PROBE_TOOL", "list_notebooks") or "").strip()
+                probe = str(_cfg("NOTEBOOKLM_PROBE_TOOL", "notebook_list") or "").strip()
                 names = {t.get("name") for t in conn.tools}
                 if probe not in names:
                     for cand in _LIST_NOTEBOOK_TOOLS:

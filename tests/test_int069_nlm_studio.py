@@ -236,6 +236,43 @@ def test_execute_mirrors_notebook_arg():
     assert args2 == {"notebook_id": NB, "x": 1}
 
 
+# ── INT-069.1 · alineación de defaults a v0.8.5 + mirror query→question ───
+def test_mirror_query_arg_v085():
+    """chat_ask (v0.8.5) declara `question`; el orquestador (INT-023) envía
+    `query` (nombre de la tool legacy query_notebook) → se espeja."""
+    mgr = mcpm.MCPClientManager()
+    conn = _StubConn(tools=[{
+        "name": "chat_ask",
+        "inputSchema": {"properties": {"notebook": {"type": "string"},
+                                       "question": {"type": "string"}}}}])
+    args = {"notebook": NB, "query": "biblia de investigación"}
+    mgr._mirror_query_arg(conn, "chat_ask", args)
+    assert args == {"notebook": NB, "question": "biblia de investigación"}
+    # servidor legacy (declara query, p.ej. query_notebook) queda intacto
+    conn2 = _StubConn(tools=[{
+        "name": "query_notebook",
+        "inputSchema": {"properties": {"notebook_id": {"type": "string"},
+                                       "query": {"type": "string"}}}}])
+    args2 = {"notebook_id": NB, "query": "x"}
+    mgr._mirror_query_arg(conn2, "query_notebook", args2)
+    assert args2 == {"notebook_id": NB, "query": "x"}
+
+
+def test_defaults_aligned_v085():
+    """INT-069.1: los defaults de código apuntan a tools v0.8.5
+    (notebook_list para el probe; chat_ask para el contexto del orquestador),
+    con los nombres legacy aún aceptados en _LIST_NOTEBOOK_TOOLS."""
+    assert config.NOTEBOOKLM_PROBE_TOOL == "notebook_list"
+    assert config.NOTEBOOKLM_CONTEXT_TOOL == "chat_ask"
+    backend = Path(__file__).resolve().parents[1] / "backend"
+    mm_src = (backend / "services" / "mcp_manager.py").read_text(encoding="utf-8")
+    assert '_cfg("NOTEBOOKLM_PROBE_TOOL", "notebook_list")' in mm_src
+    assert '"notebook_list", "list_notebooks"' in mm_src  # legacy aceptado
+    po_src = (backend / "services" / "pipeline_orchestrator.py").read_text(
+        encoding="utf-8")
+    assert '_cfg("NOTEBOOKLM_CONTEXT_TOOL", "chat_ask")' in po_src
+
+
 @pytest.mark.asyncio
 async def test_notebook_create_exempt_from_missing_id_guard(monkeypatch):
     """notebook_create no acepta notebook_id (v0.8.5): debe pasar el fail-fast
