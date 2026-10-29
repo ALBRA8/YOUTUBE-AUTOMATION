@@ -125,6 +125,12 @@ RENDER_EST_CPS = float(os.getenv("RENDER_EST_CPS", "14.5"))
 RENDER_MIN_SCENE_SEC = float(os.getenv("RENDER_MIN_SCENE_SEC", "2.0"))
 # Cama musical: atenuación fija (ducking determinista) en dB negativos.
 RENDER_MUSIC_DUCK_DB = float(os.getenv("RENDER_MUSIC_DUCK_DB", "-20"))
+# INT-070 (opt-in, adaptado de estudio-video-ia): ducking DINÁMICO de la cama
+# con sidechaincompress (cede cuando habla la voz). "0" = ducking fijo de siempre.
+RENDER_MUSIC_SIDECAN = os.getenv("RENDER_MUSIC_SIDECAN", "0").strip()
+# INT-070 (opt-in): normalización de loudness a -14 LUFS (TP=-1, LRA=11), el
+# estándar de YouTube, tras la mezcla. "0" = nivel de mezcla sin tocar.
+RENDER_LOUDNORM = os.getenv("RENDER_LOUDNORM", "0").strip()
 # Cama musical por defecto: ruta absoluta o nombre de archivo dentro de
 # config.MUSIC_DIR (vacío = mezclar sin música).
 RENDER_MUSIC_PATH = os.getenv("RENDER_MUSIC_PATH", "").strip()
@@ -135,6 +141,10 @@ RENDER_SUBTITLES = os.getenv("RENDER_SUBTITLES", "burn").strip().lower()
 RENDER_FFMPEG_TIMEOUT = float(os.getenv("RENDER_FFMPEG_TIMEOUT", "900"))
 RENDER_X264_PRESET = os.getenv("RENDER_X264_PRESET", "veryfast").strip()
 RENDER_CRF = int(os.getenv("RENDER_CRF", "20"))
+# INT-070: realineación de timestamps Whisper contra silencios reales
+# (silencedetect + premio de puntuación + reparto por peso de palabra).
+# Mejora el karaoke palabra-a-palabra (INT-045) junto a las pausas; "0" = crudo.
+WHISPER_REALIGN = os.getenv("WHISPER_REALIGN", "1").strip()
 
 # ── NVIDIA NIM (Agente General · cerebros · OpenAI-compatible) ── ───────────────────────
 # kimi-k3: planificación del agente, entiende el proyecto y ejecuta acciones

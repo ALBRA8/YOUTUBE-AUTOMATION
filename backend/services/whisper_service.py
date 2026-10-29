@@ -82,5 +82,9 @@ def estimate_words(text: str, start: float = 0.0, duration: float | None = None)
 async def align_scene(text: str, audio_path: str, known_duration: float) -> list[dict]:
     words = await transcribe_words(audio_path)
     if words:
-        return words
+        # INT-070: realineación contra silencios reales (ffmpeg silencedetect).
+        # Corrige el desfase de hasta ~0.8 s de Whisper junto a las pausas;
+        # fail-open: si algo falla devuelven los timestamps crudos.
+        from services import whisper_realign
+        return whisper_realign.maybe_realign(words, audio_path)
     return estimate_words(text, 0.0, known_duration)

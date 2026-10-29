@@ -322,21 +322,44 @@ def build_sfx_cmd(video_in: Path, scene_durations: list[float], run_dir: Path) -
 def build_mix_cmd(concat_out: Path, music: Path | None,
                   run_dir: Path) -> dict | None:
     """Cama musical ducked -20dB mezclada sobre la voz (amix duration=first:
-    la voz manda). Video se copia (sin re-codificar). None si no hay música."""
+    la voz manda). Video se copia (sin re-codificar). None si no hay música.
+
+    INT-070 (adaptado de estudio-video-ia, opt-in):
+      - RENDER_MUSIC_SIDECAN=1 → ducking DINÁMICO (sidechaincompress): la cama
+        cede cuando habla la voz en vez de atenuarse siempre igual.
+      - RENDER_LOUDNORM=1 → normalización a -14 LUFS (estándar de YouTube),
+        TP=-1 dB, LRA=11. Ambos OFF por defecto: no cambia renders golden."""
     if music is None:
         return None
     run_dir = Path(run_dir)
     duck = max(min(float(_cfg("RENDER_MUSIC_DUCK_DB", -20)), 0.0), _MIX_DB_FLOOR)
     out_av = run_dir / "final_av.mp4"
-    fc = (f"[1:a]volume={duck:g}dB[m];"
-          f"[0:a][m]amix=inputs=2:duration=first:dropout_transition=0[aout]")
+    sidecan = str(_cfg("RENDER_MUSIC_SIDECAN", "0")).strip().lower() in ("1", "true", "yes", "on")
+    loudnorm = str(_cfg("RENDER_LOUDNORM", "0")).strip().lower() in ("1", "true", "yes", "on")
+    if sidecan:
+        # la voz ([0:a]) es señal Y llave: asplit; la cama se comprime contra la voz
+        amix_in = "[voz][bedd]"
+        fc = (f"[1:a]volume={duck:g}dB[bed];"
+              f"[0:a]asplit=2[voz][llave];"
+              f"[bed][llave]sidechaincompress=threshold=0.03:ratio=6:attack=20:release=350[bedd];")
+    else:
+        amix_in = "[0:a][m]"
+        fc = f"[1:a]volume={duck:g}dB[m];"
+    if loudnorm:
+        # el normalizador va en cadena: amix → [amix] → loudnorm → [aout]
+        fc += (f"{''.join(amix_in)}amix=inputs=2:duration=first:dropout_transition=0[amix];"
+               "[amix]loudnorm=I=-14:TP=-1:LRA=11[aout]")
+    else:
+        fc += (f"{''.join(amix_in)}"
+               "amix=inputs=2:duration=first:dropout_transition=0[aout]")
     cmd = [FFMPEG_BIN, "-y", "-hide_banner", "-loglevel", "error",
            "-i", str(concat_out), "-stream_loop", "-1", "-i", str(music),
            "-filter_complex", fc,
            "-map", "0:v", "-map", "[aout]",
            "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-ar", "48000",
            str(out_av)]
-    return {"cmd": cmd, "out": out_av, "duck_db": duck}
+    return {"cmd": cmd, "out": out_av, "duck_db": duck,
+            "sidechain": sidecan, "loudnorm": loudnorm}
 
 
 def build_burn_cmd(src: Path, srt: Path, out: Path) -> dict:

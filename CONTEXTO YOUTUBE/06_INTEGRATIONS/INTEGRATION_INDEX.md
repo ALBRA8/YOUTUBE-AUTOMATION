@@ -227,3 +227,11 @@
 ## Huecos de numeración documentados (auditoría 2026-10-28)
 - **INT-060, INT-063, INT-065, INT-067 NO existen**: verificado en el historial completo (`git log --all`), en `06_INTEGRATIONS/` y en el árbol (`rg`) — ningún commit, ficha o servicio los referencia. La ola INT-059→INT-068 los saltó.
 - **Convención:** no reutilizar esos números sin auditoría previa; los próximos trabajos de integración continúan desde INT-070. Si otra sesión llega a usarlos con contenido real, documentar el re-mapeo aquí.
+
+## INT-070 — Auditoría dirigida y adopción quirúrgica de `estudio-video-ia`
+- **Estado:** IMPLEMENTADO (4 absorciones) / batería 16/16 · suite 208/208 · smokes reales ffmpeg OK.
+- **Documento:** [INT-070](INT-070_ESTUDIO_VIDEO_IA_ADOPCION.md).
+- **Origen:** zip aportado por el usuario (pipeline manual Claude Code + Kling 4.0); método INT-019, sin importación wholesale y con nota de licencia honesta (el zip no trae LICENSE).
+- **Absorbido:** (1) realineador de timestamps Whisper contra silencios reales → `services/whisper_realign.py` + hook en `align_scene` (gate `WHISPER_REALIGN`, default ON, fail-open); (2) retimer de video por anclas palabra↔escena → `services/video_retimer.py` (vía de RESCATE ante clips que violan duración; no cableado al pipeline por decisión de producto); (3) sidechain dinámico + loudnorm -14 LUFS en la mezcla → opt-in `RENDER_MUSIC_SIDECAN`/`RENDER_LOUDNORM` (golden intacto); (4) medidor espectral de acento es-ES/seseo para casting → `services/accent_meter.py`.
+- **Ya cubierto (verificado, sin puerto):** karaoke palabra-a-palabra (INT-045 es superset), perfiles de marca (brand_profiles es superset). **Descartado:** skills .claude (paradigma interactivo incompatible con A2A).
+- **R-registradas:** R-1 resaltado de keywords en karaoke · R-2 hook de rescate retimer en execution_contract · R-3 fundos anti-clic en SFX · R-4 acento en voices_catalog · R-5 palabras_por_segundo + catálogo de estilos "biblia" como semillas de datos.

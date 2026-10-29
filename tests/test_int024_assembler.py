@@ -327,8 +327,12 @@ def s4_ffmpeg_construction(tmp: Path):
     harv.write_manifest(tmp, manifest)
 
     plan = vasm.plan_render(manifest, tmp, music_path="", subtitles="burn")
-    check("S4 plan: 5 pasos (3 escenas + concat + subtítulos/copia)",
-          len(plan["steps"]) == 5, f"steps={len(plan['steps'])}")
+    # INT-070: 6 pasos desde INT-050 (3 escenas + concat + sfx 3.5 + subtítulos)
+    check("S4 plan: 6 pasos (3 escenas + concat + sfx + subtítulos/copia)",
+          len(plan["steps"]) == 6, f"steps={len(plan['steps'])}")
+    check("S4 plan: incluye paso sfx de INT-050",
+          any(s.get("stage") == "sfx" for s in plan["steps"]),
+          [s.get("stage") for s in plan["steps"]])
     check("S4 plan: usa las 3 escenas con duración total = suma manifest",
           plan["scenes_used"] == 3 and
           abs(plan["duration_total"] - sum(s["duration_sec"] for s in manifest["scenes"])) < 0.01)
