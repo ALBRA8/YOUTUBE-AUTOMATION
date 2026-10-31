@@ -2,10 +2,25 @@
 YOUTUBE AUTOMATION v2.0 — Paso 4: Render de video
 Ken Burns (zoompan) por escena → concat → voz + música con ducking →
 subtítulos estilo TikTok/Hormozi quemados con ASS. 100% ffmpeg.
+
+INT-077 · Pacing estricto + estructura UGC nativa:
+- El clip de cada escena dura EXACTAMENTE dur_audio + GAP(pausa de voz) +
+  pad(transición) en escenas no finales y dur_audio en la final ⇒ la duración
+  del master silencioso coincide MILIMÉTRICamente con voice_full.wav
+  (Σdur + GAP×(n-1)) y el mux con -shortest jamás corta la narración en seco.
+- Si el audio excede lo que el slow-mo (cap FACTOR_MAX) puede estirar del
+  video de Flow, el clip se ENBUCLA (-stream_loop -1) con factor por
+  segmento; tras cada render se mide el clip con ffprobe y una remediación
+  única fuerza el bucle si quedó corto (verificación, no suposición).
+- Escenas tipadas UGC: type 'avatar' (Flow + lip-sync v2v) intercalado con
+  type 'product_broll' (imagen de producto + zoompan, solo TTS en off, SIN
+  lip-sync facial) — el B-roll descansa la vista del avatar y mata el
+  uncanny valley de los planos fijos de 8-12 s.
 """
 import asyncio
 import json
 import logging
+import math
 import random
 import subprocess
 from pathlib import Path
@@ -13,11 +28,36 @@ from pathlib import Path
 from config import FPS, LONG_H, LONG_W, MUSIC_VOLUME, OUTPUT_DIR, SHORT_H, SHORT_W
 from pipeline import subtitles as subs_mod
 from pipeline import typography as typo_mod
+from pipeline.tts_step import GAP as VOICE_GAP  # pausa real de voice_full
 from services import avatar_motion
 
 log = logging.getLogger("video")
 
 TRANSITION_DUR = 0.5  # segundos de crossfade entre escenas (compensado en el pad)
+FACTOR_MAX = 2.5      # cap de slow-mo por segmento (retime setpts)
+CLIP_TOL = 0.25       # tolerancia milimétrica post-render (s) clip vs target
+# INT-077 · tipos de escena UGC (scene['type'] o scene['meta']['type'],
+# case-insensitive). Sin type → comportamiento legacy 100% compatible.
+BROLL_TYPES = {"product_broll", "broll", "product"}
+
+
+def scene_render_mode(scene: dict, has_flow_video: bool) -> str:
+    """Modo de render de una escena (INT-077 estructura UGC nativa):
+    - 'broll_zoompan': escena product_broll → imagen de producto + Ken Burns
+      (zoompan 3 fases) y solo TTS en off. NUNCA lip-sync facial: aunque haya
+      video de Flow asignado se ignora a propósito (descanso visual del
+      avatar, cero uncanny valley).
+    - 'flow_lipsync': escena avatar → video de Flow + lip-sync v2v + retime.
+    - 'kenburns': sin video de Flow → imagen con Ken Burns (fail-open clásico).
+    El type se lee de scene['type'] o scene['meta']['type']; sin type los
+    proyectos legacy renderizan exactamente igual que siempre."""
+    stype = str(scene.get("type")
+                or (scene.get("meta") or {}).get("type") or "").strip().lower()
+    if stype in BROLL_TYPES:
+        return "broll_zoompan"
+    if has_flow_video:
+        return "flow_lipsync"
+    return "kenburns"
 
 # Ken Burns 3 fases (patrón hans-n8n "videos-without-ai"):
 # zoom-in durante los primeros ZOOM_IN_FRAC de la escena, meseta al peak,
@@ -88,26 +128,51 @@ def scene_clip_cmd(img: Path, duration: float, out: Path, w: int, h: int,
             ":fillcolor=black")
     parts.append("format=yuv420p")
     vf = ",".join(parts)
-    return ["ffmpeg", "-y", "-loop", "1", "-i", str(img), "-t", f"{duration:.3f}",
+    # -frames:v exacto (INT-077): ver retime_clip_cmd — -t solo deja pasar
+    # frames extra de la cola del encoder; el conteo es determinista.
+    frames_out = max(int(math.ceil(duration * fps)), 1)
+    return ["ffmpeg", "-y", "-loop", "1", "-i", str(img),
+            "-frames:v", str(frames_out), "-t", f"{duration:.3f}",
             "-vf", vf, "-r", str(fps), "-an",
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", str(out)]
 
 
 def retime_clip_cmd(src: Path, target_dur: float, out: Path, w: int, h: int,
-                    fps: int = FPS) -> list[str]:
+                    fps: int = FPS, force_loop: bool = False) -> list[str]:
     """Video REAL de Flow (Veo ~8s fijos) re-temporalizado a la duración de la
     narración con setpts (patrón hans-n8n / AI-Content-Automation-Engine).
     duration_out = duration_src * factor ⇒ factor = target/src:
     factor>1 ralentiza (slow-mo cinemático), factor<1 acelera. Se limita a
-    [0.5, 2.5] y se recorta con -t. Audio original eliminado (la voz es nuestra)."""
+    [0.5, FACTOR_MAX] y se recorta con -t. Audio original eliminado (la voz
+    es nuestra).
+    INT-077 pacing estricto (fin del corte en seco a mitad de frase):
+    - Si target > src×FACTOR_MAX (p. ej. 11.8s de voz sobre 7.6s de Veo):
+      el clip se ENBUCLA (-stream_loop -1) y el factor se calcula POR
+      SEGMENTO sobre n_loops = ceil(target/src) ⇒ siempre ≤ FACTOR_MAX y el
+      video alcanza la narración completa sin slow-mo ridículo.
+    - force_loop=True (remediación post-render): enbucla SIEMPRE a velocidad
+      natural y deja que -t recorte — salva también el caso de
+      probe_duration fallido (factor 1.0) y el cache/sidecar rancio."""
     src_dur = probe_duration(src)
-    factor = (target_dur / src_dur) if (src_dur > 0.3 and target_dur > 0.3) else 1.0
-    factor = max(0.5, min(2.5, factor))
+    n_loops = 1
+    if src_dur > 0.3 and target_dur > src_dur * FACTOR_MAX:
+        n_loops = max(int(math.ceil(target_dur / src_dur)), 1)
+    factor = (target_dur / (src_dur * n_loops)) if (src_dur > 0.3 and target_dur > 0.3) else 1.0
+    factor = max(0.5, min(FACTOR_MAX, factor))
     vf = (f"scale={w * 2}:{h * 2}:force_original_aspect_ratio=increase,"
           f"crop={w * 2}:{h * 2},setpts=PTS*{factor:.6f},fps={fps},format=yuv420p")
-    return ["ffmpeg", "-y", "-i", str(src), "-vf", vf, "-an",
+    # -frames:v corta por CONTEO exacto de frames: -t solo deja pasar frames
+    # extra de la cola del encoder (medido: +0.37s con fps=30) — el conteo es
+    # determinista ⇒ duración del clip = N/fps, milimétrica de verdad.
+    frames_out = max(int(math.ceil(target_dur * fps)), 1)
+    cmd = ["ffmpeg", "-y"]
+    if force_loop or n_loops > 1:
+        cmd += ["-stream_loop", "-1"]
+    cmd += ["-i", str(src), "-vf", vf, "-an",
+            "-frames:v", str(frames_out),
             "-t", f"{target_dur:.3f}", "-r", str(fps),
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", str(out)]
+    return cmd
 
 
 def _clip_cache_ok(out: Path, src: Path, target_dur: float) -> bool:
@@ -126,21 +191,33 @@ def _clip_cache_ok(out: Path, src: Path, target_dur: float) -> bool:
 async def render_scenes(project: dict, scenes: list[dict], durations: list[float],
                         on_progress=None, is_cancelled=None,
                         flow_videos: dict | None = None,
-                        transition_pad: float = 0.0) -> list[Path]:
+                        transition_pad: float = 0.0,
+                        scene_gap: float | None = None) -> list[Path]:
     """Renderiza el clip de cada escena, 2 en paralelo.
 
-    - Si la escena tiene video REAL de Flow (flow_videos[i]) se usa con retime
-      setpts a la duración de la narración; si no, Ken Burns sobre la imagen.
-    - transition_pad añade margen a los clips NO finales para que, tras el
-      solape xfade, la duración total coincida EXACTAMENTE con sum(durations)
-      y la voz quede sincronizada.
+    - Escena avatar con video REAL de Flow (flow_videos[i]): lip-sync v2v
+      (INT-075) + retime setpts a la duración de la narración (INT-077 con
+      bucle si el audio excede el cap de slow-mo).
+    - Escena product_broll (scenes[i].type/meta.type): Ken Burns zoompan sobre
+      la imagen de producto con solo TTS en off — NUNCA lip-sync facial.
+    - Sin video de Flow: Ken Burns sobre la imagen (fail-open clásico).
+    - transition_pad añade margen a los clips NO finales para compensar el
+      solape xfade, y scene_gap (default VOICE_GAP=tts_step.GAP) compensa la
+      pausa de voz que build_full_track inserta entre escenas ⇒ la duración
+      del master silencioso coincide MILIMÉTRICamente con voice_full.wav y
+      el mux -shortest jamás corta la narración.
     - Reutilización idempotente: clip válido con mismo source y misma
-      duración objetivo se salta (ver _clip_cache_ok)."""
+      duración objetivo se salta (ver _clip_cache_ok).
+    - Verificación milimétrica post-render: cada clip se mide con ffprobe; si
+      quedó más corto que su narración (cache rancio, probe del src fallido,
+      v2v acortado…) se re-renderiza UNA vez con bucle forzado y el resultado
+      queda registrado en el sidecar (fitted/measured)."""
     proj_dir = OUTPUT_DIR / project["id"]
     clips_dir = proj_dir / "clips"
     clips_dir.mkdir(parents=True, exist_ok=True)
     w, h = (SHORT_W, SHORT_H) if project["format"] == "short" else (LONG_W, LONG_H)
     n_scenes = len(scenes)
+    gap = VOICE_GAP if scene_gap is None else max(float(scene_gap), 0.0)
 
     async def one(i: int) -> Path:
         if is_cancelled and is_cancelled():
@@ -148,20 +225,34 @@ async def render_scenes(project: dict, scenes: list[dict], durations: list[float
         img = scenes[i].get("image_path") or ""
         out = clips_dir / f"clip_{i:02d}.mp4"
         dur = max(durations[i], 1.0)
-        pad = transition_pad if i < n_scenes - 1 else 0.0
+        not_final = i < n_scenes - 1
+        pad = transition_pad if not_final else 0.0
         fv = (flow_videos or {}).get(i)
-        has_fv = bool(fv) and Path(str(fv)).exists()
-        src = Path(str(fv)) if has_fv else Path(img)
-        target = dur + pad if has_fv else dur + 0.05 + pad
+        fv_ok = bool(fv) and Path(str(fv)).exists()
+        mode = scene_render_mode(scenes[i], fv_ok)
+        has_fv = fv_ok and mode == "flow_lipsync"
+        if mode == "broll_zoompan":
+            # B-roll: imagen de producto + zoompan; el video de Flow (si lo
+            # hubiera) se ignora a propósito — solo TTS en off.
+            src = Path(img)
+            target = dur + 0.05 + gap + pad if not_final else dur + 0.05
+        elif has_fv:
+            src = Path(str(fv))
+            # la escena FINAL no lleva gap: build_full_track no apadea el
+            # último audio ⇒ target = dur exacto (mux -shortest sin recorte)
+            target = dur + gap + pad if not_final else dur
+        else:
+            src = Path(img)
+            target = dur + 0.05 + gap + pad if not_final else dur + 0.05
         if _clip_cache_ok(out, src, target):
             if on_progress:
                 await on_progress(i + 1, n_scenes, None)
             return out
+        src_use = src
         if has_fv:
             # INT-075: lip-sync VIDEO-to-VIDEO del clip de Flow con el audio
             # TTS de la escena, ANTES del retime/masterizado. Fail-open: si el
             # Space falla se sigue con el video original (render nunca se rompe).
-            src_use = src
             a_path = str(scenes[i].get("audio_path") or "").strip()
             if a_path and Path(a_path).is_file() and avatar_motion.v2v_enabled():
                 v2v_out = clips_dir / f"lipsync_{i:02d}.mp4"
@@ -177,17 +268,46 @@ async def render_scenes(project: dict, scenes: list[dict], durations: list[float
                 except Exception as e:  # noqa: BLE001
                     log.warning("clip %d: v2v error (%s) — sin lip-sync",
                                 i, str(e)[:120])
-            cmd = retime_clip_cmd(src_use, target, out, w, h)
-        else:
+        if mode == "broll_zoompan" or not has_fv:
             cmd = scene_clip_cmd(src, target, out, w, h,
                                  zoom_dir=1 if i % 2 == 0 else -1)
+        else:
+            cmd = retime_clip_cmd(src_use, target, out, w, h)
         p = await asyncio.to_thread(lambda: _run_ffmpeg(cmd))
         if p.returncode != 0:
             log.error("clip %d: %s", i, p.stderr[-300:])
             raise RuntimeError(f"Error renderizando escena {i + 1}")
-        try:  # sidecar para reutilización exacta en re-runs
+        # INT-077 · verificación milimétrica: el clip debe durar ≥ target-tol.
+        # Si quedó corto (probe del src fallido, cap de factor, v2v acortado,
+        # cache rancio) se re-renderiza UNA vez con bucle forzado.
+        fitted, measured = True, 0.0
+        try:
+            measured = await asyncio.to_thread(lambda: probe_duration(out))
+            fitted = measured >= target - CLIP_TOL
+        except Exception:  # noqa: BLE001
+            fitted = False
+        if not fitted:
+            log.warning("clip %d: %.2fs < target %.2fs — remediando con bucle",
+                        i, measured, target)
+            if mode == "broll_zoompan" or not has_fv:
+                cmd_fix = scene_clip_cmd(src, target, out, w, h, zoom_dir=1)
+            else:
+                cmd_fix = retime_clip_cmd(src_use, target, out, w, h,
+                                          force_loop=True)
+            p2 = await asyncio.to_thread(lambda: _run_ffmpeg(cmd_fix))
+            if p2.returncode == 0:
+                try:
+                    measured = await asyncio.to_thread(lambda: probe_duration(out))
+                    fitted = measured >= target - CLIP_TOL
+                except Exception:  # noqa: BLE001
+                    fitted = False
+        if not fitted:
+            log.warning("clip %d: pacing no verificado (%.2fs/%.2fs) — "
+                        "el QA final lo reportará", i, measured, target)
+        try:  # sidecar para reutilización exacta en re-runs + observabilidad
             out.with_suffix(".json").write_text(json.dumps(
-                {"src": str(src), "dur": round(target, 3)}))
+                {"src": str(src), "dur": round(target, 3),
+                 "measured": round(measured, 3), "fitted": bool(fitted)}))
         except Exception:  # noqa: BLE001
             pass
         if on_progress:
