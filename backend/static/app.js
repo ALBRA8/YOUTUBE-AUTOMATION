@@ -1205,7 +1205,7 @@ function renderProject() {
         <div style="display:flex;gap:9px;flex-wrap:wrap">
           ${['draft','failed'].includes(p.status) ? `<button class="btn primary" onclick="startJob('${p.id}')">▶️ Generar video</button>` : ''}
           ${p.status === 'ready' ? `<button class="btn primary" onclick="goPublish('${p.id}')">📺 Publicar en YouTube</button>` : ''}
-          ${p.status === 'ready' ? `<a class="btn" href="/api/projects/${p.id}/video" download>⬇️ Descargar MP4</a>` : ''}
+          ${p.status === 'ready' ? `<a class="btn" href="/api/projects/${p.id}/video?download=1" download>⬇️ Descargar MP4</a>` : ''}
           <a class="btn" href="/api/projects/${p.id}/export/flow.zip" download title="ZIP método completo: PROMPT MÁSTER (imágenes base + videos en cadena), script.json de tu extensión, método ChatGPT y guion">🌊 Flow (Método Completo)</a>
           <a class="btn" href="/api/projects/${p.id}/export/flow.zip?ai=1" download title="Igual que el anterior, pero Gemini (free tier) escribe los prompts en inglés con calidad editorial — tarda ~1 min">✨ Flow +IA</a>
           <a class="btn" href="/api/projects/${p.id}/export/flow.zip?format=artesano&ai=1" download title="Modo FABRICACIÓN DE PERSONAJE (tu método palma+pino): imagen ancla + secuencia iterativa para Flow + maestro de fabricación (REGLA ABSOLUTA + PASOS) + meta-prompt para re-editar el TXT en ChatGPT. Gemini extrae héroe/materiales/emblema — tarda ~1 min">🎭 Flow Artesano</a>

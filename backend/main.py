@@ -1205,13 +1205,25 @@ async def job_events(job_id: str):
 
 # ── media de proyectos ────────────────────────────────────────────────────
 @app.get("/api/projects/{pid}/video")
-async def project_video(pid: str):
+async def project_video(pid: str, download: bool = False):
+    """Sirve el MP4 del proyecto.
+
+    Por defecto `Content-Disposition: inline` — el reproductor <video> de
+    Chrome aborta la reproducción (pantalla negra en 0:00) si recibe
+    `attachment`. Con `?download=1` se fuerza `attachment` para descargas
+    explícitas; el botón <a download> de la UI funciona igual con ambos
+    porque el atributo actúa client-side.
+    """
     _pid(pid)
     p = db.get_project(pid)
     if not p or not p.get("video_url") or not Path(p["video_url"]).exists():
         raise HTTPException(404, "video no disponible")
-    return FileResponse(p["video_url"], media_type="video/mp4",
-                        filename=f"{p['title'][:40]}.mp4")
+    return FileResponse(
+        p["video_url"],
+        media_type="video/mp4",
+        filename=f"{p['title'][:40]}.mp4",
+        content_disposition_type="attachment" if download else "inline",
+    )
 
 
 @app.get("/api/projects/{pid}/thumbnail")
