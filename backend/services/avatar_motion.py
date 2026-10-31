@@ -1,15 +1,20 @@
 """
-YOUTUBE AUTOMATION v2.36 — LivePortrait & MuseTalk Motion Connector (INT-066)
+YOUTUBE AUTOMATION v2.37 — LivePortrait & MuseTalk Motion Connector (INT-066 + INT-072)
 Clonado limpio de LivePortrait (KwaiVGI) y MuseTalk (Tencent Music Lyra Lab).
 
 1. LivePortrait: Animación facial fluida (parpadeo de ojos, respiración y micro-movimiento de cabeza).
 2. MuseTalk: Sincronización labial impulsada por audio (phoneme-driven lip-sync).
 3. Motor dual: Soporta endpoints de inferencia remotos (GPU/Gradio) y motor determinista
    local offline a $0.00 de coste sin dependencias pesadas.
+4. INT-072: lip-sync hiperrealista vía HF Spaces públicos $0.00 (gradio_client) con
+   failover entre Spaces y fail-open al motor local (lipsync_liveportrait_hf +
+   normalize_vertical_916 → lienzo 1080x1920).
 """
 from __future__ import annotations
 
+import asyncio
 import base64
+import inspect
 import logging
 import math
 import os
@@ -299,9 +304,41 @@ async def render_avatar_animation(
     duration_sec: float = 4.0,
     engine: str = "auto"
 ) -> dict[str, Any]:
-    """Punto de entrada unificado que decide entre LivePortrait (bucle) o MuseTalk (hablado)."""
-    # Si viene audio, ejecutar pipeline MuseTalk (Sincronización Labial)
+    """Punto de entrada unificado que decide entre LivePortrait (bucle) o MuseTalk (hablado).
+
+    INT-072: con audio, intenta primero el motor hiperrealista de HF Spaces
+    (``lipsync_liveportrait_hf``, cadenas EchoMimic/AniPortrait audio-driven a
+    $0.00) y hace fail-open al motor determinista local si HF falla, duerme o
+    no tiene cuota. ``engine`` controla la ruta:
+      · "auto" (default) → HF primero, local de respaldo.
+      · "hf" / "liveportrait" → solo HF (si falla, propaga).
+      · "musetalk" / "local" → solo motor local determinista (sin red).
+    """
+    # Si viene audio, ejecutar pipeline de Sincronización Labial
     if audio_path and audio_path.is_file():
+        requested = (engine or "auto").strip().lower()
+        want_hf = requested in ("auto", "hf", "liveportrait", "liveportrait_hf")
+        if want_hf and hf_lipsync_enabled():
+            try:
+                p, space_used = await lipsync_liveportrait_hf(image_path, audio_path, output_video)
+                p = await asyncio.to_thread(
+                    normalize_vertical_916, p,
+                    int(_am_cfg("AVATAR_OUTPUT_W", "1080")),
+                    int(_am_cfg("AVATAR_OUTPUT_H", "1920")),
+                )
+                return {
+                    "ok": True,
+                    "engine": "liveportrait_hf",
+                    "type": "lipsync_speaking",
+                    "video_path": str(p),
+                    "video_url": f"/static/assets/{p.name}",
+                    "space": space_used,
+                    "fallback": False,
+                }
+            except Exception as ex:  # fail-open: jamás romper el render
+                log.warning("[avatar_motion] HF Spaces fail-open → motor local: %s", ex)
+                if requested in ("hf", "liveportrait", "liveportrait_hf"):
+                    raise  # modo explícito HF: sí propaga el fallo
         p = lipsync_musetalk_local(image_path, audio_path, output_video)
         return {
             "ok": True,
@@ -320,3 +357,231 @@ async def render_avatar_animation(
             "video_path": str(p),
             "video_url": f"/static/assets/{p.name}"
         }
+
+
+# ── INT-072 · HF Spaces Lip-Sync & Face Animation ($0.00) ──────────────────
+# Verificación de contratos (2026-10-31, view_api + predict real):
+#   · KwaiVGI/LivePortrait: SOLO video-driven (no acepta audio) y
+#     fffiloni/LivePortrait-Realtime fue eliminado de HF (404).
+#   · TMElyralab/MuseTalk: caído (RUNTIME_ERROR).
+#   · Vivos y audio-driven: fffiloni/EchoMimic (/generate_video),
+#     fffiloni/echomimic-v2 (/generate), ZJYang/AniPortrait_official (/audio2video).
+# "lipsync_liveportrait_hf" conserva el nombre de la spec INT-072; internamente
+# enruta a la cadena audio-driven viva configurable via AVATAR_HF_SPACES.
+
+_AVATAR_HF_SPACES_DEFAULT = "fffiloni/EchoMimic,ZJYang/AniPortrait_official,fffiloni/echomimic-v2"
+
+
+def _am_cfg(key: str, default: str) -> str:
+    """Lee config.py primero (recarga viva del dashboard) y .env como respaldo."""
+    try:
+        import config as _c
+        v = getattr(_c, key, None)
+        if v is not None and str(v).strip() != "":
+            return str(v)
+    except Exception:
+        pass
+    return os.getenv(key, default)
+
+
+def hf_lipsync_enabled() -> bool:
+    return _am_cfg("AVATAR_HF_ENABLED", "1").strip().lower() in ("1", "true", "yes")
+
+
+def hf_space_list() -> list[str]:
+    """Cadena de Spaces audio-driven en orden de prioridad (failover)."""
+    raw = _am_cfg("AVATAR_HF_SPACES", _AVATAR_HF_SPACES_DEFAULT)
+    return [s.strip() for s in str(raw).split(",") if s.strip()]
+
+
+def _hf_token() -> str:
+    """HF_TOKEN opcional (cuenta gratis sube la cuota ZeroGPU). Nunca se loguea."""
+    tok = str(_am_cfg("HF_TOKEN", "") or "").strip()
+    return tok
+
+
+def _extract_video_from_result(result: Any) -> Path:
+    """gradio_client devuelve filepath (str), dict con 'video'/'path', FileData o
+    tuplas anidadas según el Space. Normaliza a la ruta del MP4 resultante."""
+    if result is None:
+        return None
+    if isinstance(result, (list, tuple)):
+        for item in result:
+            found = _extract_video_from_result(item)
+            if found is not None:
+                return found
+        raise RuntimeError(f"Sin video en la respuesta: {result!r:.200}")
+    if isinstance(result, dict):
+        for key in ("video", "path", "value", "filepath", "url"):
+            if key in result and result[key]:
+                found = _extract_video_from_result(result[key])
+                if found is not None:
+                    return found
+        raise RuntimeError(f"Sin video en la respuesta dict: {result!r:.200}")
+    if isinstance(result, str) and result.strip():
+        p = Path(result.strip())
+        if p.is_file():
+            return p
+        # FileData en modo URL (raro en spaces): descargaría aquí si hiciera falta
+        raise FileNotFoundError(f"Ruta devuelta por el Space no existe: {p}")
+    raise RuntimeError(f"Respuesta no reconocida del Space: {type(result).__name__}")
+
+
+def _make_hf_client(space_id: str):
+    """Client de gradio_client compatible con 1.x (hf_token=) y 2.x (token=).
+    El token es opcional; si no hay, None (cuota anónima de ZeroGPU)."""
+    from gradio_client import Client
+
+    token = _hf_token()
+    params = inspect.signature(Client.__init__).parameters
+    if "token" in params:
+        return Client(space_id, token=token or None, verbose=False)
+    if "hf_token" in params:  # gradio_client 1.x
+        return Client(space_id, hf_token=token or None, verbose=False)
+    return Client(space_id, verbose=False)
+
+
+def _call_hf_lipsync_gradio(space_id: str, img_path: str, audio_path: str, out_path: str) -> Path:
+    """Llama a UN Space audio-driven con su contrato real. Sincrono (correr en hilo).
+    Lanza excepción si el Space falla → el caller hace failover al siguiente."""
+    from gradio_client import handle_file
+
+    client = _make_hf_client(space_id)
+    steps = int(_am_cfg("AVATAR_HF_STEPS", "12"))
+    length = int(_am_cfg("AVATAR_HF_LENGTH", "100"))
+
+    if space_id == "fffiloni/EchoMimic":
+        result = client.predict(
+            uploaded_img=handle_file(img_path),
+            uploaded_audio=handle_file(audio_path),
+            width=512, height=512,
+            length=length,            # frames (mínimo 100 validado en vivo)
+            seed=42,
+            facemask_dilation_ratio=0.1, facecrop_dilation_ratio=0.1,
+            context_frames=12, context_overlap=0,
+            cfg=2.5, steps=steps,
+            sample_rate=16000, fps=12, device="cuda",
+            api_name="/generate_video",
+        )
+    elif space_id == "fffiloni/echomimic-v2":
+        result = client.predict(
+            image_input=handle_file(img_path),
+            audio_input=handle_file(audio_path),
+            pose_input="",
+            preset_name="Showcase",
+            width=512, height=512,
+            length=length, steps=steps,
+            sample_rate=16000, cfg=2.5, fps=12,
+            context_frames=12, context_overlap=0,
+            quantization_input=False, seed=42,
+            api_name="/generate",
+        )
+    elif space_id == "ZJYang/AniPortrait_official":
+        result = client.predict(
+            input_audio=handle_file(audio_path),
+            ref_img=handle_file(img_path),
+            headpose_video=None,
+            size=512, steps=min(steps, 20), length=length, seed=42,
+            api_name="/audio2video",
+        )
+    else:
+        # Space genérico añadido por .env: contrato especulativo estándar.
+        result = client.predict(
+            source_image=handle_file(img_path),
+            driving_audio=handle_file(audio_path),
+            api_name="/predict",
+        )
+
+    video_src = _extract_video_from_result(result)
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(video_src, out_path)
+    return Path(out_path)
+
+
+async def lipsync_liveportrait_hf(
+    image_path: Path,
+    audio_path: Path,
+    output_video: Path,
+) -> tuple[Path, str]:
+    """Lip-sync hiperrealista vía HF Spaces públicos ($0.00). INT-072.
+
+    Recorre la cadena ``AVATAR_HF_SPACES`` con failover; cada intento corre en
+    un hilo con timeout propio (el backend jamás se bloquea). Devuelve
+    ``(video_path, space_usado)``. Lanza RuntimeError si todos los Spaces fallan
+    (el caller decide fail-open al motor local).
+    """
+    if not image_path.is_file():
+        raise FileNotFoundError(f"Imagen de avatar no encontrada: {image_path}")
+    if not audio_path.is_file():
+        raise FileNotFoundError(f"Audio para lip-sync no encontrado: {audio_path}")
+
+    timeout_s = float(_am_cfg("AVATAR_HF_TIMEOUT_S", "420"))
+    errors: list[str] = []
+    for space_id in hf_space_list():
+        try:
+            p = await asyncio.wait_for(
+                asyncio.to_thread(
+                    _call_hf_lipsync_gradio, space_id,
+                    str(image_path), str(audio_path), str(output_video),
+                ),
+                timeout=timeout_s,
+            )
+            log.info("[avatar_motion] Lip-sync HF OK via %s", space_id)
+            return p, space_id
+        except Exception as ex:
+            # NO registrar HF_TOKEN; solo tipo y mensaje corto
+            errors.append(f"{space_id}: {type(ex).__name__}: {str(ex)[:160]}")
+            log.warning("[avatar_motion] Space %s falló (%s)", space_id, type(ex).__name__)
+    raise RuntimeError("Todos los Spaces HF fallaron → " + " | ".join(errors))
+
+
+def _video_dims(video_path: Path) -> tuple[int, int] | None:
+    """Dimensiones del video vía ffprobe (None si no se puede sondear)."""
+    try:
+        res = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height", "-of", "csv=p=0",
+             str(video_path)],
+            capture_output=True, text=True, timeout=30,
+        )
+        w, h = res.stdout.strip().split(",")[:2]
+        return int(w), int(h)
+    except Exception:
+        return None
+
+
+def normalize_vertical_916(
+    video_path: Path,
+    out_w: int = 1080,
+    out_h: int = 1920,
+) -> Path:
+    """Normaliza el video del Space (p.ej. 512x512 cuadrado) a 9:16 vertical
+    (1080x1920) con FFmpeg: escalado 'cover' + crop centrado. Conserva el
+    audio y escribe +faststart para streaming. Si ya está en el lienzo
+    destino, no toca nada (idempotente). Sobrescribe ``video_path`` in situ.
+    """
+    if not video_path.is_file():
+        raise FileNotFoundError(f"Video a normalizar no existe: {video_path}")
+
+    dims = _video_dims(video_path)
+    if dims == (out_w, out_h):
+        return video_path  # ya está en 9:16
+
+    tmp_out = video_path.with_name(video_path.stem + "_916.mp4")
+    vf = (
+        f"scale={out_w}:{out_h}:force_original_aspect_ratio=increase,"
+        f"crop={out_w}:{out_h},setsar=1"
+    )
+    cmd = [
+        "ffmpeg", "-y", "-i", str(video_path),
+        "-vf", vf,
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20",
+        "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart",
+        str(tmp_out),
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode != 0:
+        raise RuntimeError(f"FFmpeg error normalizando 9:16: {res.stderr[-400:]}")
+    shutil.move(str(tmp_out), str(video_path))
+    return video_path

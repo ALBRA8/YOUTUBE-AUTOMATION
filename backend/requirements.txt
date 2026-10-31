@@ -10,6 +10,9 @@ httpx>=0.27                # requisito REAL de arranque: agent.py → nvidia_cli
                            # lo importa a nivel de módulo (antes llegaba solo
                            # transitivo vía google-genai)
 edge-tts>=6.1              # locución gratuita ilimitada (fallback)
+gradio_client>=1.0         # INT-072: lip-sync hiperrealista HF Spaces $0.00
+                           # (EchoMimic/AniPortrait audio-driven; LivePortrait
+                           # oficial es video-driven — ver avatar_motion.py)
 yt-dlp>=2024.8.6           # modo "Desde URL" (TikTok/YouTube)
 
 # video / audio / imágenes

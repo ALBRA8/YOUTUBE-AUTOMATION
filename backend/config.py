@@ -247,6 +247,33 @@ def ffmpeg() -> str:
     return FFMPEG_BIN
 
 
+# ── Avatar Motion · HF Spaces lip-sync $0.00 (INT-072) ────────────────────
+# Cadena real verificada el 2026-10-31 (view_api + predicts de prueba):
+#   · KwaiVGI/LivePortrait (oficial) es SOLO video-driven: /gpu_wrapped_execute_video
+#     no acepta audio → no sirve para lip-sync de locución.
+#   · fffiloni/LivePortrait-Realtime: 404 (eliminado de HF).
+#   · TMElyralab/MuseTalk (oficial): RUNTIME_ERROR (caído).
+#   · Vivos y audio-driven (contratos reales con Gradio API):
+#       fffiloni/EchoMimic            /generate_video(uploaded_img, uploaded_audio, ...)
+#       ZJYang/AniPortrait_official   /audio2video(input_audio, ref_img, ...) [steps ≤ 20]
+#       fffiloni/echomimic-v2         /generate(...) [showcase CPU: solo si se duplica]
+# Orden = prioridad de failover. ZeroGPU exige HF_TOKEN gratis para cuota
+# estable (anon tiene ~0s/día); el token es opcional y NUNCA se registra en logs.
+AVATAR_HF_ENABLED = os.getenv("AVATAR_HF_ENABLED", "1").strip().lower() in ("1", "true", "yes")
+AVATAR_HF_SPACES = os.getenv(
+    "AVATAR_HF_SPACES",
+    "fffiloni/EchoMimic,ZJYang/AniPortrait_official,fffiloni/echomimic-v2").strip()
+# NOTA: fffiloni/echomimic-v2 es un showcase de CPU (solo genera si el usuario
+# duplica el Space a su perfil, sigue siendo $0); por eso va al final.
+AVATAR_HF_TIMEOUT_S = float(os.getenv("AVATAR_HF_TIMEOUT_S", "420"))   # por Space
+AVATAR_HF_STEPS = int(os.getenv("AVATAR_HF_STEPS", "12"))              # menor = más rápido
+AVATAR_HF_LENGTH = int(os.getenv("AVATAR_HF_LENGTH", "100"))           # frames (mín. 100 en EchoMimic)
+# Lienzo final del avatar hablado (Shorts/Reels 9:16). El Space devuelve
+# cuadrado 512x512: se normaliza con FFmpeg (cover + crop centrado).
+AVATAR_OUTPUT_W = int(os.getenv("AVATAR_OUTPUT_W", "1080"))
+AVATAR_OUTPUT_H = int(os.getenv("AVATAR_OUTPUT_H", "1920"))
+
+
 # ── Escritura en vivo desde el dashboard (⚙️ Configuración) ──────────────
 # Claves que el dashboard puede escribir en .env. SECRET_KEYS se enmascaran
 # al leerlas por la API (nunca se devuelven completas).

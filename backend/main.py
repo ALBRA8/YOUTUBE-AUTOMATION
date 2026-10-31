@@ -2430,13 +2430,17 @@ async def avatar_lipsync_musetalk(avatar_id: str, body: dict):
     cmd = ["ffmpeg", "-y", "-i", str(mp3_path), "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le", str(wav_path)]
     subprocess.run(cmd, capture_output=True, check=True)
 
-    from services.avatar_motion import lipsync_musetalk_local
+    # INT-072: HF Spaces hiperrealista primero ($0.00) con fail-open al motor
+    # local determinista. La decisión vive en render_avatar_animation.
+    from services.avatar_motion import render_avatar_animation
     out_video = out_dir / f"avatar_mt_{avatar_id}_{text_hash}.mp4"
-    lipsync_musetalk_local(Path(img_p), wav_path, out_video)
+    res_anim = await render_avatar_animation(Path(img_p), out_video, audio_path=wav_path, engine="auto")
 
     return {
         "ok": True,
-        "engine": "MuseTalk",
+        "engine": "LivePortrait-HF" if res_anim.get("engine") == "liveportrait_hf" else "MuseTalk",
+        "space": res_anim.get("space", ""),
+        "fallback": bool(res_anim.get("fallback", res_anim.get("engine") == "musetalk")),
         "video_url": f"/static/assets/{out_video.name}",
         "audio_url": f"/static/assets/{mp3_path.name}",
         "spoken_text": text
