@@ -19,6 +19,13 @@ export const ASPECTS = ['16:9', '4:3', '1:1', '3:4', '9:16'];
 // Any other "@" (e.g. "@Image 1") is left as plain text.
 export const MENTION = /@\{([^}]+)\}/g;
 
+// INT-073: editor de prompts RESILIENTE. La UI moderna de Flow ya no garantiza
+// div.ProseMirror: puede renderizar un contenteditable genérico, textarea, el web
+// component flow-prompt-input o un role=textbox. Un selector duro provocaba
+// "Timeout 30000ms exceeded" al entrar al proyecto. Compuesto ordenado + .first().
+const PROMPT_EDITOR = 'div.ProseMirror, div[contenteditable="true"], textarea, flow-prompt-input, [role="textbox"]';
+const promptEditor = (page) => page.locator(PROMPT_EDITOR).first();
+
 // Everything lives next to the code, so the folder can be moved as a whole.
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const STATE_FILE = path.join(ROOT, 'state.json');
@@ -84,7 +91,14 @@ async function inProject(fn) {
     const url = `${FLOW_URL}project/${projectId}`;
     if (page.url() !== url && (page.url().includes('/edit/') || !page.url().startsWith(url))) await page.goto(url, { waitUntil: 'domcontentloaded' });
     await assertSignedIn(page);
-    await page.locator('div.ProseMirror').waitFor({ state: 'visible', timeout: 30000 });
+    // INT-073: espera tolerante al editor compuesto (15s); si no aparece, la
+    // página aún sirve para gestión de activos — continuamos si hay UI de
+    // medios/ingredientes disponible (frame-trigger, picker, sidebar).
+    await promptEditor(page).waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
+    if (!(await promptEditor(page).isVisible().catch(() => false))) {
+      const assetUi = page.locator('div.frame-trigger, button.asset-item, flow-ingredient-chip, .sidebar-footer button').first();
+      await assetUi.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
+    }
     await closePicker(page);
     return await fn(page, context, projectId);
   } finally {
@@ -195,7 +209,7 @@ async function clearPrompt(page) {
     await page.waitForTimeout(800);
   }
   if (await page.locator('flow-ingredient-chip').count()) throw new Error('Could not remove the previous reference images from the prompt');
-  const editor = page.locator('div.ProseMirror');
+  const editor = promptEditor(page);
   await editor.click();
   await page.keyboard.press(SELECT_ALL);
   await page.keyboard.press('Backspace');
@@ -210,7 +224,7 @@ async function typeText(page, text) {
 }
 
 async function insertMention(page, name) {
-  const chips = page.locator('div.ProseMirror span.mention-chip');
+  const chips = page.locator('span.mention-chip'); // viven dentro del editor, sea ProseMirror o no
   const before = await chips.count();
   await page.keyboard.type('@'); // a typed "@" opens the asset picker with its search focused
   await picker(page).waitFor({ state: 'visible', timeout: 10000 });
@@ -222,7 +236,7 @@ async function insertMention(page, name) {
     throw new Error(`No asset named "${name}" in the Flow project. Upload it first (flow_upload_file).`);
   });
   await option.click();
-  await page.waitForFunction(([n]) => document.querySelectorAll('div.ProseMirror span.mention-chip').length > n, [before], { timeout: 5000 });
+  await page.waitForFunction((n) => document.querySelectorAll('span.mention-chip').length > n, before, { timeout: 5000 });
 }
 
 async function writePrompt(page, prompt) {
@@ -394,7 +408,9 @@ export async function generateVideo({
     await configureVideo(page, { aspect });
 
     // Ensure start frame asset is selected in the Iniciar slot
-    const existingChip = page.locator('div.frame-trigger flow-image-ingredient-chip');
+    // INT-073: variantes del chip del slot (flow-image-ingredient-chip,
+    // flow-ingredient-chip genérico) y con/sin prefijo div.
+    const existingChip = page.locator('div.frame-trigger flow-image-ingredient-chip, div.frame-trigger flow-ingredient-chip, .frame-trigger flow-image-ingredient-chip').first();
     if (await existingChip.count()) {
       const chipText = (await existingChip.first().innerText()).trim();
       if (!chipText.toLowerCase().includes(startFrame.toLowerCase())) {
@@ -406,7 +422,9 @@ export async function generateVideo({
       }
     }
 
-    const iniciarBtn = page.locator('div.frame-trigger button.empty-chip', { hasText: /iniciar/i }).first();
+    // INT-073: el texto del slot vacío depende del idioma de la UI (ES "Iniciar",
+    // EN "Start frame"); se matchea cualquiera de las variantes conocidas.
+    const iniciarBtn = page.locator('div.frame-trigger button.empty-chip, .frame-trigger .empty-chip, div.frame-trigger button').filter({ hasText: /iniciar|start\s*frame|add\s*frame|empezar/i }).first();
     if (await iniciarBtn.isVisible()) {
       await iniciarBtn.click();
       await page.waitForTimeout(1000);
@@ -433,7 +451,7 @@ export async function generateVideo({
       }
     }
 
-    const slotImg = page.locator('div.frame-trigger img');
+    const slotImg = page.locator('div.frame-trigger img, .frame-trigger img, flow-image-ingredient-chip img');
     if ((await slotImg.count()) === 0) {
       throw new Error(`Start Frame slot was not set for asset "${startFrame}"`);
     }
