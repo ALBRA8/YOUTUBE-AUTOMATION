@@ -284,7 +284,7 @@ def test_api_google_sso_logout_endpoint():
 
 def test_legacy_endpoints_still_registered():
     """Regresión INT-025/043: nada del Hub rompe las rutas existentes."""
-    routes = {r.path for r in app.routes}
+    routes = {getattr(r, 'path', None) for r in app.routes}
     for legacy in ("/api/mcp/login-google", "/api/mcp/connect-all-google",
                    "/api/mcp/capture-google-session", "/api/mcp/launch-auth-browser",
                    "/api/mcp/repair-profile", "/api/mcp/launch-clean-login"):
