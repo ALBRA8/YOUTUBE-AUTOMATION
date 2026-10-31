@@ -53,12 +53,18 @@ async function connect() {
 }
 
 async function flowPage(context) {
-  return context.pages().find((p) => p.url().startsWith(FLOW_URL)) || context.newPage();
+  // INT-074: Google redirige labs.google/fx/tools/flow → flow.google.com; si solo
+  // comparáramos startsWith(FLOW_URL) la pestaña redirigida no se reconocería y
+  // newPage() se dispararía en bucle hasta timeout. Regex dual de dominios.
+  return context.pages().find((p) => /flow\.google\.com|labs\.google\/fx\/tools\/flow/.test(p.url())) || context.newPage();
 }
 
 async function assertSignedIn(page) {
   const url = page.url();
-  if (/accounts\.google\.com/.test(url) || /flow\.google\.com\/about/.test(url) || /\/about(\/|\?|$)/.test(url)) {
+  // INT-074: portada de marketing de Flow en el dominio nuevo (flow.google.com/about)
+  // y en el antiguo (labs.google/fx/tools/flow/about) = sesión no aplicada aún;
+  // el patrón genérico /about(\/|\?|$) cubre ambos dominios.
+  if (/accounts\.google\.com/.test(url) || /flow\.google\.com\/about/.test(url) || /labs\.google\/fx\/tools\/flow\/about/.test(url) || /\/about(\/|\?|$)/.test(url)) {
     throw new Error('Not signed in to Google in the Flow Chrome. Inicia sesión en Google con «🔑 Vincular Sesión Google» en el panel.');
   }
 }

@@ -7,7 +7,10 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 
 export const CDP_PORT = Number(process.env.FLOW_CDP_PORT || 9333);
-export const FLOW_URL = process.env.FLOW_URL || 'https://labs.google/fx/tools/flow';
+// INT-074: Google migró Flow al dominio canónico https://flow.google.com/
+// (labs.google/fx/tools/flow redirige allí). Default actualizado y siempre
+// normalizado con slash final para que `${FLOW_URL}project/${id}` siga siendo válido.
+export const FLOW_URL = (process.env.FLOW_URL || 'https://flow.google.com').replace(/\/+$/, '') + '/';
 
 const isWin = process.platform === 'win32';
 const isMac = process.platform === 'darwin';
