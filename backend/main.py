@@ -625,6 +625,19 @@ async def avatars_image(aid: str):
         except Exception as e:  # noqa: BLE001
             log.warning("Retrato Gemini falló: %s", str(e)[:120])
     if method == "placeholder":
+        try:
+            import urllib.request
+            import urllib.parse
+            encoded = urllib.parse.quote(prompt[:300])
+            url = f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                if resp.status == 200:
+                    out.write_bytes(resp.read())
+                    method = "pollinations_ai"
+        except Exception as e2:  # noqa: BLE001
+            log.warning("Retrato Pollinations falló: %s", str(e2)[:120])
+    if method == "placeholder":
         _avatar_placeholder(out, av)
     db.update_avatar(aid, image_path=str(out))
     return {"ok": True, "method": method, "image_url": f"/api/avatars/{aid}/image"}
