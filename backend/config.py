@@ -97,6 +97,21 @@ GOOGLE_LOGIN_PAGES = [u.strip() for u in os.getenv(
     "https://accounts.google.com/ServiceLogin?continue=https://labs.google/fx/tools/flow,https://notebooklm.google.com/").split(",")
     if u.strip()]
 
+# ── [G] Google One-Tap Hub (INT-071) — «Continuar con Google» ────────────
+# URL que abre el botón oficial del Hub: el SELECTOR de cuentas
+# (AccountChooser) con continue directo a Flow — así el humano solo elige su
+# cuenta y no teclea credenciales. En 2ª pestaña abre NotebookLM (la toma de
+# GOOGLE_LOGIN_PAGES; default https://notebooklm.google.com/).
+GOOGLE_SSO_URL = os.getenv(
+    "GOOGLE_SSO_URL",
+    "https://accounts.google.com/AccountChooser?service=lso&continue=https://labs.google/fx/tools/flow").strip()
+# Poll (s) del watchdog de sesión: comprueba por CDP la cookie de autenticación
+# (__Secure-1PSID / SID / __Secure-3PSID / SAPISID) y conecta solo al verla.
+GOOGLE_SSO_POLL_S = int(os.getenv("GOOGLE_SSO_POLL_S", "2"))
+# Timeout (s) del watchdog: si el humano no completa el login en ese plazo,
+# marca phase=timeout y suelta (el backend NUNCA queda bloqueado).
+GOOGLE_SSO_TIMEOUT_S = int(os.getenv("GOOGLE_SSO_TIMEOUT_S", "900"))
+
 # ── Pipeline Orchestrator (INT-023) — NotebookLM → Agent → Flow ──────────
 # Tool de solo-lectura del servidor notebooklm-mcp que extrae la bíblia de
 # investigación (Stage 1). Si el servidor no la expone, el error llega a la

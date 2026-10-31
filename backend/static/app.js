@@ -2401,100 +2401,122 @@ function renderMCP() {
 function mcpSaveId() { const el = $('#nblm-nid'); if (el) localStorage.setItem(NID_KEY, el.value.trim()); }
 function mcpNid() { const el = $('#nblm-nid'); return el ? el.value.trim() : (localStorage.getItem(NID_KEY) || ''); }
 
-/* ══ INT-025 · SESIÓN GOOGLE UNIFICADA (google_profile_global) ══════════
-   Un login manual humano → ambos MCP:
-   · 🔑 Login Google: Chrome REAL con user-data-dir compartido + CDP en
-     FLOW_CDP_PORT → GoogleFlowMCP hace connectOverCDP a ESE Chrome.
-   · 📥 Capturar sesión: cookies .google.com del mismo Chrome →
-     storage_state.json de notebooklm-py (NOTEBOOKLM_HOME/PROFILE).       */
+/* ══ INT-071 · GOOGLE ONE-TAP HUB — «[G] Continuar con Google» ══════════
+   Una tarjeta, DOS estados (sustituye los 5 botones técnicos de INT-025):
+   · DESCONECTADO → botón oficial de Google: abre el Chrome del perfil
+     compartido en el SELECTOR de cuentas (AccountChooser → Flow) + NotebookLM
+     (POST /api/mcp/google-sso) y el backend vigila cada 2 s la cookie
+     __Secure-1PSID/SID: al verla captura storage_state.json y conecta
+     Flow + NotebookLM SOLO.
+   · CONECTADO → panel de perfil: avatar + cuenta, pills verdes por servicio
+     y acciones discretas (Ver mis Notebooks / Abrir Chrome / Cambiar cuenta).
+   El login sigue siendo UNO para todo el ecosistema (perfil global CDP 9333). */
+
+const G_LOGO_SVG = '<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>';
+
+let gsessPollTimer = null;
+
 function mcpGsessHTML() {
-  return `<div class="mcp-svc" id="gsess-card">
+  return `<div class="mcp-svc ghub" id="gsess-card">
     <div class="mcp-svc-head">
-      <h3>🔑 Sesión Google unificada</h3>
+      <h3>${G_LOGO_SVG}<span>Ecosistema Google</span></h3>
       <span id="gsess-badge"><span class="mcp-badge mcp-b-gray">SIN VERIFICAR</span></span>
     </div>
-    <p class="hintline">UN solo login manual: se abre tu Chrome con un perfil compartido
-      (<code>google_profile_global</code>) en el puerto CDP de Flow — Flow lo reutiliza y NotebookLM recibe
-      sus cookies con «📥 Capturar sesión». Nada de scripts .bat, terminales ni logins separados.</p>
-    <div class="mcp-row btns" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
-      <button class="btn btn-primary" id="gsess-all-btn" onclick="gsessConnectAll()" style="font-weight:700; background:linear-gradient(135deg,#10b981,#059669); color:#fff; border:none; padding:8px 16px; box-shadow:0 2px 8px rgba(16,185,129,0.35);" title="Acción automática: abre Chrome interactivo con tu sesión, conecta Flow y NotebookLM y pone ambos badges en verde">🚀 Iniciar Chrome y Conectar Todo (1 Clic)</button>
-      <button class="btn" id="gsess-clean-btn" onclick="gsessCleanLogin()" title="Abre una ventana visible de Chrome para iniciar sesión si tus cookies han expirado">🌐 Abrir Ventana de Chrome</button>
-      <button class="btn ghost" id="gsess-capture-btn" onclick="gsessCapture()" title="Captura las cookies de Chrome para NotebookLM">📥 Capturar sesión → NotebookLM</button>
-      <button class="btn ghost" onclick="gsessRepairProfile()" title="Sanea el perfil de Chrome (elimina procesos colgados y repara bloqueos)">🔧 Reparar Perfil</button>
-      <button class="btn ghost" onclick="gsessRefresh()">🔄 Refrescar estado</button>
-    </div>
-    <p class="hintline" id="gsess-hint">💡 <b>Recomendado:</b> Pulsa <b>«🚀 Iniciar Chrome y Conectar Todo»</b>. Se abrirá una ventana de Chrome con tu sesión y se vincularán Google Flow y NotebookLM en verde automáticamente.</p>
-    <div id="gsess-zone"><p class="hintline">Estado: sin verificar — pulsa «🔄 Refrescar estado» o «🔑 Vincular Sesión Google (Login Único)».</p></div>
+    <div id="gsess-body"><p class="hintline">Comprobando ecosistema…</p></div>
   </div>`;
 }
 
-async function gsessConnectAll() {
-  const btn = $('#gsess-all-btn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Conectando todo…'; }
+async function gsessStart() {
+  const btn = $('#gsess-gbtn');
+  const lbl = btn ? btn.querySelector('span') : null;
+  if (btn) { btn.disabled = true; if (lbl) lbl.textContent = 'Abriendo Chrome…'; }
   try {
-    toast('Iniciando Chrome y conectando Google Flow + NotebookLM…');
-    const res = await api('/mcp/connect-all-google', { method: 'POST', body: {} });
-    if (res.ok) {
-      toast('¡Google Flow y NotebookLM conectados exitosamente! 🚀 Ambos servicios están en VERDE.', 'ok');
-    } else {
-      let msg = 'Chrome iniciado en puerto 9333. ';
-      if (res.flow && res.flow.state === 'connected') msg += 'Flow: ✅ Conectado. ';
-      else if (res.flow && res.flow.state === 'auth_required') msg += 'Flow: 🔑 Sesión pendiente en la ventana de Chrome. ';
-      if (res.notebooklm && res.notebooklm.state === 'connected') msg += 'NotebookLM: ✅ Conectado. ';
-      toast(msg, 'info');
-    }
+    await api('/mcp/google-sso', { method: 'POST', body: {} });
+    toast('Chrome abierto en el selector de cuentas — elige tu cuenta y conectamos el ecosistema solo', 'info');
     await gsessRefresh(true);
-    await mcpRefresh(true);
-    if (res.notebooklm && res.notebooklm.state === 'connected') {
-      mcpListNotebooks({ silent: true });
-    }
   } catch (e) {
-    toast('Error al conectar Google: ' + e.message, 'err');
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '🚀 Iniciar Chrome y Conectar Todo (1 Clic)'; }
+    toast('Continuar con Google: ' + e.message, 'err');
+    if (btn) { btn.disabled = false; if (lbl) lbl.textContent = 'Continuar con Google'; }
   }
 }
 
-async function gsessCleanLogin() {
-  const btn = $('#gsess-clean-btn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Abriendo Chrome…'; }
-  try {
-    await api('/mcp/launch-clean-login', { method: 'POST', body: {} });
-    toast('Se abrió Chrome en modo seguro 🌐. Inicia sesión en Google con tu cuenta, verifica Flow/NotebookLM, CIERRA esa ventana de Chrome y pulsa «2. 🔌 Conectar Chrome (CDP 9333)».');
-  } catch (e) {
-    toast('Error al abrir Chrome: ' + e.message, 'err');
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '1. 🔑 Abrir Login Seguro Google'; }
-  }
+function gsessNameFromEmail(email) {
+  const local = String(email || '').split('@')[0] || '';
+  const name = local.replace(/[._+-]+/g, ' ').trim()
+    .replace(/\b\w/g, c => c.toUpperCase());
+  return name || 'Cuenta Google';
 }
 
-async function gsessLogin() {
-  const btn = $('#gsess-login-btn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Abriendo navegador…'; }
-  try {
-    const js = await api('/mcp/launch-auth-browser', { method: 'POST', body: {} });
-    const pages = (js.pages || []).length;
-    toast(js.already_up
-      ? 'El Chrome del perfil unificado ya está activo ✅ — inicia sesión en su ventana'
-      : 'Navegador abierto con el perfil unificado 🌐 (' + pages + ' pestañas: Flow + NotebookLM) — inicia sesión UNA vez');
-    await gsessRefresh();
-    await mcpRefresh(true);   // badges MCP al día (verde cuando la sesión valide)
-  } catch (e) { toast('Vincular Sesión Google: ' + e.message, 'err'); }
-  finally { if (btn) { btn.disabled = false; btn.textContent = '🔑 Vincular Sesión Google (Login Único)'; } }
+function gsessSvcState(s) { return s && s.state === 'connected'; }
+
+function gsessDisconnectedHTML(js) {
+  const storage = (js && js.notebooklm_storage) || {};
+  const timeout = js && js.sso_phase === 'timeout';
+  const extra = storage.exists
+    ? `Tienes un storage_state capturado (${Math.round((storage.size_bytes || 0) / 1024)} KB) — si tu sesión sigue viva, la conexión será directa.`
+    : 'El backend detecta la sesión cada 2 s y conecta Google Flow + NotebookLM automáticamente.';
+  return `<div class="ghub-disconnected">
+    <p class="ghub-sub">Inicia sesión <b>una sola vez</b> para conectar automáticamente
+      <b>Google Flow</b> (VideoFX/ImageFX), <b>NotebookLM</b> (Investigación y Studio)
+      y tu <b>Google Drive</b>.</p>
+    <button class="gbtn" id="gsess-gbtn" onclick="gsessStart()">
+      ${G_LOGO_SVG}<span>Continuar con Google</span>
+    </button>
+    <p class="hintline" style="margin-top:10px">${extra}</p>
+    ${timeout ? '<p class="hintline">⌛ Tiempo de espera agotado sin login — pulsa el botón cuando quieras reintentar.</p>' : ''}
+    <div class="ghub-foot">
+      <button class="btn ghost" onclick="gsessRepairProfile()">🔧 Reparar perfil</button>
+      <button class="btn ghost" onclick="gsessRefresh()">🔄 Refrescar estado</button>
+    </div>
+  </div>`;
 }
 
-async function gsessCapture() {
-  const btn = $('#gsess-capture-btn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Capturando…'; }
-  try {
-    const js = await api('/mcp/capture-google-session', { method: 'POST', body: {} });
-    toast('Sesión capturada ✅ ' + js.cookies + ' cookies de Google → storage_state de NotebookLM');
-    await gsessRefresh();
-    // repuebla el dropdown del notebook con la sesión recién capturada
-    if (S.mcp && (S.mcp.notebooklm || {}).state === 'connected')
-      mcpListNotebooks({ silent: true });
-  } catch (e) { toast('Capturar sesión: ' + e.message, 'err'); }
-  finally { if (btn) { btn.disabled = false; btn.textContent = '📥 Capturar sesión → NotebookLM'; } }
+function gsessWaitingHTML(js) {
+  const poll = (js && js.poll_s) || 2;
+  return `<div class="ghub-waiting">
+    <div class="ghub-pulse"></div>
+    <p><b>Esperando tu inicio de sesión…</b></p>
+    <p class="hintline">Chrome se abrió en el <b>selector de cuentas de Google</b> con Flow y NotebookLM.
+      Elige tu cuenta una vez: detectamos la cookie de sesión cada ${poll} s y conectamos
+      Flow + NotebookLM automáticamente.</p>
+    <p class="hintline">Puedes cerrar esta pestaña sin problema — la vigilancia sigue en el backend.</p>
+  </div>`;
+}
+
+function gsessConnectedHTML(js) {
+  const acc = (js && js.account) || {};
+  const email = acc.email || 'Cuenta Google';
+  const name = acc.name || gsessNameFromEmail(email);
+  const ini = (acc.initial || name[0] || 'G').toUpperCase();
+  const st = (js && js.services) || {};
+  const pill = (ok, label, extra) =>
+    `<span class="ghub-pill ${ok ? 'on' : 'off'}"><span class="ghub-dot"></span> ${label}${extra ? ' · ' + esc(extra) : ''}</span>`;
+  const flowExtra = js.cdp_port ? 'CDP ' + js.cdp_port : '';
+  const nbExtra = st.notebooklm && st.notebooklm.tools ? st.notebooklm.tools + ' tools' : '';
+  return `<div class="ghub-connected">
+    <div class="ghub-profile">
+      <div class="ghub-avatar">${esc(ini)}</div>
+      <div class="ghub-id">
+        <div class="ghub-name">${esc(name)}</div>
+        <div class="ghub-email">${esc(email)}</div>
+      </div>
+      <span class="mcp-badge mcp-b-green">🟢 Ecosistema Google Conectado</span>
+    </div>
+    <div class="ghub-pills">
+      ${pill(gsessSvcState(st.flow), '🟢 Google Flow', flowExtra)}
+      ${pill(gsessSvcState(st.notebooklm), '🟢 NotebookLM MCP', nbExtra)}
+      ${pill(st.workspace && st.workspace.state === 'connected', '🟢 Google Workspace & Gemini', 'misma sesión')}
+    </div>
+    <div class="ghub-actions">
+      <button class="btn" onclick="gsessOpenNotebooks()">📂 Ver mis Notebooks</button>
+      <button class="btn ghost" onclick="gsessOpenChrome()">🌐 Abrir Chrome</button>
+      <button class="btn ghost" onclick="gsessLogout()">🚪 Cambiar cuenta / Desconectar</button>
+    </div>
+    <div class="ghub-foot">
+      <button class="btn ghost" onclick="gsessRepairProfile()">🔧 Reparar perfil</button>
+      <button class="btn ghost" onclick="gsessRefresh()">🔄 Refrescar</button>
+    </div>
+  </div>`;
 }
 
 async function gsessRepairProfile() {
@@ -2506,28 +2528,86 @@ async function gsessRepairProfile() {
 }
 
 function gsessApply(js) {
-  const badge = $('#gsess-badge'), zone = $('#gsess-zone');
-  if (!zone) return;
-  const up = !!js.chrome_up;
-  const st = js.notebooklm_storage || {};
-  if (badge) badge.innerHTML = up
-    ? '<span class="mcp-badge mcp-b-green">CHROME ACTIVO</span>'
-    : '<span class="mcp-badge mcp-b-gray">CHROME APAGADO</span>';
-  let h = `<p class="hintline">Chrome CDP (puerto ${js.cdp_port}): ${up ? '✅ arriba — Flow compartirá ESTE Chrome' : '❌ abajo — pulsa «🔑 Login Google»'}` +
-    (js.shared_with_flow ? ' · <b>perfil compartido con Flow</b> (mismo puerto CDP)' : ' · ⚠ puerto distinto de FLOW_CDP_PORT') + `</p>`;
-  h += `<p class="hintline">storage NotebookLM: ${st.exists
-    ? '✅ capturado → <code>' + esc(st.active.split(/[\\\\/]/).pop()) + '</code> (' + (st.size_bytes || 0) + ' bytes)'
-    : '❌ sin storage_state — haz login y «📥 Capturar sesión»'}</p>`;
-  if (js.profile_dir) h += `<p class="hintline">Perfil global: <code>${esc(js.profile_dir)}</code></p>`;
-  zone.innerHTML = h;
+  const badge = $('#gsess-badge'), body = $('#gsess-body');
+  if (!body) return;
+  const phase = (js && js.sso_phase) || 'idle';
+  const auth = !!(js && js.session_auth);
+  const st = (js && js.services) || {};
+  const connected = gsessSvcState(st.flow) && gsessSvcState(st.notebooklm);
+  if (badge) {
+    if (connected) badge.innerHTML = '<span class="mcp-badge mcp-b-green">ECOSISTEMA CONECTADO</span>';
+    else if (phase === 'watching') badge.innerHTML = '<span class="mcp-badge mcp-b-yellow">ESPERANDO LOGIN…</span>';
+    else if (phase === 'connecting') badge.innerHTML = '<span class="mcp-badge mcp-b-yellow">CONECTANDO…</span>';
+    else if (auth) badge.innerHTML = '<span class="mcp-badge mcp-b-yellow">SESIÓN SIN MCP</span>';
+    else badge.innerHTML = '<span class="mcp-badge mcp-b-gray">DESCONECTADO</span>';
+  }
+  if (connected) {
+    body.innerHTML = gsessConnectedHTML(js);
+    gsessStopPoll();
+    mcpRefresh(true);          // pills globales del header en verde
+    return;
+  }
+  if (phase === 'watching' || phase === 'connecting') {
+    body.innerHTML = gsessWaitingHTML(js);
+    gsessStartPoll();
+    return;
+  }
+  body.innerHTML = gsessDisconnectedHTML(js);
+  gsessStopPoll();
+}
+
+/* Polling del Hub: 2 s mientras el backend vigila el login; sin poll en
+   reposo (el estado se refresca al abrir la pestaña y tras cada acción). */
+function gsessStartPoll() {
+  if (gsessPollTimer) return;
+  gsessPollTimer = setInterval(() => {
+    if (!$('#gsess-body')) { gsessStopPoll(); return; }   // salimos de #mcp
+    gsessRefresh(true);
+  }, 2000);
+}
+function gsessStopPoll() {
+  if (gsessPollTimer) { clearInterval(gsessPollTimer); gsessPollTimer = null; }
 }
 
 async function gsessRefresh(silent) {
   try {
-    const js = await api('/mcp/login-google');
+    const js = await api('/mcp/google-sso/status');
     gsessApply(js);
     return js;
-  } catch (e) { if (!silent) toast('Estado sesión: ' + e.message, 'err'); return null; }
+  } catch (e) { if (!silent) toast('Estado ecosistema: ' + e.message, 'err'); return null; }
+}
+
+async function gsessOpenNotebooks() {
+  if (S.mcp && (S.mcp.notebooklm || {}).state === 'connected') {
+    mcpListNotebooks({});
+    const el = $('#nblm-nid-sel');
+    if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); }
+    toast('Notebooks cargados en el desplegable de NotebookLM 📚', 'ok');
+  } else {
+    toast('NotebookLM MCP aún no está conectado — revisa su tarjeta más abajo', 'err');
+    await gsessRefresh();
+  }
+}
+
+async function gsessOpenChrome() {
+  try {
+    const js = await api('/mcp/launch-auth-browser', { method: 'POST', body: {} });
+    toast(js.already_up
+      ? 'El Chrome del ecosistema ya estaba abierto ✅'
+      : 'Chrome abierto con tu sesión 🌐 (' + (js.pages || []).length + ' pestañas)', 'ok');
+  } catch (e) { toast('Abrir Chrome: ' + e.message, 'err'); }
+}
+
+async function gsessLogout() {
+  const btns = document.querySelectorAll('.ghub-actions button');
+  btns.forEach(b => { b.disabled = true; });
+  try {
+    const res = await api('/mcp/google-sso/logout', { method: 'POST', body: {} });
+    toast('Ecosistema desconectado: ' + (res.actions || []).join(' · '), 'ok');
+    await gsessRefresh(true);
+    await mcpRefresh(true);
+  } catch (e) { toast('Cambiar cuenta: ' + e.message, 'err'); }
+  finally { btns.forEach(b => { b.disabled = false; }); }
 }
 
 /* Dropdown de notebooks (INT-025): puebla SIEMPRE el select visible; el

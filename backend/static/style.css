@@ -836,3 +836,62 @@ code.mini { background: var(--bg2); border: 1px solid var(--border); border-radi
   border-color: var(--accent, #10b981) !important;
   box-shadow: 0 8px 24px rgba(16,185,129,0.15) !important;
 }
+
+/* ── INT-071 · Google One-Tap Hub — «[G] Continuar con Google» ── */
+.ghub .mcp-svc-head h3 { display: inline-flex; align-items: center; gap: 9px; }
+.ghub .mcp-svc-head h3 svg { border-radius: 4px; }
+.ghub-sub { font-size: 13.5px; color: var(--muted); max-width: 660px; margin: 6px 0 14px; }
+
+/* Botón oficial de Google (brand guidelines: blanco, borde #dadce0, texto #3c4043) */
+.gbtn {
+  display: inline-flex; align-items: center; gap: 12px;
+  background: #fff; color: #3c4043;
+  border: 1px solid #dadce0; border-radius: 999px;
+  padding: 11px 24px; font-size: 14.5px; font-weight: 500;
+  font-family: 'Google Sans', Roboto, 'Segoe UI', Arial, sans-serif;
+  cursor: pointer; letter-spacing: .1px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.28);
+  transition: box-shadow .15s ease, transform .12s ease;
+}
+.gbtn:hover:not(:disabled) { box-shadow: 0 2px 10px rgba(0,0,0,.38); transform: translateY(-1px); }
+.gbtn:active:not(:disabled) { transform: translateY(0); }
+.gbtn:disabled { opacity: .62; cursor: wait; }
+.gbtn svg { flex: 0 0 auto; }
+
+/* Estado: esperando login (pulso verde) */
+.ghub-waiting { text-align: center; padding: 14px 0 6px; }
+.ghub-pulse {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--ok); margin: 0 auto 12px;
+  animation: ghubPulse 1.4s ease-in-out infinite;
+}
+@keyframes ghubPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(43,217,118,.55); opacity: 1; }
+  50% { box-shadow: 0 0 0 11px rgba(43,217,118,0); opacity: .55; }
+}
+
+/* Estado: conectado (perfil + pills + acciones) */
+.ghub-profile { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 4px; }
+.ghub-avatar {
+  width: 46px; height: 46px; border-radius: 50%;
+  display: grid; place-items: center;
+  font-size: 20px; font-weight: 800; color: #fff;
+  background: linear-gradient(135deg, #1a73e8, #7c5cff);
+  box-shadow: 0 2px 10px rgba(26,115,232,.42);
+}
+.ghub-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ghub-name { font-weight: 800; font-size: 15px; line-height: 1.2; }
+.ghub-email { font-size: 12.5px; color: var(--muted); }
+.ghub-pills { display: flex; gap: 8px; flex-wrap: wrap; margin: 13px 0; }
+.ghub-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 6px 13px; border-radius: 999px;
+  font-size: 12px; font-weight: 700;
+  border: 1px solid var(--border); color: var(--muted); background: var(--card);
+}
+.ghub-pill .ghub-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--err); flex: 0 0 auto; }
+.ghub-pill.on { color: var(--ok); border-color: rgba(43,217,118,.45); background: rgba(43,217,118,.08); }
+.ghub-pill.on .ghub-dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.ghub-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.ghub-foot { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; opacity: .75; }
+.ghub-foot .btn { font-size: 12px; padding: 5px 11px; }

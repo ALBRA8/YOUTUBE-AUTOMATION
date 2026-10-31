@@ -2184,6 +2184,44 @@ async def mcp_capture_google_session():
         raise HTTPException(502, f"[{e.code}] {e}") from e
 
 
+# ───────── Google One-Tap Hub (INT-071) · [G] Continuar con Google ──
+@app.post("/api/mcp/google-sso")
+async def mcp_google_sso():
+    """[G] Estado A del Hub: abre Chrome con el perfil global (CDP 9333)
+    en el selector de cuentas (AccountChooser → Flow) + NotebookLM y arranca
+    el watchdog (poll GOOGLE_SSO_POLL_S=2s) que detecta la cookie
+    __Secure-1PSID/SID; al verla captura storage_state.json, conecta
+    Flow + NotebookLM y extrae la cuenta. Respuesta inmediata (watching)."""
+    try:
+        return await _mcpm.manager.google_sso_start()
+    except _mcpm.MCPManagerError as e:
+        raise HTTPException(502, f"[{e.code}] {e}") from e
+
+
+@app.get("/api/mcp/google-sso/status")
+async def mcp_google_sso_status():
+    """Estado del Hub para la UI: fase SSO (idle/watching/connecting/
+    connected/timeout), cuenta activa (si se pudo extraer), pills por
+    servicio (Google Flow · NotebookLM MCP · Workspace & Gemini), CDP y
+    storage_state. Barato: 1 llamada CDP por poll."""
+    try:
+        return await _mcpm.manager.google_sso_status()
+    except _mcpm.MCPManagerError as e:
+        raise HTTPException(502, f"[{e.code}] {e}") from e
+
+
+@app.post("/api/mcp/google-sso/logout")
+async def mcp_google_sso_logout():
+    """🚪 Cambiar cuenta / Desconectar: cancela el watchdog, desconecta
+    Flow + NotebookLM, ARCHIVA storage_state.json (.bak-<ts>) y cierra el
+    Chrome del perfil global. El siguiente «Continuar con Google» parte
+    limpio en el selector de cuentas."""
+    try:
+        return await _mcpm.manager.google_sso_logout()
+    except _mcpm.MCPManagerError as e:
+        raise HTTPException(502, f"[{e.code}] {e}") from e
+
+
 # ───────── NotebookLM Studio Bridge (INT-069) · Audio Overview PoC ──
 # Flujo: garantizar notebook → fuente de texto (guion) → studio_generate
 # (artifact_type="audio") → poll studio_status → studio_download a exports.

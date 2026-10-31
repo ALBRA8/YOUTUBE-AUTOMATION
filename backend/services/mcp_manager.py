@@ -311,6 +311,65 @@ class _Conn:
                     pass
 
 
+# ── INT-071 · Google One-Tap Hub: extracción de cuenta (funciones puras) ──
+_ACCOUNT_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_ACCOUNT_JUNK_RE = re.compile(r"example|domain\.com|correo\.com|sentry|user@localhost", re.I)
+
+
+def _account_from_email(email: str) -> dict:
+    """Deriva el perfil visible del Hub desde el email: nombre legible
+    («johan.bravo» → «Johan Bravo») e inicial para el avatar."""
+    local = email.split("@", 1)[0]
+    name = re.sub(r"[._\-+]+", " ", local).strip().title()
+    return {"email": email,
+            "name": name or email,
+            "initial": (name[:1] or "G").upper()}
+
+
+def account_from_html(html: str) -> dict | None:
+    """Extrae la cuenta activa del HTML de accounts.google.com
+    (SignOutOptions / AccountChooser muestran el email de la sesión).
+    Estrategia 2 del Hub · fail-soft: None si no encuentra nada fiable."""
+    if not html:
+        return None
+    emails: list[str] = []
+    for m in re.finditer(
+            r'(?:data-email=["\']|mailto:)([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})',
+            html):
+        emails.append(m.group(1))
+    if not emails:
+        emails = [m.group(0) for m in _ACCOUNT_EMAIL_RE.finditer(html)]
+    seen: set[str] = set()
+    for e in emails:
+        k = e.lower()
+        if k in seen or _ACCOUNT_JUNK_RE.search(k):
+            continue
+        seen.add(k)
+        return _account_from_email(e)
+    return None
+
+
+def account_from_targets(targets: list[dict]) -> dict | None:
+    """Estrategia 1: URLs/títulos de las pestañas del Chrome CDP
+    (GET http://127.0.0.1:<port>/json/list). Páginas de Google suelen traer
+    el correo en ?authuser= / Email= o en el título de la pestaña.
+    Fail-soft: None si no encuentra nada."""
+    for t in targets or []:
+        blob = f"{t.get('url') or ''} {t.get('title') or ''}"
+        m = re.search(
+            r"(?:[?&]authuser=|[?&]Email=)([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})",
+            blob)
+        email = m.group(1) if m else None
+        if not email:
+            m2 = _ACCOUNT_EMAIL_RE.search(blob)
+            email = m2.group(0) if m2 else None  # regex genérico SIN grupos
+        if email:
+            k = email.lower()
+            if not _ACCOUNT_JUNK_RE.search(k):
+                return _account_from_email(email)
+    return None
+
+
 # ──────────────────────────────── gestor ──
 class MCPClientManager:
     """Supervisor de conexiones MCP stdio (una por servicio)."""
@@ -318,6 +377,11 @@ class MCPClientManager:
     def __init__(self) -> None:
         self._conns: dict[str, _Conn] = {}
         self._lifecycle = asyncio.Lock()  # serializa connect/disconnect entre requests
+        # INT-071 · Google One-Tap Hub: estado del watcher de login SSO.
+        # "task" guarda la referencia fuerte al asyncio task del watchdog
+        # (nunca se serializa hacia la UI: los endpoints la omiten).
+        self._sso: dict = {"phase": "idle", "started_at": 0.0, "error": "",
+                           "account": None, "updated_at": 0.0, "task": None}
 
     # ── resolvers parcheables (hermeticidad) ──
     def _resolve_command(self, service: str) -> tuple[list[str], str | None]:
@@ -1157,6 +1221,225 @@ class MCPClientManager:
         return {"ok": True, "cookies": len(cookies),
                 "storage_paths": written,
                 "chrome_up": True, "cdp_port": port}
+
+    # ── INT-071 · Google One-Tap Hub — [G] Continuar con Google ────────
+    async def google_sso_start(self, urls: list[str] | None = None) -> dict:
+        """[G] Estado A del Hub: abre el Chrome del perfil global (CDP 9333)
+        en el SELECTOR de cuentas de Google (AccountChooser → Flow) + 2ª
+        pestaña NotebookLM, y arranca el watchdog que hace polling cada
+        GOOGLE_SSO_POLL_S hasta ver la cookie de autenticación
+        (__Secure-1PSID / SID). Al verla: captura storage_state.json,
+        conecta Flow + NotebookLM y extrae la cuenta — sin más clicks.
+        Devuelve inmediatamente (el backend nunca se bloquea)."""
+        nb_page = "https://notebooklm.google.com/"
+        pages = [u.strip() for u in (urls or []) if u and u.strip()] or [
+            str(_cfg("GOOGLE_SSO_URL", "") or nb_page), nb_page]
+        res = await self.launch_google_login(pages, cdp=True)
+        self._sso.update({"phase": "watching", "started_at": time.time(),
+                          "error": "", "account": None,
+                          "updated_at": time.time()})
+        self._sso_ensure_task()
+        log.info("[google-sso] watching=%s poll=%ss port=%s pages=%s",
+                 True, _cfg("GOOGLE_SSO_POLL_S", 2), res.get("cdp_port"), pages)
+        return {"ok": True, "watching": True, "phase": "watching",
+                "cdp_port": res.get("cdp_port"), "pages": pages,
+                "already_up": res.get("already_up"),
+                "heal_actions": res.get("heal_actions", []),
+                "notebooklm_storage": res.get("notebooklm_storage")}
+
+    def _sso_ensure_task(self) -> None:
+        """Arranca el watchdog si no hay uno vivo (singleton por manager)."""
+        t = self._sso.get("task")
+        if t is not None and not t.done():
+            return
+        self._sso["task"] = asyncio.create_task(self._sso_watchdog())
+
+    async def _sso_watchdog(self) -> None:
+        """Polling GOOGLE_SSO_POLL_S: cookie __Secure-1PSID/SID vía CDP →
+        captura + conexión. Fail-soft total: un error de poll se registra y
+        se reintenta; el timeout solo marca phase=timeout. Nada mata nunca
+        el loop del backend."""
+        port = int(_cfg("GOOGLE_LOGIN_CDP_PORT", 9333))
+        poll = max(1, int(_cfg("GOOGLE_SSO_POLL_S", 2)))
+        timeout = max(60, int(_cfg("GOOGLE_SSO_TIMEOUT_S", 900)))
+        while self._sso.get("phase") == "watching":
+            try:
+                has_auth, _detail = await self._cdp_has_google_auth(port)
+                if has_auth:
+                    self._sso["phase"] = "connecting"
+                    self._sso["updated_at"] = time.time()
+                    if await self._sso_finish_connect(port):
+                        return
+                    # cookies aún incompletas para la captura → seguir esperando
+                    self._sso["phase"] = "watching"
+            except Exception as e:  # fail-open: el poll nunca muere por un error
+                self._sso["error"] = str(e)
+            if time.time() - float(self._sso.get("started_at") or 0) > timeout:
+                self._sso["phase"] = "timeout"
+                self._sso["updated_at"] = time.time()
+                log.info("[google-sso] watchdog timeout (%ss) sin login", timeout)
+                return
+            await asyncio.sleep(poll)
+
+    async def _sso_finish_connect(self, port: int) -> bool:
+        """Sesión detectada: captura cookies → conecta ambos MCP → extrae
+        la cuenta (fail-soft, cosmética). True = Hub pasa a CONNECTED.
+        False = la captura aún no tiene cookies → reintenta (watching)."""
+        try:
+            await self.capture_google_session()
+        except MCPManagerError as e:
+            if e.code == "NO_GOOGLE_COOKIES":
+                return False
+            self._sso["error"] = f"captura: {e}"
+        except Exception as e:
+            self._sso["error"] = f"captura: {e}"
+        for svc, tag in (("google-flow", "flow"), ("notebooklm", "notebooklm")):
+            try:
+                await self.connect(svc)
+                self._sso[f"{tag}_error"] = ""
+            except Exception as e:
+                self._sso[f"{tag}_error"] = str(e)
+        self._sso["account"] = await self.google_account_info(port)
+        self._sso["phase"] = "connected"
+        self._sso["updated_at"] = time.time()
+        log.info("[google-sso] sesión conectada (account=%s)",
+                 (self._sso.get("account") or {}).get("email", "?"))
+        return True
+
+    async def _cdp_list_targets(self, port: int, timeout: float = 3.0) -> list[dict]:
+        """GET http://127.0.0.1:<port>/json/list — targets CDP (url/title)."""
+        try:
+            import httpx  # noqa: PLC0415
+            async with httpx.AsyncClient() as client:
+                r = await client.get(f"http://127.0.0.1:{port}/json/list",
+                                     timeout=timeout)
+                if r.status_code == 200:
+                    data = r.json()
+                    return data if isinstance(data, list) else []
+        except Exception:
+            pass
+        return []
+
+    def _fetch_signout_html(self, port: int) -> str:
+        """Estrategia 2 (Playwright en thread): abre SignOutOptions en el
+        Chrome del perfil vía connectOverCDP y devuelve su HTML. Cierra la
+        CONEXIÓN CDP, no el Chrome del usuario (mismo patrón que
+        _cdp_fetch_google_cookies_impl)."""
+        from playwright.sync_api import sync_playwright  # noqa: PLC0415
+
+        with sync_playwright() as p:
+            browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
+            try:
+                ctx = browser.contexts[0] if browser.contexts else browser.new_context()
+                page = ctx.new_page()
+                try:
+                    page.goto("https://accounts.google.com/SignOutOptions?hl=es",
+                              timeout=8000, wait_until="domcontentloaded")
+                    return page.content()
+                finally:
+                    try:
+                        page.close()
+                    except Exception:
+                        pass
+            finally:
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+
+    async def google_account_info(self, port: int) -> dict | None:
+        """Cuenta activa del Chrome de login — DATO COSMÉTICO del Hub:
+        fail-soft, devuelve None si no puede (nunca bloquea la conexión).
+        Estrategia 1: targets CDP (barata, sin Playwright). Estrategia 2:
+        HTML de SignOutOptions vía Playwright en thread."""
+        try:
+            acc = account_from_targets(await self._cdp_list_targets(port))
+            if acc:
+                return acc
+        except Exception:
+            pass
+        try:
+            from playwright.sync_api import sync_playwright  # noqa: F401,PLC0415
+            html = await asyncio.to_thread(self._fetch_signout_html, port)
+            return account_from_html(html)
+        except Exception:
+            return None
+
+    async def google_sso_status(self) -> dict:
+        """GET del Hub: fase del watcher, cuenta, pills por servicio
+        (Flow / NotebookLM MCP / Workspace & Gemini), CDP y storage.
+        Regla honesta de CONECTADO: sesión viva en el Chrome (cookie) O
+        watcher conectado en esta sesión del backend — así el Hub refleja
+        el ecosistema aunque el backend se haya reiniciado."""
+        port = int(_cfg("GOOGLE_LOGIN_CDP_PORT", 9333))
+        base = await self.google_login_status()
+        has_auth, auth_detail = False, ""
+        try:
+            has_auth, auth_detail = await self._cdp_has_google_auth(port)
+        except Exception as e:
+            auth_detail = str(e)
+        flow_st = self._conn_status(self._conns.get("google-flow")) or {}
+        nb_conn = self._conns.get("notebooklm")
+        nb_st = self._conn_status(nb_conn) or {}
+        phase = str(self._sso.get("phase") or "idle")
+        if phase in ("idle", "timeout") and has_auth \
+                and flow_st.get("state") == ST_CONNECTED \
+                and nb_st.get("state") == ST_CONNECTED:
+            phase = "connected"
+        return {"cdp_port": base.get("cdp_port"),
+                "chrome_up": base.get("chrome_up"),
+                "profile_dir": base.get("profile_dir"),
+                "shared_with_flow": base.get("shared_with_flow"),
+                "notebooklm_storage": base.get("notebooklm_storage"),
+                "sso_phase": phase,
+                "sso_error": str(self._sso.get("error") or ""),
+                "session_auth": bool(has_auth),
+                "auth_detail": auth_detail,
+                "account": self._sso.get("account"),
+                "services": {
+                    "flow": {"state": flow_st.get("state", "disconnected"),
+                             "auth": flow_st.get("auth", "")},
+                    "notebooklm": {"state": nb_st.get("state", "disconnected"),
+                                   "auth": nb_st.get("auth", ""),
+                                   "tools": len((nb_conn.tools if nb_conn else None) or [])},
+                    "workspace": {"state": "connected" if has_auth else "disconnected",
+                                  "note": "misma sesión Google del perfil global (Drive/Gemini)"}},
+                "poll_s": max(1, int(_cfg("GOOGLE_SSO_POLL_S", 2)))}
+
+    async def google_sso_logout(self) -> dict:
+        """🚪 «Cambiar cuenta / Desconectar»: cancela el watcher, desconecta
+        ambos MCP, ARCHIVA el storage_state.json (.bak-<ts>, nunca destruye
+        cookies sin copia) y cierra el Chrome del perfil global — el
+        siguiente «Continuar con Google» parte limpio."""
+        actions: list[str] = []
+        t = self._sso.get("task")
+        if t is not None and not t.done():
+            t.cancel()
+            actions.append("vigilancia cancelada")
+        for svc in ("google-flow", "notebooklm"):
+            try:
+                await self.disconnect(svc)
+                actions.append(f"{svc} desconectado")
+            except Exception as e:
+                actions.append(f"{svc}: {e}")
+        for p in self._nb_storage_paths():
+            if p.is_file():
+                bak = p.with_name(f"{p.name}.bak-{int(time.time())}")
+                try:
+                    p.rename(bak)
+                    actions.append(f"storage archivado → {bak.name}")
+                except OSError as e:
+                    actions.append(f"storage: {e}")
+        try:
+            killed = self.kill_profile_processes(
+                Path(str(_cfg("GOOGLE_PROFILE_GLOBAL", ""))))
+            if killed:
+                actions.append(f"{len(killed)} procesos Chrome cerrados")
+        except Exception as e:
+            actions.append(f"chrome: {e}")
+        self._sso.update({"phase": "idle", "started_at": 0.0, "error": "",
+                          "account": None, "updated_at": time.time()})
+        return {"ok": True, "actions": actions}
 
 
     # ── helpers ──
