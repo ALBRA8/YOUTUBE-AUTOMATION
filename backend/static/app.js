@@ -1014,8 +1014,18 @@ function closeNichoWindow() {
 /* v2.11.2 · "＋ Nuevo video" desde la ventana de un nicho →
    asistente Crear en modo nicho con ESTE nicho ya elegido */
 function newVideoInNicho() {
-  nav('create'); W.mode = 'nicho'; W.step = 2;
-  W.nicho = _NICHO_TPL_ID || '';
+  nav('create');
+  if (_NICHO_TPL_ID) {
+    W.mode = 'nicho';
+    W.step = 2;
+    W.nicho = _NICHO_TPL_ID;
+  } else {
+    W.mode = 'idea';
+    W.step = 1;
+    if (_PROJ_NICHO) {
+      W.idea = 'Video para el nicho ' + _PROJ_NICHO + ': ';
+    }
+  }
   renderCreate();
 }
 

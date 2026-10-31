@@ -64,5 +64,17 @@
     "format": "short",
     "voice": "",
     "subtitles": "hormozi"
+  },
+  {
+    "id": "salud-y-bienestar",
+    "emoji": "🌿",
+    "name": "Salud y Bienestar",
+    "folder": "salud-y-bienestar",
+    "description": "Suplementos, hábitos saludables, digestión y bienestar integral.",
+    "prompt": "Escribe un video corto UGC para un producto de salud y bienestar: gancho de dolor claro en los primeros 3 segundos, beneficios concretos y llamada a la acción irresistible.",
+    "style": "auto",
+    "format": "short",
+    "voice": "es-CO-SalomeNeural",
+    "subtitles": "hormozi"
   }
 ]
