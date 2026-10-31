@@ -1968,6 +1968,34 @@ app.mount("/mcp", mcp_server.app)
 from services.youtube_harness import api as harness_api  # noqa: E402
 app.include_router(harness_api.router)
 
+# ── Extensiones de Calidad Audiovisual (Adopción CHAT-X) ───────────
+from services import lighting_presets as _lighting_svc  # noqa: E402
+from services import qa_forensics_checker as _qa_forensics_svc  # noqa: E402
+from services import voice_cloner as _voice_cloner_svc  # noqa: E402
+
+
+@app.get("/api/studio/lighting-presets")
+async def get_lighting_presets(categoria: Optional[str] = None):
+    """Presets de iluminación de estudio y estilo UGC auténtico de CHAT-X."""
+    return {"ok": True, "presets": _lighting_svc.list_lighting_presets(categoria)}
+
+
+@app.get("/api/studio/voice-clon/probe")
+async def probe_voice_clon():
+    """Sonda honesta de capacidades de clonación local de voz."""
+    return {"ok": True, "status": _voice_cloner_svc.check_cloning_subsystem()}
+
+
+@app.post("/api/studio/media/inspect")
+async def inspect_media_binary(body: dict):
+    """Inspección de integridad forense por magic bytes reales y silencio."""
+    file_path = (body.get("file_path") or "").strip()
+    expected = (body.get("expected_type") or "").strip() or None
+    if not file_path:
+        raise HTTPException(400, "falta file_path")
+    return _qa_forensics_svc.inspect_media_file(file_path, expected_type=expected)
+
+
 
 @app.api_route("/mcp", methods=["GET", "POST"])
 async def mcp_sin_barra(req: _Req):
