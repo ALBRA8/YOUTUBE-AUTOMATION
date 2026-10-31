@@ -11,6 +11,7 @@ import re
 import shutil
 import zipfile
 from pathlib import Path
+from typing import Optional
 
 import config
 import database as db
