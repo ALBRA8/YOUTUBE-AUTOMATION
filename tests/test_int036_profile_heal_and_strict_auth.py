@@ -33,6 +33,7 @@ def check(desc: str, ok: bool, detail: object = None) -> None:
     else:
         FAIL += 1
         print(f"  ✗ {desc} — {detail}")
+        raise AssertionError(f"{desc} — {detail}")  # INT-080: sin falsos verdes
 
 
 def test_auto_heal_profile():

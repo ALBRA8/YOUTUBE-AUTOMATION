@@ -29,7 +29,8 @@ def wav_duration(path: Path) -> float:
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration",
          "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
-        capture_output=True, text=True, check=True)
+        capture_output=True, text=True, check=True,
+        timeout=30)  # INT-080: un ffprobe colgado congelaba el event loop
     return float(out.stdout.strip())
 
 

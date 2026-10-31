@@ -31,6 +31,8 @@ def check(nombre: str, cond: bool, extra: str = ""):
     FAIL += 0 if ok else 1
     OK += 1 if ok else 0
     print(f"{'✓' if ok else '✗'} {nombre}" + (f" — {extra}" if extra and not ok else ""))
+    if not ok:  # INT-080: bajo pytest esto debe fallar DE VERDAD (no falso verde)
+        raise AssertionError(f"{nombre}" + (f" — {extra}" if extra else ""))
 
 
 def test_presets_catalog():

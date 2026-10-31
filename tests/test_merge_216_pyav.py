@@ -195,8 +195,10 @@ def main() -> int:
                     SRC_TTS, re.S) is not None)
     check("doctor: check pyav con cota <19",
           'add("pyav", av_ok and 0 < av_major < 19' in SRC_DOC)
-    check("main.py: versión 2.20.0 (FastAPI)", 'version="2.20.0"' in SRC_MAIN)
-    check("main.py: versión 2.20.0 (/estado)", '"version": "2.20.0"' in SRC_MAIN)
+    check("main.py: versión única vía config.APP_VERSION (FastAPI)",
+          'version=config.APP_VERSION' in SRC_MAIN)  # INT-080: fuente única
+    check("main.py: versión única vía config.APP_VERSION (/estado)",
+          '"version": config.APP_VERSION' in SRC_MAIN)  # INT-080
 
     # ═══════════════════ D · Compatibilidad entre líneas ═══════════════════
     print("── D. Compatibilidad Adapter ↔ pipeline ↔ MCP")
@@ -220,10 +222,10 @@ def main() -> int:
           "                 auto_start_override=None)" in SRC_PJ)
     check("sin narración no se inventa voz (Adapter)",
           "tts_skip = not narr" in SRC_PJ)
-    check("coherencia MCP/Adapter 2.20.0 y app 2.20.0",
+    check("coherencia MCP/Adapter 2.20.0 + app vía config.APP_VERSION",
           '"version": "2.20.0"' in SRC_MCP
           and '"version": "2.20.0"' in SRC_PJ
-          and 'version="2.20.0"' in SRC_MAIN)
+          and 'version=config.APP_VERSION' in SRC_MAIN)  # INT-080
 
     print(f"\n═══ {OK} OK · {FAIL} fallos ═══")
     return 1 if FAIL else 0

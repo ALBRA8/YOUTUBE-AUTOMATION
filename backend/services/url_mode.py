@@ -84,10 +84,16 @@ def clean_url(url: str) -> str:
     return url.split("?")[0] or url
 
 
+_COOKIES_BROWSER = {"chrome", "firefox", "edge", "brave", "safari", "vivaldi"}
+
+
 def _cookies_args(cookies: str | None) -> list[str]:
     """[--cookies-from-browser X] — la solución $0 al anti-bot de
-    YouTube/TikTok desde IP residencial (misma receta de trend_research)."""
-    return ["--cookies-from-browser", cookies] if cookies else []
+    YouTube/TikTok desde IP residencial (misma receta de trend_research).
+    INT-080: whitelist idéntica a la de /api/projects — el valor pasa tal
+    cual a argv de yt-dlp, solo se aceptan navegadores conocidos."""
+    c = (cookies or "").strip().lower()
+    return ["--cookies-from-browser", c] if c in _COOKIES_BROWSER else []
 
 
 async def fetch_metadata(url: str, cookies: str | None = None) -> dict:

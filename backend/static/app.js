@@ -42,7 +42,9 @@ async function api(path, opts = {}) {
 
 function toast(msg, kind = '') {
   const t = document.createElement('div');
-  t.className = 'toast ' + kind;
+  // v2.36: normaliza tipos no estándar ('error'/'success'/'info' → clases CSS existentes)
+  const kMap = { error: 'err', success: 'ok', ok: 'ok', err: 'err', info: '' };
+  t.className = 'toast ' + (kMap[kind] !== undefined ? kMap[kind] : kind);
   t.textContent = msg;
   $('#toasts').appendChild(t);
   setTimeout(() => t.remove(), 4200);
@@ -487,14 +489,12 @@ async function executeQuickCreate() {
       };
     }
 
-    const p = await api('/projects', { method: 'POST', body });
-    if (audioPath) {
-      await fetch('/api/projects/' + p.id, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ meta_patch: { audio_path: audioPath } })
-      });
-    }
+    const p = await api('/projects', {
+      method: 'POST',
+      // INT-080: audio_path viaja en el POST (puerta validada server-side) —
+      // el PATCH meta_patch anterior recibía 403 por M6 y la voz se perdía.
+      body: audioPath ? { ...body, audio_path: audioPath } : body
+    });
 
     closeOverlay();
     toast('¡Fabricación iniciada! 🚀 El motor IA está creando tu video', 'ok');
@@ -944,15 +944,12 @@ async function createProject() {
                    subtitle_style: W.subtitles,
                    cookies_from_browser: W.cookies || null,
                    brand_profile_id: W.brandProfile || null };
+    if (audioPath) body.audio_path = audioPath;  // INT-080: puerta legitima (antes PATCH → 403)
     if (W.mode === 'idea') body.idea = W.idea;
     if (W.mode === 'script') { body.script = W.script; body.title = W.title || W.script.slice(0, 50); }
     if (W.mode === 'url') body.url = W.url;
     if (W.style === 'custom-studio') body.custom_style_prompt = W.custom;
     const p = await api('/projects', { method: 'POST', body });
-    if (audioPath) {
-      await fetch('/api/projects/' + p.id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ meta_patch: { audio_path: audioPath } }) });
-    }
     toast('Proyecto creado. ¡A producir! 🎬', 'ok');
     startJob(p.id);
   } catch (e) { toast(e.message, 'err'); }
@@ -1174,6 +1171,7 @@ function nichoEscClose(e) { if (e.key === 'Escape') closeOverlay(); }
 function closeOverlay() {
   $('#overlay-root').innerHTML = '';
   document.removeEventListener('keydown', nichoEscClose);
+  document.removeEventListener('keydown', qcEscClose);  // INT-080: fuga de listener del Quick-Create
 }
 
 /* refresca lo que esté visible tras guardar/borrar un nicho */
@@ -1432,7 +1430,9 @@ function initDrag() {
     card.ondragend = async () => {
       card.classList.remove('dragging');
       const ids = $$('.scene-card', list).map(c => c.dataset.id);
-      await api(`/projects/${S.project.id}/reorder`, { method: 'POST', body: { scene_ids: ids } });
+      try {
+        await api(`/projects/${S.project.id}/reorder`, { method: 'POST', body: { scene_ids: ids } });
+      } catch (e) { toast('Error reordenando: ' + e.message, 'err'); }
       await openProject(S.project.id);
     };
     card.ondragover = e => {
@@ -1526,15 +1526,19 @@ async function runNow() {
 async function addIdea() {
   if (guardDemo()) return;
   const v = $('#f-idea').value.trim(); if (!v) return;
-  await api('/factory/ideas', { method: 'POST', body: { idea: v } });
-  S.ideas = await api('/factory/ideas'); S.factory = await api('/factory'); renderFactory();
+  try {
+    await api('/factory/ideas', { method: 'POST', body: { idea: v } });
+    S.ideas = await api('/factory/ideas'); S.factory = await api('/factory'); renderFactory();
+  } catch (e) { toast(e.message, 'err'); }
 }
 
 async function delIdea(ix) {
-  const ideas = S.ideas.filter((_, i) => i !== ix);
-  await fetch('/api/factory/ideas', { method: 'DELETE' });
-  for (const i of ideas) await api('/factory/ideas', { method: 'POST', body: { idea: i } });
-  S.ideas = await api('/factory/ideas'); S.factory = await api('/factory'); renderFactory();
+  try {
+    const ideas = S.ideas.filter((_, i) => i !== ix);
+    await fetch('/api/factory/ideas', { method: 'DELETE' });
+    for (const i of ideas) await api('/factory/ideas', { method: 'POST', body: { idea: i } });
+    S.ideas = await api('/factory/ideas'); S.factory = await api('/factory'); renderFactory();
+  } catch (e) { toast(e.message, 'err'); }
 }
 
 /* ── vista: PUBLICAR ─────────────────────────────────────── */
@@ -3934,7 +3938,9 @@ async function clipperRenderMoment(momentId) {
         style: style,
         subtitle_text: m.quote || '',
         subtitle_style: subsStyle,
-        broll: broll
+        broll: broll,
+        auto_emojis: autoEmojis,   // INT-080: los toggles existían pero nunca viajaban
+        progress_bar: progressBar
       }
     });
 
@@ -4001,9 +4007,8 @@ async function generateQCHooks() {
   `;
 
   try {
-    const res = await api('/api/ugc/multi-angle-hooks', {
-      method: 'POST',
-      body: JSON.stringify({ product_name: prodName })
+    const res = await api('/ugc/multi-angle-hooks', {
+      body: { product_name: prodName }
     });
     if (!res || !res.ok || !res.hooks) throw new Error('No se pudieron generar los ganchos');
     CURRENT_QC_HOOKS = res.hooks;
@@ -4060,9 +4065,8 @@ async function playHookTTSPreview(text, btn) {
   btn.innerHTML = '⏳ Cargando...';
   btn.disabled = true;
   try {
-    const res = await api('/api/ugc/preview-tts-hook', {
-      method: 'POST',
-      body: JSON.stringify({ text })
+    const res = await api('/ugc/preview-tts-hook', {
+      body: { text }
     });
     if (res && res.ok && res.audio_url) {
       const audio = new Audio(res.audio_url);
@@ -4090,12 +4094,11 @@ function selectQCHook(hookText) {
 async function generateABVariantsModal(prodName) {
   try {
     toast('Construyendo matriz A/B de 5 variantes...', 'info');
-    const res = await api('/api/ugc/ab-variants', {
-      method: 'POST',
-      body: JSON.stringify({
+    const res = await api('/ugc/ab-variants', {
+      body: {
         product_name: prodName || 'Producto Viral',
         hooks: CURRENT_QC_HOOKS
-      })
+      }
     });
     if (!res || !res.ok) throw new Error('Error al construir variantes');
     const variants = res.variants;
@@ -4114,9 +4117,8 @@ async function animateAvatarLivePortrait(aid, btn) {
   btn.innerHTML = '⏳ Animando...';
   btn.disabled = true;
   try {
-    const res = await api(`/api/avatars/${aid}/animate-liveportrait`, {
-      method: 'POST',
-      body: JSON.stringify({ duration_sec: 4.0 })
+    const res = await api(`/avatars/${aid}/animate-liveportrait`, {
+      body: { duration_sec: 4.0 }
     });
     if (res && res.ok && res.video_url) {
       toast('¡Avatar animado con éxito con LivePortrait!', 'success');
@@ -4137,9 +4139,8 @@ async function lipsyncAvatarMuseTalk(aid) {
   if (!text) return;
   toast('Sintetizando voz y sincronización labial MuseTalk...', 'info');
   try {
-    const res = await api(`/api/avatars/${aid}/lipsync-musetalk`, {
-      method: 'POST',
-      body: JSON.stringify({ text })
+    const res = await api(`/avatars/${aid}/lipsync-musetalk`, {
+      body: { text }
     });
     if (res && res.ok && res.video_url) {
       toast('¡Sincronización labial MuseTalk completada!', 'success');

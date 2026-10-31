@@ -42,6 +42,8 @@ def check(nombre: str, cond: bool, extra: str = ""):
     FAIL += 0 if ok else 1
     OK += 1 if ok else 0
     print(f"{'✓' if ok else '✗'} {nombre}" + (f" — {extra}" if extra and not ok else ""))
+    if not ok:  # INT-080: bajo pytest esto debe fallar DE VERDAD (no falso verde)
+        raise AssertionError(f"{nombre}" + (f" — {extra}" if extra else ""))
 
 
 def _proyecto_fake(video_path: Path) -> dict:
@@ -67,7 +69,10 @@ def client():
 # ── S1 · inline por defecto (reproductor <video>) ──────────────────────────
 def test_inline_por_defecto(client, tmp_path):
     video_path = _mp4(tmp_path)
-    with patch("main.db.get_project", return_value=_proyecto_fake(video_path)):
+    # INT-080: la contención M5 exige video_url bajo raíz segura — el test
+    # hace de OUTPUT_DIR su tmp_path (el MP4 falso vive dentro).
+    with patch("main.db.get_project", return_value=_proyecto_fake(video_path)), \
+            patch("main.OUTPUT_DIR", tmp_path):
         res = client.get(f"/api/projects/{PID}/video")
         check("GET /video sin query responde 200", res.status_code == 200, str(res.status_code))
         cd = res.headers.get("content-disposition", "")
@@ -82,7 +87,8 @@ def test_inline_por_defecto(client, tmp_path):
 # ── S2 · ?download=1 → attachment (descarga explícita) ─────────────────────
 def test_download_explicito(client, tmp_path):
     video_path = _mp4(tmp_path)
-    with patch("main.db.get_project", return_value=_proyecto_fake(video_path)):
+    with patch("main.db.get_project", return_value=_proyecto_fake(video_path)), \
+            patch("main.OUTPUT_DIR", tmp_path):  # INT-080: contención M5
         res = client.get(f"/api/projects/{PID}/video?download=1")
         check("GET /video?download=1 responde 200", res.status_code == 200, str(res.status_code))
         cd = res.headers.get("content-disposition", "")

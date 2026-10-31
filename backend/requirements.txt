@@ -33,3 +33,6 @@ av>=11,<19                        # motor de faster-whisper · v2.15.1: PyAV 19
                                   # lo soporte.
 google-api-python-client>=2.100   # autopublish YouTube
 google-auth-oauthlib>=1.2         # OAuth YouTube (loopback, sin OOB)
+
+# INT-080 · usado por ecommerce_overlays.py y accent_meter.py (import top-level)
+numpy>=1.26

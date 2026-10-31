@@ -41,7 +41,7 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("main")
 
-app = FastAPI(title="YT Automation v2.0", version="2.20.0")
+app = FastAPI(title="YT Automation v2.0", version=config.APP_VERSION)
 
 # [flow-bridge v1.1] CORS endurecido (fusión con la línea 2.2 del repo):
 # solo la extensión Chrome (chrome-extension:// con ID válido de 32 chars a-p)
@@ -111,8 +111,9 @@ async def auth_guard(request, call_next):
             provided = auth[7:] if auth.startswith("Bearer ") else ""
         if not provided:
             provided = request.cookies.get(security.COOKIE_NAME, "")
-        if not provided:
-            provided = request.query_params.get("api_key", "")
+        # INT-080: el vector ?api_key= fue eliminado — la clave en la query
+        # termina en access-logs de uvicorn, historial del navegador y proxies.
+        # Para SSE/EventSource la cookie (mismo origen) hace ese papel.
         if not security.verify(provided):
             return JSONResponse(status_code=401,
                                 content={"detail": "clave maestra requerida "
@@ -200,10 +201,67 @@ _SYSTEM_META_KEYS = {
 }
 
 
+# ── INT-080 · helpers de auditoría ─────────────────────────────────────────
+def _to_int(v, default: int, name: str) -> int:
+    """Cast de input del body a int → 400 (no 500) si no es numérico."""
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        raise HTTPException(400, f"'{name}' debe ser un entero")
+
+
+def _to_float(v, default: float, name: str) -> float:
+    """Cast de input del body a float → 400 (no 500) si no es numérico."""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        raise HTTPException(400, f"'{name}' debe ser numérico")
+
+
+def _path_contenida(raw: str) -> "Path | None":
+    """INT-080 · M5 para rutas arbitrarias: devuelve la ruta RESUELTA solo si
+    vive bajo una raíz segura del backend (data/, tmp/, static/, output/).
+    Bloquea leer/servir archivos fuera de ellas (p.ej. backend/.env) aunque un
+    endpoint reciba una ruta absoluta del cliente."""
+    try:
+        rp = Path(raw).resolve()
+    except (OSError, ValueError):
+        return None
+    for root in (DATA_DIR, TMP_DIR, STATIC_DIR, OUTPUT_DIR):
+        try:
+            if rp.is_relative_to(Path(root).resolve()):
+                return rp
+        except ValueError:
+            continue
+    return None
+
+
 # ──────────────────────────────────────────────────────── básicos ──
+@app.on_event("startup")
+async def _int080_security_guard():
+    """INT-080 · fail-closed: HOST no-loopback sin MASTER_API_KEY = API abierta
+    a toda la LAN (lectura de .env, RCE vía MCP). No arrancar salvo escape
+    explícito ALLOW_OPEN_LAN=1. Además, best-effort: .env a 0600."""
+    import os as _os  # INT-080: main.py importa os de forma diferida
+    host = (_os.getenv("HOST") or str(HOST or "127.0.0.1")).strip().lower()
+    if host not in {"127.0.0.1", "localhost", "::1", "[::1]"} \
+            and not security.enabled() \
+            and _os.getenv("ALLOW_OPEN_LAN", "").strip() != "1":
+        raise RuntimeError(
+            "HOST no-loopback sin MASTER_API_KEY: la API quedaría abierta a la "
+            "LAN. Define MASTER_API_KEY en backend/.env o fuerza con "
+            "ALLOW_OPEN_LAN=1 si asumes el riesgo.")
+    try:
+        env_file = Path(config.__file__).resolve().parent / ".env"
+        if env_file.is_file() and (env_file.stat().st_mode & 0o077):
+            env_file.chmod(0o600)
+    except Exception:  # noqa: BLE001 — best-effort, nunca tumba el arranque
+        pass
+
+
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "version": "2.20.0", "gemini": gemini_client.available(),
+    return {"ok": True, "version": config.APP_VERSION, "gemini": gemini_client.available(),
             "nvidia": nvidia_client.available(),
             "nvidia_model": nvidia_client.last_model(),
             "whisper": whisper_service.available(),
@@ -341,7 +399,7 @@ async def serve_voice_audio(filename: str):
     from services import voices_catalog
     clean_name = Path(filename).name
     file_path = voices_catalog.PREVIEWS_DIR / clean_name
-    if not file_path.exists() or not file_path.is_file():
+    if file_path.suffix.lower() not in {".mp3", ".wav"} or not file_path.exists() or not file_path.is_file():
         raise HTTPException(404, "Audio de preescucha no encontrado")
     media_type = "audio/mpeg" if clean_name.endswith(".mp3") else "audio/wav"
     return FileResponse(file_path, media_type=media_type)
@@ -1017,6 +1075,20 @@ async def create_project(body: dict):
             if not body.get("subtitle_style") and bp.get("subtitle_style"):
                 meta["subtitle_style"] = bp["subtitle_style"]
 
+    # v2.36 · INT-080: puerta legítima para el audio del modo «audio».
+    # Antes el frontend lo intentaba vía PATCH meta_patch.audio_path → 403 por
+    # M6 y el pipeline arrancaba SIN la voz del usuario. El upload vive en
+    # TMP_DIR con prefijo voice_upload_ (import_audio): se valida contención.
+    if mode == "audio":
+        audio_src = (body.get("audio_path") or "").strip()
+        if audio_src:
+            ap = _path_contenida(audio_src)
+            if (not ap or not ap.is_file() or not ap.name.startswith("voice_upload_")
+                    or ap.suffix.lower() not in {".mp3", ".wav", ".m4a", ".ogg",
+                                                ".webm", ".aac", ".flac"}):
+                raise HTTPException(400, "audio_path inválido — sube el audio vía /api/import/audio")
+            meta["audio_path"] = str(ap)
+
     platforms = body.get("platforms")
     if not isinstance(platforms, list):
         platforms = ["youtube"]
@@ -1216,10 +1288,15 @@ async def project_video(pid: str, download: bool = False):
     """
     _pid(pid)
     p = db.get_project(pid)
-    if not p or not p.get("video_url") or not Path(p["video_url"]).exists():
+    if not p or not p.get("video_url"):
+        raise HTTPException(404, "video no disponible")
+    # INT-080: contención M5 — la columna video_url solo puede apuntar a
+    # raíces seguras del backend; nunca a rutas arbitrarias del disco.
+    video_fs = _path_contenida(p["video_url"])
+    if not video_fs or not video_fs.is_file():
         raise HTTPException(404, "video no disponible")
     return FileResponse(
-        p["video_url"],
+        video_fs,
         media_type="video/mp4",
         filename=f"{p['title'][:40]}.mp4",
         content_disposition_type="attachment" if download else "inline",
@@ -1240,7 +1317,10 @@ async def project_srt(pid: str):
     words_file = security.safe_project_output_dir(_pid(pid)) / "words.json"  # M5
     if not words_file.exists():
         raise HTTPException(404, "sin subtítulos")
-    words = json.loads(words_file.read_text())
+    try:
+        words = json.loads(words_file.read_text())
+    except (json.JSONDecodeError, OSError):
+        raise HTTPException(500, "subtítulos corruptos — regenera los subtítulos del proyecto")
     from fastapi import Response
     return Response(words_to_srt(words), media_type="text/plain",
                     headers={"Content-Disposition": "attachment"})
@@ -1974,7 +2054,7 @@ async def trends_research(body: dict):
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"investigación falló: {str(e)[:150]}")
     ideas = await trends_svc.ideas_from_research(
-        research, int(body.get("n_ideas") or 5))
+        research, _to_int(body.get("n_ideas") or 5, 5, "n_ideas"))
     return {"ok": True, "research": research, "ideas": ideas}
 
 
@@ -2019,7 +2099,10 @@ async def inspect_media_binary(body: dict):
     expected = (body.get("expected_type") or "").strip() or None
     if not file_path:
         raise HTTPException(400, "falta file_path")
-    return _qa_forensics_svc.inspect_media_file(file_path, expected_type=expected)
+    fp_contenido = _path_contenida(file_path)  # INT-080: oráculo de paths cerrado
+    if not fp_contenido:
+        raise HTTPException(400, "file_path fuera de los directorios permitidos del backend")
+    return _qa_forensics_svc.inspect_media_file(str(fp_contenido), expected_type=expected)
 
 
 
@@ -2081,7 +2164,7 @@ async def mcp_execute(body: dict):
     try:
         return await _mcpm.manager.execute(
             _svc(body), tool, args,
-            timeout=float(body.get("timeout")) if body.get("timeout") else None,
+            timeout=_to_float(body.get("timeout"), 0, "timeout") if body.get("timeout") else None,
             notebook_id=(body.get("notebook_id") or "").strip() or None,
             auto_connect=bool(body.get("auto_connect", True)))
     except _mcpm.MCPManagerError as e:
@@ -2323,9 +2406,9 @@ async def clipper_analyze(body: dict):
     url = (body.get("url") or "").strip()
     if not url:
         raise HTTPException(400, "Se requiere una URL válida de video o podcast")
-    count = int(body.get("count", 5))
-    min_dur = int(body.get("min_duration", 20))
-    max_dur = int(body.get("max_duration", 65))
+    count = _to_int(body.get("count", 5), 5, "count")
+    min_dur = _to_int(body.get("min_duration", 20), 20, "min_duration")
+    max_dur = _to_int(body.get("max_duration", 65), 65, "max_duration")
     cookies = (body.get("cookies") or "").strip() or None
     try:
         return await viral_clipper.detect_viral_moments(
@@ -2343,8 +2426,8 @@ async def clipper_render(body: dict):
     url = (body.get("url") or "").strip()
     if not url:
         raise HTTPException(400, "URL requerida")
-    start = float(body.get("start", 0))
-    end = float(body.get("end", 0))
+    start = _to_float(body.get("start", 0), 0, "start")
+    end = _to_float(body.get("end", 0), 0, "end")
     if end <= start:
         raise HTTPException(400, "El tiempo de fin debe ser mayor al de inicio")
     title = (body.get("title") or "Short").strip()
@@ -2392,8 +2475,10 @@ async def avatar_circle_pip(avatar_id: str, body: dict | None = None):
     if not img_p or not Path(img_p).is_file():
         raise HTTPException(400, "El avatar no tiene un retrato generado")
 
-    b_color = (body or {}).get("border_color", "cyan")
-    from services.avatar_pip import create_circle_avatar
+    b_color = str((body or {}).get("border_color") or "cyan").strip().lower()
+    from services.avatar_pip import BORDER_PRESETS, create_circle_avatar
+    if b_color not in BORDER_PRESETS:  # INT-080: antes llegaba crudo al filename
+        raise HTTPException(400, "border_color no válido: " + ", ".join(sorted(BORDER_PRESETS)))
     out_dir = STATIC_DIR / "assets"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"avatar_pip_{avatar_id}_{b_color}.png"
@@ -2411,7 +2496,7 @@ async def avatar_animate_liveportrait(avatar_id: str, body: dict | None = None):
     if not img_p or not Path(img_p).is_file():
         raise HTTPException(400, "El avatar no tiene un retrato generado")
 
-    duration = float((body or {}).get("duration_sec", 4.0))
+    duration = _to_float((body or {}).get("duration_sec", 4.0), 4.0, "duration_sec")
     from services.avatar_motion import animate_liveportrait_local
     out_dir = STATIC_DIR / "assets"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -2538,9 +2623,12 @@ async def dubbing_dub_video(body: dict):
 
     # Si hay video original, sustituir audio con FFmpeg
     output_video_url = None
-    if video_url_or_path and Path(video_url_or_path).is_file():
+    dub_src = _path_contenida(video_url_or_path) if video_url_or_path else None
+    if video_url_or_path and not dub_src:
+        raise HTTPException(400, "video_path fuera de los directorios permitidos del backend")
+    if dub_src:
         dubbed_video = out_dir / f"video_{target_lang}_{h}.mp4"
-        multilang_dubber.swap_video_audio(Path(video_url_or_path), dubbed_audio, dubbed_video)
+        multilang_dubber.swap_video_audio(dub_src, dubbed_audio, dubbed_video)
         output_video_url = f"/static/dubbed_videos/{dubbed_video.name}"
 
     return {
@@ -2635,6 +2723,10 @@ async def product_studio_preview(body: dict):
     style = body.get("style") or "luxury_dark"
     if not image_url:
         raise HTTPException(400, "image_url requerida")
+    try:
+        image_url = security.validar_url(str(image_url))  # INT-080: anti-SSRF/file://
+    except ValueError as e:
+        raise HTTPException(400, f"image_url rechazada: {e}")
 
     out_dir = STATIC_DIR / "studio_previews"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -2741,6 +2833,13 @@ async def clipper_create_project(body: dict):
     summary = (body.get("summary") or "").strip()
     source_url = (body.get("url") or "").strip()
     video_url = (body.get("video_url") or "").strip()
+    # INT-080: la columna projects.video_url la sirve GET /api/projects/{pid}/video
+    # con contención M5 — aquí se valida el ORIGEN: solo URL http(s) o ruta bajo
+    # raíces seguras. Un «../../.env» o una ruta absoluta ajena muere aquí.
+    if video_url and not (_path_contenida(video_url)
+                          or video_url.startswith(("http://", "https://"))
+                          or video_url.startswith(("/api/", "/static/"))):
+        raise HTTPException(400, "video_url inválido (solo URL http(s) o archivo del backend)")
     start = body.get("start")
     end = body.get("end")
 
@@ -2764,13 +2863,16 @@ async def clipper_create_project(body: dict):
 
 
 @app.get("/api/renders/{file_name}")
-async def get_rendered_file(file_name: str):
-    """Reproduce o descarga un video vertical renderizado."""
+async def get_rendered_file(file_name: str, download: bool = False):
+    """Reproduce (inline, por defecto) o descarga (?download=1) un render.
+    INT-080: mismo arreglo que INT-076 — `filename=` solo forzaba attachment
+    y el <video> de Chrome abortaba en 0:00; + whitelist de extensión .mp4."""
     safe_name = Path(file_name).name
     path = viral_clipper.RENDERS_DIR / safe_name
-    if not path.is_file():
+    if path.suffix.lower() != ".mp4" or not path.is_file():
         raise HTTPException(404, "El video renderizado no existe")
-    return FileResponse(path, media_type="video/mp4", filename=safe_name)
+    return FileResponse(path, media_type="video/mp4", filename=safe_name,
+                        content_disposition_type="attachment" if download else "inline")
 
 
 # ─────────────── Pipeline Orchestrator (INT-023) · NotebookLM → Agent → Flow ──
@@ -2840,7 +2942,7 @@ async def pipeline_generate_hooks(payload: dict):
     if not topic:
         raise HTTPException(400, "El campo 'topic' es requerido para generar hooks")
     niche = (payload.get("niche") or "").strip() or None
-    count = int(payload.get("count", 3))
+    count = _to_int(payload.get("count", 3), 3, "count")
     custom_prompt = (payload.get("custom_prompt") or "").strip() or None
     hooks = await script_gen.generate_viral_hooks(topic, niche=niche, count=count, custom_prompt=custom_prompt)
     return {"ok": True, "topic": topic, "niche": niche, "hooks": hooks}

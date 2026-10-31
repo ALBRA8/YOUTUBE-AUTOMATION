@@ -337,7 +337,7 @@ async def _run_flow_render(job_id: str, project_id: str) -> None:
         if faltan_img:
             raise RuntimeError(f"Escenas sin imagen de Flow: {faltan_img}. "
                                "Importa el ZIP de Escena_XX primero.")
-        db.update_project(project_id, status="processing", error=None,
+        db.update_project(project_id, status="render", error=None,
                           step_label="Render Flow", progress=50)
         await _emit(job_id, project_id, "tts", 50, "Sintetizando voz (assets Flow)…")
 
@@ -379,7 +379,8 @@ async def _run_flow_render(job_id: str, project_id: str) -> None:
                                                     silent, voice_full)
         await _emit(job_id, project_id, "subtitles", 90, "Quemando subtítulos Hormozi…")
         final = await video.burn_subtitles(db.get_project(project_id), raw_video, words_path)
-        thumb = video.make_thumbnail(db.get_project(project_id), scenes[0].get("image_path"))
+        thumb = await asyncio.to_thread(
+            video.make_thumbnail, db.get_project(project_id), scenes[0].get("image_path"))
 
         total_dur = sum(durations)
         _gate_qa_final(project_id, final)  # §render: QA antes de ready
@@ -718,6 +719,8 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
                         raise asyncio.CancelledError("cancelado")
                     if idx in flow_videos:
                         continue  # Reutilización idempotente de clip ya existente
+                    if video.is_broll(sc):
+                        continue  # INT-080: el video Flow de un b-roll jamás se usa — no quemar cuota Veo
                     try:
                         await _emit(
                             job_id, project_id, "flow_video",
@@ -760,7 +763,8 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
         # PASO 5 — subtítulos + thumbnail
         await _emit(job_id, project_id, "subtitles", 90, "Quemando subtítulos Hormozi…")
         final = await video.burn_subtitles(db.get_project(project_id), raw_video, words_path)
-        thumb = video.make_thumbnail(db.get_project(project_id), scenes[0].get("image_path"))
+        thumb = await asyncio.to_thread(
+            video.make_thumbnail, db.get_project(project_id), scenes[0].get("image_path"))
 
         total_dur = sum(durations)
         _gate_qa_final(project_id, final)  # §render: QA antes de ready

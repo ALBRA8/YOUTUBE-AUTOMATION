@@ -194,9 +194,15 @@ WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")  # cpu | cuda
 
 # ── Video ─────────────────────────────────────────────────────────────────
 FFMPEG_BIN = os.getenv("FFMPEG_BIN", "ffmpeg")
-FPS = int(os.getenv("FPS", "30"))
+try:
+    FPS = int(float(os.getenv("FPS", "30")))  # INT-080: FPS=29.97 no tumba el arranque
+except ValueError:
+    FPS = 30
 SHORT_W, SHORT_H = 1080, 1920     # 9:16
 LONG_W, LONG_H = 1920, 1080       # 16:9
+
+# INT-080 · única fuente de verdad de versión (FastAPI + /api/health)
+APP_VERSION = "2.36.0"
 MUSIC_VOLUME = 0.18
 MUSIC_DIR = DATA_DIR / "music"
 MUSIC_DIR.mkdir(exist_ok=True)

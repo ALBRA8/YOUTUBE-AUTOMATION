@@ -331,9 +331,16 @@ async def build_full_track(project: dict, durations: list[float]) -> Path:
     for i, dur in enumerate(durations):
         wav = audio_dir / f"scene_{i:02d}.wav"
         if not wav.exists():
-            silence = TMP_DIR / f"sil_{i}.wav"
-            tts_service.silence_wav(silence, durations[i])
-            wav = silence
+            # INT-080: nombre único por proyecto + limpieza — antes sil_{i}.wav
+            # vivía en TMP_DIR compartido: dos proyectos concurrentes
+            # colisionaban y corruptaban voice_full.wav.
+            silence = TMP_DIR / f"sil_{project['id']}_{i}.wav"
+            try:
+                tts_service.silence_wav(silence, durations[i])
+                wav = silence
+            finally:
+                if wav != silence:  # pragma: no cover — solo si silence_wav lanzó
+                    silence.unlink(missing_ok=True)
         inputs += ["-i", str(wav)]
         if i < len(durations) - 1 and GAP > 0:
             pad_chains.append(f"[{i}:a]apad=pad_dur={GAP}[a{i}]")

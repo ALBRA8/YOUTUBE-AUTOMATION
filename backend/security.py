@@ -10,8 +10,9 @@ clave. Aceptada por 4 vías para cubrir todos los clientes del sistema:
   2. Header   Authorization: Bearer <clave> (clientes estándar)
   3. Cookie   yta-master-key=<clave>        (EventSource/SSE no puede poner
                                              headers → usa cookies same-origin)
-  4. Query    ?api_key=<clave>              (última opción para clientes
-                                             limitados; evítala en logs)
+  4. (eliminado en INT-080) Query ?api_key= — la clave en la query terminaba
+                                             en access-logs/proxies; para SSE
+                                             se usa la cookie de mismo origen.
 
 Sin MASTER_API_KEY definida, enabled() devuelve False y el middleware no
 bloquea nada (comportamiento histórico, cero ruptura para el usuario local).

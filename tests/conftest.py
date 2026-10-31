@@ -104,6 +104,9 @@ STANDALONE_BATTERIES = [
                                      # 0 funciones test_*): fija
                                      # os.environ["FLOW_MCP_ENABLED"] al importarse.
     "test_live_execution_2.py",      # ídem (env a nivel de módulo).
+    "test_live_execution_c1.py",     # INT-080: faltaba aquí — al importarlo fijaba
+                                     # config.FLOW_MCP_ENABLED=True en el proceso pytest
+                                     # y recolectaba 0 tests.
     "test_live_execution_c2.py",     # ídem (env + config.FLOW_MCP_ENABLED=True
                                      # a nivel de módulo). Vía LIVE correcta:
                                      # python3 tests/test_live_execution*.py.

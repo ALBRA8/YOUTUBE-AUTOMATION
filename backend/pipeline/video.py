@@ -41,6 +41,15 @@ CLIP_TOL = 0.25       # tolerancia milimétrica post-render (s) clip vs target
 BROLL_TYPES = {"product_broll", "broll", "product"}
 
 
+def is_broll(scene: dict) -> bool:
+    """True si la escena es b-roll (INT-080): consumido por el orchestrator
+    para NO quemar generaciones de Flow/Veo en escenas cuyo video nunca se
+    usa (render_scenes las renderiza con zoompan a propósito)."""
+    stype = str(scene.get("type")
+                or (scene.get("meta") or {}).get("type") or "").strip().lower()
+    return stype in BROLL_TYPES
+
+
 def scene_render_mode(scene: dict, has_flow_video: bool) -> str:
     """Modo de render de una escena (INT-077 estructura UGC nativa):
     - 'broll_zoompan': escena product_broll → imagen de producto + Ken Burns
@@ -281,9 +290,13 @@ async def render_scenes(project: dict, scenes: list[dict], durations: list[float
         # Si quedó corto (probe del src fallido, cap de factor, v2v acortado,
         # cache rancio) se re-renderiza UNA vez con bucle forzado.
         fitted, measured = True, 0.0
+        # INT-080: la escena FINAL (CTA) tolera solo 0.05s — con CLIP_TOL=0.25
+        # un clip final corto pasaba la verificación y el mux `-shortest`
+        # recortaba la cola de la narración.
+        tol = 0.05 if not not_final else CLIP_TOL
         try:
             measured = await asyncio.to_thread(lambda: probe_duration(out))
-            fitted = measured >= target - CLIP_TOL
+            fitted = measured >= target - tol
         except Exception:  # noqa: BLE001
             fitted = False
         if not fitted:
@@ -298,7 +311,7 @@ async def render_scenes(project: dict, scenes: list[dict], durations: list[float
             if p2.returncode == 0:
                 try:
                     measured = await asyncio.to_thread(lambda: probe_duration(out))
-                    fitted = measured >= target - CLIP_TOL
+                    fitted = measured >= target - tol
                 except Exception:  # noqa: BLE001
                     fitted = False
         if not fitted:
@@ -320,7 +333,15 @@ async def render_scenes(project: dict, scenes: list[dict], durations: list[float
         async with sem:
             return await one(i)
 
-    return await asyncio.gather(*(guarded(i) for i in range(n_scenes)))
+    # INT-080: return_exceptions — si una escena falla, los renders hermanos
+    # terminan (sin quedar huérfanos consumiendo CPU tras marcar failed) y
+    # se relanza el PRIMER error real preservando el contrato de retorno.
+    results = await asyncio.gather(*(guarded(i) for i in range(n_scenes)),
+                                   return_exceptions=True)
+    first_err = next((r for r in results if isinstance(r, BaseException)), None)
+    if first_err is not None:
+        raise first_err
+    return list(results)
 
 
 async def concat_clips(project: dict, clips: list[Path],

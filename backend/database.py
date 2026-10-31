@@ -247,7 +247,8 @@ _PROJECT_COLS = {
     "id", "title", "status", "mode", "style", "format", "voice",
     "tts_provider", "source_url", "video_url", "thumbnail_url",
     "youtube_id", "error", "progress", "step_label", "meta",
-    "avatar_id", "platforms", "niche", "created_at", "updated_at",
+    "avatar_id", "platforms", "niche", "brand_profile_id",
+    "created_at", "updated_at",
 }
 _SCENE_COLS = {
     "id", "project_id", "idx", "title", "narration", "image_prompt",

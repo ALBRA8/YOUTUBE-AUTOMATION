@@ -1,0 +1,5 @@
+# INT-080 · dependencias de desarrollo (la suite pytest las asume)
+pytest>=8
+pytest-asyncio>=1
+starlette[full]
+httpx
