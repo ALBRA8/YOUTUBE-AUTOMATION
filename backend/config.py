@@ -272,6 +272,17 @@ AVATAR_HF_LENGTH = int(os.getenv("AVATAR_HF_LENGTH", "100"))           # frames 
 # cuadrado 512x512: se normaliza con FFmpeg (cover + crop centrado).
 AVATAR_OUTPUT_W = int(os.getenv("AVATAR_OUTPUT_W", "1080"))
 AVATAR_OUTPUT_H = int(os.getenv("AVATAR_OUTPUT_H", "1920"))
+# INT-075 · Lip-sync VIDEO-to-VIDEO (post-procesado del video base de Google
+# Flow con el audio TTS de la escena, antes del masterizado 9:16). Cadena de
+# Spaces públicos $0.00 con failover; fail-open = el render sigue sin lip-sync.
+# Calibración 2026-10-31: ByteDance/LatentSync es GATED (aceptar licencia con
+# cuenta HF gratis + HF_TOKEN); sin token los 3 devuelven 401.
+AVATAR_V2V_ENABLED = os.getenv("AVATAR_V2V_ENABLED", "1").strip().lower() in ("1", "true", "yes")
+AVATAR_V2V_SPACES = os.getenv(
+    "AVATAR_V2V_SPACES",
+    "ByteDance/LatentSync,akhaliq/Wav2Lip,fffiloni/video-retalking").strip()
+AVATAR_V2V_TIMEOUT_S = float(os.getenv("AVATAR_V2V_TIMEOUT_S", "300"))  # por Space
+AVATAR_V2V_STEPS = int(os.getenv("AVATAR_V2V_STEPS", "25"))             # LatentSync inference_steps
 
 
 # ── Escritura en vivo desde el dashboard (⚙️ Configuración) ──────────────

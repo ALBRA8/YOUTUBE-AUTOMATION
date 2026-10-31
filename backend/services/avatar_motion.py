@@ -585,3 +585,166 @@ def normalize_vertical_916(
         raise RuntimeError(f"FFmpeg error normalizando 9:16: {res.stderr[-400:]}")
     shutil.move(str(tmp_out), str(video_path))
     return video_path
+
+
+# ════════════════════════════════════════════════════════════════════════
+# INT-075 · Lip-sync VIDEO-to-VIDEO (post-procesado de videos de Google Flow)
+# El video base de Flow (cuerpo, manos con producto, fondo) entra junto al
+# audio TTS de la escena y sale con los fonemas calzados a la boca. Cadena
+# de Spaces públicos HF $0.00 con failover + timeout por intento + fail-open
+# (si todo falla el pipeline sigue con el video original SIN lip-sync: el
+# render NUNCA se rompe).
+# Calibración en vivo (2026-10-31, gradio_client 2.0.3): los 3 Spaces de la
+# cadena devuelven 401 sin token — ByteDance/LatentSync es GATED (aceptar la
+# licencia en su página con una cuenta HF gratis). Con HF_TOKEN (ya soportado
+# por _make_hf_client) la cadena opera a $0.00.
+# ════════════════════════════════════════════════════════════════════════
+
+_VIDEO_LIPSYNC_SPACES_DEFAULT = ("ByteDance/LatentSync,akhaliq/Wav2Lip,"
+                                 "fffiloni/video-retalking")
+
+
+def v2v_enabled() -> bool:
+    """Interruptor maestro AVATAR_V2V_ENABLED (1/0)."""
+    return _am_cfg("AVATAR_V2V_ENABLED", "1").strip().lower() in ("1", "true", "yes")
+
+
+def v2v_space_list() -> list[str]:
+    """Cadena de Spaces video-to-video configurable vía AVATAR_V2V_SPACES."""
+    raw = _am_cfg("AVATAR_V2V_SPACES", _VIDEO_LIPSYNC_SPACES_DEFAULT)
+    return [s.strip() for s in str(raw).split(",") if s.strip()]
+
+
+def _to_wav_mono16k(audio_path: Path, out_wav: Path) -> Path:
+    """Convierte CUALQUIER audio TTS (mp3/wav/webm/ogg) a WAV PCM mono 16 kHz.
+    Evita el error 'file does not start with RIFF id' de los Spaces que solo
+    aceptan WAV crudo."""
+    out_wav = Path(out_wav)
+    out_wav.parent.mkdir(parents=True, exist_ok=True)
+    cmd = ["ffmpeg", "-y", "-i", str(audio_path),
+           "-ar", "16000", "-ac", "1", str(out_wav)]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(
+            f"ffmpeg wav16k timeout convirtiendo {Path(audio_path).name}") from e
+    if res.returncode != 0 or not out_wav.is_file():
+        raise RuntimeError(f"ffmpeg wav16k falló: {(res.stderr or '')[-200:]}")
+    return out_wav
+
+
+def _call_hf_v2v_gradio(space_id: str, video_path: str, audio_wav: str,
+                        out_path: str) -> Path:
+    """Llama a UN Space de video dubbing/lip-sync con su contrato real
+    (sincrono — correr en hilo). Prueba primero los kwargs canónicos del Space
+    y de último un predict posicional (video, audio) — máxima compatibilidad
+    si el Space renombró sus inputs. Lanza si todo falla → el caller hace
+    failover al siguiente Space."""
+    from gradio_client import handle_file
+
+    client = _make_hf_client(space_id)
+    attempts: list = []
+    if space_id == "ByteDance/LatentSync":
+        attempts.append(lambda: client.predict(
+            video_in=handle_file(video_path),
+            audio_in=handle_file(audio_wav),
+            guidance_scale=1.5,
+            inference_steps=int(_am_cfg("AVATAR_V2V_STEPS", "25")),
+            seed=42, api_name="/predict"))
+    elif space_id == "akhaliq/Wav2Lip":
+        attempts.append(lambda: client.predict(
+            video_in=handle_file(video_path),
+            audio_in=handle_file(audio_wav), api_name="/predict"))
+    elif space_id == "fffiloni/video-retalking":
+        attempts.append(lambda: client.predict(
+            video=handle_file(video_path),
+            audio=handle_file(audio_wav), api_name="/predict"))
+    # Genérico posicional SIEMPRE como último intento del Space.
+    attempts.append(lambda: client.predict(
+        handle_file(video_path), handle_file(audio_wav)))
+
+    result = None
+    last_err: Exception | None = None
+    for attempt in attempts:
+        try:
+            result = attempt()
+            break
+        except Exception as ex:  # noqa: BLE001
+            last_err = ex
+            log.warning("[avatar_motion v2v] %s: contrato falló: %s",
+                        space_id, str(ex)[:120])
+    if result is None:
+        raise RuntimeError(
+            f"{space_id}: todos los contratos fallaron "
+            f"({type(last_err).__name__}: {last_err})")
+
+    video_src = _extract_video_from_result(result)
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(video_src, out_path)
+    return Path(out_path)
+
+
+async def lipsync_video_to_video(
+    video_path: Path,
+    audio_path: Path,
+    output_path: Path,
+    timeout_s: float | None = None,
+) -> dict:
+    """INT-075: lip-sync video-to-video del video base de Google Flow con el
+    audio TTS de la escena ($0.00 vía Spaces públicos de Hugging Face).
+
+    1) Normaliza el audio a WAV mono 16 kHz con FFmpeg (evita el error
+       'file does not start with RIFF id').
+    2) Recorre ``AVATAR_V2V_SPACES`` con failover; cada intento corre en hilo
+       con timeout propio (``AVATAR_V2V_TIMEOUT_S`` por Space) — el backend
+       jamás se bloquea.
+    3) FAIL-OPEN: si toda la cadena falla, copia el video original a
+       ``output_path`` y devuelve ``ok=False`` — el render continúa sin
+       lip-sync.
+
+    Devuelve ``{"ok", "video", "space", "attempted", "fallback", "error"}``.
+    Firma de la espec: ``lipsync_video_to_video(video_path, audio_path,
+    output_path)``; ``timeout_s`` es opcional (override por llamada)."""
+    video_path = Path(video_path)
+    audio_path = Path(audio_path)
+    output_path = Path(output_path)
+    if not video_path.is_file():
+        raise FileNotFoundError(f"Video base no encontrado: {video_path}")
+    if not audio_path.is_file():
+        raise FileNotFoundError(f"Audio no encontrado: {audio_path}")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not v2v_enabled():
+        shutil.copy(video_path, output_path)
+        return {"ok": False, "video": str(output_path), "space": "",
+                "attempted": [], "fallback": True,
+                "error": "AVATAR_V2V_ENABLED=0 — fail-open inmediato"}
+
+    attempted: list[str] = []
+    errors: list[str] = []
+    tmp_wav = output_path.parent / f"{output_path.stem}_voice16k.wav"
+    try:
+        wav = await asyncio.to_thread(_to_wav_mono16k, audio_path, tmp_wav)
+        timeout = float(timeout_s or _am_cfg("AVATAR_V2V_TIMEOUT_S", "300"))
+        for space in v2v_space_list():
+            attempted.append(space)
+            try:
+                await asyncio.wait_for(
+                    asyncio.to_thread(_call_hf_v2v_gradio, space,
+                                      str(video_path), str(wav), str(output_path)),
+                    timeout=timeout)
+                return {"ok": True, "video": str(output_path), "space": space,
+                        "attempted": attempted, "fallback": False, "error": ""}
+            except Exception as ex:  # noqa: BLE001
+                msg = f"{space}: {type(ex).__name__}: {str(ex)[:160]}"
+                errors.append(msg)
+                log.warning("[avatar_motion v2v] %s", msg)
+        shutil.copy(video_path, output_path)  # FAIL-OPEN: video original
+        return {"ok": False, "video": str(output_path), "space": "",
+                "attempted": attempted, "fallback": True,
+                "error": " | ".join(errors)[-400:]}
+    finally:
+        try:
+            tmp_wav.unlink(missing_ok=True)
+        except OSError:
+            pass

@@ -13,6 +13,7 @@ from pathlib import Path
 from config import FPS, LONG_H, LONG_W, MUSIC_VOLUME, OUTPUT_DIR, SHORT_H, SHORT_W
 from pipeline import subtitles as subs_mod
 from pipeline import typography as typo_mod
+from services import avatar_motion
 
 log = logging.getLogger("video")
 
@@ -157,7 +158,26 @@ async def render_scenes(project: dict, scenes: list[dict], durations: list[float
                 await on_progress(i + 1, n_scenes, None)
             return out
         if has_fv:
-            cmd = retime_clip_cmd(src, target, out, w, h)
+            # INT-075: lip-sync VIDEO-to-VIDEO del clip de Flow con el audio
+            # TTS de la escena, ANTES del retime/masterizado. Fail-open: si el
+            # Space falla se sigue con el video original (render nunca se rompe).
+            src_use = src
+            a_path = str(scenes[i].get("audio_path") or "").strip()
+            if a_path and Path(a_path).is_file() and avatar_motion.v2v_enabled():
+                v2v_out = clips_dir / f"lipsync_{i:02d}.mp4"
+                try:
+                    res = await avatar_motion.lipsync_video_to_video(
+                        src, Path(a_path), v2v_out)
+                    if res.get("ok") and Path(res["video"]).is_file():
+                        src_use = Path(res["video"])
+                        log.info("clip %d: lip-sync v2v OK (%s)", i, res.get("space"))
+                    else:
+                        log.warning("clip %d: v2v fail-open: %s",
+                                    i, str(res.get("error"))[:120])
+                except Exception as e:  # noqa: BLE001
+                    log.warning("clip %d: v2v error (%s) — sin lip-sync",
+                                i, str(e)[:120])
+            cmd = retime_clip_cmd(src_use, target, out, w, h)
         else:
             cmd = scene_clip_cmd(src, target, out, w, h,
                                  zoom_dir=1 if i % 2 == 0 else -1)
