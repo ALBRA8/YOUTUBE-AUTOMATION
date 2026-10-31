@@ -8,7 +8,7 @@ const S = {            // estado global
   view: 'home', theme: localStorage.getItem('yta-theme') || 'dark',
   demo: false, health: {}, styles: [], settings: {}, stats: {},
   projects: [], project: null, factory: null, ideas: [], avatars: [],
-  niches: [], library: [],
+  niches: [], library: [], brandProfiles: [],
   chat: [], chatBusy: false, chatImage: null,
   cerebros: [], cerebroActivo: null,
   wizard: null, es: null,
@@ -511,6 +511,134 @@ window.qcSwitchMode = qcSwitchMode;
 window.executeQuickCreate = executeQuickCreate;
 window.openWizardFromQC = openWizardFromQC;
 
+
+/* ── v2.36 · INT-079 · Brand Profiles en el asistente ─────────────
+   INT-042 añadió la llamada renderWizardBrandProfileBar() pero la definición
+   nunca existió → ReferenceError silencioso que mataba TODO el asistente
+   Crear (✨ Crear, ＋ Nuevo video en nicho, CTA de nichos, wizard rápido).
+   Regla de oro: la barra NUNCA lanza — sin perfiles o con error → ''. */
+function renderWizardBrandProfileBar() {
+  try {
+    const profiles = S.brandProfiles || [];
+    if (!profiles.length) return '';   // sin perfiles → wizard clásico intacto
+    const sel = profiles.find(p => p.id === W.brandProfile);
+    const hint = sel ? [sel.niche, sel.tone].filter(Boolean).map(esc).join(' · ') : '';
+    return `
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:14px">
+        <span style="font-size:12.5px;font-weight:700;color:var(--muted)">🏢 Perfil de marca:</span>
+        <select onchange="W.brandProfile=this.value;if(W.brandProfile){applyBrandToWizard();toast('Perfil de marca aplicado 🏢','ok')}renderCreate()" style="max-width:280px">
+          <option value="">— Sin perfil (configuración manual) —</option>
+          ${profiles.map(p => `<option value="${p.id}" ${W.brandProfile === p.id ? 'selected' : ''}>${p.is_default ? '⭐ ' : ''}${esc(p.name)}</option>`).join('')}
+        </select>
+        ${hint ? `<small style="color:var(--muted);font-size:11.5px">${hint}</small>` : ''}
+        <small style="color:var(--muted);font-size:11px;margin-left:auto"><a href="#" onclick="openBrandProfilesModal();return false" style="color:var(--accent2)">Administrar</a></small>
+      </div>`;
+  } catch (e) { return ''; }   // jamás puede tumbar el asistente
+}
+
+/* autofill 1-clic (documentado en Ajustes): solo campos seguros, sin pisar
+   decisiones del usuario — lo vacío en el perfil se deja como esté. */
+function applyBrandToWizard() {
+  const p = (S.brandProfiles || []).find(x => x.id === W.brandProfile);
+  if (!p) return;
+  if (p.subtitle_style) W.subtitles = p.subtitle_style;
+  if (p.visual_style && p.visual_style !== 'auto') W.style = p.visual_style;
+  if (p.tts_provider === 'gemini') W.voice = 'gemini';
+  else if (p.tts_provider === 'edge-tts') W.voice = '';
+}
+
+/* v2.36 · INT-079 · modal de administración de Canales y Marcas.
+   INT-042 dejó el botón de Ajustes apuntando a una función inexistente. */
+async function openBrandProfilesModal() {
+  if (guardDemo()) return;
+  try { S.brandProfiles = (await api('/brand-profiles')).profiles || []; } catch (e) {}
+  $('#overlay-root').innerHTML = `<div class="overlay nicho-overlay" onclick="if(event.target===this)closeOverlay()"><div class="box card nicho-box">
+    <div class="nicho-modal-head">
+      <h3>🏢 Canales y Marcas</h3>
+      <button class="modal-x" onclick="closeOverlay()" title="Cerrar">✕</button>
+    </div>
+    ${renderBrandProfilesAdmin()}
+  </div></div>`;
+  document.addEventListener('keydown', nichoEscClose);
+}
+
+function renderBrandProfilesAdmin() {
+  const profiles = S.brandProfiles || [];
+  return `
+    <div class="field"><label>Nombre del canal / marca *</label><input type="text" id="bp-name" placeholder="Canal Principal / Shorts Virales"></div>
+    <div class="row">
+      <div class="field"><label>Nicho</label><input type="text" id="bp-niche" placeholder="Curiosidades y Misterios"></div>
+      <div class="field"><label>Estilo visual</label><select id="bp-style">
+        <option value="auto">auto</option>
+        ${(S.styles || []).map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}
+      </select></div>
+    </div>
+    <div class="field"><label>Audiencia objetivo</label><input type="text" id="bp-audience" placeholder="Audiencia joven (18-35) en TikTok/Shorts..."></div>
+    <div class="field"><label>Tono de voz</label><input type="text" id="bp-tone" placeholder="Directo, intrigante, ritmo acelerado"></div>
+    <div class="row">
+      <div class="field"><label>Voz neuronal</label><input type="text" id="bp-voice" placeholder="es-ES-AlvaroNeural"></div>
+      <div class="field" style="max-width:130px"><label>TTS</label><select id="bp-tts">
+        <option value="edge-tts">edge-tts</option><option value="gemini">gemini</option>
+      </select></div>
+      <div class="field"><label>Subtítulos</label><select id="bp-subs">
+        ${['shorts','hormozi','mrbeast','neon','tiktok','boxed','minimal','karaoke'].map(v => `<option value="${v}">${v}</option>`).join('')}
+      </select></div>
+    </div>
+    <div class="field"><label>Reglas y directivas de guion</label><textarea id="bp-rules" rows="3" placeholder="1. Gancho de impacto en los primeros 3 segundos...\n2. Frases concisas (máx 12 palabras)...\n3. Tensión narrativa hasta la última escena."></textarea></div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:10px;cursor:pointer">
+      <input type="checkbox" id="bp-default"> ⭐ Marcar como predeterminado (autocompleta nuevos videos)</label>
+    <button class="btn small primary" onclick="saveBrandProfile()">💾 Guardar perfil</button>
+    <div class="card" style="margin-top:10px">${profiles.length ? profiles.map(p => `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid rgba(128,128,128,.15)">
+        <span>${p.is_default ? '⭐ ' : '🏢 '} <b>${esc(p.name)}</b> <small style="color:var(--muted)">· ${esc(p.niche || 'sin nicho')}</small></span>
+        <span style="display:flex;gap:6px">
+          ${p.is_default ? '' : `<button class="btn small ghost" onclick="setBrandDefault('${p.id}')" title="Hacer predeterminado">⭐</button>`}
+          <button class="btn small danger" onclick="delBrandProfile('${p.id}')">🗑️</button>
+        </span>
+      </div>`).join('') : '<span style="color:var(--muted);font-size:13px">Sin perfiles aún — crea el primero arriba.</span>'}</div>`;
+}
+
+async function saveBrandProfile() {
+  if (guardDemo()) return;
+  try {
+    await api('/brand-profiles', { method: 'POST', body: {
+      name: $('#bp-name').value, niche: $('#bp-niche').value,
+      audience: $('#bp-audience').value, tone: $('#bp-tone').value,
+      visual_style: $('#bp-style') ? $('#bp-style').value : 'auto',
+      voice: ($('#bp-voice').value || '').trim() || 'es-ES-AlvaroNeural',
+      tts_provider: $('#bp-tts') ? $('#bp-tts').value : 'edge-tts',
+      subtitle_style: $('#bp-subs') ? $('#bp-subs').value : 'hormozi',
+      prompt_rules: $('#bp-rules').value,
+      is_default: !!($('#bp-default') && $('#bp-default').checked) }});
+    S.brandProfiles = (await api('/brand-profiles')).profiles || [];
+    toast('Perfil de marca guardado ✅', 'ok');
+    openBrandProfilesModal();
+    if (S.view === 'settings') renderSettings();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function delBrandProfile(id) {
+  if (guardDemo()) return;
+  try {
+    await api('/brand-profiles/' + id, { method: 'DELETE' });
+    if (W.brandProfile === id) W.brandProfile = '';
+    S.brandProfiles = (await api('/brand-profiles')).profiles || [];
+    toast('Perfil eliminado');
+    openBrandProfilesModal();
+    if (S.view === 'settings') renderSettings();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function setBrandDefault(id) {
+  if (guardDemo()) return;
+  try {
+    await api('/brand-profiles/' + id + '/default', { method: 'POST' });
+    S.brandProfiles = (await api('/brand-profiles')).profiles || [];
+    toast('Perfil predeterminado ⭐', 'ok');
+    openBrandProfilesModal();
+    if (S.view === 'settings') renderSettings();
+  } catch (e) { toast(e.message, 'err'); }
+}
 
 /* ── vista: WIZARD CREAR (4 pasos como Labsia) ───────────── */
 const W = { step: 1, mode: 'idea', format: 'short', style: 'auto',
@@ -2233,6 +2361,7 @@ async function refreshAll() {
   S.stats = stats; S.projects = projects; S.factory = factory; S.ideas = ideas;
   try { S.avatars = await api('/avatars'); } catch { S.avatars = []; }
   try { S.niches = await api('/niches'); } catch { S.niches = []; }
+  try { S.brandProfiles = (await api('/brand-profiles')).profiles || []; } catch { S.brandProfiles = S.brandProfiles || []; }
   try { S.library = await api('/library'); } catch { S.library = []; }
   try { const cb = await api('/cerebros'); S.cerebros = cb.cerebros || []; S.cerebroActivo = cb.activo; } catch { /* sin clave NVIDIA */ }
   refreshSidebar();
