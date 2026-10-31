@@ -2465,6 +2465,7 @@ function gsessDisconnectedHTML(js) {
     <p class="hintline" style="margin-top:10px">${extra}</p>
     ${timeout ? '<p class="hintline">⌛ Tiempo de espera agotado sin login — pulsa el botón cuando quieras reintentar.</p>' : ''}
     <div class="ghub-foot">
+      <button class="btn ghost" onclick="gsessOpenWindow()">🪟 Abrir ventana de Chrome</button>
       <button class="btn ghost" onclick="gsessRepairProfile()">🔧 Reparar perfil</button>
       <button class="btn ghost" onclick="gsessRefresh()">🔄 Refrescar estado</button>
     </div>
@@ -2525,6 +2526,27 @@ async function gsessRepairProfile() {
     const acts = (res.actions || []).length ? res.actions.join(', ') : 'perfil en estado óptimo';
     toast('Perfil saneado ✅: ' + acts, 'ok');
   } catch (e) { toast('Reparar perfil: ' + e.message, 'err'); }
+}
+
+/* INT-071-fix: «Abrir Ventana de Chrome» — fuerza ventana interactiva visible.
+   Si hay un Chrome fantasma (proceso vivo sin MainWindowHandle), el endpoint
+   lo purga con taskkill /F, borra los Singleton* y relanza limpia con foco. */
+async function gsessOpenWindow() {
+  try {
+    const res = await api('/mcp/google-sso/launch', {
+      method: 'POST',
+      body: { force_window: true }
+    });
+    if (res && res.ok) {
+      const extra = res.relaunched
+        ? 'instancia fantasma purgada y ventana relanzada'
+        : 'ventana reenviada a la instancia viva';
+      toast('Ventana de Chrome lanzada 🪟 (' + extra + ')', 'ok');
+      gsessRefresh();
+    } else {
+      toast('No se pudo abrir la ventana de Chrome', 'err');
+    }
+  } catch (e) { toast('Abrir ventana: ' + e.message, 'err'); }
 }
 
 function gsessApply(js) {

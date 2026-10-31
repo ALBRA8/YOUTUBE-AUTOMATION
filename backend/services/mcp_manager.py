@@ -856,6 +856,7 @@ class MCPClientManager:
                 break
 
         if sys.platform == "win32":
+            import tempfile
             chrome = argv[0]
             cmd_parts = []
             for a in argv[1:]:
@@ -867,15 +868,38 @@ class MCPClientManager:
                 else:
                     cmd_parts.append(a)
             args_str = " ".join(cmd_parts)
-            # cmd.exe /c start "" delega al shell de Windows (Explorer), garantizando
-            # una ventana interactiva visible en el escritorio activo del usuario.
-            full_cmd = f'cmd.exe /c start "" "{chrome}" {args_str}'
-            log.info("[mcp] Lanzando Chrome interactivo en Windows: %s", full_cmd)
+            # INT-071-fix: .bat DESACOPLADO — el cmd lanzado con DETACHED_PROCESS
+            # no hereda consola/estación de ventana del backend; `start` delega al
+            # shell de Windows (Explorer) → Chrome renderiza SIEMPRE en el
+            # escritorio interactivo del usuario actual, con foco al frente
+            # (--start-maximized ya viene en argv). Fallback: os.startfile.
+            bat_body = f'@echo off\r\nstart "" "{chrome}" {args_str}\r\n'
+            bat_path = Path(tempfile.gettempdir()) / (
+                f"yta_chrome_launch_{os.getpid()}_{int(time.time())}.bat")
             try:
-                p = subprocess.Popen(full_cmd, shell=True)
+                try:
+                    bat_path.write_text(bat_body, encoding="mbcs")
+                except (LookupError, UnicodeError):
+                    bat_path.write_text(bat_body, encoding="utf-8")
+            except OSError:
+                bat_path = None
+            log.info("[mcp] Lanzando Chrome interactivo en Windows vía .bat desacoplado: %s",
+                     bat_path or f'cmd start {chrome}')
+            try:
+                if bat_path:
+                    flags = (getattr(subprocess, "DETACHED_PROCESS", 0x00000008) |
+                             getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200))
+                    p = subprocess.Popen(["cmd.exe", "/c", str(bat_path)],
+                                         creationflags=flags,
+                                         stdout=subprocess.DEVNULL,
+                                         stderr=subprocess.DEVNULL,
+                                         stdin=subprocess.DEVNULL, close_fds=True)
+                    return p.pid
+                p = subprocess.Popen(f'cmd.exe /c start "" "{chrome}" {args_str}',
+                                     shell=True)
                 return p.pid
             except Exception as ex:
-                log.warning("[mcp] cmd start falló (%s), fallback a os.startfile...", ex)
+                log.warning("[mcp] cmd/bat falló (%s), fallback a os.startfile...", ex)
                 try:
                     os.startfile(chrome, "open", arguments=args_str)
                     return 0
@@ -884,6 +908,45 @@ class MCPClientManager:
         return subprocess.Popen(
             argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL, start_new_session=True).pid
+
+    def _windows_visible_state(self, profile_path: Path | str | None = None) -> bool | None:
+        """🪟 Windows: ¿la instancia de Chrome vinculada al perfil tiene ventana
+        gráfica REAL? Devuelve True (≥1 ventana visible en el escritorio),
+        False (procesos vivos pero todos con MainWindowHandle == 0 → zombie
+        fantasma que responde CDP pero el usuario JAMÁS ve) o None (no-Windows
+        o PowerShell falló → estado desconocido: el llamador NUNCA mata nada).
+        Una sola pasada PowerShell: Win32_Process (CommandLine = perfil) +
+        Get-Process (MainWindowHandle del top-level). $0.00, sin dependencias."""
+        import sys
+        if sys.platform != "win32":
+            return None
+        p_name = Path(str(profile_path if profile_path
+                          else _cfg("GOOGLE_PROFILE_GLOBAL", ""))).name
+        ps_cmd = (
+            "Get-CimInstance Win32_Process -Filter \"Name = 'chrome.exe'\" | "
+            f"Where-Object {{ $_.CommandLine -like '*{p_name}*' }} | "
+            "ForEach-Object { "
+            "$p = Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue; "
+            "if ($p) { [PSCustomObject]@{ pid = $_.ProcessId; "
+            "hwnd = $p.MainWindowHandle } } } | ConvertTo-Json -Compress"
+        )
+        try:
+            res = subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd],
+                                 capture_output=True, text=True, timeout=10)
+            if res.returncode != 0:
+                log.warning("[mcp] _windows_visible_state: PowerShell rc=%s — desconocido, no se mata nada",
+                            res.returncode)
+                return None
+            out = (res.stdout or "").strip()
+            if not out:
+                return False  # cero procesos del perfil → cero ventanas
+            data = json.loads(out)
+            rows = data if isinstance(data, list) else [data]
+            return any(int(r.get("hwnd") or 0) != 0
+                       for r in rows if isinstance(r, dict))
+        except Exception as e:
+            log.warning("[mcp] _windows_visible_state falló (%s) — desconocido, no se mata nada", e)
+            return None
 
     def _nb_storage_paths(self) -> list[Path]:
         """Rutas candidatas del storage_state.json de notebooklm-py, en orden
@@ -909,13 +972,20 @@ class MCPClientManager:
                 "size_bytes": existing.stat().st_size if existing else 0,
                 "mtime": existing.stat().st_mtime if existing else 0.0}
 
-    async def launch_google_login(self, urls: list[str] | None = None, cdp: bool = True) -> dict:
+    async def launch_google_login(self, urls: list[str] | None = None, cdp: bool = True,
+                                  force_window: bool = False) -> dict:
         """🔑 Abre (o reutiliza) el Chrome REAL con el perfil global y la URL
         de login de Google. UNA vez el humano loguea: Flow hereda la sesión
         (mismo Chrome por CDP) y NotebookLM la captura («📥 Capturar sesión»).
         urls: pestañas a abrir (default = [GOOGLE_LOGIN_URL]). El endpoint
         «Vincular Sesión Google (Login Único)» pasa ServiceLogin Flow +
-        notebooklm.google.com para que el único login cubra ambos products."""
+        notebooklm.google.com para que el único login cubra ambos products.
+        INT-071-fix (ventana visible): si CDP ya responde en 9333 se verifica
+        que la instancia viva tenga ventana gráfica real en Windows; un zombie
+        (MainWindowHandle == 0) se purga con taskkill /F, se borran los
+        Singleton* y se relanza una ventana interactiva limpia con foco.
+        force_window=True («Abrir Ventana de Chrome») fuerza esa reparación
+        aunque la ventana parezca viva."""
         port = int(_cfg("GOOGLE_LOGIN_CDP_PORT", 9333))
         profile = Path(str(_cfg("GOOGLE_PROFILE_GLOBAL", "")))
         profile.mkdir(parents=True, exist_ok=True)
@@ -926,6 +996,22 @@ class MCPClientManager:
                      "https://accounts.google.com/ServiceLogin?continue=https://labs.google/fx/tools/flow"))]
         already_up = await self._cdp_up(port) if cdp else False
         pid = None
+        window_state: bool | None = None
+        relaunched = False
+        killed_pids: list[int] = []
+        if already_up:
+            # INT-071-fix: ¿la instancia viva en 9333 tiene ventana gráfica REAL?
+            # Un Chrome fantasma (MainWindowHandle == 0) responde CDP pero el
+            # usuario nunca ve el login → detectar, purgar y relanzar limpio.
+            window_state = self._windows_visible_state(profile)
+            if force_window or window_state is False:
+                killed_pids = self.kill_profile_processes(profile)
+                heal_res = self.heal_chrome_profile(profile)  # borra Singleton* + repara
+                already_up = False
+                relaunched = True
+                log.warning("[mcp] Chrome fantasma (window_state=%s, force=%s): "
+                            "purgados %s → relanzando ventana interactiva",
+                            window_state, force_window, killed_pids or "[]")
         if not already_up:
             # Purgar SIEMPRE procesos huérfanos/zombis en profile antes del spawn (tanto CDP como sin CDP)
             # para evitar que una instancia fantasma capture la petición silenciosamente sin abrir ventana visible.
@@ -936,8 +1022,7 @@ class MCPClientManager:
             argv = [chrome,
                     f"--user-data-dir={profile}",
                     "--new-window",
-                    "--window-size=1280,800",
-                    "--window-position=40,40",
+                    "--start-maximized",
                     "--no-first-run", "--no-default-browser-check",
                     "--disable-session-crashed-bubble",
                     "--hide-crash-restore-bubble",
@@ -966,7 +1051,10 @@ class MCPClientManager:
                 "login_url": pages[0],
                 "pages": pages,
                 "heal_actions": heal_res.get("actions", []),
-                "notebooklm_storage": st}
+                "notebooklm_storage": st,
+                "window_state": window_state,
+                "relaunched": relaunched,
+                "killed_pids": killed_pids}
 
     async def google_login_status(self) -> dict:
         """Estado de la sesión unificada (polling barato de la UI)."""

@@ -2186,6 +2186,25 @@ async def mcp_capture_google_session():
 
 
 # ───────── Google One-Tap Hub (INT-071) · [G] Continuar con Google ──
+@app.post("/api/mcp/google-sso/launch")
+async def mcp_google_sso_launch(body: dict | None = None):
+    """🪟 «Abrir Ventana de Chrome» / «Iniciar Chrome» (INT-071-fix): garantiza
+    una ventana interactiva VISIBLE del Chrome del perfil global (CDP 9333).
+    Si hay instancia fantasma (MainWindowHandle == 0) o el usuario pide ventana
+    explícita: purga procesos huérfanos con taskkill /F (solo los del perfil
+    FlowImageChrome), borra SingletonLock/Cookie/Socket y relanza limpia con
+    foco (--start-maximized) vía .bat desacoplado del backend. Body opcional:
+    {"force_window": true (default), "urls": [...]}. Respuesta inmediata."""
+    b = body or {}
+    force = bool(b.get("force_window", True))
+    urls = b.get("urls") or None
+    try:
+        return await _mcpm.manager.launch_google_login(urls, cdp=True,
+                                                       force_window=force)
+    except _mcpm.MCPManagerError as e:
+        raise HTTPException(502, f"[{e.code}] {e}") from e
+
+
 @app.post("/api/mcp/google-sso")
 async def mcp_google_sso():
     """[G] Estado A del Hub: abre Chrome con el perfil global (CDP 9333)

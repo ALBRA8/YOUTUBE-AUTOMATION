@@ -1,6 +1,7 @@
 """
 Tests para INT-043: Solución Definitiva de Conexión Google en 1 Clic
-- Inclusión de --new-window y geometría explícita en argv de Chrome
+- Inclusión de --new-window y --start-maximized (foco al frente, INT-071-fix)
+  en argv de Chrome
 - Spawn interactivo visible en Windows
 - Método unificado connect_all_google()
 - Endpoint REST POST /api/mcp/connect-all-google
@@ -22,7 +23,8 @@ client = TestClient(app)
 
 
 def test_launch_google_login_includes_new_window_and_geometry():
-    """Verifica que launch_google_login agregue --new-window para evitar que Chrome delegue a procesos zombis."""
+    """Verifica que launch_google_login agregue --new-window + --start-maximized
+    (INT-071-fix: foco al frente; sustituye a la geometría fija 1280x800)."""
     mgr = mcpm.MCPClientManager()
     captured_argv = []
 
@@ -39,8 +41,9 @@ def test_launch_google_login_includes_new_window_and_geometry():
             res = asyncio.run(mgr.launch_google_login(["https://flow.google.com/"], cdp=True))
             assert res["ok"] is True
             assert "--new-window" in captured_argv
-            assert "--window-size=1280,800" in captured_argv
-            assert "--window-position=40,40" in captured_argv
+            assert "--start-maximized" in captured_argv
+            assert not any(a.startswith("--window-size=") for a in captured_argv)
+            assert not any(a.startswith("--window-position=") for a in captured_argv)
             assert any(a.startswith("--remote-debugging-port=") for a in captured_argv)
 
 
