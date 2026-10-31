@@ -469,11 +469,23 @@ def build_result(raw: dict) -> dict:
     ni al export Flow (blindaje anti Safety Policy Violation)."""
     scenes = []
     for i, sc in enumerate(raw.get("scenes", [])):
-        scenes.append({
+        # INT-078: el tipo de render (avatar/product_broll) que traigan los
+        # generadores se preserva en scenes.meta.type — db.replace_scenes lo
+        # persiste (columna meta JSON) y pipeline/video.py scene_render_mode
+        # lo consume para la cadena UGC avatar + B-roll. Sin type → meta sin
+        # 'type' → comportamiento legacy 100% intacto (otros nichos).
+        scene_meta = dict(sc.get("meta") or {})
+        stype = str(sc.get("type") or "").strip()
+        if stype:
+            scene_meta.setdefault("type", stype)
+        scene = {
             "title": (sc.get("title") or f"Escena {i + 1}").strip()[:80],
             "narration": (sc.get("narration") or "").strip(),
             "image_prompt": (sc.get("image_prompt") or "").strip(),
-        })
+        }
+        if scene_meta:
+            scene["meta"] = scene_meta
+        scenes.append(scene)
     sanitize_script_scenes(scenes)
     title_topic = raw.get("title") or (scenes[0]["narration"][:40] if scenes else "este tema")
     hook_variants = raw.get("hook_variants")

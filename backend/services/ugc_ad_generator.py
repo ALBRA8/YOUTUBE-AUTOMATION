@@ -174,6 +174,13 @@ def generate_ugc_script(
     cta = angle_cfg["cta_template"].format(name=name, problem="los dolores de cabeza")
 
     # Estructura persuasiva en 4 escenas optimizadas para retención
+    # INT-078 · estructura UGC nativa ganadora: Hook-avatar → B-roll →
+    # Cierre-avatar. Cada escena emite:
+    #   - role: semántica narrativa (hook/benefit_1/benefit_2/cta)
+    #   - type: TIPO DE RENDER que consume pipeline/video.py
+    #     (scene_render_mode): 'avatar' = video de Flow + lip-sync v2v;
+    #     'product_broll' = imagen de producto + zoompan con solo voz en off
+    #     (sin lip-sync facial — descansa la vista y mata el uncanny valley).
     scene_duration = round(duration_sec / 4.0, 1)
 
     s1 = f"{hook} Te aseguro que esto va a cambiar por completo tu rutina diaria."
@@ -189,28 +196,32 @@ def generate_ugc_script(
             "narration": s1,
             "duration_sec": scene_duration,
             "visual_prompt": f"cinematic close up of {name}, high end product photography, dramatic commercial lighting, 8k vertical 9:16",
-            "type": "hook"
+            "role": "hook",
+            "type": "avatar"
         },
         {
             "scene_id": "scene_02",
             "narration": s2,
             "duration_sec": scene_duration,
             "visual_prompt": f"person holding and using {name} happily, bright modern lifestyle aesthetic, clean background, 8k vertical 9:16",
-            "type": "benefit_1"
+            "role": "benefit_1",
+            "type": "product_broll"
         },
         {
             "scene_id": "scene_03",
             "narration": s3,
             "duration_sec": scene_duration,
             "visual_prompt": f"close detail of {name} premium materials and features, clean studio setting, soft shadows, 8k vertical 9:16",
-            "type": "benefit_2"
+            "role": "benefit_2",
+            "type": "product_broll"
         },
         {
             "scene_id": "scene_04",
             "narration": s4,
             "duration_sec": scene_duration,
             "visual_prompt": f"hero shot of {name} with glowing subtle light, sale promo commercial aesthetic, 8k vertical 9:16",
-            "type": "cta"
+            "role": "cta",
+            "type": "avatar"
         }
     ]
 

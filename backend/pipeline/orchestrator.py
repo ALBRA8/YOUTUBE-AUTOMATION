@@ -596,10 +596,14 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
             ugc = ugc_ad_generator.generate_ugc_script(p_info, angle=meta.get("ugc_angle", "3_reasons"))
             raw_scenes = []
             for sc in ugc["scenes"]:
+                # INT-078: role (hook/benefit/cta) alimenta el título; el
+                # tipo de render (avatar/product_broll) viaja en 'type' y
+                # build_result lo preserva en scenes.meta para el pipeline.
                 raw_scenes.append({
-                    "title": sc.get("type", "Scene"),
+                    "title": sc.get("role") or sc.get("type", "Scene"),
                     "narration": sc["narration"],
                     "image_prompt": sc["visual_prompt"],
+                    "type": sc.get("type"),
                 })
             result = script_gen.build_result({
                 "title": ugc["title"],

@@ -210,6 +210,26 @@ def parse_payload(payload) -> dict:
     return data
 
 
+# ── INT-078 · vocabulario de render del pipeline ──────────────────────────
+# Debe mantenerse sincronizado con pipeline/video.py (BROLL_TYPES y
+# scene_render_mode): test_int078_ugc_typed_scenes.py verifica la sync.
+_RENDER_BROLL_TYPES = {"product_broll", "broll", "product"}
+
+
+def _render_type_of(utipo: str) -> str | None:
+    """Traduce unidad_tipo del Creative Engine al tipo de render plano que
+    consume pipeline/video.py (scene_render_mode vía scenes.meta.type):
+    'avatar' → video de Flow + lip-sync v2v; product_broll/broll/product →
+    imagen + zoompan con solo voz en off. Cualquier otro valor (u otros
+    nichos) devuelve None → la escena NO se tipa (legacy intacto)."""
+    t = str(utipo or "").strip().lower()
+    if t == "avatar":
+        return "avatar"
+    if t in _RENDER_BROLL_TYPES:
+        return "product_broll"
+    return None
+
+
 # ── validación + adaptación (el corazón del Adapter) ──────────────────────
 def validate(data: dict, estilos_validos: set[str],
              production_id: str | None = None) -> tuple[dict, list[str], list[str]]:
@@ -472,6 +492,14 @@ def validate(data: dict, estilos_validos: set[str],
             # existente del contrato guion_json: meta.camara/outfit/ambiente)
             "tts_skip": tts_skip,
         }
+        # INT-078: si unidad_tipo pertenece al vocabulario de render del
+        # pipeline (pipeline/video.py scene_render_mode), se expone PLANO en
+        # meta.type para la cadena UGC avatar + B-roll. El unit type verbatim
+        # queda intacto en meta.production_unit.type; valores no reconocidos
+        # NO se exponen (otros nichos: comportamiento legacy intacto).
+        render_type = _render_type_of(utipo)
+        if render_type:
+            meta_esc["type"] = render_type
         if duration_target is not None:
             meta_esc["duration_target"] = duration_target
         if cam_receta:
