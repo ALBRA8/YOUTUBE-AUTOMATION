@@ -2288,8 +2288,10 @@ async def mcp_google_sso_launch(body: dict | None = None):
     Si hay instancia fantasma (MainWindowHandle == 0) o el usuario pide ventana
     explícita: purga procesos huérfanos con taskkill /F (solo los del perfil
     FlowImageChrome), borra SingletonLock/Cookie/Socket y relanza limpia con
-    foco (--start-maximized) vía .bat desacoplado del backend. Body opcional:
-    {"force_window": true (default), "urls": [...]}. Respuesta inmediata."""
+    foco (--start-maximized) mediante Popen directo de chrome.exe en la sesión
+    interactiva (INT-081: sin .bat intermedio ni DETACHED_PROCESS). Body
+    opcional: {"force_window": true (default), "urls": [...]}. Respuesta
+    inmediata."""
     b = body or {}
     force = bool(b.get("force_window", True))
     urls = b.get("urls") or None

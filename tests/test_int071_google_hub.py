@@ -78,9 +78,10 @@ def test_google_sso_start_launches_accountchooser_and_watching():
     mgr = mcpm.MCPClientManager()
     captured = {}
 
-    async def fake_launch(urls, cdp=True):
+    async def fake_launch(urls, cdp=True, force_window=False):
         captured["urls"] = urls
         captured["cdp"] = cdp
+        captured["force_window"] = force_window
         return {"ok": True, "already_up": False, "cdp_port": 9333,
                 "heal_actions": [], "notebooklm_storage": {"exists": False}}
 
@@ -94,6 +95,7 @@ def test_google_sso_start_launches_accountchooser_and_watching():
 
     assert res["ok"] is True and res["watching"] is True and res["phase"] == "watching"
     assert captured["cdp"] is True
+    assert captured["force_window"] is True   # INT-081: ventana garantizada
     assert "AccountChooser" in captured["urls"][0]
     assert "labs.google/fx/tools/flow" in captured["urls"][0]
     assert captured["urls"][1] == "https://notebooklm.google.com/"

@@ -773,12 +773,14 @@ class MCPClientManager:
         if sys.platform == "win32":
             try:
                 ps_cmd = (
-                    f"Get-CimInstance Win32_Process -Filter \"Name = 'chrome.exe'\" | "
+                    "Get-CimInstance -Query \"SELECT ProcessId, CommandLine "
+                    "FROM Win32_Process WHERE Name = 'chrome.exe'\" | "
                     f"Where-Object {{ $_.CommandLine -like '*{p_name}*' }} | "
                     f"Select-Object -ExpandProperty ProcessId"
                 )
-                res = subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd],
-                                     capture_output=True, text=True, timeout=12)
+                res = subprocess.run(["powershell", "-NoProfile", "-NonInteractive",
+                                      "-Command", ps_cmd],
+                                     capture_output=True, text=True, timeout=8)
                 for line in res.stdout.strip().splitlines():
                     line = line.strip()
                     if line.isdigit():
@@ -856,52 +858,37 @@ class MCPClientManager:
                 break
 
         if sys.platform == "win32":
-            import tempfile
+            # INT-081 (SSO Hub): chrome.exe es una app GUI Win32 NATIVA, no un
+            # comando de consola. El antiguo .bat + cmd.exe /c + DETACHED_PROCESS
+            # aislaba el proceso de la estación de ventana interactiva
+            # (WinSta0\Default) y la ventana de Google Login NUNCA aparecía en el
+            # escritorio del usuario. Ahora se lanza DIRECTO con Popen y
+            # CREATE_NEW_PROCESS_GROUP (sin DETACHED_PROCESS): el proceso queda en
+            # la sesión interactiva del usuario y Windows trae la ventana al
+            # frente (--new-window + --start-maximized ya vienen en argv).
+            # Fallback: os.startfile (ShellExecuteEx, siempre escritorio
+            # interactivo). Los args pasan verbatim en la lista → sin re-cotizar.
             chrome = argv[0]
-            cmd_parts = []
-            for a in argv[1:]:
-                if a.startswith("--user-data-dir="):
-                    val = a[len("--user-data-dir="):].strip('"')
-                    cmd_parts.append(f'--user-data-dir="{val}"')
-                elif " " in a and not (a.startswith('"') and a.endswith('"')):
-                    cmd_parts.append(f'"{a}"')
-                else:
-                    cmd_parts.append(a)
-            args_str = " ".join(cmd_parts)
-            # INT-071-fix: .bat DESACOPLADO — el cmd lanzado con DETACHED_PROCESS
-            # no hereda consola/estación de ventana del backend; `start` delega al
-            # shell de Windows (Explorer) → Chrome renderiza SIEMPRE en el
-            # escritorio interactivo del usuario actual, con foco al frente
-            # (--start-maximized ya viene en argv). Fallback: os.startfile.
-            bat_body = f'@echo off\r\nstart "" "{chrome}" {args_str}\r\n'
-            bat_path = Path(tempfile.gettempdir()) / (
-                f"yta_chrome_launch_{os.getpid()}_{int(time.time())}.bat")
             try:
-                try:
-                    bat_path.write_text(bat_body, encoding="mbcs")
-                except (LookupError, UnicodeError):
-                    bat_path.write_text(bat_body, encoding="utf-8")
-            except OSError:
-                bat_path = None
-            log.info("[mcp] Lanzando Chrome interactivo en Windows vía .bat desacoplado: %s",
-                     bat_path or f'cmd start {chrome}')
-            try:
-                if bat_path:
-                    flags = (getattr(subprocess, "DETACHED_PROCESS", 0x00000008) |
-                             getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200))
-                    p = subprocess.Popen(["cmd.exe", "/c", str(bat_path)],
-                                         creationflags=flags,
-                                         stdout=subprocess.DEVNULL,
-                                         stderr=subprocess.DEVNULL,
-                                         stdin=subprocess.DEVNULL, close_fds=True)
-                    return p.pid
-                p = subprocess.Popen(f'cmd.exe /c start "" "{chrome}" {args_str}',
-                                     shell=True)
+                flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+                p = subprocess.Popen(argv, creationflags=flags,
+                                     stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL,
+                                     stdin=subprocess.DEVNULL, close_fds=True)
                 return p.pid
             except Exception as ex:
-                log.warning("[mcp] cmd/bat falló (%s), fallback a os.startfile...", ex)
+                log.warning("[mcp] Popen directo falló (%s), fallback a os.startfile...", ex)
+                cmd_parts = []
+                for a in argv[1:]:
+                    if a.startswith("--user-data-dir="):
+                        val = a[len("--user-data-dir="):].strip('"')
+                        cmd_parts.append(f'--user-data-dir="{val}"')
+                    elif " " in a and not (a.startswith('"') and a.endswith('"')):
+                        cmd_parts.append(f'"{a}"')
+                    else:
+                        cmd_parts.append(a)
                 try:
-                    os.startfile(chrome, "open", arguments=args_str)
+                    os.startfile(chrome, "open", arguments=" ".join(cmd_parts))
                     return 0
                 except Exception:
                     return 0
@@ -922,8 +909,13 @@ class MCPClientManager:
             return None
         p_name = Path(str(profile_path if profile_path
                           else _cfg("GOOGLE_PROFILE_GLOBAL", ""))).name
+        # INT-081: consulta WQL ligera (solo ProcessId+CommandLine, filtrado en
+        # el proveedor WMI), PowerShell -NonInteractive (jamás abre diálogos que
+        # cuelgan) y timeout 3.0 s — el antiguo Get-CimInstance sin SELECT
+        # (+timeout 10) congelaba el event-loop hasta 10 s en Windows.
         ps_cmd = (
-            "Get-CimInstance Win32_Process -Filter \"Name = 'chrome.exe'\" | "
+            "Get-CimInstance -Query \"SELECT ProcessId, CommandLine "
+            "FROM Win32_Process WHERE Name = 'chrome.exe'\" | "
             f"Where-Object {{ $_.CommandLine -like '*{p_name}*' }} | "
             "ForEach-Object { "
             "$p = Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue; "
@@ -931,8 +923,9 @@ class MCPClientManager:
             "hwnd = $p.MainWindowHandle } } } | ConvertTo-Json -Compress"
         )
         try:
-            res = subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd],
-                                 capture_output=True, text=True, timeout=10)
+            res = subprocess.run(["powershell", "-NoProfile", "-NonInteractive",
+                                  "-ExecutionPolicy", "Bypass", "-Command", ps_cmd],
+                                 capture_output=True, text=True, timeout=3.0)
             if res.returncode != 0:
                 log.warning("[mcp] _windows_visible_state: PowerShell rc=%s — desconocido, no se mata nada",
                             res.returncode)
@@ -984,8 +977,9 @@ class MCPClientManager:
         que la instancia viva tenga ventana gráfica real en Windows; un zombie
         (MainWindowHandle == 0) se purga con taskkill /F, se borran los
         Singleton* y se relanza una ventana interactiva limpia con foco.
-        force_window=True («Abrir Ventana de Chrome») fuerza esa reparación
-        aunque la ventana parezca viva."""
+        force_window=True («Abrir Ventana de Chrome» y desde INT-081 también
+        «Continuar con Google») purga SIEMPRE y relanza ventana interactiva
+        garantizada, sin sondear el estado previo."""
         port = int(_cfg("GOOGLE_LOGIN_CDP_PORT", 9333))
         profile = Path(str(_cfg("GOOGLE_PROFILE_GLOBAL", "")))
         profile.mkdir(parents=True, exist_ok=True)
@@ -1000,18 +994,33 @@ class MCPClientManager:
         relaunched = False
         killed_pids: list[int] = []
         if already_up:
-            # INT-071-fix: ¿la instancia viva en 9333 tiene ventana gráfica REAL?
-            # Un Chrome fantasma (MainWindowHandle == 0) responde CDP pero el
-            # usuario nunca ve el login → detectar, purgar y relanzar limpio.
-            window_state = self._windows_visible_state(profile)
-            if force_window or window_state is False:
+            # INT-081 (SSO Hub): purge rules —
+            # · force_window=True (botón «Continuar con Google» / «Abrir Ventana»):
+            #   purga DIRECTA sin sondear (ahorra hasta 3 s de PowerShell) →
+            #   la ventana gráfica queda GARANTIZADA por el spawn nuevo.
+            # · Sin force: sondear; se purga si window_state es False (zombie
+            #   MainWindowHandle==0) o None EN WINDOWS (PowerShell colgado/error →
+            #   se asume SIN ventana visible, nunca se confía en un fantasma).
+            #   En no-Windows None es estructural (no hay comprobación) y no purga.
+            import sys as _sys
+            on_windows = _sys.platform == "win32"
+            if force_window:
                 killed_pids = self.kill_profile_processes(profile)
                 heal_res = self.heal_chrome_profile(profile)  # borra Singleton* + repara
                 already_up = False
                 relaunched = True
-                log.warning("[mcp] Chrome fantasma (window_state=%s, force=%s): "
-                            "purgados %s → relanzando ventana interactiva",
-                            window_state, force_window, killed_pids or "[]")
+                log.warning("[mcp] force_window=True: purgados %s zombis del perfil "
+                            "→ spawn de ventana interactiva garantizada", killed_pids or "[]")
+            else:
+                window_state = self._windows_visible_state(profile)
+                if window_state is False or (window_state is None and on_windows):
+                    killed_pids = self.kill_profile_processes(profile)
+                    heal_res = self.heal_chrome_profile(profile)
+                    already_up = False
+                    relaunched = True
+                    log.warning("[mcp] Chrome fantasma (window_state=%s): "
+                                "purgados %s → relanzando ventana interactiva",
+                                window_state, killed_pids or "[]")
         if not already_up:
             # Purgar SIEMPRE procesos huérfanos/zombis en profile antes del spawn (tanto CDP como sin CDP)
             # para evitar que una instancia fantasma capture la petición silenciosamente sin abrir ventana visible.
@@ -1322,7 +1331,11 @@ class MCPClientManager:
         nb_page = "https://notebooklm.google.com/"
         pages = [u.strip() for u in (urls or []) if u and u.strip()] or [
             str(_cfg("GOOGLE_SSO_URL", "") or nb_page), nb_page]
-        res = await self.launch_google_login(pages, cdp=True)
+        # INT-081: el usuario pulsa «Continuar con Google» → exige ventana
+        # visible. force_window=True purga zombis (9333 ocupado por un huérfano
+        # sin MainWindowHandle), limpia Singleton* y hace spawn de Chrome
+        # interactivo SIEMPRE — jamás un PUT /json/new sobre un fantasma.
+        res = await self.launch_google_login(pages, cdp=True, force_window=True)
         self._sso.update({"phase": "watching", "started_at": time.time(),
                           "error": "", "account": None,
                           "updated_at": time.time()})
@@ -1332,8 +1345,12 @@ class MCPClientManager:
         return {"ok": True, "watching": True, "phase": "watching",
                 "cdp_port": res.get("cdp_port"), "pages": pages,
                 "already_up": res.get("already_up"),
+                "pid": res.get("pid"),
                 "heal_actions": res.get("heal_actions", []),
-                "notebooklm_storage": res.get("notebooklm_storage")}
+                "notebooklm_storage": res.get("notebooklm_storage"),
+                "relaunched": res.get("relaunched", False),
+                "window_state": res.get("window_state"),
+                "killed_pids": res.get("killed_pids", [])}
 
     def _sso_ensure_task(self) -> None:
         """Arranca el watchdog si no hay uno vivo (singleton por manager)."""

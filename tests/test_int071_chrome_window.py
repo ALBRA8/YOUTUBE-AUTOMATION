@@ -1,14 +1,14 @@
 """
-Tests INT-071-fix: ventana visible de Chrome en Windows (Chrome fantasma)
+Tests INT-071-fix + INT-081: ventana visible de Chrome en Windows (fantasma)
 - _windows_visible_state: True (≥1 ventana) / False (todos MainWindowHandle=0)
-  / None (no-Windows o PowerShell falló → NUNCA se mata nada)
+  / None (no-Windows o PowerShell falló) — timeout 3 s, WQL ligera
 - launch_google_login: zombie con already_up=True → purga taskkill + Singleton*
   borrados + relanzamiento limpio; ventana viva → se conserva; force_window
-  fuerza la reparación; estado desconocido → no toca nada
-- _spawn_chrome en win32: .bat desacoplado (DETACHED_PROCESS) con
-  --start-maximized, quoting de user-data-dir y URLs con espacios, fallback
-  os.startfile
-- _spawn_chrome argv: --new-window + --start-maximized (sustituye geometría fija)
+  purga SIEMPRE sin sondear (INT-081); None en Windows también purga (INT-081);
+  None en no-Windows → no toca nada
+- _spawn_chrome en win32 (INT-081): Popen DIRECTO de chrome.exe con
+  CREATE_NEW_PROCESS_GROUP — sin .bat, sin cmd.exe, sin DETACHED_PROCESS;
+  fallback os.startfile; argv íntegro con --new-window + --start-maximized
 - Endpoint REST POST /api/mcp/google-sso/launch (force_window default True)
 
 Hermeticidad: cero red, cero Chrome, cero PowerShell — todo con mocks.
@@ -89,9 +89,23 @@ def test_visible_state_ps_exception_returns_none(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "platform", "win32")
     with patch.object(mcpm.subprocess, "run",
                       side_effect=__import__("subprocess").TimeoutExpired(
-                          cmd="powershell", timeout=10)):
+                          cmd="powershell", timeout=3.0)):
         mgr = mcpm.MCPClientManager()
         assert mgr._windows_visible_state(tmp_path) is None
+
+
+def test_visible_state_timeout_is_short_and_noninteractive(monkeypatch, tmp_path):
+    """INT-081: el sondeo cuesta ≤3 s (antes 10) y PowerShell corre
+    -NonInteractive para que jamás cuelgue esperando un diálogo."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    fake = SimpleNamespace(returncode=0, stdout="", stderr="")
+    with patch.object(mcpm.subprocess, "run", return_value=fake) as run_mock:
+        mgr = mcpm.MCPClientManager()
+        assert mgr._windows_visible_state(tmp_path) is False
+    assert run_mock.call_args.kwargs["timeout"] <= 3.0
+    argv = run_mock.call_args[0][0]
+    assert "-NonInteractive" in argv
+    assert "-NoProfile" in argv
 
 
 # ── 2 · launch_google_login: reparación del fantasma con CDP arriba ─────
@@ -100,6 +114,7 @@ def _mgr_ghost(visible, force=False):
     mgr._cdp_up = AsyncMock(return_value=True)
     mgr._windows_visible_state = MagicMock(return_value=visible)
     mgr.kill_profile_processes = MagicMock(return_value=[111, 222])
+    mgr.heal_chrome_profile = MagicMock(return_value={"ok": True, "actions": ["repaired"]})
     mgr._find_chrome_bin = lambda: r"C:\Google\Chrome\Application\chrome.exe"
     mgr._spawn_chrome = MagicMock(return_value=999)
     return mgr
@@ -153,8 +168,10 @@ def test_launch_force_window_repairs_even_if_visible(tmp_path):
     mgr.kill_profile_processes.assert_called()
 
 
-def test_launch_unknown_window_state_does_not_kill(tmp_path):
-    """No-Windows / PS roto (None) sin force → comportamiento legacy intacto."""
+def test_launch_unknown_window_state_does_not_kill(tmp_path, monkeypatch):
+    """No-Windows con None (estructural: no hay comprobación de ventana)
+    sin force → comportamiento conservador: no mata, reutiliza CDP."""
+    monkeypatch.setattr(sys, "platform", "linux")
     mgr = _mgr_ghost(visible=None)
     with tempfile.TemporaryDirectory() as td:
         with patch.object(mcpm, "_cfg",
@@ -164,6 +181,43 @@ def test_launch_unknown_window_state_does_not_kill(tmp_path):
     assert res["relaunched"] is False
     assert res["window_state"] is None
     mgr.kill_profile_processes.assert_not_called()
+
+
+def test_launch_unknown_state_on_windows_purges(tmp_path, monkeypatch):
+    """INT-081: en Windows None = PowerShell colgó/falló → NUNCA confiar en un
+    fantasma: se purga y se relanza ventana interactiva garantizada."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    mgr = _mgr_ghost(visible=None)
+    with tempfile.TemporaryDirectory() as td:
+        with patch.object(mcpm, "_cfg",
+                          side_effect=lambda k, d=None: td if "PROFILE" in k or k == "NOTEBOOKLM_HOME" else d):
+            res = asyncio.run(mgr.launch_google_login(["https://flow.google.com/"], cdp=True))
+    assert res["already_up"] is False
+    assert res["relaunched"] is True
+    assert res["window_state"] is None
+    assert res["killed_pids"] == [111, 222]
+    assert res["pid"] == 999
+    mgr.kill_profile_processes.assert_called()
+    mgr.heal_chrome_profile.assert_called()
+
+
+def test_launch_force_window_skips_probe_and_purges(tmp_path):
+    """INT-081: con force_window el sondeo de ventana se omite (0 s de
+    PowerShell) y la purga + relanzamiento ocurren SIEMPRE."""
+    mgr = _mgr_ghost(visible=True)   # ¡incluso si la ventana "parece" viva!
+    with tempfile.TemporaryDirectory() as td:
+        with patch.object(mcpm, "_cfg",
+                          side_effect=lambda k, d=None: td if "PROFILE" in k or k == "NOTEBOOKLM_HOME" else d):
+            res = asyncio.run(mgr.launch_google_login(
+                ["https://flow.google.com/"], cdp=True, force_window=True))
+    assert res["relaunched"] is True
+    assert res["already_up"] is False
+    assert res["pid"] == 999
+    mgr._windows_visible_state.assert_not_called()   # sin sondeo
+    mgr.kill_profile_processes.assert_called()
+    mgr.heal_chrome_profile.assert_called()
+    argv = mgr._spawn_chrome.call_args[0][0]
+    assert "--new-window" in argv and "--start-maximized" in argv
 
 
 def test_launch_purges_orphans_before_spawn_when_cdp_down(tmp_path):
@@ -179,8 +233,11 @@ def test_launch_purges_orphans_before_spawn_when_cdp_down(tmp_path):
     mgr.kill_profile_processes.assert_called()   # purga preventiva del spawn
 
 
-# ── 3 · _spawn_chrome en Windows: .bat desacoplado ──────────────────────
-def test_spawn_chrome_writes_detached_bat(monkeypatch, tmp_path):
+# ── 3 · _spawn_chrome en Windows: Popen directo (INT-081) ────────────────
+def test_spawn_chrome_direct_popen_without_bat(monkeypatch):
+    """INT-081: chrome.exe se lanza DIRECTO con Popen — sin .bat, sin
+    cmd.exe, sin DETACHED_PROCESS (que aislaba el proceso de la estación
+    de ventana WinSta0\\Default y la ventana jamás aparecía en escritorio)."""
     monkeypatch.setattr(sys, "platform", "win32")
     popen = MagicMock(return_value=SimpleNamespace(pid=4242))
     with patch.object(mcpm.subprocess, "Popen", popen):
@@ -189,31 +246,44 @@ def test_spawn_chrome_writes_detached_bat(monkeypatch, tmp_path):
                                  "--new-window", "https://flow.google.com/"])
     assert pid == 4242
     args, kwargs = popen.call_args
-    assert args[0][:2] == ["cmd.exe", "/c"]
-    bat = Path(args[0][2])
-    assert bat.exists() and bat.suffix == ".bat"
-    body = bat.read_text(encoding="utf-8")
-    assert body.startswith("@echo off")
-    assert 'start "" "chrome.exe"' in body
-    assert "--start-maximized" in body
-    assert kwargs["creationflags"] == (getattr(mcpm.subprocess, "DETACHED_PROCESS", 0x8) |
-                                       getattr(mcpm.subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200))
+    argv = args[0]
+    assert argv[0] == "chrome.exe"                       # el binario, directo
+    assert "cmd.exe" not in argv and "/c" not in argv    # sin shell intermedio
+    assert "--start-maximized" in argv and "--new-window" in argv
+    flags = kwargs["creationflags"]
+    assert flags == getattr(mcpm.subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200)
+    assert not (flags & getattr(mcpm.subprocess, "DETACHED_PROCESS", 0x8))
     assert kwargs["stdout"] == mcpm.subprocess.DEVNULL
-    bat.unlink()
 
 
-def test_spawn_chrome_quotes_user_data_dir_and_spaced_url(monkeypatch, tmp_path):
+def test_spawn_chrome_never_writes_bat(monkeypatch):
+    """INT-081: el lanzamiento no escribe NINGÚN archivo — el viejo
+    yta_chrome_launch_*.bat desapareció (sin tempfile, sin .bat en la fuente)."""
+    import inspect
+    src = inspect.getsource(mcpm.MCPClientManager._spawn_chrome)
+    assert "tempfile" not in src
+    assert "yta_chrome_launch" not in src      # el .bat dejó de generarse
+    assert "write_text" not in src             # nada se escribe a disco
+    monkeypatch.setattr(sys, "platform", "win32")
+    popen = MagicMock(return_value=SimpleNamespace(pid=1))
+    with patch.object(mcpm.subprocess, "Popen", popen):
+        mgr = mcpm.MCPClientManager()
+        assert mgr._spawn_chrome(["chrome.exe", "--start-maximized", "https://x.com"]) == 1
+    popen.assert_called_once()   # un único Popen directo, sin pasos intermedios
+
+
+def test_spawn_chrome_args_pass_verbatim(monkeypatch, tmp_path):
+    """INT-081: con Popen en lista los argumentos pasan ÍNTEGROS (sin
+    re-cotización cmd): user-data-dir con espacios y URL con espacios."""
     monkeypatch.setattr(sys, "platform", "win32")
     popen = MagicMock(return_value=SimpleNamespace(pid=77))
     with patch.object(mcpm.subprocess, "Popen", popen):
         mgr = mcpm.MCPClientManager()
         mgr._spawn_chrome(["chrome.exe", f"--user-data-dir={tmp_path}",
                            "--start-maximized", "my page url"])
-    bat = Path(popen.call_args[0][0][2])
-    body = bat.read_text(encoding="utf-8")
-    assert f'--user-data-dir="{tmp_path}"' in body
-    assert '"my page url"' in body
-    bat.unlink()
+    argv = popen.call_args[0][0]
+    assert f"--user-data-dir={tmp_path}" in argv     # tal cual, sin comillas
+    assert "my page url" in argv                     # íntegro, un solo arg
 
 
 def test_spawn_chrome_fallback_startfile_on_failure(monkeypatch):
