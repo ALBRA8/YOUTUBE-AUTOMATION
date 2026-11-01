@@ -993,6 +993,8 @@ class MCPClientManager:
         window_state: bool | None = None
         relaunched = False
         killed_pids: list[int] = []
+        spawn_confirmed: bool | None = None
+        window_state_after_spawn: bool | None = None
         if already_up:
             # INT-081 (SSO Hub): purge rules —
             # · force_window=True (botón «Continuar con Google» / «Abrir Ventana»):
@@ -1045,6 +1047,26 @@ class MCPClientManager:
             except OSError as e:
                 raise MCPManagerError(f"no se pudo lanzar Chrome: {e}",
                                       "CHROME_SPAWN_FAILED") from e
+            # INT-081b (lección BROWSER-FACTORY, que SIEMPRE abre): no bastará
+            # con lanzar — se CONFIRMA que el Chrome recién nacido está vivo
+            # en el puerto CDP (≤3 s) y, en Windows, que la ventana gráfica
+            # real apareció. La respuesta deja evidencia exacta en vez de un
+            # toast a ciegas: spawn_confirmed + window_state_after_spawn.
+            if cdp and pid is not None:
+                for _ in range(6):
+                    await asyncio.sleep(0.5)
+                    if await self._cdp_up(port):
+                        spawn_confirmed = True
+                        break
+                else:
+                    spawn_confirmed = False
+                    log.warning("[mcp] Chrome lanzado (pid=%s) pero CDP %s NO "
+                                "responde tras 3 s — posible fantasma nuevo", pid, port)
+                if spawn_confirmed:
+                    window_state_after_spawn = self._windows_visible_state(profile)
+                    if window_state_after_spawn is False:
+                        log.warning("[mcp] CDP %s arriba pero SIN ventana visible "
+                                    "(MainWindowHandle==0) — revisar sesión de Windows", port)
         else:
             import httpx
             for p_url in pages:
@@ -1063,7 +1085,9 @@ class MCPClientManager:
                 "notebooklm_storage": st,
                 "window_state": window_state,
                 "relaunched": relaunched,
-                "killed_pids": killed_pids}
+                "killed_pids": killed_pids,
+                "spawn_confirmed": spawn_confirmed,
+                "window_state_after_spawn": window_state_after_spawn}
 
     async def google_login_status(self) -> dict:
         """Estado de la sesión unificada (polling barato de la UI)."""
@@ -1350,7 +1374,9 @@ class MCPClientManager:
                 "notebooklm_storage": res.get("notebooklm_storage"),
                 "relaunched": res.get("relaunched", False),
                 "window_state": res.get("window_state"),
-                "killed_pids": res.get("killed_pids", [])}
+                "killed_pids": res.get("killed_pids", []),
+                "spawn_confirmed": res.get("spawn_confirmed"),
+                "window_state_after_spawn": res.get("window_state_after_spawn")}
 
     def _sso_ensure_task(self) -> None:
         """Arranca el watchdog si no hay uno vivo (singleton por manager)."""

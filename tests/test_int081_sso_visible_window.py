@@ -107,8 +107,7 @@ def test_sso_start_orphan_unknown_window_state_still_purges():
     con force_window la purga y el spawn ocurren igual — nunca un fantasma."""
     mgr = mcpm.MCPClientManager()
     mgr._cdp_up = AsyncMock(return_value=True)
-    mgr._windows_visible_state = MagicMock(side_effect=AssertionError(
-        "con force_window NO se debe sondear (bloqueo innecesario)"))
+    mgr._windows_visible_state = MagicMock(return_value=None)  # PS colgado (post-spawn)
     mgr.kill_profile_processes = MagicMock(return_value=[42])
     mgr.heal_chrome_profile = MagicMock(return_value={"ok": True, "actions": []})
     mgr._find_chrome_bin = lambda: "chrome.exe"
@@ -122,6 +121,7 @@ def test_sso_start_orphan_unknown_window_state_still_purges():
 
     assert res["relaunched"] is True and res["pid"] == 9
     assert res["killed_pids"] == [42]
+    assert res["window_state"] is None          # PRE-spawn: jamás sondeado con force
     mgr._spawn_chrome.assert_called_once()
 
 
@@ -247,3 +247,76 @@ def test_spawn_chrome_posix_unchanged(monkeypatch):
         assert mgr._spawn_chrome(["google-chrome", "--start-maximized"]) == 88
     assert p.call_args.kwargs["start_new_session"] is True
     assert "creationflags" not in p.call_args.kwargs
+
+
+# ── 7 · INT-081b: confirmación post-spawn (lección BROWSER-FACTORY) ──────
+def test_spawn_confirmed_when_cdp_comes_up(monkeypatch):
+    """Tras lanzar Chrome, se espera ≤3 s a que el CDP responda y, en
+    Windows, se sondea la ventana real → evidencia en la respuesta."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    mgr = mcpm.MCPClientManager()
+    mgr._cdp_up = AsyncMock(side_effect=[False, True])   # 1ª: pre-check; 2ª: confirm
+    mgr.kill_profile_processes = MagicMock(return_value=[])
+    mgr.heal_chrome_profile = MagicMock(return_value={"ok": True, "actions": []})
+    mgr._windows_visible_state = MagicMock(return_value=True)
+    mgr._find_chrome_bin = lambda: "chrome.exe"
+    mgr._spawn_chrome = MagicMock(return_value=777)
+    res = asyncio.run(mgr.launch_google_login(["https://flow.google.com/"], cdp=True))
+    assert res["spawn_confirmed"] is True
+    assert res["window_state_after_spawn"] is True
+    assert res["pid"] == 777
+
+
+def test_spawn_confirmed_false_when_cdp_never_comes_up(monkeypatch):
+    """Chrome lanzado pero CDP muerto tras 3 s → spawn_confirmed=False
+    (el toast ya NO puede mentir: el campo delata el fantasma nuevo)."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    mgr = mcpm.MCPClientManager()
+    mgr._cdp_up = AsyncMock(return_value=False)
+    mgr.kill_profile_processes = MagicMock(return_value=[])
+    mgr.heal_chrome_profile = MagicMock(return_value={"ok": True, "actions": []})
+    mgr._windows_visible_state = MagicMock(
+        side_effect=AssertionError("sin CDP no hay sondeo de ventana"))
+    mgr._find_chrome_bin = lambda: "chrome.exe"
+    mgr._spawn_chrome = MagicMock(return_value=778)
+    res = asyncio.run(mgr.launch_google_login(["https://flow.google.com/"], cdp=True))
+    assert res["spawn_confirmed"] is False
+    assert res["window_state_after_spawn"] is None
+    assert res["pid"] == 778
+
+
+def test_spawn_confirmed_none_when_reusing_existing_cdp(monkeypatch):
+    """Reutilización legacy (CDP arriba + ventana viva + sin force): no hubo
+    spawn → spawn_confirmed None, sin esperas ni sondeos extra."""
+    monkeypatch.setattr(sys, "platform", "linux")
+    mgr = mcpm.MCPClientManager()
+    mgr._cdp_up = AsyncMock(return_value=True)
+    mgr._windows_visible_state = MagicMock(return_value=True)
+    mgr.kill_profile_processes = MagicMock(return_value=[])
+    mgr.heal_chrome_profile = MagicMock(return_value={"ok": True, "actions": []})
+    mgr._spawn_chrome = MagicMock(side_effect=AssertionError("no debe haber spawn"))
+    res = asyncio.run(mgr.launch_google_login(["https://flow.google.com/"], cdp=True))
+    assert res["already_up"] is True
+    assert res["spawn_confirmed"] is None
+    assert res["window_state_after_spawn"] is None
+    mgr._windows_visible_state.assert_called_once()   # solo el sondeo pre-existente
+
+
+def test_sso_start_propagates_spawn_confirmation():
+    """La respuesta de «Continuar con Google» incluye spawn_confirmed y
+    window_state_after_spawn para diagnosticar sin tocar logs."""
+    mgr = mcpm.MCPClientManager()
+
+    async def fake_launch(urls=None, cdp=True, force_window=False):
+        return {"ok": True, "already_up": False, "cdp_port": 9333,
+                "heal_actions": [], "notebooklm_storage": {"exists": False},
+                "relaunched": True, "window_state": None, "killed_pids": [],
+                "pid": 555, "spawn_confirmed": True,
+                "window_state_after_spawn": True}
+
+    mgr.launch_google_login = AsyncMock(side_effect=fake_launch)
+    mgr._sso_watchdog = AsyncMock()
+    res = asyncio.run(mgr.google_sso_start())
+    assert res["spawn_confirmed"] is True
+    assert res["window_state_after_spawn"] is True
+    assert res["pid"] == 555

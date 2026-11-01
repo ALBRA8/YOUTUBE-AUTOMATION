@@ -213,7 +213,8 @@ def test_launch_force_window_skips_probe_and_purges(tmp_path):
     assert res["relaunched"] is True
     assert res["already_up"] is False
     assert res["pid"] == 999
-    mgr._windows_visible_state.assert_not_called()   # sin sondeo
+    assert res["window_state"] is None              # PRE-spawn: sin sondeo
+    mgr._windows_visible_state.assert_called_once() # solo el POST-spawn (INT-081b)
     mgr.kill_profile_processes.assert_called()
     mgr.heal_chrome_profile.assert_called()
     argv = mgr._spawn_chrome.call_args[0][0]
