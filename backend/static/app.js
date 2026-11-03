@@ -839,6 +839,9 @@ function renderCreate() {
     if (W.step === 3) { W.step = 4; renderCreate(); return; }
     createProject();
   };
+
+  // INT-082: en el paso final, aviso visible si falta algo crítico (TTS/ffmpeg)
+  if (W.step === 4 || (W.mode === 'nicho' && W.step === 2)) renderPreflightBanner();
 }
 
 /* ── admin de plantillas de nicho ────────────────────── */
@@ -906,6 +909,7 @@ async function delNichoCard(i) {
 
 async function createProject() {
   if (guardDemo()) return;
+  if (!(await preflightGate())) return;  // INT-082: aviso antes de gastar recursos
   if (W.mode === 'nicho') {
     if (!W.nicho) return toast('Elige un nicho primero', 'err');
     try {
@@ -1013,8 +1017,53 @@ async function cancelJob(jobId) {
   hideProgress(); toast('Trabajo cancelado');
 }
 
+/* ── INT-082 · preflight ligero antes de gastar recursos (mejora 3 del
+   informe de revisión en vivo): si falta la voz (TTS) o ffmpeg, avisar ANTES
+   de crear un proyecto que moriría a mitad del pipeline con guion e imágenes
+   ya gastados. Resultado en caché 60s para no sondear en cada clic. ── */
+S.preflight = { ts: 0, data: null };
+
+async function preflightCrear(force) {
+  const now = Date.now();
+  if (!force && S.preflight.data && (now - S.preflight.ts) < 60000) return S.preflight.data;
+  try {
+    const d = await api('/doctor/preflight_creacion');
+    S.preflight = { ts: now, data: d };
+    return d;
+  } catch { return null; }  // fail-open: si el endpoint no responde, la fábrica sigue
+}
+
+function preflightAvisos(d) {
+  const lines = [];
+  (d?.blockers || []).forEach(b => lines.push('❌ ' + b.detail + (b.hint ? ' → ' + b.hint : '')));
+  (d?.warns || []).forEach(w => lines.push('⚠️ ' + w.detail + (w.hint ? ' → ' + w.hint : '')));
+  return lines.join('\n');
+}
+
+async function preflightGate() {
+  const d = await preflightCrear();
+  if (!d || d.ok) return true;  // sin blockers (o endpoint caído) → producir
+  return confirm('⚠️ Preflight de creación — faltan piezas críticas:\n\n' + preflightAvisos(d) +
+    '\n\nEl proyecto quedaría mudo o fallaría a mitad del pipeline (se gastarían guion e imágenes).\n¿Continuar de todos modos?');
+}
+
+function renderPreflightBanner() {
+  preflightCrear().then(d => {
+    if (!d || d.ok) return;
+    const host = document.querySelector('#view .wizard');
+    if (!host || host.querySelector('.preflight-banner')) return;  // cambió de vista
+    const body = preflightAvisos(d).split('\n').map(l => `<div>${esc(l)}</div>`).join('');
+    host.insertAdjacentHTML('afterbegin',
+      `<div class="card preflight-banner" style="border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.08);margin-bottom:12px">
+        <b>⚠️ Preflight de creación</b>
+        <div style="margin-top:6px;font-size:13px;line-height:1.65">${body}</div>
+      </div>`);
+  });
+}
+
 async function startJob(pid) {
   if (guardDemo()) return;
+  if (!(await preflightGate())) return;  // INT-082: aviso antes de gastar recursos
   try {
     const r = await api(`/projects/${pid}/generate`, { method: 'POST', body: {} });
     W.step = 1; showProgress(r.job_id, pid);

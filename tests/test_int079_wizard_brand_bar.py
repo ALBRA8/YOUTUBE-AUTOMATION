@@ -22,6 +22,9 @@ from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parent.parent / "backend"
 STATIC = BACKEND / "static"
+sys.path.insert(0, str(BACKEND))  # INT-082: el contrato de versión lee config.APP_VERSION
+
+import config  # noqa: E402
 APP_JS = (STATIC / "app.js").read_text(encoding="utf-8")
 AUTH_JS = (STATIC / "auth.js").read_text(encoding="utf-8")
 INDEX_HTML = (STATIC / "index.html").read_text(encoding="utf-8")
@@ -146,12 +149,20 @@ def test_apply_brand_towizard_only_mutates_safe_fields():
 
 
 def test_cache_bust_version_bumped():
-    """El fix solo llega a los usuarios si la URL de app.js cambia (?v=)."""
-    m = re.search(r'app\.js\?v=([\d.]+)', INDEX_HTML)
+    """El fix solo llega a los usuarios si la URL de app.js cambia (?v=).
+    INT-082: la versión ya NO se mantiene a mano en index.html — la tag usa
+    el token __APP_VERSION__ que el servidor sustituye por la ÚNICA constante
+    config.APP_VERSION (garantía POR CONSTRUCCIÓN: cada release cambia las 3
+    URLs de assets a la vez; adiós a los paneles con JS nuevo + CSS viejo).
+    Aquí se congela el token y que la constante viva siga siendo >= 2.36.0."""
+    m = re.search(r"app\.js\?v=([\w.]+)", INDEX_HTML)
     assert m, "index.html debe referenciar app.js?v="
-    version = tuple(int(x) for x in m.group(1).split("."))
+    assert m.group(1) == "__APP_VERSION__", (
+        "INT-082: la versión de assets sale del token único __APP_VERSION__ "
+        "(sustituido en servidor por config.APP_VERSION); no escribir a mano")
+    version = tuple(int(x) for x in config.APP_VERSION.split("."))
     assert version >= (2, 36, 0), \
-        f"app.js?v={m.group(1)} — sube la versión (>=2.36.0) para invalidar la caché del navegador"
+        f"APP_VERSION={config.APP_VERSION} — sube la constante única (>=2.36.0) para invalidar la caché del navegador"
 
 
 if __name__ == "__main__":

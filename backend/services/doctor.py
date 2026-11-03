@@ -168,3 +168,76 @@ async def run_doctor() -> dict:
         "summary": {"total": len(checks), "ok": len(checks) - fails - warns,
                     "warn": warns, "fail": fails},
     }
+
+
+# ── INT-082 · preflight ligero del botón Crear (mejora 3 del informe en vivo) ──
+# El caso real verificado en producción: «El imperio romano» murió en el paso
+# de locución porque el proveedor TTS no estaba disponible; el preflight de
+# producto actuó bien PERO avisó DESPUÉS de gastar guion e imágenes. Este
+# guarda ligero responde en milisegundos (sin subprocess ni red) y se consulta
+# desde el panel ANTES de crear/lanzar un proyecto. Filosofía coherente con el
+# doctor: solo bloquea lo que MATA un proyecto ya iniciado (TTS, ffmpeg);
+# lo que degrada con gracia (placeholders, subtítulos) es warn.
+
+def run_preflight_creacion() -> dict:
+    """Preflight de creación: {ok, blockers[], warns[], summary, tts_provider}.
+    - blockers: producir HOY dejaría un proyecto mudo o sin render.
+    - warns: el sistema degrada con gracia; avisar sin bloquear."""
+    blockers: list[dict] = []
+    warns: list[dict] = []
+
+    def block(cid: str, detail: str, hint: str = "") -> None:
+        blockers.append({"id": cid, "detail": detail, "hint": hint})
+
+    def soft(cid: str, detail: str, hint: str = "") -> None:
+        warns.append({"id": cid, "detail": detail, "hint": hint})
+
+    # ── TTS: la voz ES el caso raíz del informe — un proyecto sin locución
+    #    no puede pasar el preflight de producto y muere con recursos gastados.
+    prov = (config.TTS_PROVIDER or "edge").strip().lower()
+    if prov == "gemini":
+        if not config.GEMINI_API_KEY:
+            block("tts", "locución configurada con Gemini pero GEMINI_API_KEY "
+                         "no está presente",
+                  "guárdala en ⚙️ Ajustes del panel o en .env GEMINI_API_KEY")
+        elif not _import_ok("google.genai"):
+            block("tts", "clave Gemini presente pero google-genai no está "
+                         "instalable",
+                  "pip install google-genai")
+    elif not _import_ok("edge_tts"):
+        block("tts", "proveedor de voz edge-tts no está instalado: el proyecto "
+                     "quedaría MUDO y moriría en el paso de locución",
+              "pip install edge-tts (voz neuronal 100% gratis)")
+
+    # ── Render final: sin ffmpeg no hay video aunque todo lo demás funcione
+    if not shutil.which("ffmpeg"):
+        block("ffmpeg", "ffmpeg no está disponible: el pipeline nunca podría "
+                        "renderizar el MP4 final",
+              "sudo apt install ffmpeg (Linux) / winget install ffmpeg (Windows)")
+    if not shutil.which("ffprobe"):
+        block("ffprobe", "ffprobe no está disponible (viene con ffmpeg)",
+              "reinstala ffmpeg completo")
+
+    # ── Degradaciones elegantes → warn (nunca bloquean la creación)
+    if not config.GEMINI_API_KEY:
+        if _import_ok("PIL"):
+            soft("imagen", "sin GEMINI_API_KEY: las escenas usarán placeholders "
+                           "locales en vez de imágenes IA",
+                 "opcional: guarda tu clave Gemini en ⚙️ Ajustes para imágenes "
+                 "reales")
+        else:
+            soft("imagen", "sin GEMINI_API_KEY ni pillow: las escenas quedarían "
+                           "sin imagen",
+                 "pip install pillow y/o guarda tu clave Gemini")
+    if not _import_ok("faster_whisper"):
+        soft("subtitulos", "faster-whisper no instalado: subtítulos sin "
+                           "alineación palabra a palabra",
+             "pip install faster-whisper (opcional, estilo Hormozi)")
+
+    return {
+        "ok": not blockers,
+        "blockers": blockers,
+        "warns": warns,
+        "summary": {"blockers": len(blockers), "warns": len(warns)},
+        "tts_provider": prov,
+    }

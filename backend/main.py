@@ -19,7 +19,7 @@ import security
 from config import DATA_DIR, HOST, OUTPUT_DIR, PORT, TMP_DIR
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
-                               StreamingResponse)
+                               Response, StreamingResponse)
 from fastapi.staticfiles import StaticFiles
 from pipeline import images as imgs_pipeline
 from pipeline import orchestrator
@@ -75,6 +75,41 @@ async def _startup_tasks():
 
 AVATARS_DIR = DATA_DIR / "avatars"
 VALID_PLATFORMS = ("youtube", "tiktok", "instagram", "facebook")
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    """INT-082 · cabeceras de seguridad HTTP (mejora 7 del informe de revisión
+    en vivo). Blindaje por si el panel se expone por LAN o detrás de un proxy:
+    · X-Content-Type-Options: nosniff → en TODAS las respuestas (inofensivo
+      en JSON/MP4, decisivo en HTML subido por error).
+    · X-Frame-Options: DENY + CSP con frame-ancestors 'none' → anti
+      clickjacking del panel.
+    · CSP básica SOLO en el HTML del panel: 'unsafe-inline' en script/style
+      es imprescindible (el panel usa onclick inline y estilos dinámicos),
+      pero sigue bloqueando <script src> externo. /docs y /redoc quedan
+      fuera de la CSP: el Swagger UI de FastAPI carga scripts de CDN.
+    Definido PRIMERO ⇒ es el middleware MÁS EXTERNO: estampa cabeceras
+    también en las respuestas 401/403 que generan auth_guard/csrf_guard."""
+    resp = await call_next(request)
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    ct = resp.headers.get("content-type", "")
+    _p = request.url.path
+    if ct.startswith("text/html") and not _p.startswith(("/docs", "/redoc")):
+        resp.headers.setdefault("X-Frame-Options", "DENY")
+        resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        resp.headers.setdefault("Content-Security-Policy",
+                                "default-src 'self'; "
+                                "script-src 'self' 'unsafe-inline'; "
+                                "style-src 'self' 'unsafe-inline' "
+                                "https://fonts.googleapis.com; "
+                                "font-src 'self' https://fonts.gstatic.com; "
+                                "img-src 'self' data: blob: https:; "
+                                "media-src 'self' blob:; "
+                                "connect-src 'self'; "
+                                "frame-ancestors 'none'; "
+                                "base-uri 'self'; form-action 'self'")
+    return resp
 
 
 @app.middleware("http")
@@ -1977,6 +2012,18 @@ async def doctor():
     return await doctor_svc.run_doctor()
 
 
+@app.get("/api/doctor/preflight_creacion")
+async def doctor_preflight_creacion():
+    """INT-082 · preflight LIGERO conectado al botón Crear (mejora 3 del
+    informe de revisión en vivo). El caso real verificado: un proyecto
+    completo murió en el paso de locución porque el proveedor TTS no estaba
+    disponible — el aviso llegó DESPUÉS de gastar guion e imágenes. Este
+    endpoint responde en milisegundos (sin subprocess ni red) y devuelve
+    blockers (deben arreglarse antes de producir) y warns (degradación
+    elegante). Hereda auth_guard por ser /api/*."""
+    return await asyncio.to_thread(doctor_svc.run_preflight_creacion)
+
+
 # ───────────────────────────── PRODUCTION DOCTOR V1.0 (transversal) ──
 # Diagnóstico por capas A-I del pipeline completo + reparaciones seguras
 # (lista blanca) + REAL FLOW PREFLIGHT. Capa de diagnóstico SOBRE el
@@ -3186,9 +3233,25 @@ async def pipeline_render_file(run_id: str):
     return FileResponse(out, media_type="video/mp4", filename=out.name)
 
 
-@app.get("/")
-async def index():
-    return FileResponse(STATIC_DIR / "index.html")
+@app.api_route("/", methods=["GET", "HEAD"])
+async def index(request: Request):
+    """INT-082 · dos mejoras del informe de revisión en vivo en la raíz:
+    · Mejora 4 (cache-busting unificado): las TRES versiones de assets que
+      declara index.html (style.css, auth.js, app.js) salen ahora del token
+      __APP_VERSION__ sustituido en servidor por la ÚNICA constante
+      config.APP_VERSION (fuente de verdad de INT-080). Se acabaron los
+      paneles con JS nuevo + CSS viejo tras actualizar.
+    · Mejora 7 (HEAD en /): la ruta acepta HEAD además de GET — antes
+      devolvía 405 Method Not Allowed y monitores/proxies que sondean con
+      HEAD veían la fábrica «caída» aunque estuviera sana. Para HEAD se
+      devuelve 200 sin cuerpo pero con el Content-Length real (respuesta
+      válida en cualquier servidor ASGI)."""
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8").replace(
+        "__APP_VERSION__", config.APP_VERSION)
+    if request.method == "HEAD":
+        return Response(status_code=200, media_type="text/html",
+                        headers={"Content-Length": str(len(html.encode("utf-8")))})
+    return HTMLResponse(html)
 
 
 if __name__ == "__main__":

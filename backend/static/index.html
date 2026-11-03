@@ -6,7 +6,7 @@
 <title>YT Automation v2.0 — Fábrica de videos IA</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="static/style.css?v=2.25.0">
+<link rel="stylesheet" href="static/style.css?v=__APP_VERSION__">
 </head>
 <body>
 <div class="app">
@@ -58,7 +58,10 @@
 <div id="overlay-root"></div>
 <div id="modal-root"></div>
 <div id="toasts"></div>
-<script src="static/auth.js?v=2.5.0"></script>
-<script src="static/app.js?v=2.36.0"></script>
+<!-- INT-082: las 3 versiones de assets salen del token __APP_VERSION__ que
+     el servidor sustituye por la constante única config.APP_VERSION.
+     NO editar a mano: un solo sitio, cero paneles rotos tras actualizar. -->
+<script src="static/auth.js?v=__APP_VERSION__"></script>
+<script src="static/app.js?v=__APP_VERSION__"></script>
 </body>
 </html>
