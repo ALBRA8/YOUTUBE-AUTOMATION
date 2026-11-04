@@ -147,6 +147,12 @@ def _apply_redirection(session_tmp: Path) -> None:
     cfg.TMP_DIR = data_dir / "tmp"
     cfg.DB_PATH = data_dir / "yt_automation.db"
     cfg.MUSIC_DIR = data_dir / "music"
+    # INT-086 · workspaces modulares (data/projects): misma naturaleza que
+    # output/ — si config.py lo derivó del data real a import-time, se
+    # redirige al tmp de sesión para que pytest NUNCA toque backend/data.
+    if _is_under(getattr(cfg, "PROJECTS_DIR", None), old_data):
+        cfg.PROJECTS_DIR = data_dir / "projects"
+        (data_dir / "projects").mkdir(parents=True, exist_ok=True)
     # Globals que config.py congeló POR VALOR desde el DATA_DIR original a
     # import-time: re-derívarlos SOLO si apuntaban bajo el data real (así no
     # se pisa ninguna configuración explícita del entorno/máquina del usuario).

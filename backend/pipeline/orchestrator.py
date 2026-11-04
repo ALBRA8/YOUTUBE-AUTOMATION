@@ -18,6 +18,7 @@ import config
 from config import OUTPUT_DIR
 from pipeline import flow_import, images as imgs
 from pipeline import script_gen, tts_step, video
+from pipeline import project_workspace  # INT-086: workspace modular
 from services import flow_mcp_client, gemini_client, url_mode, whisper_service, youtube_publish
 from services import library as library_svc
 
@@ -345,6 +346,11 @@ async def _run_flow_render(job_id: str, project_id: str) -> None:
             await _emit(job_id, project_id, "tts", 50 + int(20 * i / total),
                         f"Locución {i}/{total} ({used})")
 
+        # INT-086 · cierre de canal (marca.json → última escena) ANTES de la
+        # voz del render Flow: si inyecta, refrescar escenas para que el TTS
+        # la grabe y los subtítulos la hereden.
+        if project_workspace.inject_cierre(db.get_project(project_id)):
+            scenes = db.get_scenes(project_id)
         durations, words_per_scene = await tts_step.synthesize_scenes(
             db.get_project(project_id), scenes, tts_prog, is_cancelled(job_id))
         _gate_voz_real(project_id, db.get_scenes(project_id))
@@ -396,6 +402,9 @@ async def _run_flow_render(job_id: str, project_id: str) -> None:
         db.update_project(project_id, status="ready", progress=100,
                           step_label="Listo (Flow)", video_url=str(final),
                           thumbnail_url=str(thumb) if thumb else None)
+        # INT-086 · publicar la vista organizada del proyecto
+        # (guion/, voz/, clips/, out/video_final.mp4, portada.png)
+        project_workspace.sync_artifacts(db.get_project(project_id))
         _archive_library(project_id, final)
         db.update_job(job_id, status="done", progress=100, step="done",
                       message=f"Video Flow listo · {total_dur:.0f}s")
@@ -677,6 +686,11 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
                         + (" · MODO DEMO $0" if result.get("engine") == "local-demo" else ""),
                         {"title": result["title"]})
 
+        # INT-086 · cierre de canal: marca.json → última escena ANTES de
+        # imágenes/TTS. Idempotente, NO fatal; si inyecta, refrescar escenas.
+        if project_workspace.inject_cierre(db.get_project(project_id)):
+            scenes = db.get_scenes(project_id)
+
         # PASO 2 — imágenes (híbridas)
         async def img_prog(i, total, method):
             m = f" [{method}]" if method and method != "gemini" else ""
@@ -789,6 +803,9 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
         db.update_project(project_id, status="ready", progress=100,
                           step_label="Listo", video_url=str(final),
                           thumbnail_url=str(thumb) if thumb else None)
+        # INT-086 · publicar la vista organizada del proyecto
+        # (guion/, voz/, clips/, out/video_final.mp4, portada.png)
+        project_workspace.sync_artifacts(db.get_project(project_id))
         _archive_library(project_id, final)
         db.update_job(job_id, status="done", progress=100, step="done",
                       message=f"Video listo · {total_dur:.0f}s")

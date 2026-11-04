@@ -23,6 +23,7 @@ from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
 from fastapi.staticfiles import StaticFiles
 from pipeline import images as imgs_pipeline
 from pipeline import orchestrator
+from pipeline import project_workspace  # INT-086: workspace modular
 from pipeline import video as video_pipeline
 from pipeline.subtitles import words_to_srt
 from services import (general_agent as agent_svc,  # INT-028: cerebro único (ex-VÓRTICE)
@@ -31,6 +32,7 @@ from services import (general_agent as agent_svc,  # INT-028: cerebro único (ex
                       gemini_client, guion_json as guion_svc,
                       library as library_svc,
                       niches as niches_svc, nvidia_client,
+                      niche_templates as ntpl_svc,  # INT-086: catálogo
                       production_json as prod_svc, scheduler,
                       trend_research as trends_svc,
                       tts_service, url_mode, whisper_service, youtube_publish)
@@ -262,7 +264,8 @@ def _path_contenida(raw: str) -> "Path | None":
         rp = Path(raw).resolve()
     except (OSError, ValueError):
         return None
-    for root in (DATA_DIR, TMP_DIR, STATIC_DIR, OUTPUT_DIR):
+    for root in (DATA_DIR, TMP_DIR, STATIC_DIR, OUTPUT_DIR,
+                 config.PROJECTS_DIR):  # INT-086: workspaces modulares
         try:
             if rp.is_relative_to(Path(root).resolve()):
                 return rp
@@ -940,6 +943,44 @@ async def projects():
     return out
 
 
+def _template_meta(tpl: dict) -> dict:
+    """INT-086 · metadatos de producción heredables de la plantilla."""
+    keys = ("pacing", "broll", "musica", "estructura", "safe_zones",
+            "formatos", "cortes_seg", "solo_miniaturas", "miniatura")
+    d = {"template_id": tpl["id"]}
+    d.update({k: tpl[k] for k in keys if k in tpl})
+    return d
+
+
+def _post_create_init(project: dict, tpl: dict | None) -> dict:
+    """INT-086 · inicialización post-creación común a TODOS los modos:
+    marca la plantilla de nicho usada y crea el workspace modular
+    (estructura estándar + marca.json). Best-effort: nunca invalida la
+    creación del proyecto."""
+    try:
+        meta = dict(project.get("meta") or {})
+        if tpl:
+            meta.update(_template_meta(tpl))
+            db.update_project(project["id"], meta=meta)
+            project["meta"] = meta
+        ws = project_workspace.create_workspace(
+            project, marca=(project_workspace.marca_from_template(tpl, project)
+                            if tpl else None))
+        project["workspace"] = str(ws)
+    except Exception:  # noqa: BLE001
+        log.warning("post-create init falló para %s (no fatal)",
+                    project.get("id"), exc_info=True)
+    return project
+
+
+@app.get("/api/templates")
+async def list_niche_templates():
+    """INT-086 · catálogo de Plantillas de Nicho: icono, descripción y
+    configuración base de producción (ritmo, B-roll, voz, música,
+    subtítulos, zonas seguras y marca.json de canal)."""
+    return ntpl_svc.list_templates()
+
+
 @app.post("/api/projects")
 async def create_project(body: dict):
     """Crea un proyecto. INT-084 · mejora 6 del informe en vivo — contrato de
@@ -957,6 +998,16 @@ async def create_project(body: dict):
     if mode not in ("script", "idea", "url", "audio", "nicho", "guion_json",
                     "production_json", "product"):
         raise HTTPException(400, "modo inválido")
+    # INT-086 · plantilla de nicho opcional (todos los modos): inicializa la
+    # producción con ritmo/voz/subtítulos de la plantilla y crea el workspace
+    # modular con marca.json. El body SIEMPRE gana sobre la plantilla.
+    tpl = None
+    template_id = (body.get("template_id") or "").strip()
+    if template_id:
+        tpl = ntpl_svc.get_template(template_id)
+        if not tpl:
+            raise HTTPException(
+                400, "template_id desconocido — consulta GET /api/templates")
     if mode == "guion_json":
         # v2.10 · contrato guion_json: el guion llega HECHO desde ChatGPT —
         # cero LLM interno. Valida, normaliza (alias/fences/fallbacks) y
@@ -967,13 +1018,13 @@ async def create_project(body: dict):
                 av = None
             # v2.11 · receta de cámara por defecto del proyecto → meta
             pmeta = {"camara": g["camara"]} if g.get("camara") else {}
-            return db.create_project(
+            return _post_create_init(db.create_project(
                 title=(g.get("titulo") or "Video desde guion JSON"),
                 mode="guion_json", style=g.get("estilo") or "auto",
                 format=g.get("formato") or "short", voice=g.get("voz"),
                 meta=pmeta, avatar_id=av,
                 platforms=g.get("plataformas") or ["youtube"],
-                niche=g.get("nicho"))
+                niche=g.get("nicho")), tpl)  # INT-086: workspace+plantilla
         try:
             return await guion_svc.ingest(body, {s["id"] for s in STYLES}, _crear)
         except ValueError as e:
@@ -995,13 +1046,13 @@ async def create_project(body: dict):
             sub = (body.get("subtitle_style") or "shorts").lower()
             if sub in video_pipeline.subs_mod.SUB_STYLES:
                 pmeta["subtitle_style"] = sub
-            return db.create_project(
+            return _post_create_init(db.create_project(
                 title=(g.get("titulo") or "Video desde Production JSON"),
                 mode="production_json", style=g.get("estilo") or "auto",
                 format=g.get("formato") or "short", voice=g.get("voz"),
                 meta=pmeta, avatar_id=av,
                 platforms=g.get("plataformas") or ["youtube"],
-                niche=g.get("nicho"))
+                niche=g.get("nicho")), tpl)  # INT-086: workspace+plantilla
         try:
             payload = body.get("production", body.get("production_json"))
             if payload is None:
@@ -1014,6 +1065,24 @@ async def create_project(body: dict):
             raise HTTPException(400, str(e))
     meta = {"pacing": (body.get("pacing") or "normal").strip().lower()}
     title = (body.get("title") or "Nuevo proyecto")[:60]
+    # INT-086 · herencia de la plantilla de nicho (precedencia: body >
+    # plantilla, igual que el modo nicho): ritmo, estilo, formato, voz y
+    # subtítulos heredados SOLO si el usuario no los eligió.
+    if tpl:
+        tmeta = _template_meta(tpl)
+        if body.get("pacing"):
+            tmeta.pop("pacing", None)
+        else:
+            meta["pacing"] = tpl.get("pacing") or meta["pacing"]
+        meta.update(tmeta)
+        if not body.get("style") and tpl.get("style"):
+            body["style"] = tpl["style"]
+        if not body.get("format") and tpl.get("format"):
+            body["format"] = tpl["format"]
+        if not body.get("voice") and tpl.get("voice"):
+            body["voice"] = tpl["voice"]
+        if not body.get("subtitle_style") and tpl.get("subtitle_style"):
+            body["subtitle_style"] = tpl["subtitle_style"]
     if mode == "script":
         script = (body.get("script") or "").strip()
         if not script:
@@ -1154,12 +1223,12 @@ async def create_project(body: dict):
         if niche_label:
             niche_label = niche_label[:60]
 
-    project = db.create_project(
+    project = _post_create_init(db.create_project(
         title=title, mode=mode, style=style,
         format=body.get("format", "short"), voice=voice,
         tts_provider=tts_provider, meta=meta,
         avatar_id=avatar_id, platforms=platforms,
-        niche=niche_label)
+        niche=niche_label), tpl)  # INT-086: workspace+plantilla
     if brand_pid:
         with db.connect() as con:
             cols = [r[1] for r in con.execute("PRAGMA table_info(projects)").fetchall()]
@@ -1223,12 +1292,14 @@ async def delete_project(pid: str):
     # CONTENIDA en OUTPUT_DIR; solo entonces rmtree (el exploit
     # DELETE /api/projects/%2e%2e que borraba backend/data muere con 400).
     _pid(pid)
-    if not db.get_project(pid):
+    p = db.get_project(pid)
+    if not p:
         raise HTTPException(404, "no existe")
     job = db.active_job_for_project(pid)
     if job:
         orchestrator.cancel_job(job["id"])
     shutil.rmtree(security.safe_project_output_dir(pid), ignore_errors=True)
+    project_workspace.purge_workspace(p)  # INT-086: vista organizada
     db.delete_project(pid)  # ahora también purga flow_jobs (integridad)
     return {"ok": True}
 

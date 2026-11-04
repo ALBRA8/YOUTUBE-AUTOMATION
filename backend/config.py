@@ -10,8 +10,9 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 OUTPUT_DIR = DATA_DIR / "output"
+PROJECTS_DIR = DATA_DIR / "projects"   # INT-086: workspaces modulares
 TMP_DIR = DATA_DIR / "tmp"
-for d in (DATA_DIR, OUTPUT_DIR, TMP_DIR):
+for d in (DATA_DIR, OUTPUT_DIR, PROJECTS_DIR, TMP_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = DATA_DIR / "yt_automation.db"
@@ -206,7 +207,7 @@ SHORT_W, SHORT_H = 1080, 1920     # 9:16
 LONG_W, LONG_H = 1920, 1080       # 16:9
 
 # INT-080 · única fuente de verdad de versión (FastAPI + /api/health)
-APP_VERSION = "2.39.0"
+APP_VERSION = "2.40.0"
 MUSIC_VOLUME = 0.18
 MUSIC_DIR = DATA_DIR / "music"
 MUSIC_DIR.mkdir(exist_ok=True)
