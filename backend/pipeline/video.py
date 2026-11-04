@@ -16,6 +16,11 @@ INT-077 · Pacing estricto + estructura UGC nativa:
   type 'product_broll' (imagen de producto + zoompan, solo TTS en off, SIN
   lip-sync facial) — el B-roll descansa la vista del avatar y mata el
   uncanny valley de los planos fijos de 8-12 s.
+
+INT-085 · Masterización audio broadcast: todo el audio final (voz + música)
+normaliza a -14 LUFS / LRA=11 / TP=-1.0 dBTP (dual_mono) + 48 kHz + AAC 192k
+estándar de YouTube/TikTok/Reels — volumen uniforme, potente, sin
+distorsión ni penalización algorítmica. Kill-switch: AUDIO_MASTER_BROADCAST=0.
 """
 import asyncio
 import json
@@ -25,7 +30,8 @@ import random
 import subprocess
 from pathlib import Path
 
-from config import FPS, LONG_H, LONG_W, MUSIC_VOLUME, OUTPUT_DIR, SHORT_H, SHORT_W
+from config import (AUDIO_MASTER_BROADCAST, FPS, LONG_H, LONG_W,
+                    MUSIC_VOLUME, OUTPUT_DIR, SHORT_H, SHORT_W)
 from pipeline import subtitles as subs_mod
 from pipeline import typography as typo_mod
 from pipeline.tts_step import GAP as VOICE_GAP  # pausa real de voice_full
@@ -34,6 +40,11 @@ from services import avatar_motion
 log = logging.getLogger("video")
 
 TRANSITION_DUR = 0.5  # segundos de crossfade entre escenas (compensado en el pad)
+
+# INT-085 · filtro loudnorm broadcast (parámetros de plataformas digitales:
+# integrado -14 LUFS, rango LRA 11, true peak -1.0 dBTP, dual_mono=true para
+# fuentes mono como el TTS). Un único filtro para ambas ramas del mux.
+BROADCAST_LOUDNORM = "loudnorm=I=-14:LRA=11:TP=-1.0:dual_mono=true"
 FACTOR_MAX = 2.5      # cap de slow-mo por segmento (retime setpts)
 CLIP_TOL = 0.25       # tolerancia milimétrica post-render (s) clip vs target
 # INT-077 · tipos de escena UGC (scene['type'] o scene['meta']['type'],
@@ -405,13 +416,23 @@ async def _concat_xfade(project: dict, clips: list[Path], out: Path,
 async def mux_audio_music(project: dict, video_silent: Path, voice_full: Path) -> Path:
     """Une video + voz + música (con ducking automático sobre la voz).
     v2.19: la pista elegida queda registrada en music_track.json — antes
-    era imposible saber qué música llevó cada video (observabilidad §28)."""
+    era imposible saber qué música llevó cada video (observabilidad §28).
+    INT-085: el audio final se MASTERIZA a broadcast (-14 LUFS / LRA=11 /
+    TP=-1.0 dBTP dual_mono, 48 kHz, AAC 192k — estándar YouTube/TikTok);
+    settings en audio_master.json; kill-switch AUDIO_MASTER_BROADCAST=0."""
     proj_dir = OUTPUT_DIR / project["id"]
     music = _pick_music()
     out = proj_dir / "video_raw.mp4"
     (proj_dir / "music_track.json").write_text(json.dumps(
         {"track": music.name if music else None, "ducking": bool(music)},
         ensure_ascii=False), encoding="utf8")
+
+    # INT-085 · masterización broadcast (default ON; leída en runtime para
+    # que los tests puedan conmutarla sin reimportar el módulo).
+    master = str(AUDIO_MASTER_BROADCAST).strip().lower() in ("1", "true", "yes", "on")
+    loud_chain = f";[aout]{BROADCAST_LOUDNORM}[al]" if master else ""
+    a_map = "[al]" if master else "[aout]"
+    ar_args = ["-ar", "48000"] if master else []  # 48 kHz estándar broadcast
 
     if music and music.exists():
         # sidechaincompress: la música baja cuando habla la voz
@@ -420,11 +441,12 @@ async def mux_audio_music(project: dict, video_silent: Path, voice_full: Path) -
             f"[2:a]volume={MUSIC_VOLUME},aformat=sample_rates=24000:channel_layouts=mono[mus];"
             f"[mus][sc]sidechaincompress=threshold=0.02:ratio=12:attack=20:release=350[duck];"
             f"[vo][duck]amix=inputs=2:duration=first:dropout_transition=3[aout]"
+            f"{loud_chain}"
         )
         cmd = ["ffmpeg", "-y", "-i", str(video_silent), "-i", str(voice_full),
                "-stream_loop", "-1", "-i", str(music),
-               "-filter_complex", filter_complex, "-map", "0:v", "-map", "[aout]",
-               "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+               "-filter_complex", filter_complex, "-map", "0:v", "-map", a_map,
+               "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", *ar_args,
                "-shortest", str(out)]
         p = await asyncio.to_thread(lambda: _run_ffmpeg(cmd, timeout=600))
         if p.returncode != 0:
@@ -432,10 +454,23 @@ async def mux_audio_music(project: dict, video_silent: Path, voice_full: Path) -
     else:
         cmd = ["ffmpeg", "-y", "-i", str(video_silent), "-i", str(voice_full),
                "-map", "0:v", "-map", "1:a", "-c:v", "copy",
-               "-c:a", "aac", "-b:a", "192k", "-shortest", str(out)]
+               *(("-af", BROADCAST_LOUDNORM) if master else ()),
+               "-c:a", "aac", "-b:a", "192k", *ar_args, "-shortest", str(out)]
         p = await asyncio.to_thread(lambda: _run_ffmpeg(cmd, timeout=300))
         if p.returncode != 0:
             raise RuntimeError("No se pudo unir audio y video")
+
+    # INT-085 · observabilidad: settings de masterización del audio final
+    (proj_dir / "audio_master.json").write_text(json.dumps(
+        {"enabled": master, "loudnorm": BROADCAST_LOUDNORM if master else None,
+         "target_lufs": -14 if master else None,
+         "lra": 11 if master else None,
+         "tp_dbtp": -1.0 if master else None,
+         "dual_mono": True if master else None,
+         "sample_rate": 48000 if master else None,
+         "codec": "aac", "bitrate": "192k",
+         "music_ducking": bool(music)},
+        ensure_ascii=False), encoding="utf8")
     return out
 
 

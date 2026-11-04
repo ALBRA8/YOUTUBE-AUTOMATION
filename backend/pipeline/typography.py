@@ -140,19 +140,25 @@ def generate_shorts_sub_style(font_path: str | None = None,
     - Fontsize: 3.7% de la altura -> 71pt a 1080x1920 (banda 68-75) y
       escala proporcional (142pt a 3840) — PlayRes viaja con la
       resolución real del render.
-    - MarginV: >= 280px desde abajo (zona segura UI Shorts/TikTok),
-      escalado en 4K (560px a 3840).
+    - MarginV: banda segura de INT-085 en vertical (bottom del texto en
+      Y=1350 @1920 — nunca por debajo de 1550); legacy 280px en horizontal.
     - Bold 1 · BorderStyle 1 · Outline 3-4 (banda) · Shadow 2 · Align 2.
     """
     style = get_contrasting_style(avg_brightness)
     h = max(int(h), 1)
     fontname = FONT_LOCAL_NAME if font_path else FONT_SYSTEM_NAME
     size = max(28, int(h * 0.037))            # 71 @1920 · 142 @3840
-    marginv = max(280, int(h * 280 / 1920))   # 280 @1920 · 560 @3840
+    # INT-085 · zonas seguras móviles: en 9:16 el subtítulo vive en la banda
+    # Y 1200-1350 (@1920) y respeta la botonera derecha (single source of
+    # truth: safe_zones.subtitle_margins). Horizontal mantiene el legacy.
+    import safe_zones
+    margins = safe_zones.subtitle_margins(w, h)
+    ml, mr = (60, 60) if margins is None else (margins[0], margins[1])
+    marginv = 280 if margins is None else margins[2]  # legacy 280 @horizontal
     return (f"Style: Shorts,{fontname},{size},{style['text_color']},"
             f"&H00FFFFFF,{style['outline_color']},{style['back_color']},"
             f"1,0,0,0,100,100,1,0,1,{style['outline']},{style['shadow']},"
-            f"2,60,60,{marginv},1")
+            f"2,{ml},{mr},{marginv},1")
 
 
 def estimate_video_brightness(video_path: str | Path, timeout_s: int = 45,

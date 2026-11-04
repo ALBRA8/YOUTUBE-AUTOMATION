@@ -384,6 +384,15 @@ async def _run_flow_render(job_id: str, project_id: str) -> None:
 
         total_dur = sum(durations)
         _gate_qa_final(project_id, final)  # §render: QA antes de ready
+        # INT-085 · hoja de contacto QA (16 frames + zonas seguras) — NO
+        # fatal: su fallo jamás tumba un render válido y el endpoint la
+        # regenera al vuelo si falta.
+        try:
+            from services.contact_sheet import generate_contact_sheet
+            await asyncio.to_thread(generate_contact_sheet,
+                                    final, OUTPUT_DIR / project_id / "contact_sheet.jpg")
+        except Exception as _cs_err:  # noqa: BLE001
+            log.warning("contact_sheet %s: %s", project_id, _cs_err)
         db.update_project(project_id, status="ready", progress=100,
                           step_label="Listo (Flow)", video_url=str(final),
                           thumbnail_url=str(thumb) if thumb else None)
@@ -768,6 +777,15 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
 
         total_dur = sum(durations)
         _gate_qa_final(project_id, final)  # §render: QA antes de ready
+        # INT-085 · hoja de contacto QA (16 frames + zonas seguras) — NO
+        # fatal: su fallo jamás tumba un render válido y el endpoint la
+        # regenera al vuelo si falta.
+        try:
+            from services.contact_sheet import generate_contact_sheet
+            await asyncio.to_thread(generate_contact_sheet,
+                                    final, OUTPUT_DIR / project_id / "contact_sheet.jpg")
+        except Exception as _cs_err:  # noqa: BLE001
+            log.warning("contact_sheet %s: %s", project_id, _cs_err)
         db.update_project(project_id, status="ready", progress=100,
                           step_label="Listo", video_url=str(final),
                           thumbnail_url=str(thumb) if thumb else None)

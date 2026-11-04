@@ -167,5 +167,5 @@ def test_chat_vacio_sigue_400(client):
 
 # ═══════════════ 4 · contrato de versión (INT-080) ══════════════════════
 
-def test_version_2_38_0():
-    assert config.APP_VERSION == "2.38.0"
+def test_version_2_39_0():
+    assert config.APP_VERSION == "2.39.0"   # INT-085: masterización broadcast + contact sheet

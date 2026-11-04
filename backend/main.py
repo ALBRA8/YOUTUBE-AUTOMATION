@@ -1372,6 +1372,30 @@ async def project_thumb(pid: str):
     return FileResponse(p["thumbnail_url"], media_type="image/jpeg")
 
 
+@app.get("/api/projects/{pid}/contact-sheet")
+async def project_contact_sheet(pid: str):
+    """INT-085 · Hoja de contacto QA: cuadrícula 4x4 con 16 fotogramas del
+    video terminado + overlay de zonas seguras móviles (cian) y timestamp
+    por cuadro. Si aún no existe se genera AL VUELO y queda cacheada en
+    output/<pid>/contact_sheet.jpg (regenerable borrando el archivo)."""
+    _pid(pid)
+    p = db.get_project(pid)
+    if not p or not p.get("video_url"):
+        raise HTTPException(404, "video no disponible")
+    video_fs = _path_contenida(p["video_url"])  # INT-080: contención M5
+    if not video_fs or not video_fs.is_file():
+        raise HTTPException(404, "video no disponible")
+    out = security.safe_project_output_dir(_pid(pid)) / "contact_sheet.jpg"
+    if not out.is_file():
+        from services.contact_sheet import generate_contact_sheet
+        try:
+            await asyncio.to_thread(generate_contact_sheet, video_fs, out)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(
+                500, f"no se pudo generar la hoja de contactos: {str(e)[:140]}")
+    return FileResponse(out, media_type="image/jpeg")
+
+
 @app.get("/api/projects/{pid}/subtitles.srt")
 async def project_srt(pid: str):
     words_file = security.safe_project_output_dir(_pid(pid)) / "words.json"  # M5

@@ -59,10 +59,11 @@ def test_ass_generation_all_presets():
         {"word": "todo", "start": 0.8, "end": 1.2},
     ]
 
-    # 1. Hormozi: Contrato legacy intacto
+    # 1. Hormozi: Contrato INT-085 (banda segura vertical — antes legacy
+    #    Alignment 5 / MarginV 576 que invadía la UI inferior de TikTok)
     ass_h = subtitles.build_ass(words, 1080, 1920, style="hormozi")
-    LEGACY = "Style: Hormozi,Impact,119,&H0033FFFF,&H00FFFFFF,&H00000000,&H7F000000,-1,0,0,0,100,100,1,0,1,9,4,5,60,60,576,1"
-    check("Hormozi respeta contrato legacy byte-idéntico", LEGACY in ass_h)
+    SAFE = "Style: Hormozi,Impact,119,&H0033FFFF,&H00FFFFFF,&H00000000,&H7F000000,-1,0,0,0,100,100,1,0,1,9,4,2,64,170,570,1"
+    check("Hormozi respeta contrato INT-085 (banda segura vertical)", SAFE in ass_h)
 
     # 2. Shorts: Contrato de INT-021
     ass_s = subtitles.build_ass(words, 1080, 1920, style="shorts")
@@ -77,12 +78,13 @@ def test_ass_generation_all_presets():
     # 4. Boxed: BorderStyle=3 (caja rectangular de fondo)
     ass_bx = subtitles.build_ass(words, 1080, 1920, style="boxed")
     check("Boxed tiene Style: Boxed", "Style: Boxed" in ass_bx)
-    check("Boxed usa BorderStyle=3", ",3,4,0,5," in ass_bx)
+    check("Boxed usa BorderStyle=3 (alignment 2 en vertical, INT-085)",
+          ",3,4,0,2," in ass_bx)
 
-    # 5. Minimal: Alignment=2 (inferior) y marginv=80
+    # 5. Minimal: Alignment=2 (inferior) · INT-085 banda segura vertical
     ass_min = subtitles.build_ass(words, 1080, 1920, style="minimal")
     check("Minimal tiene Style: Minimal", "Style: Minimal" in ass_min)
-    check("Minimal usa Alignment=2 (inferior)", ",2,60,60,80,1" in ass_min)
+    check("Minimal en banda segura vertical (INT-085)", ",2,64,170,570,1" in ass_min)
 
     # 6. Neon: Verde/Cian eléctrico
     ass_neo = subtitles.build_ass(words, 1080, 1920, style="neon")

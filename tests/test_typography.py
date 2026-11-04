@@ -197,10 +197,14 @@ check("transición lum=0.95 -> bright, '&H00FFFFFF', "
 
 # ── S5. generate_shorts_sub_style ───────────────────────────────────────
 print("\nS5 — generate_shorts_sub_style (línea Style ASS)")
+# INT-085: en vertical (1080x1920) el subtítulo baja a la banda segura —
+# Alignment=2 con MarginV 570 (bottom del texto en Y=1350, nunca >1550) y
+# MarginR 170 que reserva la botonera derecha (15%). Horizontal intacto.
 linea = generate_shorts_sub_style(font_path=find_font())
 check("(a) empieza 'Style: Shorts,Montserrat ExtraBold,71,'",
       linea.startswith("Style: Shorts,Montserrat ExtraBold,71,"), linea)
-check("(a) termina ',2,60,60,280,1'", linea.endswith(",2,60,60,280,1"),
+check("(a) termina ',2,64,170,570,1' (INT-085 banda segura vertical)",
+      linea.endswith(",2,64,170,570,1"),
       linea)
 campos = linea.split(",")
 check("(b) índice 7 == '1' (Bold)", campos[7] == "1", campos[7])
@@ -210,10 +214,11 @@ check("(b) índice 16 in ('3','4') (Outline)", campos[16] in ("3", "4"),
 check("(b) índice 17 == '2' (Shadow)", campos[17] == "2", campos[17])
 check("(b) índice 18 == '2' (Alignment bottom-center)", campos[18] == "2",
       campos[18])
-check("(b) índice 21 == '280' (MarginV)", campos[21] == "280", campos[21])
+check("(b) índice 21 == '570' (MarginV INT-085: bottom texto Y=1350)",
+      campos[21] == "570", campos[21])
 linea4k = generate_shorts_sub_style(font_path=find_font(), w=2160, h=3840)
 campos4k = linea4k.split(",")
-check("(c) 2160x3840 -> MarginV 560 (índice 21)", campos4k[21] == "560",
+check("(c) 2160x3840 -> MarginV 1140 (índice 21, INT-085)", campos4k[21] == "1140",
       campos4k[21])
 check("(c) 2160x3840 -> size 142 (',142,' presente e índice 2)",
       ",142," in linea4k and campos4k[2] == "142", campos4k[2])
@@ -244,9 +249,10 @@ check("(a) todas las Dialogue referencian ',Shorts,'",
 check("(a) 'Hormozi' NO aparece en la salida shorts",
       "Hormozi" not in ass_shorts, "")
 LEGACY = ("Style: Hormozi,Impact,119,&H0033FFFF,&H00FFFFFF,&H00000000,"
-          "&H7F000000,-1,0,0,0,100,100,1,0,1,9,4,5,60,60,576,1")
+          "&H7F000000,-1,0,0,0,100,100,1,0,1,9,4,2,64,170,570,1")
 ass_hormozi = subtitles.build_ass(_WORDS, 1080, 1920, style="hormozi")
-check("(b) CONTRATO LEGACY: substring byte-idéntica del estilo antiguo",
+check("(b) CONTRATO INT-085: hormozi vertical en banda segura "
+      "(Alignment 2 · MarginR 170 · MarginV 570 → Y 1350)",
       LEGACY in ass_hormozi, "")
 check("(b) las Dialogue del legacy referencian ',Hormozi,'",
       all(",Hormozi," in d for d in

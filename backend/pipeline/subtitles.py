@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pipeline.typography import find_font, generate_shorts_sub_style
 
+import safe_zones  # INT-085: única fuente de verdad de zonas seguras móviles
+
 ASS_HEADER = """[Script Info]
 ScriptType: v4.00+
 PlayResX: {w}
@@ -17,7 +19,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Hormozi,{font},{size},&H0033FFFF,&H00FFFFFF,&H00000000,&H7F000000,-1,0,0,0,100,100,1,0,1,{outline},{shadow},5,60,60,{marginv},1
+Style: Hormozi,{font},{size},&H0033FFFF,&H00FFFFFF,&H00000000,&H7F000000,-1,0,0,0,100,100,1,0,1,{outline},{shadow},{alignment},{ml},{mr},{marginv},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -216,6 +218,9 @@ def build_ass(words: list[dict], w: int, h: int, style: str = "hormozi",
     Mantiene compatibilidad estricta con el contrato legacy 'hormozi' y el estilo 'shorts'."""
     cfg = (SUB_STYLES["shorts"] if style == "shorts"
            else SUB_STYLES.get(style, SUB_STYLES["hormozi"]))
+    # INT-085 · márgenes de zona segura para frame vertical (None en
+    # horizontal): banda Y 1200-1350 @1920 + botonera derecha reservada.
+    sz_margins = safe_zones.subtitle_margins(w, h)
     font_size = max(int(h * cfg["size_ratio"]), 28)
     if style == "shorts":
         style_name = "Shorts"
@@ -227,9 +232,17 @@ def build_ass(words: list[dict], w: int, h: int, style: str = "hormozi",
                 else avg_brightness))
     elif style == "hormozi":
         style_name = "Hormozi"
-        marginv = int(h * 0.30) if h > w else int(h * 0.22)  # más arriba del centro
+        # INT-085 · vertical 9:16: banda segura con Alignment=2 (bottom del
+        # texto en Y=0.703h → 1350 @1920, nunca por debajo de 1550) y
+        # botonera derecha reservada. Horizontal: legacy intacto (Alignment
+        # 5 centrado, MarginV 0.22h).
+        if sz_margins is not None:
+            ml, mr, marginv, alignment = (*sz_margins, 2)
+        else:
+            ml, mr, marginv, alignment = 60, 60, int(h * 0.22), 5
         header = ASS_HEADER.format(w=w, h=h, font=cfg["font"], size=font_size,
                                    outline=cfg["outline"], shadow=cfg["shadow"],
+                                   alignment=alignment, ml=ml, mr=mr,
                                    marginv=marginv)
     else:
         # Estilos modernos de INT-041 (mrbeast, neon, minimal, boxed, etc.)
@@ -240,12 +253,19 @@ def build_ass(words: list[dict], w: int, h: int, style: str = "hormozi",
         sec = cfg.get("secondary_color", "&H00FFFFFF&").replace("&", "")
         outl_col = cfg.get("outline_color", "&H00000000&").replace("&", "")
         back_col = cfg.get("back_color", "&H7F000000&").replace("&", "")
-        marginv = 80 if alignment == 2 else (int(h * 0.30) if h > w else int(h * 0.22))
+        # INT-085 · vertical 9:16: TODOS los presets bajan a la banda segura
+        # (Alignment=2, Y 1200-1350 @1920) — un subtítulo centrado (5) o
+        # pegado abajo (80) choca con la UI de TikTok/Shorts.
+        if sz_margins is not None:
+            ml, mr, marginv, alignment = (*sz_margins, 2)
+        else:
+            ml, mr = 60, 60
+            marginv = 80 if alignment == 2 else int(h * 0.22)
         style_line = (
             f"Style: {style_name},{cfg['font']},{font_size},"
             f"&{prim},&{sec},&{outl_col},&{back_col},"
             f"-1,0,0,0,100,100,1,0,{border_style},{cfg['outline']},{cfg['shadow']},"
-            f"{alignment},60,60,{marginv},1"
+            f"{alignment},{ml},{mr},{marginv},1"
         )
         header = f"""[Script Info]
 ScriptType: v4.00+
@@ -263,7 +283,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
     events: list[str] = []
-    usable = max(w - 120, 300)  # ancho útil (margins L/R de 60px)
+    # INT-085: ancho útil con los márgenes REALES del estilo — en vertical la
+    # botonera derecha se reserva (15%) y el pop reduce fscx antes de invadirla.
+    ml0, mr0 = (60, 60) if sz_margins is None else (sz_margins[0], sz_margins[1])
+    usable = max(w - ml0 - mr0, 300)
     pop_max = cfg.get("pop_scale", 118)
     for group in group_words_smart(words, cfg["chunks"]):
         start = group[0]["start"]

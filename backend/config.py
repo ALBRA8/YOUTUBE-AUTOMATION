@@ -146,6 +146,10 @@ RENDER_MUSIC_SIDECAN = os.getenv("RENDER_MUSIC_SIDECAN", "0").strip()
 # INT-070 (opt-in): normalización de loudness a -14 LUFS (TP=-1, LRA=11), el
 # estándar de YouTube, tras la mezcla. "0" = nivel de mezcla sin tocar.
 RENDER_LOUDNORM = os.getenv("RENDER_LOUDNORM", "0").strip()
+# INT-085 (default ON): masterización broadcast del audio FINAL en
+# pipeline.video.mux_audio_music — loudnorm I=-14:LRA=11:TP=-1.0:dual_mono
+# + 48 kHz + AAC 192k (estándar YouTube/TikTok/Reels). "0" = mezcla legacy.
+AUDIO_MASTER_BROADCAST = os.getenv("AUDIO_MASTER_BROADCAST", "1").strip()
 # Cama musical por defecto: ruta absoluta o nombre de archivo dentro de
 # config.MUSIC_DIR (vacío = mezclar sin música).
 RENDER_MUSIC_PATH = os.getenv("RENDER_MUSIC_PATH", "").strip()
@@ -202,7 +206,7 @@ SHORT_W, SHORT_H = 1080, 1920     # 9:16
 LONG_W, LONG_H = 1920, 1080       # 16:9
 
 # INT-080 · única fuente de verdad de versión (FastAPI + /api/health)
-APP_VERSION = "2.38.0"
+APP_VERSION = "2.39.0"
 MUSIC_VOLUME = 0.18
 MUSIC_DIR = DATA_DIR / "music"
 MUSIC_DIR.mkdir(exist_ok=True)
