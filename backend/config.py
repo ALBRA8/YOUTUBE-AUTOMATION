@@ -202,7 +202,7 @@ SHORT_W, SHORT_H = 1080, 1920     # 9:16
 LONG_W, LONG_H = 1920, 1080       # 16:9
 
 # INT-080 · única fuente de verdad de versión (FastAPI + /api/health)
-APP_VERSION = "2.37.0"
+APP_VERSION = "2.38.0"
 MUSIC_VOLUME = 0.18
 MUSIC_DIR = DATA_DIR / "music"
 MUSIC_DIR.mkdir(exist_ok=True)

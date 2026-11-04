@@ -158,9 +158,9 @@ def test_hf_token_envoltorio_publico_coincide():
 
 # ═══════════════ 9 · contrato de versión (INT-080 cache-busting) ═════════
 
-def test_version_bump_2_37_0():
-    assert config.APP_VERSION == "2.37.0"
-    assert tuple(int(p) for p in config.APP_VERSION.split(".")) >= (2, 36, 0)
+def test_version_bump_2_38_0():
+    assert config.APP_VERSION == "2.38.0"
+    assert tuple(int(p) for p in config.APP_VERSION.split(".")) >= (2, 37, 0)
 
 
 # ═══════════════ 10 · GET /api/config expone estado HF enmascarado ═══════

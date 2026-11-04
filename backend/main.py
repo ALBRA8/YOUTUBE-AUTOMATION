@@ -858,7 +858,9 @@ async def chat(body: dict):
         result = await agent_svc.execute(plan_out, db, orchestrator, db.list_avatars())
         result["engine"] = "confirm"
         return result
-    message = (body.get("message") or "").strip()
+    # INT-084 · mejora 6: alias «mensaje» ≡ «message» (integraciones ES/EN);
+    # la canónica del panel sigue siendo «message» y gana si llegan ambas.
+    message = (body.get("message") or body.get("mensaje") or "").strip()
     history = body.get("history") or []
     if not message:
         raise HTTPException(400, "mensaje vacío")
@@ -940,7 +942,18 @@ async def projects():
 
 @app.post("/api/projects")
 async def create_project(body: dict):
+    """Crea un proyecto. INT-084 · mejora 6 del informe en vivo — contrato de
+    alias ES/EN retrocompatible en TODOS los modos:
+    · `mode`: «nicho» canónico; se acepta «niche».
+    · `nicho` canónico; se acepta `niche` (carpeta del árbol de proyectos).
+      Precedencia honesta: plantilla del nicho → perfil de marca → campo del
+      body (antes el campo se ignoraba en silencio en los modos simples).
+    · guion_json/production_json ya normalizaban niche vía sus adaptadores
+      (_ALIASES) — siguen intactos; aquí se cierra el hueco de los modos
+      idea/script/url/audio/product y de integraciones externas."""
     mode = body.get("mode", "idea")
+    if mode == "niche":            # alias EN del modo canónico «nicho»
+        mode = "nicho"
     if mode not in ("script", "idea", "url", "audio", "nicho", "guion_json",
                     "production_json", "product"):
         raise HTTPException(400, "modo inválido")
@@ -1132,6 +1145,14 @@ async def create_project(body: dict):
     if not isinstance(platforms, list):
         platforms = ["youtube"]
     platforms = [p for p in platforms if p in VALID_PLATFORMS] or ["youtube"]
+
+    # INT-084 · alias niche/nicho en TODOS los modos: el campo explícito del
+    # body se respeta cuando ni plantilla ni perfil de marca definen nicho
+    # (canónica «nicho» gana si llegan ambas; ≤60 como el contrato guion_json).
+    if not niche_label:
+        niche_label = ((body.get("nicho") or body.get("niche") or "").strip() or None)
+        if niche_label:
+            niche_label = niche_label[:60]
 
     project = db.create_project(
         title=title, mode=mode, style=style,
