@@ -202,7 +202,7 @@ SHORT_W, SHORT_H = 1080, 1920     # 9:16
 LONG_W, LONG_H = 1920, 1080       # 16:9
 
 # INT-080 · única fuente de verdad de versión (FastAPI + /api/health)
-APP_VERSION = "2.36.0"
+APP_VERSION = "2.37.0"
 MUSIC_VOLUME = 0.18
 MUSIC_DIR = DATA_DIR / "music"
 MUSIC_DIR.mkdir(exist_ok=True)
@@ -298,8 +298,10 @@ EDITABLE_KEYS = (
     "GEMINI_API_KEY", "NVIDIA_API_KEY", "NVIDIA_MODEL", "TTS_PROVIDER",
     "EDGE_TTS_VOICE", "GEMINI_TTS_VOICE", "TTS_RATE", "WHISPER_MODEL",
     "WHISPER_DEVICE", "FPS", "PEXELS_API_KEY", "PIXABAY_API_KEY",
+    "HF_TOKEN",  # INT-083: lip-sync v2v (LatentSync GATED) + cuota ZeroGPU
 )
-SECRET_KEYS = {"GEMINI_API_KEY", "NVIDIA_API_KEY", "PEXELS_API_KEY", "PIXABAY_API_KEY"}
+SECRET_KEYS = {"GEMINI_API_KEY", "NVIDIA_API_KEY", "PEXELS_API_KEY",
+               "PIXABAY_API_KEY", "HF_TOKEN"}
 
 
 def reload() -> None:

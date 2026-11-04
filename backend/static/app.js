@@ -1727,6 +1727,9 @@ async function renderSettings() {
   const whChip = c.whisper_available
     ? `<span class="cfg-status ok">✅ Instalado</span>`
     : `<span class="cfg-status err">⚠️ No instalado (tiempos estimados)</span>`;
+  const hfChip = c.hf_token_set
+    ? `<span class="cfg-status ok">✅ Token guardado · ${esc(c.hf_token_masked || '•••')}</span>`
+    : `<span class="cfg-status err">⚠️ Sin token — los avatares salen SIN lip-sync (fail-open)</span>`;
 
   $('#view').innerHTML = `
     <h2 class="sec">⚙️ Ajustes</h2>
@@ -1746,6 +1749,20 @@ async function renderSettings() {
         </div>
         <div class="hintline">Clave <b>gratis y al instante</b> en <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> → «Create API key» → copia (AIzaSy…).<br>
         Activa: guiones IA, imágenes reales (Gemini 2.5 Flash Image) y voz premium. Se guarda en <code class="mini">${esc(c.env_path || 'backend/.env')}</code> y <b>aplica sin reiniciar</b>.</div>
+      </div>
+
+      <div class="card">
+        <b>👄 Lip-sync de avatares (Hugging Face)</b> <span style="float:right">${hfChip}</span>
+        <div class="keyrow" style="margin-top:14px">
+          <input type="password" id="cfg-hf" autocomplete="off" spellcheck="false"
+                 placeholder="${c.hf_token_set ? 'Escribe un token nuevo para reemplazar ' + esc(c.hf_token_masked || '') : 'hf_… (token de lectura, gratis)'}">
+          <button class="eye" onclick="const i=document.getElementById('cfg-hf');i.type=i.type==='password'?'text':'password'" title="Mostrar/ocultar">👁️</button>
+        </div>
+        <div class="cfg-actions">
+          <button class="btn primary small" onclick="saveCfg({HF_TOKEN: document.getElementById('cfg-hf').value}, 'Token HF guardado — lip-sync activado sin reiniciar')">💾 Guardar token</button>
+        </div>
+        <div class="hintline">Token <b>gratis</b> en <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener">huggingface.co/settings/tokens</a> (permiso Read). Acepta también la licencia de <a href="https://huggingface.co/ByteDance/LatentSync" target="_blank" rel="noopener">ByteDance/LatentSync</a> con tu cuenta (botón «Agree»).
+        Activa el <b>lip-sync video→video</b> (labios sincronizados con la voz) y la animación del avatar. Se guarda en <code class="mini">backend/.env</code> y <b>aplica sin reiniciar</b>. Sin token el render sigue (fail-open) pero los avatares salen con la boca estática.</div>
       </div>
 
       <div class="card">

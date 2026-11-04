@@ -400,6 +400,12 @@ def _hf_token() -> str:
     return tok
 
 
+def hf_token() -> str:
+    """HF_TOKEN vigente (envoltorio público para el preflight del doctor).
+    Nunca se loguea ni se devuelve en APIs del panel."""
+    return _hf_token()
+
+
 def _extract_video_from_result(result: Any) -> Path:
     """gradio_client devuelve filepath (str), dict con 'video'/'path', FileData o
     tuplas anidadas según el Space. Normaliza a la ruta del MP4 resultante."""

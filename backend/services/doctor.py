@@ -234,6 +234,42 @@ def run_preflight_creacion() -> dict:
                            "alineación palabra a palabra",
              "pip install faster-whisper (opcional, estilo Hormozi)")
 
+    # ── INT-083 · Lip-sync / avatar animado: aviso ANTES de que el render
+    #    falle en silencio. Calibración en vivo (2026-10-31): sin HF_TOKEN los
+    #    3 Spaces de lip-sync v2v (ByteDance/LatentSync GATED, Wav2Lip,
+    #    video-retalking) devuelven 401 y el fail-open continúa con el video
+    #    original ⇒ el proyecto sale SIN sincronización labial y el usuario
+    #    nunca se entera. Aquí se avisa en el botón Crear, no en el log.
+    try:
+        from services import avatar_motion as _am
+        _v2v_on = bool(_am.v2v_enabled())
+        _hf_on = bool(_am.hf_lipsync_enabled())
+        _token = str(_am.hf_token() or "").strip()
+    except Exception:  # noqa: BLE001 — el preflight jamás tumba el panel
+        _v2v_on = _hf_on = False
+        _token = ""
+    if _v2v_on or _hf_on:
+        if not _import_ok("gradio_client"):
+            soft("lipsync", "gradio_client no está instalado: el lip-sync y el "
+                            "avatar animado se saltan (fail-open) — los clips "
+                            "salen sin sincronización labial",
+                 "pip install gradio_client")
+        elif not _token:
+            if _v2v_on:
+                soft("lipsync", "sin HF_TOKEN los Spaces de lip-sync v2v "
+                                "(LatentSync/Wav2Lip/video-retalking) devuelven "
+                                "401: los videos de avatar saldrán SIN "
+                                "sincronización labial",
+                     "crea un token gratis en huggingface.co/settings/tokens, "
+                     "acepta la licencia de ByteDance/LatentSync y guárdalo "
+                     "como HF_TOKEN en ⚙️ Ajustes o .env")
+            else:
+                soft("lipsync", "sin HF_TOKEN la cuota anónima de ZeroGPU es "
+                                "~0s/día: la animación del avatar fallará de "
+                                "forma intermitente",
+                     "token gratis en huggingface.co/settings/tokens → HF_TOKEN "
+                     "en ⚙️ Ajustes")
+
     return {
         "ok": not blockers,
         "blockers": blockers,

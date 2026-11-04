@@ -484,6 +484,8 @@ def _mask(secret: str) -> str:
 @app.get("/api/config")
 async def get_config():
     """Vista de configuración para ⚙️ Ajustes. Los secretos van enmascarados."""
+    import os as _os  # INT-080: import diferido (INT-083: HF_TOKEN lee .env vivo)
+    _hf = _os.getenv("HF_TOKEN", "").strip()
     return {
         "env_path": str(config.ENV_PATH),
         "env_exists": config.ENV_PATH.exists(),
@@ -502,6 +504,8 @@ async def get_config():
         "fps": config.FPS,
         "youtube_configured": youtube_publish.configured(),
         "youtube_token": youtube_publish.has_token(),
+        "hf_token_set": bool(_hf),
+        "hf_token_masked": _mask(_hf),  # INT-083
         "ext_pending": db.count_ext_images(),
     }
 
@@ -515,7 +519,7 @@ async def save_config(body: dict):
         if key not in config.EDITABLE_KEYS:
             continue
         val = str(value).strip()
-        if key in ("GEMINI_API_KEY", "NVIDIA_API_KEY"):
+        if key in ("GEMINI_API_KEY", "NVIDIA_API_KEY", "HF_TOKEN"):
             # Enmascarado (el input placeholder) = NO tocar la clave guardada.
             # Vacío = borrado explícito (botón "Quitar clave").
             if val.startswith("•") or "…" in val:
