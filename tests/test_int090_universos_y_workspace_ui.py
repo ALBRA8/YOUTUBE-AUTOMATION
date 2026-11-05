@@ -75,8 +75,15 @@ def _lib_tmp(tmp_path: Path, ids: dict[str, dict] | None = None) -> Path:
 # ── A. biblioteca canónica del repo ──────────────────────────────────────
 def test_biblioteca_canonica_del_repo():
     check("directorio data/avatars/ existe", REPO_LIB.is_dir())
+    # FIX-WIN-003 · cross-platform por COMPONENTES del path (en Windows la
+    # ruta usa «\» y endswith("data/avatars") falla). El conftest redirige
+    # DATA_DIR a <sesión>/backend_data, así que el layout legítimo es uno de:
+    #   repo real:  .../backend/data/avatars        → ("data", "avatars")
+    #   sesión pytest: .../<sesión>/backend_data/avatars
+    #                                    → ("backend_data", "avatars")
     check("universos.AVATARS_LIB apunta a data/avatars",
-          str(universos.AVATARS_LIB).endswith("data/avatars"),
+          Path(universos.AVATARS_LIB).parts[-2:] in
+          (("data", "avatars"), ("backend_data", "avatars")),
           str(universos.AVATARS_LIB))
     # cargar leyendo del REPO real (no del DATA_DIR de la sesión de tests)
     orig = universos.AVATARS_LIB
@@ -294,6 +301,7 @@ def test_open_folder_endpoint(client, tmp_path, monkeypatch):
 
 def test_open_folder_honesto_sin_gui(client, tmp_path, monkeypatch):
     """En un servidor sin GUI responde honesto (abierto=False) sin lanzar."""
+    import os as _os
     import shutil as _shutil
     import subprocess as _subprocess
     monkeypatch.setattr(config, "PROJECTS_DIR", tmp_path / "projects")
@@ -301,6 +309,13 @@ def test_open_folder_honesto_sin_gui(client, tmp_path, monkeypatch):
     monkeypatch.setattr(_shutil, "which", lambda x: None)
     monkeypatch.setattr(_subprocess, "Popen",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("no GUI")))
+    # FIX-WIN-003 · cross-platform: en Windows _abrir_carpeta_sistema llama
+    # _os.startfile (mismo módulo «os» que importa internamente) ANTES de
+    # consultar shutil.which/subprocess.Popen — sin este parche el test pasa
+    # en Linux/Mac pero abre el Explorador REAL en Windows y da verde falso.
+    # Forzamos SO sin startfile para que la rama sin GUI aplique en todos.
+    monkeypatch.setattr(_os, "name", "posix")
+    monkeypatch.delattr(_os, "startfile", raising=False)
     p = client.post("/api/projects", json={"mode": "idea", "title": "Sin GUI"}).json()
     r = client.post(f"/api/projects/{p['id']}/open-folder")
     check("sin GUI → 200", r.status_code == 200, r.text[:200])
