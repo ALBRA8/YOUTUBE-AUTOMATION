@@ -101,3 +101,6 @@ backend/data/google_profile_global/
 # Scratch temporary files
 scratch/
 backend/static/assets/
+
+# INT-089: telemetría HF — datos de runtime, nunca en el repo
+backend/data/hf_telemetry.json
