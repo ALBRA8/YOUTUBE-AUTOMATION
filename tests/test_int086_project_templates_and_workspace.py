@@ -320,8 +320,24 @@ def test_link_fallback_windows(tmp_path, monkeypatch):
     target = tmp_path / "voice_full.wav"
     target.write_bytes(b"RIFFfake")
     link = tmp_path / "narracion.wav"
+
+    # [FIX-SYMLINK-WIN] "con symlink disponible" NO llama os.symlink real:
+    # en Windows sin Developer Mode lanza WinError 1314 aunque _link() sea
+    # correcto. Se mockea el ÉXITO y se verifica que _link toma la ruta
+    # symlink (retorno, efecto en disco y llamada con el destino correcto).
+    symlink_calls = []
+
+    def _symlink_ok(src, dst, **_k):
+        symlink_calls.append((str(src), str(dst)))
+        d = Path(dst)
+        s = Path(src)
+        d.write_bytes((s if s.is_absolute() else d.parent / s).read_bytes())
+
+    monkeypatch.setattr(pws.os, "symlink", _symlink_ok)
     check("con symlink disponible → symlink",
-          pws._link(target, link) == "symlink" and link.is_symlink())
+          pws._link(target, link) == "symlink" and link.exists()
+          and link.read_bytes() == b"RIFFfake"
+          and len(symlink_calls) == 1 and Path(symlink_calls[0][1]) == link)
     link.unlink()
 
     def _winerror_1314(*_a, **_k):

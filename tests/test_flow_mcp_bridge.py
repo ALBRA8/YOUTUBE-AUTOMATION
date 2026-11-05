@@ -132,14 +132,20 @@ def _create_valid_png(path: Path, width: int = 120, height: int = 120, min_bytes
 
 
 class TestFlowMCPConfigAndAvailability(unittest.TestCase):
+    # ── [FIX-ENV-WIN] aislamiento del .env local (máquina real Windows) ──
+    # El .env de producción define FLOW_MCP_ENABLED=1 / FLOW_MCP_VIDEO_ENABLED=1.
+    # NO basta con os.environ.pop() antes del re-import: config.py ejecuta
+    # load_dotenv(ENV_PATH) al importarse y dotenv (override=False) re-carga el
+    # valor del .env en os.environ, revirtiendo el pop. Pre-fijar "0" SÍ gana:
+    # dotenv no sobreescribe variables ya presentes (verificado en vivo).
+    _ENV_FLAGS_OFF = {"FLOW_MCP_ENABLED": "0", "FLOW_MCP_VIDEO_ENABLED": "0"}
+
+    @patch.dict(os.environ, _ENV_FLAGS_OFF, clear=False)
     def test_default_flag_is_disabled(self):
-        """Verifica que por defecto (sin env que envenene la colección)
-        el feature flag esté desactivado."""
-        with patch.dict(os.environ), _isolated_app_state(self._scratch()):
-            # test_live_execution*.py fijan FLOW_MCP_ENABLED=1 en os.environ a
-            # nivel de módulo (colección): el default REAL es sin env.
-            for k in ("FLOW_MCP_ENABLED", "FLOW_MCP_VIDEO_ENABLED"):
-                os.environ.pop(k, None)
+        """Verifica que por defecto (aislado del .env real y del envenenamiento
+        de colección de test_live_execution*.py) el feature flag esté
+        desactivado."""
+        with _isolated_app_state(self._scratch()):
             import config as fresh_config  # noqa: F401 — re-import fresco
             from services import flow_mcp_client as fresh_fmc
             self.assertFalse(fresh_config.FLOW_MCP_ENABLED)
@@ -334,6 +340,7 @@ class TestImagesPipelineFallbackIntegration(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    @patch.dict(os.environ, TestFlowMCPConfigAndAvailability._ENV_FLAGS_OFF, clear=False)
     async def test_flag_disabled_pipeline_preserves_legacy_flow(self):
         """Con FLOW_MCP_ENABLED=False, flow_mcp no se llama y corre el pipeline anterior."""
         with _isolated_app_state(self.td):
@@ -355,6 +362,7 @@ class TestImagesPipelineFallbackIntegration(unittest.IsolatedAsyncioTestCase):
                                     self.assertEqual(method, "placeholder")
                                     self.assertTrue(out.is_file())
 
+    @patch.dict(os.environ, TestFlowMCPConfigAndAvailability._ENV_FLAGS_OFF, clear=False)
     async def test_flag_enabled_success_produces_flow_mcp_method(self):
         """Con FLOW_MCP_ENABLED=True y éxito, se copia el archivo y se registra 'flow_mcp'."""
         valid_generated = self.td / "flow_out.png"
@@ -375,6 +383,7 @@ class TestImagesPipelineFallbackIntegration(unittest.IsolatedAsyncioTestCase):
                             self.assertTrue(out.is_file())
                             self.assertGreater(out.stat().st_size, 4096)
 
+    @patch.dict(os.environ, TestFlowMCPConfigAndAvailability._ENV_FLAGS_OFF, clear=False)
     async def test_flag_enabled_failure_gracefully_falls_back(self):
         """Con FLOW_MCP_ENABLED=True pero fallo en MCP, se degrada limpiamente a Gemini/Placeholder."""
         with _isolated_app_state(self.td):
@@ -398,6 +407,7 @@ class TestImagesPipelineFallbackIntegration(unittest.IsolatedAsyncioTestCase):
                                         self.assertEqual(method, "placeholder")
                                         self.assertTrue(out.is_file())
 
+    @patch.dict(os.environ, TestFlowMCPConfigAndAvailability._ENV_FLAGS_OFF, clear=False)
     async def test_flag_enabled_invalid_file_rejected_and_falls_back(self):
         """Si flow_generate_image devuelve un archivo vacío/corrupto, no se acepta como escena."""
         bad_file = self.td / "bad.png"

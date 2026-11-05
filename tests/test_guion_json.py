@@ -138,7 +138,9 @@ def main() -> int:
     print("── 5. rama del orquestador (guion_json salta PASO 1)")
     import importlib  # noqa: E402
     orch = importlib.import_module("pipeline.orchestrator")
-    src = Path(BACKEND / "pipeline/orchestrator.py").read_text()
+    # [FIX-ENC-WIN] encoding explícito: sin él, Windows usa cp1252 y lee el
+    # orchestrator.py (UTF-8 con acentos) → UnicodeDecodeError.
+    src = Path(BACKEND / "pipeline/orchestrator.py").read_text(encoding="utf-8")
     check("rama guion_json existe", 'project["mode"] == "guion_json"' in src)
     check("mención de contrato en emisión", "contrato guion_json" in src)
     check("escenas vacías → error claro", "guion_json sin escenas" in src)

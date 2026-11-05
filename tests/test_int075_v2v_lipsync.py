@@ -13,9 +13,11 @@ Hermeticidad: cero red, cero HF, cero Chrome. FFmpeg real solo en la prueba
 de conversión de audio (rápida); el retime del pipeline se mockea.
 """
 import asyncio
+import os
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -83,9 +85,30 @@ def test_to_wav_mono16k_bad_source_raises(tmp_path):
 
 
 # ── 2 · lipsync_video_to_video: cadena, failover, fail-open, timeout ────
+
+# ── [FIX-ENV-WIN] aislamiento del .env real (máquina Windows) ───────────
+# El .env de producción define AVATAR_V2V_SPACES=fffiloni/LatentSync,... y estos
+# tests validan la cadena POR DEFECTO del código. _am_cfg() lee PRIMERO el
+# atributo de config (config.py lo congela a import-time DESDE el .env) y solo
+# como respaldo os.getenv → hay que aislar AMBOS canales. El valor aislado es
+# la constante del propio módulo (nada hardcodeado en los tests).
+_V2V_CHAIN_DEFAULT = str(am._VIDEO_LIPSYNC_SPACES_DEFAULT)
+
+
+@contextmanager
+def _v2v_chain_por_defecto():
+    """Fija la cadena v2v por defecto del CÓDIGO durante el test, aislando
+    del .env real tanto el canal config (primario en _am_cfg) como os.environ
+    (respaldo getenv)."""
+    with patch.object(config, "AVATAR_V2V_SPACES", _V2V_CHAIN_DEFAULT), \
+         patch.dict(os.environ, {"AVATAR_V2V_SPACES": _V2V_CHAIN_DEFAULT}):
+        yield
+
+
 def test_spaces_default_chain_order():
-    assert am.v2v_space_list() == ["ByteDance/LatentSync", "akhaliq/Wav2Lip",
-                                   "fffiloni/video-retalking"]
+    with _v2v_chain_por_defecto():
+        assert am.v2v_space_list() == \
+            [s.strip() for s in _V2V_CHAIN_DEFAULT.split(",") if s.strip()]
 
 
 def test_v2v_requires_existing_inputs(tmp_path):
@@ -105,12 +128,14 @@ def test_v2v_ok_first_space(tmp_path):
     v, a, out = tmp_path / "base.mp4", tmp_path / "voice.mp3", tmp_path / "out.mp4"
     _make_video(v)
     _make_mp3(a)
-    with patch.object(am, "_call_hf_v2v_gradio",
-                      side_effect=lambda sp, vp, ap, op: Path(shutil_copy(vp, op))):
-        res = asyncio.run(am.lipsync_video_to_video(v, a, out, timeout_s=10))
+    with _v2v_chain_por_defecto():
+        primero = am.v2v_space_list()[0]
+        with patch.object(am, "_call_hf_v2v_gradio",
+                          side_effect=lambda sp, vp, ap, op: Path(shutil_copy(vp, op))):
+            res = asyncio.run(am.lipsync_video_to_video(v, a, out, timeout_s=10))
     assert res["ok"] is True and res["fallback"] is False
-    assert res["space"] == "ByteDance/LatentSync"
-    assert res["attempted"] == ["ByteDance/LatentSync"]
+    assert res["space"] == primero
+    assert res["attempted"] == [primero]
     assert Path(res["video"]).is_file()
     assert not (tmp_path / "out_voice16k.wav").exists()  # temp WAV limpiado
 
@@ -121,17 +146,20 @@ def test_v2v_failover_to_second_space(tmp_path):
     _make_wav_stereo(a)
     calls = []
 
-    def fake(space, vp, ap, op):
-        calls.append(space)
-        if space == "ByteDance/LatentSync":
-            raise RuntimeError("401 gated sin token")
-        return Path(shutil_copy(vp, op))
+    with _v2v_chain_por_defecto():
+        primero, segundo = am.v2v_space_list()[:2]
 
-    with patch.object(am, "_call_hf_v2v_gradio", side_effect=fake):
-        res = asyncio.run(am.lipsync_video_to_video(v, a, out, timeout_s=10))
+        def fake(space, vp, ap, op):
+            calls.append(space)
+            if space == primero:
+                raise RuntimeError("401 gated sin token")
+            return Path(shutil_copy(vp, op))
+
+        with patch.object(am, "_call_hf_v2v_gradio", side_effect=fake):
+            res = asyncio.run(am.lipsync_video_to_video(v, a, out, timeout_s=10))
     assert res["ok"] is True
-    assert res["space"] == "akhaliq/Wav2Lip"
-    assert res["attempted"] == ["ByteDance/LatentSync", "akhaliq/Wav2Lip"]
+    assert res["space"] == segundo
+    assert res["attempted"] == [primero, segundo]
 
 
 def test_v2v_failopen_copies_original_when_all_fail(tmp_path):
@@ -139,12 +167,13 @@ def test_v2v_failopen_copies_original_when_all_fail(tmp_path):
     _make_video(v)
     _make_wav_stereo(a)
     original = v.read_bytes()
-    with patch.object(am, "_call_hf_v2v_gradio",
-                      side_effect=RuntimeError("Space caído")):
-        res = asyncio.run(am.lipsync_video_to_video(v, a, out, timeout_s=5))
+    with _v2v_chain_por_defecto():
+        cadena = am.v2v_space_list()
+        with patch.object(am, "_call_hf_v2v_gradio",
+                          side_effect=RuntimeError("Space caído")):
+            res = asyncio.run(am.lipsync_video_to_video(v, a, out, timeout_s=5))
     assert res["ok"] is False and res["fallback"] is True
-    assert res["attempted"] == ["ByteDance/LatentSync", "akhaliq/Wav2Lip",
-                                "fffiloni/video-retalking"]
+    assert res["attempted"] == cadena
     assert Path(res["video"]).read_bytes() == original  # video original intacto
     assert "Space caído" in res["error"]
 

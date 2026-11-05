@@ -92,6 +92,15 @@ def _isolated_app_state(tmp_root: Path):
         sys.modules.update(saved)
 
 
+# ── [FIX-ENV-WIN] aislamiento del .env local (máquina real Windows) ──────
+# El .env de producción define FLOW_MCP_ENABLED=1 / FLOW_MCP_VIDEO_ENABLED=1.
+# NO basta con os.environ.pop(): el re-import de config (dentro de
+# _isolated_app_state) ejecuta load_dotenv(ENV_PATH) y dotenv (override=False)
+# re-carga el valor del .env revirtiendo el pop. Pre-fijar "0" SÍ gana:
+# dotenv no sobreescribe variables ya presentes (verificado en vivo).
+_ENV_FLAGS_OFF = {"FLOW_MCP_ENABLED": "0", "FLOW_MCP_VIDEO_ENABLED": "0"}
+
+
 def _create_dummy_mp4(path: Path, size_bytes: int = 15000) -> Path:
     """Crea un archivo binario con cabecera ftyp simulando un contenedor MP4."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -141,6 +150,7 @@ class TestFlowMCPVideoClient(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    @patch.dict(os.environ, _ENV_FLAGS_OFF, clear=False)
     async def test_generate_video_success(self):
         out_vid = self.tmp / "flow" / "Escena_01_video.mp4"
         _create_dummy_mp4(out_vid, size_bytes=25000)
@@ -172,6 +182,7 @@ class TestPipelineVideoBridge(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    @patch.dict(os.environ, _ENV_FLAGS_OFF, clear=False)
     async def test_generate_scene_video_bridge_and_import(self):
         proj_dir = self.tmp / "test_proj"
         flow_dir = proj_dir / "flow"

@@ -454,7 +454,8 @@ def _gate_imagenes_reales(project_id: str, scenes: list[dict]) -> None:
             continue
         sf = Path(str(p)).with_suffix(".style.json")
         try:
-            metodo = (json.loads(sf.read_text()) or {}).get("method") or "?"
+            # [FIX-ENC-WIN] encoding explícito (Windows: cp1252 por defecto)
+            metodo = (json.loads(sf.read_text(encoding="utf-8")) or {}).get("method") or "?"
         except Exception:  # noqa: BLE001 — sin style.json no se puede saber
             metodo = "?"
         metodos.append(metodo)

@@ -258,12 +258,31 @@ def test_mirror_query_arg_v085():
     assert args2 == {"notebook_id": NB, "query": "x"}
 
 
-def test_defaults_aligned_v085():
+def test_defaults_aligned_v085(monkeypatch):
     """INT-069.1: los defaults de código apuntan a tools v0.8.5
     (notebook_list para el probe; chat_ask para el contexto del orquestador),
-    con los nombres legacy aún aceptados en _LIST_NOTEBOOK_TOOLS."""
-    assert config.NOTEBOOKLM_PROBE_TOOL == "notebook_list"
-    assert config.NOTEBOOKLM_CONTEXT_TOOL == "chat_ask"
+    con los nombres legacy aún aceptados en _LIST_NOTEBOOK_TOOLS.
+
+    [FIX-ENV-WIN] Aislado del .env real (máquina Windows): si el .env define
+    NOTEBOOKLM_*, config las congela a import-time y los asserts originales
+    comparaban valores de la MÁQUINA, no defaults del código. Se pre-fijan en
+    os.environ con el valor default del código (delenv NO basta: el re-import
+    de config ejecuta load_dotenv(), que re-carga el .env revirtiendo el
+    delenv; dotenv no sobreescribe vars preexistentes) y se re-importa config
+    FRESCO, restaurando el módulo previo exactamente al salir (patrón FIX-C)."""
+    monkeypatch.setenv("NOTEBOOKLM_PROBE_TOOL", "notebook_list")
+    monkeypatch.setenv("NOTEBOOKLM_CONTEXT_TOOL", "chat_ask")
+    _saved = sys.modules.get("config")
+    sys.modules.pop("config", None)
+    try:
+        import config as fresh_cfg  # noqa: F401 — re-import fresco sin .env
+        assert fresh_cfg.NOTEBOOKLM_PROBE_TOOL == "notebook_list"
+        assert fresh_cfg.NOTEBOOKLM_CONTEXT_TOOL == "chat_ask"
+    finally:
+        if _saved is not None:
+            sys.modules["config"] = _saved
+        else:
+            sys.modules.pop("config", None)
     backend = Path(__file__).resolve().parents[1] / "backend"
     mm_src = (backend / "services" / "mcp_manager.py").read_text(encoding="utf-8")
     assert '_cfg("NOTEBOOKLM_PROBE_TOOL", "notebook_list")' in mm_src
