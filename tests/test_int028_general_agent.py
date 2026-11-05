@@ -303,15 +303,18 @@ check("plan() sin claves degrada a regex local con avatar opcional",
 print("── S5. cero marca VÓRTICE activa (cerebro + UI)")
 check("SYSTEM_BRAIN sin identidad VÓRTICE", "VÓRTICE" not in ga.SYSTEM_BRAIN)
 check("_HELP_TEXT sin identidad VÓRTICE", "VÓRTICE" not in ga._HELP_TEXT)
-app_js = (BACKEND / "static" / "app.js").read_text(encoding="utf-8")
+# INT-088: app.js es un loader; el código de la SPA vive en los módulos app-*.js
+app_js = "\n".join((BACKEND / "static" / f).read_text(encoding="utf-8")
+                   for f in ("app.js", "app-core.js", "app-projects.js",
+                             "app-mcp.js", "app-wizard.js", "app-player.js"))
 check("app.js sin «Agente VÓRTICE» en UI", "Agente VÓRTICE" not in app_js)
 check("app.js sin «Soy VÓRTICE»", "Soy VÓRTICE" not in app_js)
 check("app.js sin «VÓRTICE está pensando»", "VÓRTICE está pensando" not in app_js)
 check("app.js con nuevo saludo del Agente General",
       "Soy el Agente General" in app_js and "who\">AGENTE" in app_js)
 check("banner de la home rebrandeado", "<b>Agente General</b>" in app_js)
-check("index.html sirve app.js?v=2.25.0",
-      "app.js?v=2.25.0" in (BACKEND / "static" / "index.html").read_text(encoding="utf-8"))
+check("index.html sirve app.js con cache-busting por versión",
+      "app.js?v=" in (BACKEND / "static" / "index.html").read_text(encoding="utf-8"))
 main_src = (BACKEND / "main.py").read_text(encoding="utf-8")
 check("main.py importa general_agent como agent_svc (redirect)",
       "general_agent as agent_svc" in main_src)

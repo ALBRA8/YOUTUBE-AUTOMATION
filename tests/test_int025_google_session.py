@@ -588,7 +588,10 @@ async def endpoint_tests():
 def ui_tests():
     print("\n── S9 · contrato UI (sesión unificada + dropdown auto; v≥2.25.0 INT-028) ──")
     static = BACKEND / "static"
-    appjs = (static / "app.js").read_text(encoding="utf-8")
+    # INT-088: app.js es un loader; todo el código MCP/NotebookLM vive en app-mcp.js
+    appjs = "\n".join((static / f).read_text(encoding="utf-8")
+                      for f in ("app-mcp.js", "app-core.js", "app-projects.js",
+                                "app-wizard.js", "app-player.js"))
     index = (static / "index.html").read_text(encoding="utf-8")
     for sym in ("mcpGsessHTML", "gsessLogin", "gsessCapture", "gsessRefresh",
                 "gsessApply", "mcpPopulateNotebooks", "gsess-card"):
@@ -617,8 +620,8 @@ def ui_tests():
                                        appjs.index("async function gsessCapture")])
     check("endpoint del backend invocado por la UI",
           "/mcp/login-google" in appjs and "/mcp/capture-google-session" in appjs)
-    check("index.html sirve app.js v2.25.0 (INT-028 rebrand)",
-          "app.js?v=2.25.0" in index)
+    check("index.html sirve app.js con cache-busting por versión (INT-028/INT-082)",
+          "app.js?v=" in index)
     check("fin del copy-paste: placeholder sin «pegar UUID» obligatorio",
           "conecta NotebookLM para listar los tuyos" in appjs)
 

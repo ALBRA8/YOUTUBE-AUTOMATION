@@ -130,7 +130,11 @@ def test_contrato_fuente():
           and '"attachment" if download else "inline"' in src_main)
     check("El endpoint declara query param download: bool = False",
           "async def project_video(pid: str, download: bool = False)" in src_main)
-    src_ui = (BACKEND / "static" / "app.js").read_text(encoding="utf-8")
+    # INT-088: el frontend vive en app.js (loader) + módulos app-*.js
+    src_ui = "\n".join(
+        (BACKEND / "static" / f).read_text(encoding="utf-8")
+        for f in ("app.js", "app-core.js", "app-projects.js", "app-mcp.js",
+                  "app-wizard.js", "app-player.js"))
     check("El botón ⬇️ Descargar MP4 apunta a ?download=1",
           "/video?download=1" in src_ui)
     check("El reproductor <video> sigue sirviendo la URL inline (sin ?download)",

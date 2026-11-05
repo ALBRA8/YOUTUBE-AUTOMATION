@@ -156,7 +156,7 @@ def test_circle_pip_border_color_whitelist(client, tmp_path, monkeypatch):
 
 # ── E4 · versión: única fuente de verdad ────────────────────────────────────
 def test_app_version_single_source(client):
-    assert config.APP_VERSION == "2.42.0"   # INT-087: selector de plantillas en la UI
+    assert config.APP_VERSION == "2.43.0"   # INT-088: refactor modular de app.js
     assert main.app.version == config.APP_VERSION
     res = client.get("/api/health")
     assert res.json()["version"] == config.APP_VERSION
@@ -199,8 +199,13 @@ def test_final_scene_strict_tolerance_contract():
 
 
 # ── A2/F1 · frontend: sin doble prefijo ni meta_patch de audio_path ────────
+# INT-088: el frontend vive en app.js (loader) + 5 módulos app-*.js; los
+# contratos se verifican sobre la concatenación de los 6 ficheros.
 def test_frontend_contracts():
-    src = (BACKEND / "static" / "app.js").read_text(encoding="utf-8")
+    src = "\n".join(
+        (BACKEND / "static" / f).read_text(encoding="utf-8")
+        for f in ("app.js", "app-core.js", "app-projects.js", "app-mcp.js",
+                  "app-wizard.js", "app-player.js"))
     assert "api('/api/" not in src                    # los 5 dobles prefijos muertos
     assert "meta_patch: { audio_path" not in src      # los 2 PATCH 403 eliminados
     assert "auto_emojis: autoEmojis" in src           # toggles del clipper viajan

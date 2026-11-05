@@ -25,7 +25,11 @@ STATIC = BACKEND / "static"
 sys.path.insert(0, str(BACKEND))  # INT-082: el contrato de versión lee config.APP_VERSION
 
 import config  # noqa: E402
-APP_JS = (STATIC / "app.js").read_text(encoding="utf-8")
+# INT-088: app.js es ahora un loader; el código vive en 5 módulos. Los
+# contratos «definida en el frontend» se leen sobre la concatenación de todos.
+FRONTEND_FILES = ("app.js", "app-core.js", "app-projects.js", "app-mcp.js",
+                  "app-wizard.js", "app-player.js")
+APP_JS = "\n".join((STATIC / f).read_text(encoding="utf-8") for f in FRONTEND_FILES)
 AUTH_JS = (STATIC / "auth.js").read_text(encoding="utf-8")
 INDEX_HTML = (STATIC / "index.html").read_text(encoding="utf-8")
 

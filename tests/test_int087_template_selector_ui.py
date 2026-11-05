@@ -3,7 +3,7 @@
 INT-087 · Selector de Plantillas de Nicho en la UI (asistente Crear).
 
 Cubre los 3 frentes de la tarea:
-  A. app.js — tarjetas de las 5 plantillas (iconos 🍳🧶🛍️⚡🖼️) en el
+  A. app-wizard.js — tarjetas de las 5 plantillas (iconos 🍳🧶🛍️⚡🖼️) en el
      wizard de Crear (paso 1) Y en el modal de creación rápida 1-clic,
      alimentadas por GET /api/templates (carga perezosa + best-effort).
      Al hacer clic se AUTOCOMPLETAN nicho, voz, ritmo, subtítulos, estilo
@@ -15,7 +15,8 @@ Cubre los 3 frentes de la tarea:
      lexicon de resolve_scene_count y de las tarjetas de ritmo de la UI)
      + etiqueta humana «ritmo»; cache-busting app.js?v=__APP_VERSION__.
 
-Método: contratos de fuente congelados (app.js/index.html), API REAL con
+Método: contratos de fuente congelados (app-wizard.js/app-core.js/index.html
+— INT-088 dividió app.js en módulos), API REAL con
 TestClient (catálogo + creación con plantilla) y validación de sintaxis
 JS vía node --check cuando node está disponible.
 
@@ -57,9 +58,13 @@ def client():
     return TestClient(main.app)
 
 
-# ── A. contratos de fuente del selector (app.js) ─────────────────────────
+# ── A. contratos de fuente del selector (app-wizard.js; boot en app-core.js) ─
 def test_selector_js_fuente():
-    js = (BACKEND / "static" / "app.js").read_text(encoding="utf-8")
+    # INT-088: las tarjetas viven en app-wizard.js, pero el payload que envía
+    # template_id lo construye createProject() en app-projects.js → se leen ambos.
+    js = "\n".join((BACKEND / "static" / f).read_text(encoding="utf-8")
+                   for f in ("app-wizard.js", "app-projects.js"))
+    core_js = (BACKEND / "static" / "app-core.js").read_text(encoding="utf-8")
     check("catálogo cargado desde GET /api/templates",
           "fetch('/api/templates')" in js and "loadTemplates" in js)
     check("carga perezosa + caché local",
@@ -83,19 +88,25 @@ def test_selector_js_fuente():
           "=== id) ? '' : id" in js)
     check("cierre de marca visible en la tarjeta seleccionada",
           "cierre.frase" in js)
-    check("boot carga el catálogo", "loadTemplates();  // INT-087" in js)
+    check("boot carga el catálogo", "loadTemplates();  // INT-087" in core_js)
 
 
 def test_app_js_sintaxis_node():
-    """node --check sobre app.js (si node existe): el selector no rompe la SPA."""
+    """node --check sobre app.js (loader) y los 5 módulos (INT-088): si node
+    existe, ningún trozo de la SPA puede quedar con sintaxis rota."""
     node = shutil.which("node")
     if not node:
         check("node no disponible — se omite la validación de sintaxis", True)
         return
-    r = subprocess.run([node, "--check", str(BACKEND / "static" / "app.js")],
-                       capture_output=True, text=True)
-    check("app.js sintaxis válida (node --check)", r.returncode == 0,
-          r.stderr[:200])
+    bad = []
+    for f in ("app.js", "app-core.js", "app-projects.js", "app-mcp.js",
+              "app-wizard.js", "app-player.js"):
+        r = subprocess.run([node, "--check", str(BACKEND / "static" / f)],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            bad.append(f"{f}: {r.stderr[:120]}")
+    check("app.js + 5 módulos: sintaxis válida (node --check)", not bad,
+          "; ".join(bad))
 
 
 # ── B. API real: catálogo y creación desde la UI ─────────────────────────
@@ -164,8 +175,8 @@ def test_dashboard_sirve_app_js_con_cache_busting(client):
 
 # ── C. contrato de versión (cadena INT-080) ──────────────────────────────
 def test_version():
-    check("APP_VERSION 2.42.0 (INT-080: bump por cambio funcional)",
-          config.APP_VERSION == "2.42.0")
+    check("APP_VERSION 2.43.0 (INT-080: bump por cambio funcional)",
+          config.APP_VERSION == "2.43.0")
 
 
 if __name__ == "__main__":  # modo script directo

@@ -185,8 +185,12 @@ def test_get_en_raiz_sigue_sirviendo_html_completo(client):
 
 def test_contrato_appjs_gate_antes_de_gastar():
     """El gate se ejecuta en createProject y startJob ANTES de la llamada que
-    crea el proyecto / lanza el pipeline."""
-    appjs = (BACKEND / "static" / "app.js").read_text(encoding="utf-8")
+    crea el proyecto / lanza el pipeline. (INT-088: el código vive ahora en
+    app-projects.js; se lee la concatenación de todo el frontend.)"""
+    appjs = "\n".join(
+        (BACKEND / "static" / f).read_text(encoding="utf-8")
+        for f in ("app.js", "app-core.js", "app-projects.js", "app-mcp.js",
+                  "app-wizard.js", "app-player.js"))
     assert "/doctor/preflight_creacion" in appjs
     assert appjs.count("if (!(await preflightGate())) return;") == 2
 
@@ -200,7 +204,10 @@ def test_contrato_appjs_gate_antes_de_gastar():
 
 
 def test_contrato_appjs_banner_y_cache():
-    appjs = (BACKEND / "static" / "app.js").read_text(encoding="utf-8")
+    appjs = "\n".join(
+        (BACKEND / "static" / f).read_text(encoding="utf-8")
+        for f in ("app.js", "app-core.js", "app-projects.js", "app-mcp.js",
+                  "app-wizard.js", "app-player.js"))
     assert "function renderPreflightBanner()" in appjs
     # el banner solo se pide en el paso final del asistente (botón 🚀)
     assert "renderPreflightBanner();" in appjs
