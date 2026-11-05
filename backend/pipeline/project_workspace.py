@@ -161,22 +161,45 @@ def purge_workspace(project: dict) -> None:
 
 
 # ── publicación de artefactos (vista organizada) ─────────────────────────
-def _link(target: Path, link_path: Path) -> bool:
-    """Enlace RELATIVO link_path → target (idempotente, sin follow)."""
+def _link(target: Path, link_path: Path) -> str:
+    """Enlace RELATIVO link_path → target (idempotente, sin follow).
+
+    INT-086b · Compatibilidad Windows: sin Developer Mode/Admin, os.symlink
+    lanza WinError 1314 (privilegio no otorgado). Cadena de respaldo para
+    ARCHIVOS: symlink → hardlink os.link (instantáneo en NTFS, mismo
+    volumen) → copia _copy() (cruza volúmenes). Para DIRECTORIOS solo existe
+    el symlink (NTFS no tiene hardlinks de carpeta y copiar clips duplicaría
+    gigas): si falla, la vista conserva su subcarpeta real y se devuelve "".
+
+    Devuelve el mecanismo usado («symlink» | «hardlink» | «copy») o «""» si
+    no se publicó — truthy/falsy compatible con los callers originales."""
     try:
         if link_path.is_symlink():
             link_path.unlink()
         elif link_path.exists():
-            return False  # archivo real del usuario: no se toca
+            return ""  # archivo real del usuario: no se toca
         target = Path(target)
         if not target.exists():
-            return False
+            return ""
         link_path.parent.mkdir(parents=True, exist_ok=True)
-        os.symlink(os.path.relpath(target, link_path.parent), link_path)
-        return True
+        try:
+            os.symlink(os.path.relpath(target, link_path.parent), link_path)
+            return "symlink"
+        except (OSError, NotImplementedError):
+            # WinError 1314 / EXDEV / filesystems sin symlink…
+            if target.is_dir():
+                log.info("symlink de directorio no disponible (%s): la vista "
+                         "mantiene la subcarpeta real; el contenido vive en "
+                         "el almacén legacy", link_path)
+                return ""
+            try:
+                os.link(target, link_path)  # hardlink: mismo volumen NTFS
+                return "hardlink"
+            except OSError:
+                return "copy" if _copy(target, link_path) else ""
     except Exception:  # noqa: BLE001
         log.debug("enlace fallido %s → %s", link_path, target, exc_info=True)
-        return False
+        return ""
 
 
 def _copy(src: Path, dst: Path) -> bool:
@@ -238,18 +261,22 @@ def sync_artifacts(project: dict) -> dict:
                 str(meta["script_text"]), encoding="utf-8")
             published["guion/guion.md"] = "script_text"
 
-        # medios pesados — enlaces relativos AL almacén legacy (si existe)
+        # medios pesados — enlaces relativos AL almacén legacy (si existe);
+        # el mecanismo real queda registrado (symlink/hardlink/copy, INT-086b)
         if legacy.is_dir():
-            # voz — enlaces relativos al almacén (voice_full.wav, words.json)
-            if _link(legacy / "voice_full.wav", ws / "voz" / "narracion.wav"):
-                published["voz/narracion.wav"] = "enlace → voice_full.wav"
+            mech = _link(legacy / "voice_full.wav", ws / "voz" / "narracion.wav")
+            if mech:
+                published["voz/narracion.wav"] = f"{mech} → voice_full.wav"
             for master in sorted(legacy.glob("*master*.wav"))[:1]:
-                if _link(master, ws / "voz" / "narracion_master.wav"):
-                    published["voz/narracion_master.wav"] = f"enlace → {master.name}"
-            if _link(legacy / "words.json", ws / "voz" / "voz.json"):
-                published["voz/voz.json"] = "enlace → words.json"
-            if _link(legacy / "audio_master.json", ws / "voz" / "audio_master.json"):
-                published["voz/audio_master.json"] = "enlace → audio_master.json"
+                mech = _link(master, ws / "voz" / "narracion_master.wav")
+                if mech:
+                    published["voz/narracion_master.wav"] = f"{mech} → {master.name}"
+            mech = _link(legacy / "words.json", ws / "voz" / "voz.json")
+            if mech:
+                published["voz/voz.json"] = f"{mech} → words.json"
+            mech = _link(legacy / "audio_master.json", ws / "voz" / "audio_master.json")
+            if mech:
+                published["voz/audio_master.json"] = f"{mech} → audio_master.json"
 
             # clips — directorio entero del pipeline (clips Flow/Veo + B-roll)
             clips_legacy = legacy / "clips"
@@ -257,15 +284,20 @@ def sync_artifacts(project: dict) -> dict:
             if clips_legacy.is_dir() and not any(clips_ws.iterdir()):
                 try:
                     clips_ws.rmdir()  # vacío → cede su lugar al enlace
-                    os.symlink(os.path.relpath(clips_legacy, ws), clips_ws)
-                    published["clips/"] = f"enlace → {clips_legacy.name}/"
+                    try:
+                        os.symlink(os.path.relpath(clips_legacy, ws), clips_ws)
+                        published["clips/"] = f"symlink → {clips_legacy.name}/"
+                    except (OSError, NotImplementedError):
+                        # WinError 1314…: la vista conserva su carpeta real
+                        clips_ws.mkdir(exist_ok=True)
                 except OSError:
                     pass
 
             # out — video final (enlace) + hoja de contacto (copia .png)
             final = legacy / f"{pid}_final.mp4"
-            if _link(final, ws / "out" / "video_final.mp4"):
-                published["out/video_final.mp4"] = f"enlace → {final.name}"
+            mech = _link(final, ws / "out" / "video_final.mp4")
+            if mech:
+                published["out/video_final.mp4"] = f"{mech} → {final.name}"
             if _copy(legacy / "contact_sheet.jpg", ws / "out" / "contact_sheet.png"):
                 published["out/contact_sheet.png"] = "copia ← contact_sheet.jpg"
 

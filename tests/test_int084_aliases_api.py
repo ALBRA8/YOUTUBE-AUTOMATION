@@ -168,4 +168,4 @@ def test_chat_vacio_sigue_400(client):
 # ═══════════════ 4 · contrato de versión (INT-080) ══════════════════════
 
 def test_version_2_39_0():
-    assert config.APP_VERSION == "2.40.0"   # INT-086: plantillas de nicho + workspace modular
+    assert config.APP_VERSION == "2.41.0"   # INT-086b: compat Windows _link (symlink→hardlink→copia)

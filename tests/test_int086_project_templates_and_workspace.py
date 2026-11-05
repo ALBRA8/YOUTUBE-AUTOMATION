@@ -271,6 +271,9 @@ def test_proyecto_sin_plantilla_tiene_workspace(client):
 
 
 # ── E. sync_artifacts (vista organizada) ─────────────────────────────────
+ES_POSIX = (sys.platform != "win32")
+
+
 def test_sync_artifacts(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "PROJECTS_DIR", tmp_path / "projects")
     monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "output")
@@ -285,12 +288,21 @@ def test_sync_artifacts(tmp_path, monkeypatch):
     (legacy / "thumb.jpg").write_bytes(b"jpg")
     ws = pws.create_workspace(dict(PROYECTO))
     pub = pws.sync_artifacts(dict(PROYECTO))
+    # INT-086b · cross-platform: se verifica que el artefacto EXISTA en la
+    # vista (symlink en POSIX; symlink|hardlink|copia en Windows) — solo en
+    # POSIX se exige además que sea symlink.
     check("voz/narracion.wav expuesto",
-          (ws / "voz" / "narracion.wav").is_symlink(), str(pub))
-    check("voz/voz.json expuesto", (ws / "voz" / "voz.json").is_symlink())
-    check("clips/ enlazado al almacén", (ws / "clips").is_symlink())
+          (ws / "voz" / "narracion.wav").exists(), str(pub))
+    check("voz/voz.json expuesto", (ws / "voz" / "voz.json").exists())
+    check("clips/ expuesto",
+          (ws / "clips").is_symlink() if ES_POSIX else (ws / "clips").is_dir())
     check("out/video_final.mp4 expuesto",
-          (ws / "out" / "video_final.mp4").is_symlink())
+          (ws / "out" / "video_final.mp4").exists())
+    if ES_POSIX:  # en el sandbox Linux el mecanismo CANÓNICO es el symlink
+        check("mecanismo canónico symlink en POSIX",
+              (ws / "voz" / "narracion.wav").is_symlink()
+              and (ws / "voz" / "voz.json").is_symlink()
+              and (ws / "out" / "video_final.mp4").is_symlink())
     check("out/contact_sheet.png copiado",
           (ws / "out" / "contact_sheet.png").is_file())
     check("portada.png copiado", (ws / "portada.png").is_file())
@@ -299,6 +311,38 @@ def test_sync_artifacts(tmp_path, monkeypatch):
     # idempotente: segunda pasada no revienta
     pub2 = pws.sync_artifacts(dict(PROYECTO))
     check("sync idempotente", isinstance(pub2, dict))
+
+
+def test_link_fallback_windows(tmp_path, monkeypatch):
+    """INT-086b · cadena symlink → hardlink → copia cuando os.symlink lanza
+    OSError (WinError 1314: en Windows sin Developer Mode/Admin el
+    privilegio de symlink no está otorgado)."""
+    target = tmp_path / "voice_full.wav"
+    target.write_bytes(b"RIFFfake")
+    link = tmp_path / "narracion.wav"
+    check("con symlink disponible → symlink",
+          pws._link(target, link) == "symlink" and link.is_symlink())
+    link.unlink()
+
+    def _winerror_1314(*_a, **_k):
+        raise OSError(1314, "A required privilege is not held by the client")
+
+    monkeypatch.setattr(pws.os, "symlink", _winerror_1314)
+    check("sin symlink → hardlink (instantáneo en NTFS)",
+          pws._link(target, link) == "hardlink" and link.exists()
+          and not link.is_symlink() and link.read_bytes() == b"RIFFfake")
+    link.unlink()
+    monkeypatch.setattr(pws.os, "link", _winerror_1314)
+    check("sin symlink ni hardlink → copia",
+          pws._link(target, link) == "copy" and link.is_file()
+          and link.read_bytes() == b"RIFFfake")
+    # directorio: sin symlink NO hay fallback (NTFS no tiene hardlinks de
+    # carpeta y copiar clips duplicaría gigas) → la vista conserva lo suyo
+    d = tmp_path / "clips_src"
+    d.mkdir()
+    out = tmp_path / "clips_view"
+    check("directorio sin symlink → '' (sin copia de gigas)",
+          pws._link(d, out) == "" and not out.exists())
 
 
 def test_sync_artifacts_guion_desde_bd(tmp_path, monkeypatch):
@@ -324,8 +368,8 @@ def test_sync_artifacts_guion_desde_bd(tmp_path, monkeypatch):
 
 # ── contratos de fuente y versión (cadena INT-080) ───────────────────────
 def test_contratos_fuente_y_version():
-    check("APP_VERSION 2.40.0 (INT-080: bump por cambio funcional)",
-          config.APP_VERSION == "2.40.0")
+    check("APP_VERSION 2.41.0 (INT-080: bump por cambio funcional)",
+          config.APP_VERSION == "2.41.0")
     src_ws = (BACKEND / "pipeline" / "project_workspace.py").read_text(
         encoding="utf-8")
     check("firma pública del módulo workspace",

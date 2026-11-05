@@ -159,7 +159,7 @@ def test_hf_token_envoltorio_publico_coincide():
 # ═══════════════ 9 · contrato de versión (INT-080 cache-busting) ═════════
 
 def test_version_bump_2_39_0():
-    assert config.APP_VERSION == "2.40.0"   # INT-086: plantillas de nicho + workspace modular
+    assert config.APP_VERSION == "2.41.0"   # INT-086b: compat Windows _link (symlink→hardlink→copia)
     assert tuple(int(p) for p in config.APP_VERSION.split(".")) >= (2, 37, 0)
 
 
