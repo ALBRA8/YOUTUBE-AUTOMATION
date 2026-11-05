@@ -204,7 +204,8 @@ def main() -> int:
 
     print("── 3. escenas deterministas (mini-chrome, sonda REAL ejecutada)")
     proc_syn = subprocess.run([node, "--check", str(HARNESS)],
-                              capture_output=True, text=True, timeout=60)
+                              capture_output=True, text=True,
+                              encoding="utf-8", timeout=60)  # [FIX-WIN-002]
     check("harness tab_selector_mock.js con sintaxis válida",
           proc_syn.returncode == 0, proc_syn.stderr.strip()[:150])
 
@@ -212,7 +213,8 @@ def main() -> int:
         sec_file = Path(td) / "bridge_v3_section.js"
         sec_file.write_text(seccion, encoding="utf-8")
         proc = subprocess.run([node, str(HARNESS), str(sec_file)],
-                              capture_output=True, text=True, timeout=120,
+                              capture_output=True, text=True,
+                              encoding="utf-8", timeout=120,  # [FIX-WIN-002]
                               cwd=str(REPO))
     salida = (proc.stdout or "") + (proc.stderr or "")
     check("harness corre sin FATAL", "FATAL" not in salida, salida[-200:])

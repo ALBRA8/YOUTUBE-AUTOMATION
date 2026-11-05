@@ -176,7 +176,8 @@ def main() -> int:
     if node:
         for js in (bg, br, HARNESS):
             proc = subprocess.run([node, "--check", str(js)],
-                                  capture_output=True, text=True, timeout=60)
+                                  capture_output=True, text=True,
+                                  encoding="utf-8", timeout=60)  # [FIX-WIN-002]
             check(f"sintaxis OK: {js.name}", proc.returncode == 0,
                   proc.stderr.strip()[:150])
     if not node:
@@ -186,7 +187,8 @@ def main() -> int:
     # ── 2. arnés real (mini-DOM, vm, sin Flow) ────────────────────────────
     print("── 2. arnés determinista (código REAL de background.js en vm)")
     proc = subprocess.run([node, str(HARNESS)], capture_output=True,
-                          text=True, timeout=120, cwd=str(REPO))
+                          text=True, encoding="utf-8",  # [FIX-WIN-002]
+                          timeout=120, cwd=str(REPO))
     salida = (proc.stdout or "") + (proc.stderr or "")
     check("arnés corre sin error (exit 0, sin error_de_harness)",
           proc.returncode == 0 and "error_de_harness" not in salida,

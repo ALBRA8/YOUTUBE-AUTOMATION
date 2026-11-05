@@ -360,7 +360,8 @@ def main() -> int:
     fake_root = _TMP / "repo_fake"
     shutil.copytree(REAL_REPO / "extension", fake_root / "extension",
                     dirs_exist_ok=True)
-    m = json.loads((fake_root / "extension" / "manifest.json").read_text())
+    # [FIX-WIN-002] encoding explícito: Windows decodifica con cp1252 por defecto
+    m = json.loads((fake_root / "extension" / "manifest.json").read_text(encoding="utf-8"))
     m.pop("host_permissions", None)
     (fake_root / "extension" / "manifest.json").write_text(json.dumps(m))
     pf_mod.REPO_ROOT = fake_root
@@ -379,10 +380,11 @@ def main() -> int:
     fake_root2 = _TMP / "repo_fake2"
     shutil.copytree(REAL_REPO / "extension", fake_root2 / "extension",
                     dirs_exist_ok=True)
-    b = (fake_root2 / "extension" / "bridge.js").read_text()
+    # [FIX-WIN-002] encoding explícito en el ciclo read-modify-write (cp1252 → WinError)
+    b = (fake_root2 / "extension" / "bridge.js").read_text(encoding="utf-8")
     b = b.replace("const BRIDGE_API_BASE = '/api/extension/flow/jobs';",
                   "const BRIDGE_API_BASE = '/api/otra/cosa';")
-    (fake_root2 / "extension" / "bridge.js").write_text(b)
+    (fake_root2 / "extension" / "bridge.js").write_text(b, encoding="utf-8")
     pf_mod.REPO_ROOT = fake_root2
     try:
         pf = pf_mod.real_flow_preflight()

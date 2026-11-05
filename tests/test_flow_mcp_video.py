@@ -113,7 +113,9 @@ def _create_dummy_mp4(path: Path, size_bytes: int = 15000) -> Path:
 
 class TestFlowMCPVideoVerificationAndParsing(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
+        # [FIX-WIN-002] ignore_cleanup_errors: en NTFS, SQLite (WAL) puede
+        # retener handles de test.db al teardown → PermissionError WinError 32.
+        self.temp_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.tmp = Path(self.temp_dir.name)
 
     def tearDown(self):
@@ -144,7 +146,9 @@ class TestFlowMCPVideoVerificationAndParsing(unittest.TestCase):
 
 class TestFlowMCPVideoClient(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
+        # [FIX-WIN-002] ignore_cleanup_errors: en NTFS, SQLite (WAL) puede
+        # retener handles de test.db al teardown → PermissionError WinError 32.
+        self.temp_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.tmp = Path(self.temp_dir.name)
 
     def tearDown(self):
@@ -176,7 +180,9 @@ class TestFlowMCPVideoClient(unittest.IsolatedAsyncioTestCase):
 
 class TestPipelineVideoBridge(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
+        # [FIX-WIN-002] ignore_cleanup_errors: en NTFS, SQLite (WAL) puede
+        # retener handles de test.db al teardown → PermissionError WinError 32.
+        self.temp_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.tmp = Path(self.temp_dir.name)
 
     def tearDown(self):
@@ -245,7 +251,9 @@ class TestOrchestratorFlowVideoWiring(unittest.IsolatedAsyncioTestCase):
     """Pruebas del puente de orquestación en pipeline/orchestrator._run (Gate C.2)."""
 
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
+        # [FIX-WIN-002] ignore_cleanup_errors: en NTFS, SQLite (WAL) puede
+        # retener handles de test.db al teardown → PermissionError WinError 32.
+        self.temp_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.tmp = Path(self.temp_dir.name)
         self.project_id = "test_orch_vid_proj"
         self.proj_dir = self.tmp / self.project_id

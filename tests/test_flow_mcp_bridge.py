@@ -187,7 +187,9 @@ class TestFlowMCPConfigAndAvailability(unittest.TestCase):
 
 class TestFlowMCPFileVerificationAndParsing(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
+        # [FIX-WIN-002] ignore_cleanup_errors: en NTFS, SQLite (WAL) puede
+        # retener handles de test.db al teardown → PermissionError WinError 32.
+        self.temp_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.td = Path(self.temp_dir.name)
 
     def tearDown(self):
@@ -331,7 +333,9 @@ class TestFlowMCPProcessLifecycle(unittest.IsolatedAsyncioTestCase):
 
 class TestImagesPipelineFallbackIntegration(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
+        # [FIX-WIN-002] ignore_cleanup_errors: en NTFS, SQLite (WAL) puede
+        # retener handles de test.db al teardown → PermissionError WinError 32.
+        self.temp_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.td = Path(self.temp_dir.name)
         self.project_id = "test_pid_001"
         self.project = {"id": self.project_id, "style": "cinematic", "format": "short"}
