@@ -18,7 +18,8 @@ const QC_STATE = {
   title: '',
   text: '',
   url: '',
-  audioFile: null
+  audioFile: null,
+  destino: ''   // INT-091: carpeta de destino elegida con el explorador de Windows
 };
 
 function openQuickCreateModal(mode) {
@@ -153,6 +154,16 @@ function renderQuickCreateModal() {
         ${renderTplCards('qc')}
 
         ${inputField}
+
+        <!-- INT-091 · libre elección de carpeta destino (diálogo nativo Windows) -->
+        <div class="field" style="margin-bottom:14px;">
+          <label style="font-size:13px; font-weight:700; margin-bottom:6px; display:block;">📂 Carpeta de destino en tu PC <small style="color:var(--muted); font-weight:400;">(opcional — vacío = carpeta estándar del servidor)</small></label>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="text" id="qc-destino" readonly value="${esc(QC_STATE.destino || '')}" placeholder="D:\\PROYECTOS\\FRUTINOVELAS\\Mi_Video" style="flex:1; border-radius:10px; padding:10px; font-size:12px; color:var(--muted);">
+            <button type="button" class="btn" style="padding:10px 14px; font-size:12px; white-space:nowrap;" onclick="qcPickDestino()" title="Abre el diálogo nativo de Windows para elegir la carpeta exacta">🔍 Examinar en mi PC</button>
+          </div>
+          <small style="color:var(--muted); display:block; margin-top:5px;">marca.json, guion/ y out/ nacen DIRECTAMENTE en la carpeta que elijas (INT-091).</small>
+        </div>
 
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:16px; background:rgba(255,255,255,0.02); padding:14px; border-radius:12px; border:1px solid var(--border);">
           <div class="field" style="margin:0;">
@@ -310,6 +321,7 @@ async function executeQuickCreate() {
       auto_start: true
     };
     if (QC_STATE.tpl) body.template_id = QC_STATE.tpl;  // INT-087: plantilla de nicho
+    if (QC_STATE.destino) body.custom_workspace_path = QC_STATE.destino;  // INT-091: destino del usuario
     if (m === 'idea') body.idea = val;
     if (m === 'script') { body.script = val; body.title = val.slice(0, 48); }
     if (m === 'url') body.url = val;
@@ -343,11 +355,42 @@ async function executeQuickCreate() {
   }
 }
 
+/* ── INT-091 · Carpeta de destino elegida por el usuario ─────────────
+   Diálogo NATIVO del PC (POST /api/dialog/pick-folder → Explorador de
+   Windows): el usuario elige la carpeta EXACTA donde vivirán marca.json,
+   guion/ y out/ del proyecto. El path devuelto viaja en la creación como
+   custom_workspace_path y el pipeline lo respeta absoluto.
+   NOTA: se usa el diálogo del SERVIDOR y no window.showDirectoryPicker()
+   porque el File System Access API NO entrega rutas físicas reales
+   (solo handles sandboxeados sin «D:\…») — el requisito es la ruta real. */
+async function pickDestinoFolder() {
+  toast('Abriendo explorador de tu PC… 📂');
+  try {
+    const r = await api('/dialog/pick-folder', { method: 'POST' });
+    if (r.ok && r.path) { toast('📂 Carpeta destino: ' + r.path, 'ok'); return r.path; }
+    toast('No se eligió ninguna carpeta', 'err');
+    return null;
+  } catch (e) { toast('No se pudo abrir el diálogo: ' + e.message, 'err'); return null; }
+}
+
+async function qcPickDestino() {
+  const p = await pickDestinoFolder();
+  if (p) { QC_STATE.destino = p; renderQuickCreateModal(); }
+}
+
+async function wizardPickDestino() {
+  const p = await pickDestinoFolder();
+  if (p) { W.destino = p; renderCreate(); }
+}
+
 window.openQuickCreateModal = openQuickCreateModal;
 window.startDirectCreation = openQuickCreateModal;
 window.qcSwitchMode = qcSwitchMode;
 window.executeQuickCreate = executeQuickCreate;
 window.openWizardFromQC = openWizardFromQC;
+window.pickDestinoFolder = pickDestinoFolder;    // INT-091
+window.qcPickDestino = qcPickDestino;            // INT-091
+window.wizardPickDestino = wizardPickDestino;    // INT-091
 
 
 /* ── v2.36 · INT-079 · Brand Profiles en el asistente ─────────────
@@ -484,7 +527,8 @@ const W = { step: 1, mode: 'idea', format: 'short', style: 'auto',
             avatar: '', platforms: ['youtube', 'tiktok'],
             transitions: true, styleReference: true, subtitles: 'shorts', brandProfile: '',
             cookies: '', nicho: '', nichoAdjust: '', pacing: 'normal',
-            tpl: '', nicheLabel: '' };  // INT-087: plantilla de nicho + nicho de marca
+            tpl: '', nicheLabel: '',   // INT-087: plantilla de nicho + nicho de marca
+            destino: '' };  // INT-091: carpeta de destino elegida con el explorador
 
 /* ── INT-087 · selector de plantillas de nicho (marca.json + workspace) ── */
 let TPLS = [];            // catálogo GET /api/templates
@@ -719,7 +763,15 @@ function renderCreate() {
         <small style="color:var(--muted);display:block;margin-top:6px">El modo URL mide la originalidad del guion (solape de 5-gramas contra el viral) y reescribe solo si copia.</small>
       </div>
       <div class="field"><label>Título interno (máx 60)</label>
-        <input type="text" maxlength="60" value="${esc(W.title)}" oninput="W.title=this.value" placeholder="solo referencia, lo genera la IA si lo dejas vacío"></div>`;
+        <input type="text" maxlength="60" value="${esc(W.title)}" oninput="W.title=this.value" placeholder="solo referencia, lo genera la IA si lo dejas vacío"></div>
+      <!-- INT-091 · libre elección de carpeta destino (diálogo nativo Windows) -->
+      <div class="field"><label>📂 Carpeta de destino en tu PC <small style="color:var(--muted)">(opcional — vacío = carpeta estándar)</small></label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="text" readonly value="${esc(W.destino || '')}" placeholder="D:\\PROYECTOS\\FRUTINOVELAS\\Mi_Video" style="flex:1;color:var(--muted)">
+          <button type="button" class="btn small ghost" onclick="wizardPickDestino()" title="Abre el diálogo nativo de Windows para elegir la carpeta exacta">🔍 Examinar en mi PC</button>
+        </div>
+        <small style="color:var(--muted);display:block;margin-top:5px">marca.json, guion/ y out/ nacen DIRECTAMENTE en la carpeta que elijas (INT-091).</small>
+      </div>`;
   }
 
   $('#view').innerHTML = `<div class="wizard">

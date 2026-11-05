@@ -60,7 +60,8 @@ async function createProject() {
         mode: 'nicho', niche_template: W.nicho, idea: W.nichoAdjust || null,
         auto_start: true,
         platforms: W.platforms.length ? W.platforms : ['youtube'],
-        transitions: W.transitions, style_reference: W.styleReference }});
+        transitions: W.transitions, style_reference: W.styleReference,
+        custom_workspace_path: W.destino || null }});  // INT-091: destino
       toast('Video en fabricación desde el nicho 🚀', 'ok');
       W.step = 1; W.nichoAdjust = '';
       showProgress(p.job_id, p.id);
@@ -92,6 +93,7 @@ async function createProject() {
                    cookies_from_browser: W.cookies || null,
                    brand_profile_id: W.brandProfile || null };
     if (W.tpl) { body.template_id = W.tpl; if (W.nicheLabel) body.niche = W.nicheLabel; }  // INT-087: plantilla + nicho de marca
+    if (W.destino) body.custom_workspace_path = W.destino;  // INT-091: destino del usuario
     if (audioPath) body.audio_path = audioPath;  // INT-080: puerta legitima (antes PATCH → 403)
     if (W.mode === 'idea') body.idea = W.idea;
     if (W.mode === 'script') { body.script = W.script; body.title = W.title || W.script.slice(0, 50); }
@@ -588,6 +590,7 @@ function renderWorkspacePanel(w) {
       <div>
         <b style="font-size:15px;display:flex;align-items:center;gap:6px">🗂️ Espacio de trabajo
           <span style="font-size:11px;font-weight:400;color:var(--muted);background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:10px">${esc(w.name || '')}</span>
+          ${w.custom ? '<span style="font-size:11px;font-weight:700;color:#fbbf24;background:rgba(251,191,36,0.12);padding:2px 8px;border-radius:10px" title="Carpeta elegida por ti con el explorador de Windows (INT-091) — el pipeline la respeta absoluta">📂 tu carpeta</span>' : ''}
           ${w.existe ? '' : '<span style="font-size:11px;color:var(--muted)">· se crea al generar</span>'}</b>
         <p style="font-size:12px;color:var(--muted);margin-top:2px">Orden real en tu disco — 📂 Abrir Carpeta te lleva directo a esta vista en tu PC${w.legacy && w.legacy.existe && !w.existe ? ' (ahora mismo: almacén legacy output/)' : ''}</p>
       </div>

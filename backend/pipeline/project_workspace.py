@@ -71,8 +71,38 @@ def legacy_dir(project: dict) -> Path:
     return Path(config.OUTPUT_DIR) / str(project.get("id") or "")
 
 
+def custom_root(project: dict) -> Path | None:
+    """INT-091 · Carpeta de destino ELEGIDA POR EL USUARIO, o None.
+
+    Lee ``meta.custom_workspace_path`` (lo escribe POST /api/projects
+    cuando la creación llega con la ruta elegida en el diálogo nativo de
+    Windows). Devuelve Path solo si es una ruta ABSOLUTA en el servidor
+    (que corre en el PC del usuario: «D:\…» en Windows). Vacío, relativo,
+    con NUL o desproporcionado → None: degradación honesta a
+    data/projects/. NUNCA lanza."""
+    meta = (project or {}).get("meta") or {}
+    raw = str(meta.get("custom_workspace_path") or "").strip().strip('"').strip()
+    if not raw:
+        return None
+    try:
+        p = Path(raw)
+        if "\x00" in raw or len(raw) > 500 or not p.is_absolute():
+            return None
+        return p
+    except Exception:  # noqa: BLE001 — ruta malformada → destino estándar
+        return None
+
+
 def workspace_path(project: dict) -> Path:
-    """Ruta canónica del workspace: data/projects/<nicho>_<slug>_<id8>."""
+    """Ruta canónica del workspace: data/projects/<nicho>_<slug>_<id8>.
+
+    INT-091 · libre elección de destino: si el proyecto define
+    ``meta.custom_workspace_path`` (carpeta elegida con el diálogo nativo
+    de Windows), esa ruta MANDA y el workspace vive EXACTAMENTE ahí —
+    cero imposición de data/projects/."""
+    custom = custom_root(project)
+    if custom is not None:
+        return custom
     return Path(config.PROJECTS_DIR) / workspace_name(project)
 
 
@@ -142,8 +172,13 @@ def create_workspace(project: dict, marca: dict | None = None) -> Path:
 def resolve_workspace(project: dict) -> Path:
     """Ruta de trabajo REAL del proyecto.
 
+    · INT-091 · proyecto con carpeta elegida por el usuario → EXACTAMENTE
+      esa ruta (create_workspace la crea on-demand; jamás cae al legacy):
+      «Abrir Carpeta» y la extensión apuntan al disco del usuario.
     · Proyecto nuevo con workspace → data/projects/<nombre>/.
     · Proyecto legacy (solo output/<pid>) → su almacén físico, intacto."""
+    if custom_root(project) is not None:
+        return workspace_path(project)
     ws = workspace_path(project)
     if ws.is_dir():
         return ws
@@ -177,12 +212,15 @@ def workspace_info(project: dict) -> dict:
             "name": ws.name,
             "path": str(ws),
             "existe": existe,
+            "custom": custom_root(project) is not None,  # INT-091: elegida por el usuario
             "carpetas": carpetas,
             "marca": (ws / "marca.json").is_file() if existe else False,
             "legacy": {"path": str(legacy), "existe": legacy.is_dir()},
         }
     except Exception:  # noqa: BLE001 — el visor nunca rompe la API
-        return {"name": "", "path": "", "existe": False, "carpetas": {},
+        return {"name": "", "path": "", "existe": False,
+                "custom": custom_root(project) is not None,
+                "carpetas": {},
                 "marca": False, "legacy": {"path": str(legacy),
                                            "existe": legacy.is_dir()}}
 
@@ -190,7 +228,16 @@ def workspace_info(project: dict) -> dict:
 def purge_workspace(project: dict) -> None:
     """Elimina la vista organizada (al borrar el proyecto). Los enlaces se
     desligan, NUNCA se sigue: el almacén legacy se borra por su cuenta vía
-    security.safe_project_output_dir en DELETE /api/projects/{pid}."""
+    security.safe_project_output_dir en DELETE /api/projects/{pid}.
+
+    INT-091 · si el workspace es la carpeta ELEGIDA por el usuario
+    (meta.custom_workspace_path) aquí NO se borra NADA: es espacio físico
+    del usuario, fuera del control de la app — sus subcarpetas, guiones y
+    marca.json quedan intactos en su disco."""
+    if custom_root(project) is not None:
+        log.info("purge_workspace(%s): carpeta elegida por el usuario — "
+                 "no se borra nada en su disco", project.get("id"))
+        return
     try:
         shutil.rmtree(workspace_path(project), ignore_errors=True)
     except Exception:  # noqa: BLE001

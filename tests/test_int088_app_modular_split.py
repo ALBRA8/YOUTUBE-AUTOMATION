@@ -39,8 +39,10 @@ import config  # noqa: E402
 OK, FAIL = 0, 0
 LOADER = "app.js"
 MODULES = ("app-core.js", "app-projects.js", "app-mcp.js", "app-wizard.js", "app-player.js")
-N_FUNCS = 191   # 189 del monolito v2.42.0 + 2 nuevas INT-090/AGENTE 2
+N_FUNCS = 194   # 189 del monolito v2.42.0 + 2 nuevas INT-090/AGENTE 2
                 # (renderWorkspacePanel + openProjectFolder en app-projects.js)
+                # + 3 nuevas INT-091 (pickDestinoFolder + qcPickDestino +
+                # wizardPickDestino en app-wizard.js — selector nativo de carpetas)
 
 # funciones estrella por módulo (cohesión; suficientes para cazar desvíos)
 STAR = {

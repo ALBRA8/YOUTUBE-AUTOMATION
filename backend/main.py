@@ -997,15 +997,41 @@ def _template_meta(tpl: dict) -> dict:
     return d
 
 
-def _post_create_init(project: dict, tpl: dict | None) -> dict:
+def _validar_carpeta_destino(body: dict) -> str | None:
+    """INT-091 · valida `custom_workspace_path` (carpeta de destino elegida
+    por el usuario con el diálogo nativo de Windows). None si el body no la
+    trae (o viene vacía); HTTP 400 si viene inválida: relativa, con NUL o
+    desproporcionada. Acepta la forma «Copy as path» de Windows (comillas
+    perimetrales). La validez ABSOLUTA se evalúa en el servidor, que corre
+    en el PC del usuario (D:\… en Windows, /… en Linux)."""
+    raw = body.get("custom_workspace_path")
+    if raw is None or not str(raw).strip():
+        return None
+    import os as _os  # INT-080: import diferido (convención de main.py)
+    s = str(raw).strip().strip('"').strip()
+    if "\x00" in s or len(s) > 500 or not _os.path.isabs(s):
+        raise HTTPException(
+            400, "custom_workspace_path debe ser una ruta ABSOLUTA del PC "
+                 "(p. ej. D:\\PROYECTOS\\FRUTINOVELAS\\Mi_Video)")
+    return s
+
+
+def _post_create_init(project: dict, tpl: dict | None,
+                      custom_path: str | None = None) -> dict:
     """INT-086 · inicialización post-creación común a TODOS los modos:
     marca la plantilla de nicho usada y crea el workspace modular
     (estructura estándar + marca.json). Best-effort: nunca invalida la
-    creación del proyecto."""
+    creación del proyecto.
+    INT-091 · si el usuario eligió carpeta de destino (custom_path), se
+    persiste en meta ANTES de crear el workspace: la estructura estándar
+    nace DIRECTAMENTE en la ruta elegida, no en data/projects/."""
     try:
         meta = dict(project.get("meta") or {})
         if tpl:
             meta.update(_template_meta(tpl))
+        if custom_path:
+            meta["custom_workspace_path"] = custom_path
+        if tpl or custom_path:
             db.update_project(project["id"], meta=meta)
             project["meta"] = meta
         ws = project_workspace.create_workspace(
@@ -1053,6 +1079,11 @@ async def create_project(body: dict):
         if not tpl:
             raise HTTPException(
                 400, "template_id desconocido — consulta GET /api/templates")
+    # INT-091 · carpeta de destino elegida por el usuario (opcional, todos
+    # los modos): valida UNA vez aquí y se aplica en cada rama vía
+    # _post_create_init(custom_path=…) — el workspace nace donde el usuario
+    # decidió, no en data/projects/.
+    cwp = _validar_carpeta_destino(body)
     if mode == "guion_json":
         # v2.10 · contrato guion_json: el guion llega HECHO desde ChatGPT —
         # cero LLM interno. Valida, normaliza (alias/fences/fallbacks) y
@@ -1069,7 +1100,7 @@ async def create_project(body: dict):
                 format=g.get("formato") or "short", voice=g.get("voz"),
                 meta=pmeta, avatar_id=av,
                 platforms=g.get("plataformas") or ["youtube"],
-                niche=g.get("nicho")), tpl)  # INT-086: workspace+plantilla
+                niche=g.get("nicho")), tpl, custom_path=cwp)  # INT-086+091
         try:
             return await guion_svc.ingest(body, {s["id"] for s in STYLES}, _crear)
         except ValueError as e:
@@ -1097,7 +1128,7 @@ async def create_project(body: dict):
                 format=g.get("formato") or "short", voice=g.get("voz"),
                 meta=pmeta, avatar_id=av,
                 platforms=g.get("plataformas") or ["youtube"],
-                niche=g.get("nicho")), tpl)  # INT-086: workspace+plantilla
+                niche=g.get("nicho")), tpl, custom_path=cwp)  # INT-086+091
         try:
             payload = body.get("production", body.get("production_json"))
             if payload is None:
@@ -1298,7 +1329,7 @@ async def create_project(body: dict):
         format=body.get("format", "short"), voice=voice,
         tts_provider=tts_provider, meta=meta,
         avatar_id=avatar_id, platforms=platforms,
-        niche=niche_label), tpl)  # INT-086: workspace+plantilla
+        niche=niche_label), tpl, custom_path=cwp)  # INT-086+091
     if brand_pid:
         with db.connect() as con:
             cols = [r[1] for r in con.execute("PRAGMA table_info(projects)").fetchall()]
@@ -1322,6 +1353,69 @@ async def get_project(pid: str):
     # canónicas + marca.json) para la vista de detalle en la UI.
     p["workspace"] = project_workspace.workspace_info(p)
     return p
+
+
+# ── INT-091 · Diálogo NATIVO de carpetas (libre elección de destino) ────
+def _pick_folder_dialog() -> tuple[bool, str]:
+    """Abre el diálogo NATIVO del SO para elegir una carpeta (INT-091).
+
+    Devuelve (aceptado, ruta). Windows: Shell.Application BrowseForFolder
+    vía PowerShell — la ventana real del Explorador, sin dependencias
+    extra y en proceso aparte (no bloquea el event loop del server más
+    allá de la espera del usuario). macOS/Linux: osascript/zenity/kdialog
+    si existen. Sin GUI o cancelado → (False, ""). Nunca lanza."""
+    import os as _os  # INT-080: import diferido (convención de main.py)
+    import subprocess
+    import sys
+    titulo = "Selecciona la carpeta para tu proyecto"
+    try:
+        if _os.name == "nt":
+            ps = ("(New-Object -ComObject Shell.Application).BrowseForFolder("
+                  f"0, '{titulo}', 0, 0).Self.Path")
+            r = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-STA", "-NonInteractive",
+                 "-Command", ps],
+                capture_output=True, text=True, timeout=1800,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            ruta = (r.stdout or "").strip().strip('"').strip()
+            # carpeta VIRTUAL (p. ej. «Este equipo») → .Self.Path vacío:
+            # se trata como cancelado para no crear workspaces sin ruta real
+            if r.returncode == 0 and ruta:
+                return True, ruta
+            return False, ""
+        if sys.platform == "darwin":
+            r = subprocess.run(
+                ["osascript", "-e",
+                 f'POSIX path of (choose folder with prompt "{titulo}")'],
+                capture_output=True, text=True, timeout=1800)
+            ruta = (r.stdout or "").strip()
+            return (True, ruta) if ruta else (False, "")
+        for cmd in (["zenity", "--file-selection", "--directory",
+                     "--title", titulo],
+                    ["kdialog", "--getexistingdirectory", "/",
+                     "--title", titulo]):
+            if shutil.which(cmd[0]):
+                r = subprocess.run(cmd, capture_output=True, text=True,
+                                   timeout=1800)
+                ruta = (r.stdout or "").strip()
+                return (True, ruta) if ruta else (False, "")
+    except Exception as e:  # noqa: BLE001 — honesto: sin diálogo no hay ruta
+        log.warning("pick-folder: diálogo no disponible: %s", e)
+    return False, ""
+
+
+@app.post("/api/dialog/pick-folder")
+async def dialog_pick_folder():
+    """INT-091 · abre el diálogo NATIVO de Windows (Explorador de archivos)
+    para que el usuario elija la carpeta exacta donde guardar el proyecto.
+    · elegida   → {"ok": true,  "path": "D:\\PROYECTOS\\…\\Mi_Video"}
+    · cancelada → {"ok": false, "cancelled": true}
+    El path devuelto viaja luego en POST /api/projects como
+    custom_workspace_path y el pipeline lo respeta ABSOLUTO (INT-091)."""
+    aceptado, ruta = _pick_folder_dialog()
+    if not aceptado:
+        return {"ok": False, "cancelled": True}
+    return {"ok": True, "path": ruta}
 
 
 # ── AGENTE 2 · Abrir Carpeta en el PC del usuario (1 clic en la web) ────
