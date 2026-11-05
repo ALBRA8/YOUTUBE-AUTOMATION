@@ -36,6 +36,7 @@ from pipeline import subtitles as subs_mod
 from pipeline import typography as typo_mod
 from pipeline.tts_step import GAP as VOICE_GAP  # pausa real de voice_full
 from services import avatar_motion
+from pipeline import project_workspace  # INT-089: telemetría HF en la carpeta del proyecto
 
 log = logging.getLogger("video")
 
@@ -235,6 +236,13 @@ async def render_scenes(project: dict, scenes: list[dict], durations: list[float
     proj_dir = OUTPUT_DIR / project["id"]
     clips_dir = proj_dir / "clips"
     clips_dir.mkdir(parents=True, exist_ok=True)
+    # INT-089 · la telemetría HF por llamada vive en la carpeta del proyecto:
+    # workspace canónico (INT-086) si existe; almacén legacy como respaldo.
+    try:
+        _ws = project_workspace.workspace_path(project)
+    except Exception:
+        _ws = None
+    tel_dir = _ws if (_ws and _ws.is_dir()) else proj_dir
     w, h = (SHORT_W, SHORT_H) if project["format"] == "short" else (LONG_W, LONG_H)
     n_scenes = len(scenes)
     gap = VOICE_GAP if scene_gap is None else max(float(scene_gap), 0.0)
@@ -278,7 +286,7 @@ async def render_scenes(project: dict, scenes: list[dict], durations: list[float
                 v2v_out = clips_dir / f"lipsync_{i:02d}.mp4"
                 try:
                     res = await avatar_motion.lipsync_video_to_video(
-                        src, Path(a_path), v2v_out)
+                        src, Path(a_path), v2v_out, project_dir=tel_dir)
                     if res.get("ok") and Path(res["video"]).is_file():
                         src_use = Path(res["video"])
                         log.info("clip %d: lip-sync v2v OK (%s)", i, res.get("space"))

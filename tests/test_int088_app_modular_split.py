@@ -192,8 +192,8 @@ def test_boot_orden_y_auth():
 
 # ── 6 · contrato de versión (cadena INT-080) ─────────────────────────────
 def test_version():
-    check("APP_VERSION 2.43.0 (INT-080: bump por cambio funcional)",
-          config.APP_VERSION == "2.43.0")
+    check("APP_VERSION 2.44.0 (INT-080: bump por cambio funcional)",
+          config.APP_VERSION == "2.44.0")
 
 
 if __name__ == "__main__":  # modo script directo

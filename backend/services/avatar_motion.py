@@ -28,6 +28,9 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFilter
 
+# INT-089: telemetría por llamada HF (ZeroGPU) — sidecar por proyecto.
+from services import hf_telemetry
+
 log = logging.getLogger("avatar_motion")
 
 LIVEPORTRAIT_API_URL = os.getenv("LIVEPORTRAIT_API_URL", "").strip()
@@ -302,7 +305,8 @@ async def render_avatar_animation(
     output_video: Path,
     audio_path: Path | None = None,
     duration_sec: float = 4.0,
-    engine: str = "auto"
+    engine: str = "auto",
+    project_dir: Path | str | None = None,
 ) -> dict[str, Any]:
     """Punto de entrada unificado que decide entre LivePortrait (bucle) o MuseTalk (hablado).
 
@@ -313,6 +317,8 @@ async def render_avatar_animation(
       · "auto" (default) → HF primero, local de respaldo.
       · "hf" / "liveportrait" → solo HF (si falla, propaga).
       · "musetalk" / "local" → solo motor local determinista (sin red).
+    INT-089: ``project_dir`` (opcional) activa la telemetría HF por llamada en
+    la carpeta del proyecto (hf_telemetry.json).
     """
     # Si viene audio, ejecutar pipeline de Sincronización Labial
     if audio_path and audio_path.is_file():
@@ -320,7 +326,8 @@ async def render_avatar_animation(
         want_hf = requested in ("auto", "hf", "liveportrait", "liveportrait_hf")
         if want_hf and hf_lipsync_enabled():
             try:
-                p, space_used = await lipsync_liveportrait_hf(image_path, audio_path, output_video)
+                p, space_used = await lipsync_liveportrait_hf(
+                    image_path, audio_path, output_video, project_dir=project_dir)
                 p = await asyncio.to_thread(
                     normalize_vertical_916, p,
                     int(_am_cfg("AVATAR_OUTPUT_W", "1080")),
@@ -508,6 +515,7 @@ async def lipsync_liveportrait_hf(
     image_path: Path,
     audio_path: Path,
     output_video: Path,
+    project_dir: Path | str | None = None,
 ) -> tuple[Path, str]:
     """Lip-sync hiperrealista vía HF Spaces públicos ($0.00). INT-072.
 
@@ -515,6 +523,9 @@ async def lipsync_liveportrait_hf(
     un hilo con timeout propio (el backend jamás se bloquea). Devuelve
     ``(video_path, space_usado)``. Lanza RuntimeError si todos los Spaces fallan
     (el caller decide fail-open al motor local).
+
+    INT-089: cada intento (éxito o fallo) deja un registro de telemetría en
+    ``hf_telemetry.json`` de la carpeta del proyecto (si ``project_dir``).
     """
     if not image_path.is_file():
         raise FileNotFoundError(f"Imagen de avatar no encontrada: {image_path}")
@@ -524,6 +535,7 @@ async def lipsync_liveportrait_hf(
     timeout_s = float(_am_cfg("AVATAR_HF_TIMEOUT_S", "420"))
     errors: list[str] = []
     for space_id in hf_space_list():
+        t0 = time.monotonic()
         try:
             p = await asyncio.wait_for(
                 asyncio.to_thread(
@@ -532,11 +544,18 @@ async def lipsync_liveportrait_hf(
                 ),
                 timeout=timeout_s,
             )
+            hf_telemetry.record("lipsync_hf", space_id, True, project_dir=project_dir,
+                                timeout_s=timeout_s,
+                                duracion_s=time.monotonic() - t0)
             log.info("[avatar_motion] Lip-sync HF OK via %s", space_id)
             return p, space_id
         except Exception as ex:
             # NO registrar HF_TOKEN; solo tipo y mensaje corto
             errors.append(f"{space_id}: {type(ex).__name__}: {str(ex)[:160]}")
+            hf_telemetry.record("lipsync_hf", space_id, False,
+                                error=errors[-1], project_dir=project_dir,
+                                timeout_s=timeout_s,
+                                duracion_s=time.monotonic() - t0)
             log.warning("[avatar_motion] Space %s falló (%s)", space_id, type(ex).__name__)
     raise RuntimeError("Todos los Spaces HF fallaron → " + " | ".join(errors))
 
@@ -695,6 +714,7 @@ async def lipsync_video_to_video(
     audio_path: Path,
     output_path: Path,
     timeout_s: float | None = None,
+    project_dir: Path | str | None = None,
 ) -> dict:
     """INT-075: lip-sync video-to-video del video base de Google Flow con el
     audio TTS de la escena ($0.00 vía Spaces públicos de Hugging Face).
@@ -708,9 +728,14 @@ async def lipsync_video_to_video(
        ``output_path`` y devuelve ``ok=False`` — el render continúa sin
        lip-sync.
 
+    INT-089: cada intento deja telemetría en ``hf_telemetry.json`` de la
+    carpeta del proyecto (si ``project_dir``): timestamp, segundos de GPU
+    solicitados/restantes cuando el error es de cuota ZeroGPU, éxito/fallo
+    y mensaje de error.
+
     Devuelve ``{"ok", "video", "space", "attempted", "fallback", "error"}``.
     Firma de la espec: ``lipsync_video_to_video(video_path, audio_path,
-    output_path)``; ``timeout_s`` es opcional (override por llamada)."""
+    output_path)``; ``timeout_s`` y ``project_dir`` son opcionales."""
     video_path = Path(video_path)
     audio_path = Path(audio_path)
     output_path = Path(output_path)
@@ -734,16 +759,23 @@ async def lipsync_video_to_video(
         timeout = float(timeout_s or _am_cfg("AVATAR_V2V_TIMEOUT_S", "300"))
         for space in v2v_space_list():
             attempted.append(space)
+            t0 = time.monotonic()
             try:
                 await asyncio.wait_for(
                     asyncio.to_thread(_call_hf_v2v_gradio, space,
                                       str(video_path), str(wav), str(output_path)),
                     timeout=timeout)
+                hf_telemetry.record("v2v", space, True, project_dir=project_dir,
+                                    timeout_s=timeout,
+                                    duracion_s=time.monotonic() - t0)
                 return {"ok": True, "video": str(output_path), "space": space,
                         "attempted": attempted, "fallback": False, "error": ""}
             except Exception as ex:  # noqa: BLE001
                 msg = f"{space}: {type(ex).__name__}: {str(ex)[:160]}"
                 errors.append(msg)
+                hf_telemetry.record("v2v", space, False, error=msg,
+                                    project_dir=project_dir, timeout_s=timeout,
+                                    duracion_s=time.monotonic() - t0)
                 log.warning("[avatar_motion v2v] %s", msg)
         shutil.copy(video_path, output_path)  # FAIL-OPEN: video original
         return {"ok": False, "video": str(output_path), "space": "",

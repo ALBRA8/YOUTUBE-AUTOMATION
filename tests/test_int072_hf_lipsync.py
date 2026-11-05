@@ -155,11 +155,15 @@ def _hf_on():
 # ── 1. contrato: firmas preservadas ──────────────────────────────────────
 def test_signatures_preserved():
     sig = inspect.signature(am.render_avatar_animation)
+    # INT-089: project_dir=None se añadió AL FINAL como kwarg opcional —
+    # la firma de la espec INT-072 sigue intacta (prefijo compatible).
     assert list(sig.parameters) == [
-        "image_path", "output_video", "audio_path", "duration_sec", "engine"]
+        "image_path", "output_video", "audio_path", "duration_sec", "engine",
+        "project_dir"]
     assert sig.parameters["audio_path"].default is None
     assert sig.parameters["duration_sec"].default == 4.0
     assert sig.parameters["engine"].default == "auto"
+    assert sig.parameters["project_dir"].default is None
 
     sig_lp = inspect.signature(am.animate_liveportrait_local)
     assert list(sig_lp.parameters) == ["image_path", "output_video", "duration_sec", "fps"]

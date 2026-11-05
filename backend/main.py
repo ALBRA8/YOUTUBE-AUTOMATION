@@ -1467,6 +1467,53 @@ async def project_contact_sheet(pid: str):
     return FileResponse(out, media_type="image/jpeg")
 
 
+@app.get("/api/projects/{pid}/hf-status")
+async def project_hf_status(pid: str):
+    """INT-089 · Último registro de telemetría HF (ZeroGPU) del proyecto.
+
+    Cada llamada real a un Space de Hugging Face (lip-sync audio-driven y
+    video-to-video LatentSync/Wav2Lip) deja un registro en hf_telemetry.json
+    dentro de la carpeta del proyecto (workspace canónico INT-086 si existe,
+    output/<pid>/ como respaldo). La UI puede consultar esto ANTES de lanzar
+    el pipeline para anticipar si el lip-sync va a chocar con la cuota:
+    `cuota_agotada` + `segundos_restantes` (cuándo se renueva la cuota)."""
+    _pid(pid)
+    p = db.get_project(pid)
+    if not p:
+        raise HTTPException(404, "proyecto no encontrado")
+    from services import hf_telemetry as hft
+
+    candidatos: list[Path] = []
+    try:
+        from pipeline import project_workspace as _pw
+        ws = _pw.workspace_path(p)
+        if ws.is_dir():
+            candidatos.append(ws)
+    except Exception:
+        pass
+    try:
+        legacy = security.safe_project_output_dir(_pid(pid))
+        if legacy.is_dir() and legacy not in candidatos:
+            candidatos.append(legacy)
+    except Exception:
+        pass
+
+    last, origen = None, ""
+    for d in candidatos:
+        last = hft.last_record(d)
+        if last:
+            origen = str(d / "hf_telemetry.json")
+            break
+    return {
+        "ok": True,
+        "project_id": pid,
+        "telemetria": last,
+        "origen": origen,
+        "cuota_agotada": bool(last and last.get("cuota_agotada")),
+        "segundos_restantes": (last or {}).get("segundos_restantes"),
+    }
+
+
 @app.get("/api/projects/{pid}/subtitles.srt")
 async def project_srt(pid: str):
     words_file = security.safe_project_output_dir(_pid(pid)) / "words.json"  # M5

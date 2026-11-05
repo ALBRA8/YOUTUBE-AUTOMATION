@@ -168,4 +168,4 @@ def test_chat_vacio_sigue_400(client):
 # ═══════════════ 4 · contrato de versión (INT-080) ══════════════════════
 
 def test_version_2_39_0():
-    assert config.APP_VERSION == "2.43.0"   # INT-088: refactor modular de app.js
+    assert config.APP_VERSION == "2.44.0"   # INT-089: telemetría HF por llamada

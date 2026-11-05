@@ -159,7 +159,7 @@ def test_hf_token_envoltorio_publico_coincide():
 # ═══════════════ 9 · contrato de versión (INT-080 cache-busting) ═════════
 
 def test_version_bump_2_39_0():
-    assert config.APP_VERSION == "2.43.0"   # INT-088: refactor modular de app.js
+    assert config.APP_VERSION == "2.44.0"   # INT-089: telemetría HF por llamada
     assert tuple(int(p) for p in config.APP_VERSION.split(".")) >= (2, 37, 0)
 
 
