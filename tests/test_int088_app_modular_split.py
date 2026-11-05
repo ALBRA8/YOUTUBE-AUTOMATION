@@ -39,7 +39,8 @@ import config  # noqa: E402
 OK, FAIL = 0, 0
 LOADER = "app.js"
 MODULES = ("app-core.js", "app-projects.js", "app-mcp.js", "app-wizard.js", "app-player.js")
-N_FUNCS = 189   # congelado: funciones top-level del monolito original (v2.42.0)
+N_FUNCS = 191   # 189 del monolito v2.42.0 + 2 nuevas INT-090/AGENTE 2
+                # (renderWorkspacePanel + openProjectFolder en app-projects.js)
 
 # funciones estrella por módulo (cohesión; suficientes para cazar desvíos)
 STAR = {

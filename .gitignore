@@ -43,7 +43,20 @@ env/
 # ── 🎬 DATOS GENERADOS EN EJECUCIÓN (videos, tmp, avatares) ─────────
 backend/data/output/
 backend/data/tmp/
-backend/data/avatars/
+# INT-090: la biblioteca de personajes (descripcion.json) SÍ es repo —
+# los retratos runtime (*.png al ras) y subcarpetas ajenas NO.
+backend/data/avatars/*
+!backend/data/avatars/cocardo/
+!backend/data/avatars/valeria/
+!backend/data/avatars/voz_narradora/
+backend/data/avatars/cocardo/*
+!backend/data/avatars/cocardo/descripcion.json
+backend/data/avatars/valeria/*
+!backend/data/avatars/valeria/descripcion.json
+backend/data/avatars/voz_narradora/*
+!backend/data/avatars/voz_narradora/descripcion.json
+# INT-086: workspaces de usuario (vista organizada) — runtime, nunca repo
+backend/data/projects/
 backend/data/whisper/
 *.mp4
 *.mp3

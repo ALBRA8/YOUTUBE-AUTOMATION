@@ -1,0 +1,21 @@
+{
+  "id": "cocardo",
+  "nombre": "Cocardo",
+  "universo": "animado",
+  "modelo": "nano-banana-2.1",
+  "voz": "es-CO-GonzaloNeural",
+  "tts_provider": "edge",
+  "estilo": "cartoon",
+  "descripcion": "Personaje animado tipo cartoon (universo Nano Banana): vecino cómico colombiano, expresivo y cálido. Vive EXCLUSIVAMENTE en el universo animado — nunca mezclar con personajes reales en el mismo proyecto.",
+  "apariencia": {
+    "piel": "verde oliva tipo rana caricaturesca",
+    "ojos": "grandes, redondos, blancos con pupila negra expresiva",
+    "cabello": "sin cabello (cabeza de rana cartoon)",
+    "cuerpo": "bajito, panzón, manos y pies regordetes",
+    "vestuario": "camiseta amarilla, gorra roja, pantalón azul"
+  },
+  "incompatible_con": ["real", "hiper"],
+  "flow_project_id": null,
+  "flow_character_id": null,
+  "nota_int090": "flow_project_id / flow_character_id enlazan este personaje con su personaje nativo de Google Flow cuando exista; se rellenan vía PATCH /api/avatars/library/cocardo."
+}

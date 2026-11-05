@@ -35,7 +35,8 @@ from services import (general_agent as agent_svc,  # INT-028: cerebro único (ex
                       niche_templates as ntpl_svc,  # INT-086: catálogo
                       production_json as prod_svc, scheduler,
                       trend_research as trends_svc,
-                      tts_service, url_mode, whisper_service, youtube_publish)
+                      tts_service, universos,  # INT-090: blindaje de universos
+                      url_mode, whisper_service, youtube_publish)
 from services import avatar_schema
 from services.themes import STYLES, get_style
 
@@ -649,7 +650,36 @@ async def avatars_schema():
 
 @app.get("/api/avatars")
 async def avatars_list():
-    return db.list_avatars()
+    out = db.list_avatars()
+    for av in out:  # INT-090: universo resuelto para la UI (nunca nulo)
+        av["universo"] = universos.universo_de(av)
+    return out
+
+
+# ── INT-090 · biblioteca canónica de personajes (backend/data/avatars/) ──
+@app.get("/api/avatars/library")
+async def avatars_library():
+    """Biblioteca de personajes con universo, motor visual y enlace a Flow.
+    Fuente de verdad: data/avatars/<id>/descripcion.json (versionado)."""
+    bib = universos.biblioteca()
+    return {
+        "universos": list(universos.UNIVERSOS),
+        "reglas": {u: sorted(p) for u, p in universos._reglas_universo().items()},
+        "avatars": [bib[k] for k in sorted(bib)],
+    }
+
+
+@app.patch("/api/avatars/library/{lib_id}")
+async def avatars_library_link(lib_id: str, body: dict):
+    """Enlaza el personaje de la biblioteca con su personaje nativo de
+    Google Flow (flow_project_id / flow_character_id). Persiste en disco."""
+    try:
+        data = universos.vincular_flow(
+            lib_id,
+            body.get("flow_project_id"), body.get("flow_character_id"))
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    return data
 
 
 @app.post("/api/avatars")
@@ -662,11 +692,18 @@ async def avatars_create(body: dict):
     if tts_provider and tts_provider not in ("edge", "gemini"):
         raise HTTPException(400, "tts_provider debe ser edge o gemini")
     style = (body.get("style") or "").strip() or None
+    # INT-090 · universo explícito (animado|real|hiper|neutro); si viene un
+    # valor inválido se rechaza CON MENSAJE — mejor que silencio.
+    universo = (body.get("universo") or "").strip().lower() or None
+    if universo and universo not in universos.UNIVERSOS:
+        raise HTTPException(400, "universo debe ser uno de: "
+                            + ", ".join(universos.UNIVERSOS))
     av = db.create_avatar(
         name=name,
         description=(body.get("description") or "").strip()[:400],
         appearance=_clean_appearance(body.get("appearance")),
-        voice=voice, tts_provider=tts_provider, style=style)
+        voice=voice, tts_provider=tts_provider, style=style,
+        universo=universo)
     return av
 
 
@@ -691,9 +728,17 @@ async def avatars_update(aid: str, body: dict):
         fields["tts_provider"] = tp
     if "appearance" in body:
         fields["appearance"] = _clean_appearance(body.get("appearance"))
+    if "universo" in body:  # INT-090: edición del universo del personaje
+        uni = (str(body.get("universo") or "").strip().lower() or None)
+        if uni and uni not in universos.UNIVERSOS:
+            raise HTTPException(400, "universo debe ser uno de: "
+                                + ", ".join(universos.UNIVERSOS))
+        fields["universo"] = uni
     if fields:
         db.update_avatar(aid, **fields)
-    return db.get_avatar(aid)
+    av = db.get_avatar(aid)
+    av["universo"] = universos.universo_de(av)
+    return av
 
 
 @app.delete("/api/avatars/{aid}")
@@ -1167,6 +1212,31 @@ async def create_project(body: dict):
         style = "auto"
     if avatar_id and not db.get_avatar(avatar_id):
         avatar_id = None
+    # INT-090 · BLINDAJE DE UNIVERSOS: admite avatar_ids (lista, retrocompat
+    # con avatar_id único) y rechaza con 400 los universos en guerra ANTES de
+    # gastar recursos. La lista explícita es estricta (id desconocido → 400);
+    # el avatar_id único conserva el comportamiento histórico (desconocido →
+    # silencio retro). El reparto completo queda en meta.avatar_ids.
+    ids_bruto: list[str] = []
+    if body.get("avatar_ids") is not None:
+        if not isinstance(body.get("avatar_ids"), list):
+            raise HTTPException(400, "avatar_ids debe ser una lista de ids")
+        ids_bruto += [str(x).strip() for x in body["avatar_ids"]
+                      if str(x).strip()]
+    if avatar_id:
+        ids_bruto.insert(0, avatar_id)
+    ids_avatares = list(dict.fromkeys(ids_bruto))
+    for _ax in ids_avatares:
+        if _ax != avatar_id and not db.get_avatar(_ax):
+            raise HTTPException(400, f"avatar no existe: {_ax}")
+    if len(ids_avatares) > 1:
+        try:
+            universos.validar_compatibles(ids_avatares)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        meta["avatar_ids"] = ids_avatares
+    if not avatar_id and ids_avatares:
+        avatar_id = ids_avatares[0]  # primario retrocompat = 1º de la lista
     if avatar_id:
         av = db.get_avatar(avatar_id)
         voice = voice or av.get("voice")
@@ -1248,7 +1318,54 @@ async def get_project(pid: str):
     p["scenes"] = db.get_scenes(pid)
     job = db.active_job_for_project(pid)
     p["job"] = job
+    # AGENTE 2 · visor visual del workspace (estado de las 5 carpetas
+    # canónicas + marca.json) para la vista de detalle en la UI.
+    p["workspace"] = project_workspace.workspace_info(p)
     return p
+
+
+# ── AGENTE 2 · Abrir Carpeta en el PC del usuario (1 clic en la web) ────
+def _abrir_carpeta_sistema(ruta: Path) -> tuple[bool, str]:
+    """Abre la carpeta en el explorador de archivos del SO (Windows primero:
+    os.startfile es el mecanismo nativo del Explorador de archivos). En
+    entornos sin GUI (servidores/CI) devuelve (False, motivo) sin lanzar."""
+    import os as _os  # INT-080: import diferido (convención de main.py)
+    import subprocess
+    import sys
+    try:
+        if _os.name == "nt" or hasattr(_os, "startfile"):
+            _os.startfile(str(ruta))  # noqa: S606 — ruta generada por el servidor
+            return True, "Explorador de archivos de Windows"
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", str(ruta)])
+            return True, "Finder (macOS)"
+        if shutil.which("xdg-open"):
+            subprocess.Popen(["xdg-open", str(ruta)])
+            return True, "explorador de archivos"
+        return False, "este entorno no tiene explorador de archivos (servidor sin GUI)"
+    except Exception as e:  # noqa: BLE001 — honesto: no se abrió
+        log.warning("open-folder falló para %s: %s", ruta, e)
+        return False, f"no se pudo abrir: {e}"
+
+
+@app.post("/api/projects/{pid}/open-folder")
+async def open_project_folder(pid: str):
+    """Abre la carpeta REAL del proyecto en el explorador de Windows con 1
+    clic desde la web (AGENTE 2). La ruta SIEMPRE la resuelve el servidor
+    (workspace canónico data/projects/<nicho>_<slug>_<id8>, o el almacén
+    legacy output/<pid>); el body no envía rutas — cero surface de traversal.
+    Si el workspace canónico no existe aún, se crea al vuelo (idempotente)."""
+    _pid(pid)
+    p = db.get_project(pid)
+    if not p:
+        raise HTTPException(404, "no existe")
+    ws = project_workspace.resolve_workspace(p)
+    if not ws.is_dir():
+        project_workspace.create_workspace(p)  # garantiza las 5 carpetas
+        ws = project_workspace.workspace_path(p)
+    abierto, metodo = _abrir_carpeta_sistema(ws)
+    return {"ok": True, "abierto": abierto, "metodo": metodo,
+            "path": str(ws)}
 
 
 @app.patch("/api/projects/{pid}")

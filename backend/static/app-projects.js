@@ -528,11 +528,13 @@ function renderProject() {
           <button class="btn ghost" onclick="openSubtitleSwitcher({target:'project', project_id: '${p.id}'})" title="Cambiar preset visual de subtítulos">🎨 Subtítulos: <b style="margin-left:4px">${esc(((p.meta||{}).subtitle_style || 'shorts').toUpperCase())}</b></button>
           <a class="btn ghost" href="/api/projects/${p.id}/subtitles.srt" download>💬 Subtítulos SRT</a>
           <button class="btn ghost" onclick="downloadProjectScriptTxt('${p.id}')" title="Guarda el guion completo (narración + prompts de imagen) en un .txt en la carpeta que elijas de tu PC">💾 Guardar Guión (.txt)</button>
+          <button class="btn" onclick="openProjectFolder('${p.id}')" title="Abre la carpeta REAL de este proyecto en el Explorador de Archivos de Windows (1 clic)">📂 Abrir Carpeta</button>
           <button class="btn danger" onclick="delProject('${p.id}')">🗑️</button>
         </div>
         ${p.error ? `<p style="color:var(--err);font-size:12.5px;margin-top:10px">⚠️ ${esc(p.error)}</p>` : ''}
       </div>
     </div>
+    ${p.workspace ? renderWorkspacePanel(p.workspace) : ''}
     ${p.status === 'ready' && social.length ? `
     <div class="card" style="margin-top:16px">
       <b>📡 Kit multi-plataforma</b>
@@ -559,6 +561,55 @@ function renderProject() {
 }
 
 function getStyleName(id) { return S.styles.find(s => s.id === id)?.name || id; }
+
+/* ── AGENTE 2 · Visor visual del workspace (INT-086b) ─────────────────
+   Muestra el estado real de las 5 carpetas canónicas del proyecto en
+   disco + marca.json, sincronizado con GET /api/projects/{pid}. */
+function renderWorkspacePanel(w) {
+  const carpetas = [
+    ['fuentes', '📁', 'fuentes/', 'Material de origen y referencias'],
+    ['guion', '📝', 'guion/', 'guion.json · guion.md'],
+    ['voz', '🎙️', 'voz/', 'Audios TTS generados'],
+    ['clips', '🎬', 'clips/', 'Videos Flow / B-roll'],
+    ['out', '📦', 'out/', 'Video final · subtítulos · portada'],
+  ];
+  const chip = ([key, emoji, nombre, desc]) => {
+    const info = (w.carpetas || {})[key] || { n: 0, items: [] };
+    const vacia = !info.n;
+    const items = (info.items || []).slice(0, 3).join(' · ');
+    return `<div class="card" style="margin:0;padding:10px 12px;border:1px solid ${vacia ? 'rgba(255,255,255,0.08)' : 'rgba(74,222,128,0.35)'};opacity:${vacia ? 0.55 : 1}" title="${esc(desc)}${items ? ' — ' + esc(items) : ''}">
+      <div style="display:flex;align-items:center;gap:6px;font-size:13px"><span>${emoji}</span><b>${esc(nombre)}</b>
+        <span style="margin-left:auto;font-size:11px;color:var(--muted);background:rgba(255,255,255,0.06);padding:1px 8px;border-radius:10px">${info.n} ${info.n === 1 ? 'archivo' : 'archivos'}</span></div>
+      <div style="font-size:11px;color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${vacia ? 'vacía' : esc(items)}${info.n > 3 ? ' · …' : ''}</div>
+    </div>`;
+  };
+  return `<div class="card" style="margin-top:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <div>
+        <b style="font-size:15px;display:flex;align-items:center;gap:6px">🗂️ Espacio de trabajo
+          <span style="font-size:11px;font-weight:400;color:var(--muted);background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:10px">${esc(w.name || '')}</span>
+          ${w.existe ? '' : '<span style="font-size:11px;color:var(--muted)">· se crea al generar</span>'}</b>
+        <p style="font-size:12px;color:var(--muted);margin-top:2px">Orden real en tu disco — 📂 Abrir Carpeta te lleva directo a esta vista en tu PC${w.legacy && w.legacy.existe && !w.existe ? ' (ahora mismo: almacén legacy output/)' : ''}</p>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span style="font-size:12px;${w.marca ? 'color:var(--ok,#4ade80)' : 'color:var(--muted)'}" title="Identidad activa del canal: nicho, tono, voz y cierre">${w.marca ? '🏷️ marca.json activa' : '🏷️ marca.json —'}</span>
+        <button class="btn small primary" onclick="openProjectFolder('${S.project.id}')">📂 Abrir Carpeta</button>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px">
+      ${carpetas.map(chip).join('')}
+    </div>
+  </div>`;
+}
+
+async function openProjectFolder(pid) {
+  toast('Abriendo carpeta del proyecto… 📂');
+  try {
+    const r = await api(`/projects/${pid}/open-folder`, { method: 'POST' });
+    if (r.abierto) toast('📂 Carpeta abierta en tu PC: ' + (r.path || ''), 'ok');
+    else toast('📁 ' + (r.path || 'carpeta del proyecto') + ' — ' + (r.metodo || 'sin explorador'), 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
 
 function sceneCard(sc) {
   const img = sc.image_path ? `/api/scenes/${sc.id}/image?project_id=${S.project.id}&v=${sc.idx}` : '';

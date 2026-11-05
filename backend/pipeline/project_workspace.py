@@ -150,6 +150,43 @@ def resolve_workspace(project: dict) -> Path:
     return legacy_dir(project)
 
 
+def workspace_info(project: dict) -> dict:
+    """Estado del workspace canónico para el VISOR VISUAL de la UI
+    (AGENTE 2 de la brigada de auditoría · INT-086b).
+
+    Devuelve un dict best-effort (nunca lanza): nombre canónico, ruta,
+    existencia, estado de las 5 subcarpetas (nº de entradas + hasta 10
+    nombres) y presencia de marca.json. Si el workspace canónico aún no
+    existe reporta vacío y la ruta del almacén legacy equivalente, para
+    que la UI siempre tenga algo honesto que mostrar."""
+    ws = workspace_path(project)
+    legacy = legacy_dir(project)
+    existe = ws.is_dir()
+    carpetas: dict[str, dict] = {}
+    for sub in SUBDIRS:
+        d = ws / sub
+        items: list[str] = []
+        if d.is_dir():
+            try:
+                items = sorted(p.name for p in d.iterdir() if not p.name.startswith("."))
+            except OSError:  # noqa: PERF203 — lectura de disco, nunca fatal
+                items = []
+        carpetas[sub] = {"n": len(items), "items": items[:10]}
+    try:
+        return {
+            "name": ws.name,
+            "path": str(ws),
+            "existe": existe,
+            "carpetas": carpetas,
+            "marca": (ws / "marca.json").is_file() if existe else False,
+            "legacy": {"path": str(legacy), "existe": legacy.is_dir()},
+        }
+    except Exception:  # noqa: BLE001 — el visor nunca rompe la API
+        return {"name": "", "path": "", "existe": False, "carpetas": {},
+                "marca": False, "legacy": {"path": str(legacy),
+                                           "existe": legacy.is_dir()}}
+
+
 def purge_workspace(project: dict) -> None:
     """Elimina la vista organizada (al borrar el proyecto). Los enlaces se
     desligan, NUNCA se sigue: el almacén legacy se borra por su cuenta vía

@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS avatars (       -- personajes consistentes del canal
     voice        TEXT,                      -- voz edge-tts asociada
     tts_provider TEXT,                      -- edge | gemini
     style        TEXT,                      -- estilo visual por defecto
+    universo     TEXT,                      -- INT-090: animado|real|hiper|neutro
     image_path   TEXT,                      -- retrato generado
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL
@@ -204,6 +205,12 @@ def _migrate(con: sqlite3.Connection) -> None:
         con.execute("ALTER TABLE flow_jobs ADD COLUMN exec_state TEXT")
     if fj and "contract_result" not in fj:
         con.execute("ALTER TABLE flow_jobs ADD COLUMN contract_result TEXT")
+    # INT-090 · avatars.universo: blindaje de universos (animado|real|hiper|
+    # neutro). NULO = se resuelve contra la biblioteca data/avatars/<slug>/
+    # descripcion.json por slug del nombre; sin match → «neutro».
+    av = [r[1] for r in con.execute("PRAGMA table_info(avatars)").fetchall()]
+    if av and "universo" not in av:
+        con.execute("ALTER TABLE avatars ADD COLUMN universo TEXT")
 
 
 # ── helpers genéricos ─────────────────────────────────────────────────────
@@ -260,7 +267,7 @@ _JOB_COLS = {
 }
 _AVATAR_COLS = {
     "id", "name", "description", "appearance", "voice", "tts_provider",
-    "style", "image_path", "created_at", "updated_at",
+    "style", "universo", "image_path", "created_at", "updated_at",
 }
 
 

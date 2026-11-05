@@ -1,0 +1,15 @@
+{
+  "id": "voz_narradora",
+  "nombre": "Voz Narradora",
+  "universo": "neutro",
+  "modelo": null,
+  "voz": null,
+  "tts_provider": "edge",
+  "estilo": null,
+  "descripcion": "Voz de narración sin rostro (universo NEUTRO): compatible con TODOS los universos (animado, real, hiper) porque nunca aparece en cámara. Asigna aquí la voz edge/gemini que prefieras para narración.",
+  "apariencia": {},
+  "incompatible_con": [],
+  "flow_project_id": null,
+  "flow_character_id": null,
+  "nota_int090": "Universo neutro = nunca entra en conflicto con otros avatares del proyecto. flow_project_id / flow_character_id quedan en null (no hay personaje visual en Flow)."
+}

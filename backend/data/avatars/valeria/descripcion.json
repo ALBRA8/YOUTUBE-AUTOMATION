@@ -1,0 +1,21 @@
+{
+  "id": "valeria",
+  "nombre": "Valeria",
+  "universo": "real",
+  "modelo": "veo-3.1",
+  "voz": "es-CO-SalomeNeural",
+  "tts_provider": "edge",
+  "estilo": "cinematic",
+  "descripcion": "Personaje REAL (universo live-action Veo 3.1): joven colombiana de ciudad, natural y cercana, para UGC y storytelling realista. Nunca mezclar con personajes animados ni hiperrealistas en el mismo proyecto.",
+  "apariencia": {
+    "piel": "trigueña luminosa",
+    "ojos": "cafés oscuros, mirada directa a cámara",
+    "cabello": "castaño oscuro, ondulado, hombros largos",
+    "cuerpo": "estatura media, complexión atlética suave",
+    "vestuario": "ropa casual urbana moderna (buzo beige, jeans)"
+  },
+  "incompatible_con": ["animado", "hiper"],
+  "flow_project_id": null,
+  "flow_character_id": null,
+  "nota_int090": "flow_project_id / flow_character_id enlazan este personaje con su personaje nativo de Google Flow cuando exista; se rellenan vía PATCH /api/avatars/library/valeria."
+}
