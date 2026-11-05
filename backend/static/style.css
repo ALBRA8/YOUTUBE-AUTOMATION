@@ -20,6 +20,10 @@
   --shadow: 0 18px 50px rgba(0, 0, 0, .45);
   --radius: 18px;
   --sidebar-w: 240px;
+  /* INT-092 · capas sutiles coherentes con el tema (reemplazan los
+     rgba(255,255,255,…) duros de las tarjetas, chips y bordes) */
+  --soft: rgba(255, 255, 255, .04);
+  --soft-2: rgba(255, 255, 255, .08);
   --font-display: 'Bangers', 'Impact', system-ui;
   --font-body: 'Plus Jakarta Sans', 'Segoe UI', system-ui, sans-serif;
 }
@@ -31,6 +35,8 @@
   --border: rgba(20, 25, 60, .1);
   --text: #171c33;
   --muted: #5b6280;
+  --soft: rgba(20, 25, 60, .05);
+  --soft-2: rgba(20, 25, 60, .1);
   --shadow: 0 14px 40px rgba(30, 40, 90, .12);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -351,13 +357,8 @@ code.mini { background: var(--bg2); border: 1px solid var(--border); border-radi
   font-family: ui-monospace, 'Sarasa Mono SC', monospace; }
 
 /* ── v2.1 · banner del agente en Inicio ─────────────────── */
-.agent-banner { display: flex; align-items: center; gap: 16px; padding: 16px 20px; border-radius: var(--radius); cursor: pointer;
-  background: linear-gradient(120deg, rgba(124, 92, 255, .16), rgba(0, 224, 198, .1)); border: 1px solid rgba(124, 92, 255, .35); margin-bottom: 18px; transition: transform .15s, border-color .15s; }
-.agent-banner:hover { transform: translateY(-2px); border-color: var(--accent); }
-.ab-ico { font-size: 34px; }
-.ab-txt { flex: 1; display: flex; flex-direction: column; gap: 3px; }
-.ab-txt b { font-size: 14.5px; }
-.ab-txt small { color: var(--muted); font-size: 12.5px; }
+/* INT-092: el banner del Agente General en Inicio se eliminó (petición del
+   usuario) — sus reglas .agent-banner/.ab-ico/.ab-txt salieron con él. */
 
 /* ── v2.4 · terminal SSE de logs en vivo ─────────────────── */
 .term { margin-top: 12px; max-height: 180px; overflow-y: auto; text-align: left;
@@ -660,7 +661,7 @@ code.mini { background: var(--bg2); border: 1px solid var(--border); border-radi
 .clipper-hero p { margin: 0; color: var(--muted); font-size: 13.5px; }
 
 .clipper-form-card {
-  background: var(--bg-card, #1e1e2d); border: 1px solid var(--border);
+  background: var(--card-solid); border: 1px solid var(--border);
   border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 14px;
 }
 .clipper-input-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -680,7 +681,7 @@ code.mini { background: var(--bg2); border: 1px solid var(--border); border-radi
   display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;
 }
 .clipper-moment-card {
-  background: var(--bg-card, #1e1e2d); border: 1px solid var(--border); border-radius: 12px;
+  background: var(--card-solid); border: 1px solid var(--border); border-radius: 12px;
   padding: 16px; display: flex; flex-direction: column; gap: 10px; transition: transform .15s, border-color .15s;
 }
 .clipper-moment-card:hover { border-color: var(--accent); transform: translateY(-2px); }
@@ -717,10 +718,10 @@ code.mini { background: var(--bg2); border: 1px solid var(--border); border-radi
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 6px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--soft);
   padding: 6px 10px;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
   font-size: 11px;
   text-align: center;
 }
@@ -734,15 +735,15 @@ code.mini { background: var(--bg2); border: 1px solid var(--border); border-radi
   justify-content: space-between;
   align-items: center;
   gap: 8px;
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--soft);
   padding: 7px 10px;
   border-radius: 8px;
-  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border: 1px dashed var(--border);
   font-size: 11.5px;
 }
 .clipper-trim-btn {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--soft-2);
+  border: 1px solid var(--border);
   color: var(--text);
   padding: 2px 7px;
   border-radius: 5px;
@@ -786,11 +787,11 @@ code.mini { background: var(--bg2); border: 1px solid var(--border); border-radi
 .qc-box {
   max-width: 680px;
   width: 95%;
-  background: var(--card-bg, #1e293b);
-  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  background: var(--card-solid);   /* INT-092: antes var(--card-bg,#1e293b) — --card-bg no existía y el modal quedaba negro en modo claro */
+  border: 1px solid var(--border);
   border-radius: 16px;
   padding: 24px;
-  box-shadow: 0 20px 40px rgba(0,0,0,0.45);
+  box-shadow: var(--shadow);
   animation: qcModalIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 @keyframes qcModalIn {
@@ -801,7 +802,7 @@ code.mini { background: var(--bg2); border: 1px solid var(--border); border-radi
   display: flex;
   gap: 8px;
   margin-bottom: 18px;
-  border-bottom: 1px solid rgba(255,255,255,0.08);
+  border-bottom: 1px solid var(--border);
   padding-bottom: 10px;
   overflow-x: auto;
 }
@@ -820,8 +821,8 @@ code.mini { background: var(--bg2); border: 1px solid var(--border); border-radi
   transition: all 0.15s;
 }
 .qc-tab:hover {
-  background: rgba(255,255,255,0.04);
-  color: var(--text, #fff);
+  background: var(--soft-2);
+  color: var(--text);
 }
 .qc-tab.active {
   background: rgba(16,185,129,0.12);

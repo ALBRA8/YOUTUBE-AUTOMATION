@@ -361,8 +361,8 @@ def test_endpoint_404_sin_video_o_proyecto(client, tmp_path):
 
 # ════════════════════════ E · contratos fuente ══════════════════════════
 def test_contratos_fuente_y_version():
-    check("APP_VERSION 2.44.0 (INT-080: bump por cambio funcional)",
-          config.APP_VERSION == "2.44.0")
+    check("APP_VERSION 2.45.0 (INT-080: bump por cambio funcional)",
+          config.APP_VERSION == "2.45.0")
     src = (BACKEND / "pipeline" / "video.py").read_text(encoding="utf-8")
     check("video.py define el filtro exacto de la tarea",
           'BROADCAST_LOUDNORM = "loudnorm=I=-14:LRA=11:TP=-1.0:dual_mono=true"'

@@ -39,7 +39,6 @@ async function delNichoCard(i) {
       if (!confirm(`¿Borrar el nicho «${key}»?\nLa plantilla desaparece de Proyectos (tus videos no se tocan).`)) return;
       await api('/niches/templates/' + meta.tplId, { method: 'DELETE' });
       S.niches = await api('/niches');
-      if (W.nicho === meta.tplId) W.nicho = '';
     } else {
       if (!confirm(`«${key}» es un nicho libre (sin plantilla).\nSus ${meta.ids.length} video(s) quedarán «Sin nicho». ¿Continuar?`)) return;
       for (const pid of meta.ids)
@@ -47,61 +46,6 @@ async function delNichoCard(i) {
     }
     toast('Nicho eliminado', 'ok');
     if (S.view === 'projects') renderProjects();
-  } catch (e) { toast(e.message, 'err'); }
-}
-
-async function createProject() {
-  if (guardDemo()) return;
-  if (!(await preflightGate())) return;  // INT-082: aviso antes de gastar recursos
-  if (W.mode === 'nicho') {
-    if (!W.nicho) return toast('Elige un nicho primero', 'err');
-    try {
-      const p = await api('/projects', { method: 'POST', body: {
-        mode: 'nicho', niche_template: W.nicho, idea: W.nichoAdjust || null,
-        auto_start: true,
-        platforms: W.platforms.length ? W.platforms : ['youtube'],
-        transitions: W.transitions, style_reference: W.styleReference,
-        custom_workspace_path: W.destino || null }});  // INT-091: destino
-      toast('Video en fabricación desde el nicho 🚀', 'ok');
-      W.step = 1; W.nichoAdjust = '';
-      showProgress(p.job_id, p.id);
-    } catch (e) { toast(e.message, 'err'); }
-    return;
-  }
-  if (W.mode === 'idea' && !W.idea.trim()) return toast('Escribe una idea primero', 'err');
-  if (W.mode === 'script' && !W.script.trim()) return toast('Pega tu guion primero', 'err');
-  if (W.mode === 'url' && !W.url.trim()) return toast('Pega la URL primero', 'err');
-
-  let audioPath = null;
-  if (W.mode === 'audio') {
-    const file = $('#audio-file')?.files?.[0];
-    if (!file) return toast('Selecciona tu archivo de audio', 'err');
-    const fd = new FormData(); fd.append('file', file);
-    const r = await fetch('/api/import/audio', { method: 'POST', body: fd });
-    if (!r.ok) return toast('Error subiendo audio', 'err');
-    audioPath = (await r.json()).path;
-  }
-
-  try {
-    const body = { mode: W.mode, style: W.style, format: W.format, pacing: W.pacing || 'normal',
-                   title: W.title || null, voice: W.voice || null,
-                   tts_provider: W.tts || null,
-                   avatar_id: W.avatar || null,
-                   platforms: W.platforms.length ? W.platforms : ['youtube'],
-                   transitions: W.transitions, style_reference: W.styleReference,
-                   subtitle_style: W.subtitles,
-                   cookies_from_browser: W.cookies || null,
-                   brand_profile_id: W.brandProfile || null };
-    if (W.tpl) { body.template_id = W.tpl; if (W.nicheLabel) body.niche = W.nicheLabel; }  // INT-087: plantilla + nicho de marca
-    if (W.destino) body.custom_workspace_path = W.destino;  // INT-091: destino del usuario
-    if (audioPath) body.audio_path = audioPath;  // INT-080: puerta legitima (antes PATCH → 403)
-    if (W.mode === 'idea') body.idea = W.idea;
-    if (W.mode === 'script') { body.script = W.script; body.title = W.title || W.script.slice(0, 50); }
-    if (W.mode === 'url') body.url = W.url;
-    if (W.style === 'custom-studio') body.custom_style_prompt = W.custom;
-    const p = await api('/projects', { method: 'POST', body });
-    toast('Proyecto creado. ¡A producir! 🎬', 'ok');
-    startJob(p.id);
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -193,26 +137,12 @@ async function preflightGate() {
     '\n\nEl proyecto quedaría mudo o fallaría a mitad del pipeline (se gastarían guion e imágenes).\n¿Continuar de todos modos?');
 }
 
-function renderPreflightBanner() {
-  preflightCrear().then(d => {
-    if (!d || d.ok) return;
-    const host = document.querySelector('#view .wizard');
-    if (!host || host.querySelector('.preflight-banner')) return;  // cambió de vista
-    const body = preflightAvisos(d).split('\n').map(l => `<div>${esc(l)}</div>`).join('');
-    host.insertAdjacentHTML('afterbegin',
-      `<div class="card preflight-banner" style="border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.08);margin-bottom:12px">
-        <b>⚠️ Preflight de creación</b>
-        <div style="margin-top:6px;font-size:13px;line-height:1.65">${body}</div>
-      </div>`);
-  });
-}
-
 async function startJob(pid) {
   if (guardDemo()) return;
   if (!(await preflightGate())) return;  // INT-082: aviso antes de gastar recursos
   try {
     const r = await api(`/projects/${pid}/generate`, { method: 'POST', body: {} });
-    W.step = 1; showProgress(r.job_id, pid);
+    showProgress(r.job_id, pid);
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -331,22 +261,30 @@ function closeNichoWindow() {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-/* v2.11.2 · "＋ Nuevo video" desde la ventana de un nicho →
-   asistente Crear en modo nicho con ESTE nicho ya elegido */
+/* v2.11.2 · "＋ Nuevo video" desde la ventana de un nicho.
+   INT-092: el wizard de 4 pasos murió — flujo único 1-clic:
+   · nicho con plantilla → confirmación + fabricación directa (mode nicho);
+   · nicho libre → modal rápido de Inicio en modo idea, pre-escrito. */
 function newVideoInNicho() {
-  nav('create');
-  if (_NICHO_TPL_ID) {
-    W.mode = 'nicho';
-    W.step = 2;
-    W.nicho = _NICHO_TPL_ID;
-  } else {
-    W.mode = 'idea';
-    W.step = 1;
-    if (_PROJ_NICHO) {
-      W.idea = 'Video para el nicho ' + _PROJ_NICHO + ': ';
-    }
-  }
-  renderCreate();
+  if (_NICHO_TPL_ID) { createNichoVideo(_NICHO_TPL_ID); return; }
+  const prefill = _PROJ_NICHO ? ('Video para el nicho ' + _PROJ_NICHO + ': ') : '';
+  openQuickCreateModal('idea', prefill);
+}
+
+/* INT-092 · fabricación directa desde un nicho con plantilla (el antiguo
+   paso 2 del wizard: plantilla → pipeline completo, un solo clic). */
+async function createNichoVideo(tplId, ajuste) {
+  if (guardDemo()) return;
+  if (!(await preflightGate())) return;  // INT-082: aviso antes de gastar recursos
+  try {
+    const p = await api('/projects', { method: 'POST', body: {
+      mode: 'nicho', niche_template: tplId, idea: ajuste || null,
+      auto_start: true,
+      platforms: ['youtube', 'tiktok'],
+      transitions: true, style_reference: true }});
+    toast('Video en fabricación desde el nicho 🚀', 'ok');
+    showProgress(p.job_id, p.id);
+  } catch (e) { toast(e.message, 'err'); }
 }
 
 /* v2.11.3 · modal de nichos: compacto y con cierre (✕, clic fuera, Esc) */
@@ -367,7 +305,6 @@ function nichoEscClose(e) { if (e.key === 'Escape') closeOverlay(); }
 function refreshNichesUI() {
   if (document.getElementById('nt-name')) openNichesAdmin(); // modal abierto → repíntalo
   if (S.view === 'projects') renderProjects();
-  else if (S.view === 'create') renderCreate();
 }
 
 function renderProjects() {
@@ -546,10 +483,10 @@ function renderProject() {
         return pl ? `<span class="plat-check on">${pl.emoji} ${pl.name}</span>` : '';
       }).join('')}</div>
     </div>` : ''}
-    <div class="card hook-ab-container" style="margin-top:16px;border:1px solid rgba(255,255,255,0.12);background:var(--bg2,#18181b)">
+    <div class="card hook-ab-container" style="margin-top:16px;border:1px solid var(--border);background:var(--bg2)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <div>
-          <b style="font-size:15px;display:flex;align-items:center;gap:6px">🎯 Ganchos Virales A/B <span style="font-size:11px;font-weight:400;color:var(--muted);background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:10px">Primeros 3 segundos</span></b>
+          <b style="font-size:15px;display:flex;align-items:center;gap:6px">🎯 Ganchos Virales A/B <span style="font-size:11px;font-weight:400;color:var(--muted);background:var(--soft-2);padding:2px 8px;border-radius:10px">Primeros 3 segundos</span></b>
           <p style="font-size:12px;color:var(--muted);margin-top:2px">Elige qué gancho psicológico abre tu video en la Escena 1 para retener a la audiencia.</p>
         </div>
         <button class="btn small" onclick="regenProjectHooks('${p.id}')" title="Generar 3 variantes nuevas con IA">⚡ Probar otros 3 Hooks</button>
@@ -579,9 +516,9 @@ function renderWorkspacePanel(w) {
     const info = (w.carpetas || {})[key] || { n: 0, items: [] };
     const vacia = !info.n;
     const items = (info.items || []).slice(0, 3).join(' · ');
-    return `<div class="card" style="margin:0;padding:10px 12px;border:1px solid ${vacia ? 'rgba(255,255,255,0.08)' : 'rgba(74,222,128,0.35)'};opacity:${vacia ? 0.55 : 1}" title="${esc(desc)}${items ? ' — ' + esc(items) : ''}">
+    return `<div class="card" style="margin:0;padding:10px 12px;border:1px solid ${vacia ? 'var(--border)' : 'rgba(74,222,128,0.35)'};opacity:${vacia ? 0.55 : 1}" title="${esc(desc)}${items ? ' — ' + esc(items) : ''}">
       <div style="display:flex;align-items:center;gap:6px;font-size:13px"><span>${emoji}</span><b>${esc(nombre)}</b>
-        <span style="margin-left:auto;font-size:11px;color:var(--muted);background:rgba(255,255,255,0.06);padding:1px 8px;border-radius:10px">${info.n} ${info.n === 1 ? 'archivo' : 'archivos'}</span></div>
+        <span style="margin-left:auto;font-size:11px;color:var(--muted);background:var(--soft-2);padding:1px 8px;border-radius:10px">${info.n} ${info.n === 1 ? 'archivo' : 'archivos'}</span></div>
       <div style="font-size:11px;color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${vacia ? 'vacía' : esc(items)}${info.n > 3 ? ' · …' : ''}</div>
     </div>`;
   };
@@ -589,7 +526,7 @@ function renderWorkspacePanel(w) {
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
       <div>
         <b style="font-size:15px;display:flex;align-items:center;gap:6px">🗂️ Espacio de trabajo
-          <span style="font-size:11px;font-weight:400;color:var(--muted);background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:10px">${esc(w.name || '')}</span>
+          <span style="font-size:11px;font-weight:400;color:var(--muted);background:var(--soft-2);padding:2px 8px;border-radius:10px">${esc(w.name || '')}</span>
           ${w.custom ? '<span style="font-size:11px;font-weight:700;color:#fbbf24;background:rgba(251,191,36,0.12);padding:2px 8px;border-radius:10px" title="Carpeta elegida por ti con el explorador de Windows (INT-091) — el pipeline la respeta absoluta">📂 tu carpeta</span>' : ''}
           ${w.existe ? '' : '<span style="font-size:11px;color:var(--muted)">· se crea al generar</span>'}</b>
         <p style="font-size:12px;color:var(--muted);margin-top:2px">Orden real en tu disco — 📂 Abrir Carpeta te lleva directo a esta vista en tu PC${w.legacy && w.legacy.existe && !w.existe ? ' (ahora mismo: almacén legacy output/)' : ''}</p>
@@ -848,7 +785,7 @@ function renderHookCards(p) {
       const safeHook = esc(h.hook).replace(/'/g, "&#39;");
       return `
         <div class="card hook-card ${isSel ? 'active-hook' : ''}" 
-             style="cursor:pointer;position:relative;border:1.5px solid ${isSel ? 'var(--accent2,#10b981)' : 'rgba(255,255,255,0.08)'};background:${isSel ? 'rgba(16,185,129,0.08)' : 'rgba(0,0,0,0.2)'};padding:14px;border-radius:10px;transition:all 0.2s ease"
+             style="cursor:pointer;position:relative;border:1.5px solid ${isSel ? 'var(--accent2)' : 'var(--border)'};background:${isSel ? 'rgba(16,185,129,0.08)' : 'var(--soft)'};padding:14px;border-radius:10px;transition:all 0.2s ease"
              onclick="selectProjectHook('${p.id}', '${esc(h.id)}', '${safeHook}')">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
             <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;${bColor}">Variante ${esc(h.id)} · ${esc(h.type || h.label || 'Hook')}</span>

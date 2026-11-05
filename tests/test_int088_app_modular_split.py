@@ -39,10 +39,12 @@ import config  # noqa: E402
 OK, FAIL = 0, 0
 LOADER = "app.js"
 MODULES = ("app-core.js", "app-projects.js", "app-mcp.js", "app-wizard.js", "app-player.js")
-N_FUNCS = 194   # 189 del monolito v2.42.0 + 2 nuevas INT-090/AGENTE 2
-                # (renderWorkspacePanel + openProjectFolder en app-projects.js)
-                # + 3 nuevas INT-091 (pickDestinoFolder + qcPickDestino +
-                # wizardPickDestino en app-wizard.js — selector nativo de carpetas)
+N_FUNCS = 183   # 194 tras INT-088/090/091 − 11 purgadas INT-092 + 1 nueva
+                # (−9 en app-wizard: openWizardFromQC, wizardPickDestino,
+                #  renderWizardBrandProfileBar, applyBrandToWizard, loadTemplates,
+                #  tplCardHTML, renderTplCards, pickTemplate, renderCreate;
+                #  −2 en app-projects: createProject, renderPreflightBanner;
+                #  +1 createNichoVideo en app-projects — flujo 1-clic de nichos)
 
 # funciones estrella por módulo (cohesión; suficientes para cazar desvíos)
 STAR = {
@@ -54,7 +56,7 @@ STAR = {
     ),
     "app-projects.js": (
         "function renderProjectCards(", "function renderProjects(",
-        "async function createProject(", "function showProgress(",
+        "async function createNichoVideo(", "function showProgress(",
         "async function startJob(", "async function preflightCrear(",
         "function renderFactory(", "function renderPublish(",
         "async function delProject(", "function renderHookCards(",
@@ -69,10 +71,8 @@ STAR = {
     ),
     "app-wizard.js": (
         "const QC_STATE = {", "function openQuickCreateModal(",
-        "async function executeQuickCreate(", "function renderWizardBrandProfileBar(",
-        "async function openBrandProfilesModal(", "const W = {",
-        "async function loadTemplates(", "function tplCardHTML(",
-        "function pickTemplate(", "function renderCreate(",
+        "function renderQuickCreateModal(", "async function executeQuickCreate(",
+        "async function openBrandProfilesModal(", "async function qcPickDestino(",
         "async function renderAvatars(", "async function openVoiceGallery(",
         "async function openSubtitleSwitcher(", "async function generateQCHooks(",
     ),
@@ -165,7 +165,7 @@ def test_nada_se_perdio_ni_duplico():
     alljs = "\n".join(_read(f) for f in (LOADER,) + MODULES)
     for w in ("window.openQuickCreateModal", "window.startDirectCreation",
               "window.qcSwitchMode", "window.executeQuickCreate",
-              "window.openWizardFromQC", "window.clipperAdjustStart",
+              "window.qcPickDestino", "window.clipperAdjustStart",
               "window.clipperAdjustEnd"):
         check(f"{w} sobrevive al split", f"{w} =" in alljs)
 
@@ -186,17 +186,17 @@ def test_boot_orden_y_auth():
           "await (window.__authReady || Promise.resolve());" in core)
     check("boot registra el tema y la navegación",
           "setTheme(S.theme);" in core and "$$('.nav-item').forEach" in core)
-    check("boot pinta home, carga plantillas y programa refrescos",
-          "renderHome();" in core and "loadTemplates();" in core
-          and "setInterval" in core)
+    check("boot pinta home y programa refrescos (INT-092: sin carga de plantillas)",
+          "renderHome();" in core and "setInterval" in core
+          and "loadTemplates();" not in core)
     check("boot ya NO se auto-ejecuta como IIFE (lo llama el loader)",
           "(async function boot() {" not in core)
 
 
 # ── 6 · contrato de versión (cadena INT-080) ─────────────────────────────
 def test_version():
-    check("APP_VERSION 2.44.0 (INT-080: bump por cambio funcional)",
-          config.APP_VERSION == "2.44.0")
+    check("APP_VERSION 2.45.0 (INT-080: bump por cambio funcional)",
+          config.APP_VERSION == "2.45.0")
 
 
 if __name__ == "__main__":  # modo script directo

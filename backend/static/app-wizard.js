@@ -1,14 +1,15 @@
 /* ============================================================
-   app-wizard.js — INT-088 · asistente Crear y pickers
-   Modal rápido 1-clic, wizard 4 pasos con selector de plantillas
-   (INT-087), Brand Profiles, admin de nichos, avatares, galería
-   de voces (INT-040) y presets de subtítulos (INT-041).
+   app-wizard.js — INT-088 · pickers y modal de creación
+   INT-092: el wizard antiguo de 4 pasos se PURGÓ — la creación vive
+   SOLO en el modal rápido 1-clic de Inicio (sin Perfil de marca,
+   sin plantillas genéricas). Quedan aquí: modal rápido, Brand
+   Profiles (Ajustes), admin de nichos, avatares, galería de voces
+   (INT-040) y presets de subtítulos (INT-041).
    ============================================================ */
 'use strict';
 
 /* ── MODAL DE CREACIÓN RÁPIDA 1-CLIC (Estilo LabsIA · $0.00) ── */
 const QC_STATE = {
-  tpl: '',   // INT-087: plantilla de nicho seleccionada
   mode: 'idea',
   format: 'short',
   pacing: 'normal',
@@ -22,9 +23,9 @@ const QC_STATE = {
   destino: ''   // INT-091: carpeta de destino elegida con el explorador de Windows
 };
 
-function openQuickCreateModal(mode) {
+function openQuickCreateModal(mode, prefillText) {
   QC_STATE.mode = mode || 'idea';
-  QC_STATE.text = '';
+  QC_STATE.text = prefillText || '';  // INT-092: prefill (ideas de Tendencias, «＋ Nuevo video» de nichos)
   QC_STATE.url = '';
   QC_STATE.audioFile = null;
 
@@ -80,7 +81,7 @@ function renderQuickCreateModal() {
             <option value="honest_review" ${QC_STATE.ugcAngle==='honest_review'?'selected':''}>📦 Review Honesta / Unboxing</option>
           </select>
         </div>
-        <div style="display:flex; gap:10px; margin-top:12px; flex-wrap:wrap; background:rgba(255,255,255,0.02); padding:10px; border-radius:10px; border:1px solid var(--border);">
+        <div style="display:flex; gap:10px; margin-top:12px; flex-wrap:wrap; background:var(--soft); padding:10px; border-radius:10px; border:1px solid var(--border);">
           <div style="flex:1; min-width:180px;">
             <label style="font-size:11.5px; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">🏷️ Sticker de Conversión (INT-055)</label>
             <select id="qc-badge-type" style="width:100%; padding:6px 10px; font-size:12px; border-radius:6px;" onchange="QC_STATE.badgeType=this.value">
@@ -106,7 +107,7 @@ function renderQuickCreateModal() {
             <div style="display:flex; align-items:center; gap:8px;">
               <span style="font-size:20px;">🎭</span>
               <div>
-                <strong style="font-size:13px; color:#fff;">Hooks Multi-Ángulo (Arcads / CreateUGC)</strong>
+                <strong style="font-size:13px; color:var(--text)">Hooks Multi-Ángulo (Arcads / CreateUGC)</strong>
                 <p style="font-size:11px; color:var(--muted); margin:0;">Genera 5 variantes de ganchos psicológicos con predicción de retención (Stop-Rate).</p>
               </div>
             </div>
@@ -128,14 +129,10 @@ function renderQuickCreateModal() {
     inputField = `
       <div class="field" style="margin-bottom:14px;">
         <label style="font-size:13px; font-weight:700; margin-bottom:6px; display:block;">🎙️ Selecciona tu archivo de audio (MP3/WAV/M4A)</label>
-        <input type="file" id="qc-input-file" accept="audio/*" style="width:100%; padding:10px; border-radius:10px; background:rgba(255,255,255,0.03); border:1px dashed var(--border);">
+        <input type="file" id="qc-input-file" accept="audio/*" style="width:100%; padding:10px; border-radius:10px; background:var(--soft); border:1px dashed var(--border);">
         <small style="color:var(--muted); display:block; margin-top:5px;">Sincronizaremos los subtítulos dinámicos y escenas con tu propia voz.</small>
       </div>`;
   }
-
-  const stylesOptions = (S.styles || []).map(s => `
-    <option value="${s.id}" ${QC_STATE.style === s.id ? 'selected' : ''}>${s.emoji || '🎨'} ${esc(s.name)}</option>
-  `).join('');
 
   $('#overlay-root').innerHTML = `
     <div class="overlay" onclick="if(event.target===this)closeOverlay()">
@@ -151,8 +148,6 @@ function renderQuickCreateModal() {
 
         <div class="qc-tabs">${tabButtons}</div>
 
-        ${renderTplCards('qc')}
-
         ${inputField}
 
         <!-- INT-091 · libre elección de carpeta destino (diálogo nativo Windows) -->
@@ -165,7 +160,11 @@ function renderQuickCreateModal() {
           <small style="color:var(--muted); display:block; margin-top:5px;">marca.json, guion/ y out/ nacen DIRECTAMENTE en la carpeta que elijas (INT-091).</small>
         </div>
 
-        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:16px; background:rgba(255,255,255,0.02); padding:14px; border-radius:12px; border:1px solid var(--border);">
+        <!-- INT-092: grid mínimo — SOLO Formato + Voz (la barra de Perfil
+             de marca y las plantillas genéricas se purgaron; pacing,
+             estilo visual, subtítulos y avatar usan los valores por
+             defecto del pipeline y se ajustan por proyecto en su visor) -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:16px; background:var(--soft); padding:14px; border-radius:12px; border:1px solid var(--border);">
           <div class="field" style="margin:0;">
             <label style="font-size:11.5px; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">Formato</label>
             <div style="display:flex; gap:6px;">
@@ -175,58 +174,17 @@ function renderQuickCreateModal() {
           </div>
 
           <div class="field" style="margin:0;">
-            <label style="font-size:11.5px; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">Ritmo de cortes</label>
-            <div style="display:flex; gap:4px;">
-              <button type="button" class="btn small ${QC_STATE.pacing === 'fast' ? 'primary' : 'ghost'}" onclick="QC_STATE.pacing='fast';renderQuickCreateModal()" style="flex:1; padding:6px 4px; font-size:10.5px;" title="Cortes dinámicos cada ~2.5s">⚡ Rápido</button>
-              <button type="button" class="btn small ${(QC_STATE.pacing === 'normal' || !QC_STATE.pacing) ? 'primary' : 'ghost'}" onclick="QC_STATE.pacing='normal';renderQuickCreateModal()" style="flex:1; padding:6px 4px; font-size:10.5px;" title="Cortes fluidos cada ~4.0s">⏱️ Normal</button>
-              <button type="button" class="btn small ${QC_STATE.pacing === 'slow' ? 'primary' : 'ghost'}" onclick="QC_STATE.pacing='slow';renderQuickCreateModal()" style="flex:1; padding:6px 4px; font-size:10.5px;" title="Cortes pausados cada ~6.0s">🧘 Pausado</button>
-            </div>
-          </div>
-
-          <div class="field" style="margin:0;">
-            <label style="font-size:11.5px; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">Estilo visual</label>
-            <select style="width:100%; padding:6px 8px; font-size:12px; border-radius:6px;" onchange="QC_STATE.style=this.value">
-              ${stylesOptions}
+            <label style="font-size:11.5px; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">Voz</label>
+            <select style="width:100%; padding:6px 8px; font-size:12px; border-radius:6px;" onchange="QC_STATE.voice=this.value">
+              <option value="">edge-tts · Salomé 🇨🇴 (gratis ilimitado)</option>
+              <option value="gemini" ${S.health.gemini ? '' : 'disabled'}>Gemini TTS · Fenrir 🎖️ (premium)</option>
             </select>
-          </div>
-
-          <div class="field" style="margin:0;">
-            <label style="font-size:11.5px; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">Subtítulos</label>
-            <select style="width:100%; padding:6px 8px; font-size:12px; border-radius:6px;" onchange="QC_STATE.subtitles=this.value">
-              <option value="shorts" ${QC_STATE.subtitles === 'shorts' ? 'selected' : ''}>📱 Shorts · Montserrat</option>
-              <option value="hormozi" ${QC_STATE.subtitles === 'hormozi' ? 'selected' : ''}>⚡ Hormozi · Amarillo</option>
-              <option value="mrbeast" ${QC_STATE.subtitles === 'mrbeast' ? 'selected' : ''}>🔴 MrBeast · Impacto</option>
-              <option value="karaoke" ${QC_STATE.subtitles === 'karaoke' ? 'selected' : ''}>🎤 Karaoke ASS · Verde Lima</option>
-              <option value="minimal" ${QC_STATE.subtitles === 'minimal' ? 'selected' : ''}>🎬 Cinema · Minimal</option>
-              <option value="neon" ${QC_STATE.subtitles === 'neon' ? 'selected' : ''}>🟢 Neon Cyber</option>
-            </select>
-          </div>
-
-          <!-- INT-058: Presentador Flotante Circular (HeyGen Style) -->
-          <div class="field" style="margin:0;">
-            <label style="font-size:11.5px; font-weight:700; color:var(--muted); margin-bottom:4px; display:block;">🔘 Avatar Flotante PiP (HeyGen)</label>
-            <div style="display:flex; gap:6px;">
-              <select style="flex:1; padding:6px 8px; font-size:12px; border-radius:6px;" onchange="QC_STATE.avatar=this.value">
-                <option value="">— Sin avatar —</option>
-                ${(S.avatars || []).map(a => `<option value="${a.id}" ${QC_STATE.avatar === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}
-              </select>
-              <select style="width:90px; padding:6px 8px; font-size:11.5px; border-radius:6px;" onchange="QC_STATE.pipBorder=this.value" title="Color del borde circular">
-                <option value="cyan" ${(QC_STATE.pipBorder==='cyan'||!QC_STATE.pipBorder)?'selected':''}>🔵 Cyan</option>
-                <option value="gold" ${QC_STATE.pipBorder==='gold'?'selected':''}>🟡 Oro</option>
-                <option value="emerald" ${QC_STATE.pipBorder==='emerald'?'selected':''}>🟢 Verde</option>
-                <option value="purple" ${QC_STATE.pipBorder==='purple'?'selected':''}>🟣 Morado</option>
-                <option value="white" ${QC_STATE.pipBorder==='white'?'selected':''}>⚪ Blanco</option>
-              </select>
-            </div>
           </div>
         </div>
 
         <div style="display:flex; gap:10px; align-items:center;">
           <button type="button" class="btn primary" id="qc-submit-btn" onclick="executeQuickCreate()" style="flex:1; padding:12px 18px; font-size:14px; font-weight:800; border-radius:10px; background:linear-gradient(135deg, #10b981, #059669); box-shadow:0 4px 14px rgba(16,185,129,0.35);">
             🚀 Fabricar Video Ahora ($0.00)
-          </button>
-          <button type="button" class="btn ghost" onclick="openWizardFromQC()" style="padding:12px 14px; font-size:12.5px;" title="Abrir asistente paso a paso avanzado">
-            Asistente Completo →
           </button>
         </div>
       </div>
@@ -243,23 +201,6 @@ function qcSwitchMode(newMode) {
   if (cur && cur.value) QC_STATE.text = cur.value;
   QC_STATE.mode = newMode;
   renderQuickCreateModal();
-}
-
-function openWizardFromQC() {
-  const inp = $('#qc-input-text');
-  if (inp && inp.value) {
-    if (QC_STATE.mode === 'script') W.script = inp.value;
-    else if (QC_STATE.mode === 'idea') W.idea = inp.value;
-    else if (QC_STATE.mode === 'url') W.url = inp.value;
-  }
-  W.mode = QC_STATE.mode;
-  W.format = QC_STATE.format;
-  W.style = QC_STATE.style;
-  W.pacing = QC_STATE.pacing;
-  W.subtitles = QC_STATE.subtitles;
-  W.step = 4;
-  closeOverlay();
-  nav('create');
 }
 
 async function executeQuickCreate() {
@@ -320,8 +261,8 @@ async function executeQuickCreate() {
       style_reference: true,
       auto_start: true
     };
-    if (QC_STATE.tpl) body.template_id = QC_STATE.tpl;  // INT-087: plantilla de nicho
     if (QC_STATE.destino) body.custom_workspace_path = QC_STATE.destino;  // INT-091: destino del usuario
+    if (QC_STATE.voice) body.tts_provider = QC_STATE.voice;  // INT-092: voz elegida en el modal rápido
     if (m === 'idea') body.idea = val;
     if (m === 'script') { body.script = val; body.title = val.slice(0, 48); }
     if (m === 'url') body.url = val;
@@ -378,55 +319,13 @@ async function qcPickDestino() {
   if (p) { QC_STATE.destino = p; renderQuickCreateModal(); }
 }
 
-async function wizardPickDestino() {
-  const p = await pickDestinoFolder();
-  if (p) { W.destino = p; renderCreate(); }
-}
-
 window.openQuickCreateModal = openQuickCreateModal;
 window.startDirectCreation = openQuickCreateModal;
 window.qcSwitchMode = qcSwitchMode;
 window.executeQuickCreate = executeQuickCreate;
-window.openWizardFromQC = openWizardFromQC;
 window.pickDestinoFolder = pickDestinoFolder;    // INT-091
 window.qcPickDestino = qcPickDestino;            // INT-091
-window.wizardPickDestino = wizardPickDestino;    // INT-091
 
-
-/* ── v2.36 · INT-079 · Brand Profiles en el asistente ─────────────
-   INT-042 añadió la llamada renderWizardBrandProfileBar() pero la definición
-   nunca existió → ReferenceError silencioso que mataba TODO el asistente
-   Crear (✨ Crear, ＋ Nuevo video en nicho, CTA de nichos, wizard rápido).
-   Regla de oro: la barra NUNCA lanza — sin perfiles o con error → ''. */
-function renderWizardBrandProfileBar() {
-  try {
-    const profiles = S.brandProfiles || [];
-    if (!profiles.length) return '';   // sin perfiles → wizard clásico intacto
-    const sel = profiles.find(p => p.id === W.brandProfile);
-    const hint = sel ? [sel.niche, sel.tone].filter(Boolean).map(esc).join(' · ') : '';
-    return `
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:14px">
-        <span style="font-size:12.5px;font-weight:700;color:var(--muted)">🏢 Perfil de marca:</span>
-        <select onchange="W.brandProfile=this.value;if(W.brandProfile){applyBrandToWizard();toast('Perfil de marca aplicado 🏢','ok')}renderCreate()" style="max-width:280px">
-          <option value="">— Sin perfil (configuración manual) —</option>
-          ${profiles.map(p => `<option value="${p.id}" ${W.brandProfile === p.id ? 'selected' : ''}>${p.is_default ? '⭐ ' : ''}${esc(p.name)}</option>`).join('')}
-        </select>
-        ${hint ? `<small style="color:var(--muted);font-size:11.5px">${hint}</small>` : ''}
-        <small style="color:var(--muted);font-size:11px;margin-left:auto"><a href="#" onclick="openBrandProfilesModal();return false" style="color:var(--accent2)">Administrar</a></small>
-      </div>`;
-  } catch (e) { return ''; }   // jamás puede tumbar el asistente
-}
-
-/* autofill 1-clic (documentado en Ajustes): solo campos seguros, sin pisar
-   decisiones del usuario — lo vacío en el perfil se deja como esté. */
-function applyBrandToWizard() {
-  const p = (S.brandProfiles || []).find(x => x.id === W.brandProfile);
-  if (!p) return;
-  if (p.subtitle_style) W.subtitles = p.subtitle_style;
-  if (p.visual_style && p.visual_style !== 'auto') W.style = p.visual_style;
-  if (p.tts_provider === 'gemini') W.voice = 'gemini';
-  else if (p.tts_provider === 'edge-tts') W.voice = '';
-}
 
 /* v2.36 · INT-079 · modal de administración de Canales y Marcas.
    INT-042 dejó el botón de Ajustes apuntando a una función inexistente. */
@@ -519,283 +418,6 @@ async function setBrandDefault(id) {
     openBrandProfilesModal();
     if (S.view === 'settings') renderSettings();
   } catch (e) { toast(e.message, 'err'); }
-}
-
-/* ── vista: WIZARD CREAR (4 pasos como Labsia) ───────────── */
-const W = { step: 1, mode: 'idea', format: 'short', style: 'auto',
-            title: '', idea: '', script: '', url: '', custom: '', voice: '', tts: '',
-            avatar: '', platforms: ['youtube', 'tiktok'],
-            transitions: true, styleReference: true, subtitles: 'shorts', brandProfile: '',
-            cookies: '', nicho: '', nichoAdjust: '', pacing: 'normal',
-            tpl: '', nicheLabel: '',   // INT-087: plantilla de nicho + nicho de marca
-            destino: '' };  // INT-091: carpeta de destino elegida con el explorador
-
-/* ── INT-087 · selector de plantillas de nicho (marca.json + workspace) ── */
-let TPLS = [];            // catálogo GET /api/templates
-let TPLS_LOADED = false;
-
-async function loadTemplates(force) {
-  if (TPLS_LOADED && !force) return TPLS;
-  try {
-    const r = await fetch('/api/templates');
-    if (r.ok) { TPLS = await r.json(); TPLS_LOADED = true; }
-  } catch (e) { /* best-effort: la UI funciona sin catálogo */ }
-  return TPLS;
-}
-
-function tplCardHTML(t, ctx) {
-  const sel = (ctx === 'qc' ? QC_STATE.tpl : W.tpl) === t.id;
-  const cierre = (t.marca && t.marca.cierre) || {};
-  return `
-      <div class="card mode-card tpl-card ${sel ? 'sel' : ''}" data-tpl="${t.id}"
-           style="${sel ? 'border-color:var(--accent2)' : ''}"
-           onclick="pickTemplate('${t.id}','${ctx}')">
-        <div class="emoji">${t.icono || '🎬'}</div><h3>${esc(t.nombre || t.id)}</h3>
-        <p>${esc(t.descripcion || '')}</p>
-        ${sel ? `<small style="color:var(--accent2);display:block;margin-top:6px">🎯 ritmo ${esc(t.ritmo || t.pacing || 'normal')} · voz ${esc(t.voice || (t.marca && t.marca.voz_default) || 'auto')}${cierre.frase ? ` · cierre: ${esc(cierre.frase)}` : ''}</small>` : ''}
-      </div>`;
-}
-
-function renderTplCards(ctx) {
-  if (!TPLS.length) {
-    loadTemplates().then(() => { if (TPLS.length) (ctx === 'qc' ? renderQuickCreateModal() : renderCreate()); });
-    return `<p style="color:var(--muted);font-size:12px;margin:6px 0">Cargando plantillas…</p>`;
-  }
-  return `
-      <h3 style="font-size:14px;font-weight:800;margin:20px 0 4px">🧩 Plantillas de nicho (opcional)</h3>
-      <small style="color:var(--muted);display:block;margin-bottom:10px">Elige una y se autocompletan nicho, voz, ritmo, subtítulos y el cierre de tu marca (marca.json) — el proyecto nace en su carpeta propia data/projects/&lt;nicho&gt;_&lt;titulo&gt;_&lt;id&gt;/.</small>
-      <div class="modes">${TPLS.map(t => tplCardHTML(t, ctx)).join('')}</div>`;
-}
-
-function pickTemplate(id, ctx) {
-  const t = TPLS.find(x => x.id === id) || null;
-  if (ctx === 'qc') {
-    QC_STATE.tpl = (QC_STATE.tpl === id) ? '' : id;   // toggle: 2º clic deselecciona
-    if (QC_STATE.tpl && t) {
-      QC_STATE.format = t.format || QC_STATE.format;
-      QC_STATE.pacing = t.pacing || QC_STATE.pacing;
-      QC_STATE.subtitles = t.subtitle_style || QC_STATE.subtitles;
-      QC_STATE.voice = t.voice || QC_STATE.voice;
-    }
-    renderQuickCreateModal();
-  } else {
-    W.tpl = (W.tpl === id) ? '' : id;                 // toggle
-    if (W.tpl && t) {
-      W.format = t.format || W.format;
-      W.pacing = t.pacing || W.pacing;
-      W.subtitles = t.subtitle_style || W.subtitles;
-      W.voice = t.voice || W.voice;
-      W.style = t.style || W.style;
-      W.nicheLabel = (t.marca && t.marca.nicho) || '';
-    }
-    renderCreate();
-  }
-}
-
-function renderCreate() {
-  const modes = [
-    { id: 'nicho', emoji: '🗂️', t: 'Desde Nicho', d: 'Elige un nicho con su plantilla y el video se fabrica SOLO' },
-    { id: 'idea',  emoji: '💡', t: 'Desde Idea',  d: 'Una frase → guion viral completo' },
-    { id: 'script',emoji: '📜', t: 'Desde Guion', d: 'Ya tienes el guion escrito' },
-    { id: 'url',   emoji: '🔗', t: 'Desde URL',   d: 'Recrea un viral de TikTok/YouTube (original)' },
-    { id: 'audio', emoji: '🎙️', t: 'Desde Audio', d: 'Tu propia voz como narración' },
-  ];
-  const isNicho = W.mode === 'nicho';
-  const stepName = isNicho ? ['Modo', 'Nicho'] : ['Modo', 'Formato', 'Estilo', 'Detalles'];
-  let body = '';
-
-  if (W.step === 1) {
-    body = `<div class="modes">${modes.map(m => `
-      <div class="card mode-card ${W.mode === m.id ? 'sel' : ''}" style="${W.mode === m.id ? 'border-color:var(--accent2)' : ''}"
-           onclick="W.mode='${m.id}';renderCreate()">
-        <div class="emoji">${m.emoji}</div><h3>${m.t}</h3><p>${m.d}</p></div>`).join('')}</div>
-      ${renderTplCards('w')}`;
-  }
-
-  if (W.step === 2 && isNicho) {
-    body = `
-      <p style="color:var(--muted);font-size:13px;line-height:1.55;margin-bottom:14px">
-        Cada nicho trae su <b>plantilla predeterminada</b> (prompt, estilo, formato y voz).
-        Al pulsar <b>🚀 Generar video completo</b> el motor hace TODO solo:
-        <b>guion → imágenes → animación → video</b>, y lo guarda en
-        <b>biblioteca/tu_nicho/Nombre-del-video.mp4</b> junto a tus otros proyectos del nicho.</p>
-      <div class="modes">${(S.niches || []).map(t => `
-        <div class="card mode-card ${W.nicho === t.id ? 'sel' : ''}" onclick="W.nicho='${t.id}';renderCreate()">
-          <div class="emoji">${t.emoji || '📁'}</div><h3>${esc(t.name)}</h3>
-          <p>${esc(t.description || '')}</p>
-          <small style="color:var(--accent2);display:block;margin-top:6px">📁 biblioteca/${esc(t.folder || '—')} · ${t.projects || 0} proyectos</small>
-        </div>`).join('')}</div>
-      ${W.nicho ? `
-        <div class="field" style="margin-top:16px"><label>✏️ Ajuste opcional sobre la plantilla del nicho</label>
-          <input type="text" value="${esc(W.nichoAdjust)}" oninput="W.nichoAdjust=this.value"
-            placeholder="vacío = solo la plantilla con un ángulo aleatorio (anti-repetición)"></div>` : ''}
-      <details style="margin-top:14px">
-        <summary style="cursor:pointer;font-weight:700;font-size:13px">➕ Nuevo nicho / 🗑️ administrar plantillas</summary>
-        <div style="margin-top:12px">${renderNichesAdmin()}</div>
-      </details>`;
-  } else if (W.step === 2) {
-    body = `<div class="format-row">
-      <div class="format-card ${W.format === 'short' ? 'sel' : ''}" onclick="W.format='short';renderCreate()">
-        <div class="shape s916"></div><b>Short / Vertical</b><small>9:16 · 1080×1920 · YouTube Shorts, TikTok, Reels</small></div>
-      <div class="format-card ${W.format === 'long' ? 'sel' : ''}" onclick="W.format='long';renderCreate()">
-        <div class="shape s169"></div><b>Largo / Horizontal</b><small>16:9 · 1920×1080 · YouTube clásico</small></div>
-    </div>`;
-  }
-
-  if (W.step === 3) {
-    body = `
-      <div style="margin-bottom:16px;">
-        <h3 style="font-size:18px; font-weight:700; margin:0 0 4px 0;">🎨 Estilo visual</h3>
-        <p style="color:var(--muted); font-size:13px; margin:0;">El estilo define los colores, filtros y energía visual de cada escena de tu video.</p>
-      </div>
-      <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(210px, 1fr)); gap:12px; max-height:490px; overflow-y:auto; padding-right:6px; margin-bottom:16px;">
-        ${S.styles.map(s => `
-          <div class="card" onclick="W.style='${s.id}';renderCreate()" style="cursor:pointer; padding:14px; border-radius:12px; border:2px solid ${W.style === s.id ? 'var(--accent)' : 'rgba(255,255,255,0.08)'}; background:${W.style === s.id ? 'rgba(16,185,129,0.09)' : 'rgba(255,255,255,0.02)'}; transition:all 0.15s; position:relative;">
-            <div style="width:100%; height:75px; border-radius:8px; background:${s.grad || 'linear-gradient(135deg,#1f2937,#374151)'}; display:flex; align-items:center; justify-content:center; font-size:32px; margin-bottom:10px; box-shadow:inset 0 0 20px rgba(0,0,0,0.5);">
-              ${s.emoji || '🎨'}
-            </div>
-            <b style="display:block; font-size:13.5px; margin-bottom:4px; font-weight:700;">${esc(s.name)}</b>
-            <p style="font-size:11.5px; color:var(--muted); line-height:1.4; margin:0;">${esc(s.desc || '')}</p>
-            ${W.style === s.id ? `<span style="position:absolute; top:8px; right:8px; background:var(--accent); color:#000; border-radius:50%; width:18px; height:18px; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:bold;">✓</span>` : ''}
-          </div>`).join('')}
-      </div>
-      ${W.style === 'custom-studio' ? `<div class="field" style="margin-top:16px"><label>Describe tu estilo (en inglés, estilo de imagen)</label>
-        <input type="text" value="${esc(W.custom)}" oninput="W.custom=this.value" placeholder="dark cinematic photography, moody fog..."></div>` : ''}`;
-  }
-
-  if (W.step === 4) {
-    const formatPills = `
-      <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap; align-items:center; background:rgba(255,255,255,0.03); padding:10px 14px; border-radius:10px; border:1px solid var(--border);">
-        <span style="font-size:12.5px; font-weight:700; color:var(--muted);">Formato:</span>
-        <button type="button" class="btn small ${W.format === 'short' ? 'btn-primary' : 'ghost'}" onclick="W.format='short';renderCreate()" style="padding:4px 10px; font-size:11.5px;">📱 9:16 Short (Recomendado)</button>
-        <button type="button" class="btn small ${W.format === 'long' ? 'btn-primary' : 'ghost'}" onclick="W.format='long';renderCreate()" style="padding:4px 10px; font-size:11.5px;">🖥️ 16:9 Largo</button>
-        <span style="font-size:12.5px; font-weight:700; color:var(--muted); margin-left:12px;">Estilo visual:</span>
-        <select style="padding:4px 8px; font-size:11.5px; max-width:210px; border-radius:6px;" onchange="W.style=this.value">
-          ${S.styles.map(s => `<option value="${s.id}" ${W.style === s.id ? 'selected' : ''}>${s.emoji} ${esc(s.name)}</option>`).join('')}
-        </select>
-      </div>`;
-
-    const f = W.mode === 'idea'
-      ? `<div class="field"><label>💡 Tu idea (una frase basta)</label><input type="text" value="${esc(W.idea)}" oninput="W.idea=this.value" placeholder="El imperio romano explicado en 60s"></div>`
-      : W.mode === 'script'
-      ? `<div class="field"><label>📜 Pega tu guion</label><textarea rows="7" oninput="W.script=this.value" placeholder="Escribe o pega tu guion aquí...">${esc(W.script)}</textarea></div>`
-      : W.mode === 'url'
-      ? `<div class="field"><label>🔗 URL del video viral (TikTok / YouTube)</label><input type="text" value="${esc(W.url)}" oninput="W.url=this.value" placeholder="https://www.tiktok.com/@user/video/..."><small style="color:var(--muted);display:block;margin-top:6px">Analizamos su estructura y creamos una versión 100% original. No copiamos contenido.</small></div>`
-      : `<div class="field"><label>🎙️ Grabación de voz (mp3/wav/m4a)</label><input type="file" id="audio-file" accept="audio/*"></div>`;
-    body = formatPills + f + `
-      <div class="field" style="margin-bottom:20px; background:rgba(255,255,255,0.02); padding:14px; border-radius:12px; border:1px solid var(--border);">
-        <label style="font-size:13px; font-weight:700; margin-bottom:8px; display:block;">⏱️ Ritmo de cortes visuales</label>
-        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px;">
-          <div class="card" onclick="W.pacing='fast';renderCreate()" style="cursor:pointer; padding:10px 12px; text-align:center; border-radius:10px; border:2px solid ${W.pacing==='fast' ? 'var(--accent)' : 'rgba(255,255,255,0.08)'}; background:${W.pacing==='fast' ? 'rgba(16,185,129,0.1)' : 'transparent'};">
-            <b style="display:block; font-size:13px;">⚡ Rápido</b>
-            <span style="color:var(--muted); font-size:11px; display:block;">~2.5s / imagen</span>
-            <small style="color:var(--accent); font-size:9.5px; font-weight:700;">TikTok / Shorts Viral</small>
-          </div>
-          <div class="card" onclick="W.pacing='normal';renderCreate()" style="cursor:pointer; padding:10px 12px; text-align:center; border-radius:10px; border:2px solid ${(W.pacing==='normal'||!W.pacing) ? 'var(--accent)' : 'rgba(255,255,255,0.08)'}; background:${(W.pacing==='normal'||!W.pacing) ? 'rgba(16,185,129,0.1)' : 'transparent'};">
-            <b style="display:block; font-size:13px;">⏱️ Normal</b>
-            <span style="color:var(--muted); font-size:11px; display:block;">~4.0s / imagen</span>
-            <small style="color:var(--muted); font-size:9.5px;">Recomendado</small>
-          </div>
-          <div class="card" onclick="W.pacing='slow';renderCreate()" style="cursor:pointer; padding:10px 12px; text-align:center; border-radius:10px; border:2px solid ${W.pacing==='slow' ? 'var(--accent)' : 'rgba(255,255,255,0.08)'}; background:${W.pacing==='slow' ? 'rgba(16,185,129,0.1)' : 'transparent'};">
-            <b style="display:block; font-size:13px;">🧘 Pausado</b>
-            <span style="color:var(--muted); font-size:11px; display:block;">~6.0s / imagen</span>
-            <small style="color:var(--muted); font-size:9.5px;">Documental / Historia</small>
-          </div>
-        </div>
-        <div style="margin-top:8px; font-size:11px; color:var(--muted); display:flex; justify-content:space-between;">
-          <span>El ritmo controla cuándo cambia el plano visual sin alterar la voz.</span>
-          <span style="color:var(--accent); font-weight:700;">$0.00 Ilimitado</span>
-        </div>
-      </div>
-      <div class="row">
-        <div class="field"><label>🎭 Avatar (personaje consistente)</label>
-          <select onchange="W.avatar=this.value">
-            <option value="">— sin avatar —</option>
-            ${S.avatars.map(a => `<option value="${a.id}" ${W.avatar === a.id ? 'selected' : ''}>${esc(a.name)}${a.voice ? ' · ' + esc(voiceName(a.voice)) : ''}</option>`).join('')}
-          </select>
-          ${S.avatars.length ? '' : '<small style="color:var(--muted);display:block;margin-top:4px">Crea personajes en la pestaña 🎭 Avatares</small>'}</div>
-        <div class="field"><label>Voz (opcional, la del avatar manda si no eliges)</label>
-          <div style="display:flex;gap:6px">
-            <select id="wiz-voice-select" onchange="W.voice=this.value" style="flex:1">
-              <option value="">edge-tts · Salomé 🇨🇴 (gratis ilimitado)</option>
-              <option value="gemini" ${S.health.gemini ? '' : 'disabled'}>Gemini TTS · Fenrir 🎖️ (premium)</option>
-            </select>
-            <button type="button" class="btn small ghost" onclick="openVoiceGallery({target:'wizard'})" title="Explorar y escuchar voces">🎧 Galería</button>
-          </div></div>
-      </div>
-      <div class="field"><label>📡 Plataformas destino</label>
-        <div class="plats">${PLATFORMS.map(p => `
-          <label class="plat-check ${W.platforms.includes(p.id) ? 'on' : ''}">
-            <input type="checkbox" ${W.platforms.includes(p.id) ? 'checked' : ''}
-              onchange="W.platforms = this.checked ? [...new Set([...W.platforms, '${p.id}'])] : W.platforms.filter(x => x !== '${p.id}'); this.closest('.plat-check').classList.toggle('on', this.checked)">
-            ${p.emoji} ${p.name}
-          </label>`).join('')}</div>
-        <small style="color:var(--muted);display:block;margin-top:4px">YouTube se publica directo con tu canal (OAuth). Para TikTok/IG/FB descarga el MP4 9:16 y súbelo — te preparamos el kit en 📺 Publicar.</small>
-      </div>
-      <div class="field"><label>🎬 Producción</label>
-        <div class="plats">
-          <label class="plat-check ${W.transitions ? 'on' : ''}"><input type="checkbox" ${W.transitions ? 'checked' : ''}
-            onchange="W.transitions = this.checked; this.closest('.plat-check').classList.toggle('on', this.checked)">🎞️ Transiciones suaves (xfade)</label>
-          <label class="plat-check ${W.styleReference ? 'on' : ''}"><input type="checkbox" ${W.styleReference ? 'checked' : ''}
-            onchange="W.styleReference = this.checked; this.closest('.plat-check').classList.toggle('on', this.checked)">🎨 Estilo consistente entre escenas</label>
-        </div>
-        <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
-          <div style="flex:1;min-width:180px"><label style="font-size:12px;color:var(--muted)">Estilo de subtítulos</label>
-            <div style="display:flex;gap:6px">
-              <select id="wiz-sub-select" onchange="W.subtitles=this.value" style="flex:1">
-                <option value="shorts" ${W.subtitles === 'shorts' ? 'selected' : ''}>📱 Shorts · Montserrat dinámico</option>
-                <option value="hormozi" ${W.subtitles === 'hormozi' ? 'selected' : ''}>⚡ Hormozi · Amarillo gigante</option>
-                <option value="mrbeast" ${W.subtitles === 'mrbeast' ? 'selected' : ''}>🔴 MrBeast · Impacto mayúsculas</option>
-                <option value="neon" ${W.subtitles === 'neon' ? 'selected' : ''}>🟢 Neon Cyber · Resplandor</option>
-                <option value="tiktok" ${W.subtitles === 'tiktok' ? 'selected' : ''}>💬 TikTok · Blanco clásico</option>
-                <option value="boxed" ${W.subtitles === 'boxed' ? 'selected' : ''}>📦 Boxed UGC · Fondo caja</option>
-                <option value="minimal" ${W.subtitles === 'minimal' ? 'selected' : ''}>🎬 Cinema · Minimal elegante</option>
-                <option value="karaoke" ${W.subtitles === 'karaoke' ? 'selected' : ''}>🎤 Karaoke · Verde lima</option>
-              </select>
-              <button type="button" class="btn small ghost" onclick="openSubtitleSwitcher({target:'wizard'})" title="Ver catálogo visual de subtítulos">🎨 Presets</button>
-            </div></div>
-          ${W.mode === 'url' ? `<div style="flex:1;min-width:180px"><label style="font-size:12px;color:var(--muted)">Cookies del navegador (anti-bloqueo viral)</label>
-            <select onchange="W.cookies=this.value">
-              <option value="" ${!W.cookies ? 'selected' : ''}>— sin cookies —</option>
-              ${['chrome','firefox','edge','brave'].map(c => `<option value="${c}" ${W.cookies === c ? 'selected' : ''}>${c}</option>`).join('')}
-            </select></div>` : ''}
-        </div>
-        <small style="color:var(--muted);display:block;margin-top:6px">El modo URL mide la originalidad del guion (solape de 5-gramas contra el viral) y reescribe solo si copia.</small>
-      </div>
-      <div class="field"><label>Título interno (máx 60)</label>
-        <input type="text" maxlength="60" value="${esc(W.title)}" oninput="W.title=this.value" placeholder="solo referencia, lo genera la IA si lo dejas vacío"></div>
-      <!-- INT-091 · libre elección de carpeta destino (diálogo nativo Windows) -->
-      <div class="field"><label>📂 Carpeta de destino en tu PC <small style="color:var(--muted)">(opcional — vacío = carpeta estándar)</small></label>
-        <div style="display:flex;gap:8px;align-items:center">
-          <input type="text" readonly value="${esc(W.destino || '')}" placeholder="D:\\PROYECTOS\\FRUTINOVELAS\\Mi_Video" style="flex:1;color:var(--muted)">
-          <button type="button" class="btn small ghost" onclick="wizardPickDestino()" title="Abre el diálogo nativo de Windows para elegir la carpeta exacta">🔍 Examinar en mi PC</button>
-        </div>
-        <small style="color:var(--muted);display:block;margin-top:5px">marca.json, guion/ y out/ nacen DIRECTAMENTE en la carpeta que elijas (INT-091).</small>
-      </div>`;
-  }
-
-  $('#view').innerHTML = `<div class="wizard">
-    ${renderWizardBrandProfileBar()}
-    <div class="steps">${stepName.map((n, i) => `
-      <div class="step ${i + 1 === W.step ? 'active' : i + 1 < W.step ? 'done' : ''}">${i + 1 < W.step ? '✓ ' : ''}${i + 1}. ${n}</div>`).join('')}</div>
-    <div class="card">${body}</div>
-    <div class="wizard-nav">
-      <button class="btn ghost" onclick="W.step--;W.step<1?nav('home'):renderCreate()">← Atrás</button>
-      <button class="btn primary" id="wiz-next">${W.step === 4 || (W.mode === 'nicho' && W.step === 2) ? '🚀 Generar video completo' : 'Continuar →'}</button>
-    </div></div>`;
-
-  $('#wiz-next').onclick = () => {
-    if (W.step === 1) { W.step = 2; renderCreate(); return; }
-    if (W.step === 2) {
-      if (isNicho) { createProject(); return; }   // un clic: plantilla → pipeline
-      W.step = 3; renderCreate(); return;
-    }
-    if (W.step === 3) { W.step = 4; renderCreate(); return; }
-    createProject();
-  };
-
-  // INT-082: en el paso final, aviso visible si falta algo crítico (TTS/ffmpeg)
-  if (W.step === 4 || (W.mode === 'nicho' && W.step === 2)) renderPreflightBanner();
 }
 
 /* ── admin de plantillas de nicho ────────────────────── */
@@ -958,7 +580,7 @@ async function renderAvatars() {
           <button class="btn small ghost" onclick="showAvatarPrompt('${a.id}')">📄 Prompt</button>
           <button class="btn small danger ghost" onclick="delAvatar('${a.id}')">🗑</button>
         </div>
-        <div style="display:flex; gap:6px; margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06);">
+        <div style="display:flex; gap:6px; margin-top:8px; padding-top:8px; border-top:1px solid var(--border);">
           <button class="btn small" style="flex:1; padding:4px 6px; font-size:11px; background:rgba(168,85,247,0.15); color:#c084fc; border:1px solid rgba(168,85,247,0.3); font-weight:700;" onclick="animateAvatarLivePortrait('${a.id}', this)" title="Anima parpadeo y micro-movimiento facial LivePortrait">🎬 LivePortrait</button>
           <button class="btn small" style="flex:1; padding:4px 6px; font-size:11px; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); font-weight:700;" onclick="lipsyncAvatarMuseTalk('${a.id}')" title="Genera habla y sincronización labial exacta con MuseTalk">👄 MuseTalk</button>
         </div>
@@ -1582,11 +1204,11 @@ function renderQCHooksList(hooks, prodName) {
   if (!container) return;
 
   const html = hooks.map((h, i) => `
-    <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:12px; margin-bottom:10px; transition:border-color 0.2s;">
+    <div style="background:var(--soft); border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:10px; transition:border-color 0.2s;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
         <div style="display:flex; align-items:center; gap:8px;">
-          <span style="font-weight:700; font-size:13px; color:#fff;">${esc(h.badge)}</span>
-          <span class="badge" style="background:rgba(99,102,241,0.2); color:#a5b4fc; font-size:10px; padding:2px 6px; border-radius:4px;">${esc(h.tag)}</span>
+          <span style="font-weight:700; font-size:13px; color:var(--text)">${esc(h.badge)}</span>
+          <span class="badge" style="background:rgba(99,102,241,0.2); color:var(--accent); font-size:10px; padding:2px 6px; border-radius:4px;">${esc(h.tag)}</span>
         </div>
         <div style="display:flex; align-items:center; gap:6px;">
           <span style="font-size:11px; color:var(--muted);">Stop-Rate:</span>
@@ -1611,7 +1233,7 @@ function renderQCHooksList(hooks, prodName) {
   container.innerHTML = `
     <div style="margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
       <span style="font-size:11.5px; font-weight:700; color:var(--muted);">Fórmulas ordenadas por Retención (Stop-Rate):</span>
-      <button type="button" class="btn ghost small" style="padding:4px 10px; font-size:11px; color:#a5b4fc; border:1px solid rgba(165,180,252,0.3);" onclick="generateABVariantsModal('${esc((prodName || '').replace(/'/g, "\\'"))}')">
+      <button type="button" class="btn ghost small" style="padding:4px 10px; font-size:11px; color:var(--accent); border:1px solid var(--border);" onclick="generateABVariantsModal('${esc((prodName || '').replace(/'/g, "\\'"))}')">
         📦 Matriz A/B (5 Variantes)
       </button>
     </div>

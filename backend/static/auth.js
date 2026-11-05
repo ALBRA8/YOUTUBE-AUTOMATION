@@ -38,9 +38,15 @@
   }
 
   function blockScreen(msg) {
+    // INT-092 · respeta el tema guardado (oscuro por defecto) — la pantalla
+    // de bloqueo ya no contradice al modo claro con un bloque azul-noche.
+    var light = false;
+    try { light = (localStorage.getItem('yta-theme') === 'light'); } catch (e) {}
+    var bg = light ? '#f2f4fb' : '#0b1020';
+    var fg = light ? '#171c33' : '#e5e7eb';
     document.body.innerHTML =
       '<div style="font-family:system-ui;display:grid;place-items:center;' +
-      'height:100vh;margin:0;text-align:center;background:#0b1020;color:#e5e7eb">' +
+      'height:100vh;margin:0;text-align:center;background:' + bg + ';color:' + fg + '">' +
       '<div><div style="font-size:54px">🔒</div><h2>' + msg + '</h2>' +
       '<p style="opacity:.7">Recarga la página (F5) para reintentar.</p></div></div>';
   }

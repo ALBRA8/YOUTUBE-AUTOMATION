@@ -6,6 +6,9 @@
 <title>YT Automation v2.0 — Fábrica de videos IA</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+<script>/* INT-092: aplica el tema guardado ANTES del primer pintado (sin destello
+   oscuro cuando el usuario está en modo claro) */
+try { document.documentElement.dataset.theme = localStorage.getItem('yta-theme') || 'dark'; } catch (e) {}</script>
 <link rel="stylesheet" href="static/style.css?v=__APP_VERSION__">
 </head>
 <body>
@@ -24,9 +27,9 @@
       <div class="nav-item" data-view="agent"><span class="ico">🤖</span> Agente</div>
     </nav>
 
-    <!-- herramientas -->
+    <!-- herramientas (INT-092: sin pestaña ✨ Crear — Inicio es el único
+         centro de mando con sus 5 modalidades de 1-clic) -->
     <div class="side-tools">
-      <button class="sidebar-nav-btn" onclick="nav('create')"><span class="ico">✨</span> Crear</button>
       <button class="sidebar-nav-btn" onclick="nav('avatars')"><span class="ico">🎭</span> Avatares</button>
       <button class="sidebar-nav-btn" onclick="nav('clipper')"><span class="ico">✂️</span> Clipper</button>
       <button class="sidebar-nav-btn" onclick="nav('projects')"><span class="ico">🗂️</span> Proyectos</button>

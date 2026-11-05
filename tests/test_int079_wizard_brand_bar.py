@@ -9,12 +9,15 @@ Causa raíz verificada en vivo (navegador headless + stack trace):
 INT-042 añadió la llamada `${renderWizardBrandProfileBar()}` dentro de
 renderCreate() pero la definición NUNCA existió en git (git log -S = 1 commit).
 El botón «🏢 Administrar Canales y Marcas» de Ajustes tenía la misma herida
-(openBrandProfilesModal sin definir). Toda ruta hacia renderCreate() moría:
-✨ Crear, ＋ Nuevo video en nicho, CTA de nichos, wizard rápido.
+(openBrandProfilesModal sin definir).
 
-Estos tests congelan los contratos que fallaron, sobre la FUENTE estática del
-frontend (sin navegador): si alguien vuelve a invocar una función inexistente,
-la suite rompe aquí y no en producción.
+INT-092 · estado actual de los contratos:
+  · El wizard de 4 pasos y su barra de Brand Profile se PURGARON — la
+    creación vive SOLO en el modal rápido de Inicio (sin perfil de marca).
+  · openBrandProfilesModal sigue viva (botón 🏢 de Ajustes).
+  · Los escáneres anti-función-fantasma (handlers inline + interpolaciones
+    ${...}) siguen siendo la garantía estructural: si alguien vuelve a
+    invocar una función inexistente, la suite rompe aquí y no en producción.
 """
 import re
 import sys
@@ -109,26 +112,30 @@ def test_no_phantom_functions_in_interpolations():
     assert not phantoms, f"Funciones fantasma en interpolaciones: {sorted(phantoms)}"
 
 
-def test_wizard_bar_defined_and_called_by_rendercreate():
-    m = re.search(r"\bfunction\s+renderWizardBrandProfileBar\s*\(", APP_JS)
-    assert m, "renderWizardBrandProfileBar debe estar DEFINIDA (INT-042 la llamaba sin definir)"
-    assert "${renderWizardBrandProfileBar()}" in APP_JS, \
-        "renderCreate debe seguir pintando la barra de Brand Profile"
+def test_wizard_bar_purgada_y_admin_de_ajustes_vivo():
+    """INT-092: la barra de Brand Profile del wizard se purgó junto al
+    asistente. Lo que SÍ sobrevive: openBrandProfilesModal (botón 🏢 de
+    Ajustes) con su admin completo."""
+    assert not re.search(r"\bfunction\s+renderWizardBrandProfileBar\s*\(", APP_JS), \
+        "la barra del wizard debe estar purgada (INT-092)"
+    assert "renderWizardBrandProfileBar" not in APP_JS
     m2 = re.search(r"\basync\s+function\s+openBrandProfilesModal\s*\(", APP_JS)
     assert m2, "openBrandProfilesModal debe estar definida (botón de Ajustes)"
     assert 'onclick="openBrandProfilesModal' in APP_JS
 
 
-def test_wizard_bar_cannot_crash_the_wizard_ever_again():
-    """La barra es accesorio: sin perfiles → '' y cualquier error → ''.
-    El asistente Crear no puede volver a morir por ella."""
-    start = APP_JS.index("function renderWizardBrandProfileBar")
-    body = APP_JS[start:start + 2500]
-    assert re.search(r"\btry\s*\{", body), "la barra debe encapsular su cuerpo en try"
-    assert re.search(r"if\s*\(!profiles\.length\)\s*return\s*''", body), \
-        "sin perfiles → '' (wizard clásico intacto)"
-    assert re.search(r"catch\s*\(\w+\)\s*\{\s*return\s*''", body), \
-        "cualquier excepción → '' (nunca propagar)"
+def test_la_barra_no_puede_matar_nada_porque_no_existe():
+    """La lección INT-079, versión INT-092: no hay barra que pueda lanzar
+    una ReferenceError — ni en la fuente ni en handlers ni en interpolaciones
+    (los escáneres anti-fantasma de arriba son la garantía continua)."""
+    assert "applyBrandToWizard" not in APP_JS
+    for src_name in FRONTEND_FILES:
+        src = (STATIC / src_name).read_text(encoding="utf-8")
+        assert "renderWizardBrandProfileBar" not in src, src_name
+    # la única puerta de creación es el modal rápido, sin barra
+    wiz = (STATIC / "app-wizard.js").read_text(encoding="utf-8")
+    assert "function renderQuickCreateModal()" in wiz
+    assert "renderWizardBrandProfileBar" not in wiz
 
 
 def test_brand_profiles_state_initialized_and_loaded_nonfatally():
@@ -142,14 +149,15 @@ def test_brand_profiles_state_initialized_and_loaded_nonfatally():
     assert m, "refreshAll debe cargar /brand-profiles dentro de try/catch no-fatal"
 
 
-def test_apply_brand_towizard_only_mutates_safe_fields():
-    """El autofill 1-clic solo toca claves del wizard (nunca campos ajenos)."""
-    start = APP_JS.index("function applyBrandToWizard")
-    body = APP_JS[start:APP_JS.index("\n}", start)]
-    touched = set(re.findall(r"\bW\.([A-Za-z_$][\w$]*)\s*=", body))
-    assert touched <= {"subtitles", "style", "voice"}, \
-        f"applyBrandToWizard solo puede mutar subtitles/style/voice; tocó: {touched}"
-    assert re.search(r"if\s*\(!p\)\s*return;", body), "perfil inexistente → no-op"
+def test_brand_admin_guarda_sin_wizard():
+    """El autofill del wizard (applyBrandToWizard) se purgó con él; el admin
+    de Ajustes guarda/borra perfiles vía su API propia sin tocar el wizard
+    (que ya no existe)."""
+    assert "applyBrandToWizard" not in APP_JS
+    start = APP_JS.index("async function saveBrandProfile")
+    body = APP_JS[start:APP_JS.index("\nasync ", start + 10)]
+    assert "api('/brand-profiles'" in body
+    assert "renderCreate" not in body and "W." not in body
 
 
 def test_cache_bust_version_bumped():
@@ -174,14 +182,14 @@ if __name__ == "__main__":
     print("[OK] test_no_phantom_functions_in_inline_handlers")
     test_no_phantom_functions_in_interpolations()
     print("[OK] test_no_phantom_functions_in_interpolations")
-    test_wizard_bar_defined_and_called_by_rendercreate()
-    print("[OK] test_wizard_bar_defined_and_called_by_rendercreate")
-    test_wizard_bar_cannot_crash_the_wizard_ever_again()
-    print("[OK] test_wizard_bar_cannot_crash_the_wizard_ever_again")
+    test_wizard_bar_purgada_y_admin_de_ajustes_vivo()
+    print("[OK] test_wizard_bar_purgada_y_admin_de_ajustes_vivo")
+    test_la_barra_no_puede_matar_nada_porque_no_existe()
+    print("[OK] test_la_barra_no_puede_matar_nada_porque_no_existe")
     test_brand_profiles_state_initialized_and_loaded_nonfatally()
     print("[OK] test_brand_profiles_state_initialized_and_loaded_nonfatally")
-    test_apply_brand_towizard_only_mutates_safe_fields()
-    print("[OK] test_apply_brand_towizard_only_mutates_safe_fields")
+    test_brand_admin_guarda_sin_wizard()
+    print("[OK] test_brand_admin_guarda_sin_wizard")
     test_cache_bust_version_bumped()
     print("[OK] test_cache_bust_version_bumped")
     print("\nTODOS LOS TESTS INT-079 PASARON (7/7).")

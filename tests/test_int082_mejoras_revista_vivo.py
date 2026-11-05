@@ -184,9 +184,10 @@ def test_get_en_raiz_sigue_sirviendo_html_completo(client):
 # ═════════════════════ Contrato frontend (panel) ══════════════════════════
 
 def test_contrato_appjs_gate_antes_de_gastar():
-    """El gate se ejecuta en createProject y startJob ANTES de la llamada que
-    crea el proyecto / lanza el pipeline. (INT-088: el código vive ahora en
-    app-projects.js; se lee la concatenación de todo el frontend.)"""
+    """El gate se ejecuta ANTES de la llamada que crea el proyecto / lanza
+    el pipeline. (INT-088: el código vive en app-projects.js; INT-092: el
+    submit del wizard creó el hueco y ahora los dos puntos de gasto son
+    createNichoVideo y startJob — el gate sigue siendo exactamente 2.)"""
     appjs = "\n".join(
         (BACKEND / "static" / f).read_text(encoding="utf-8")
         for f in ("app.js", "app-core.js", "app-projects.js", "app-mcp.js",
@@ -194,7 +195,7 @@ def test_contrato_appjs_gate_antes_de_gastar():
     assert "/doctor/preflight_creacion" in appjs
     assert appjs.count("if (!(await preflightGate())) return;") == 2
 
-    i_create = appjs.index("async function createProject()")
+    i_create = appjs.index("async function createNichoVideo(")
     assert appjs.index("preflightGate()", i_create) < \
         appjs.index("await api('/projects'", i_create)
 
@@ -204,14 +205,17 @@ def test_contrato_appjs_gate_antes_de_gastar():
 
 
 def test_contrato_appjs_banner_y_cache():
+    """INT-092: el banner visual del wizard se purgó junto al asistente —
+    la misma protección vive ahora en preflightGate() (confirm modal) que
+    invocan createNichoVideo y startJob. Lo que NO cambia: la caché de 60 s
+    de preflightCrear para no sondear en cada clic + fail-open."""
     appjs = "\n".join(
         (BACKEND / "static" / f).read_text(encoding="utf-8")
         for f in ("app.js", "app-core.js", "app-projects.js", "app-mcp.js",
                   "app-wizard.js", "app-player.js"))
-    assert "function renderPreflightBanner()" in appjs
-    # el banner solo se pide en el paso final del asistente (botón 🚀)
-    assert "renderPreflightBanner();" in appjs
-    assert "(W.step === 4 || (W.mode === 'nicho' && W.step === 2))" in appjs
+    assert "renderPreflightBanner" not in appjs   # purgado con el wizard
+    assert "async function preflightGate(" in appjs
+    assert "async function preflightCrear(" in appjs
     # caché de 60 s para no sondear en cada clic + fail-open
     assert "60000" in appjs
     assert "catch { return null; }" in appjs

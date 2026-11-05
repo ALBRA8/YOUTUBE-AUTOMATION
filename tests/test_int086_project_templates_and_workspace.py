@@ -384,8 +384,8 @@ def test_sync_artifacts_guion_desde_bd(tmp_path, monkeypatch):
 
 # ── contratos de fuente y versión (cadena INT-080) ───────────────────────
 def test_contratos_fuente_y_version():
-    check("APP_VERSION 2.44.0 (INT-080: bump por cambio funcional)",
-          config.APP_VERSION == "2.44.0")
+    check("APP_VERSION 2.45.0 (INT-080: bump por cambio funcional)",
+          config.APP_VERSION == "2.45.0")
     src_ws = (BACKEND / "pipeline" / "project_workspace.py").read_text(
         encoding="utf-8")
     check("firma pública del módulo workspace",

@@ -61,21 +61,20 @@ function setTheme(t) {
 }
 
 function nav(view) {
+  // INT-092 · la pestaña ✨ Crear se eliminó del menú: la creación vive SOLO
+  // en Inicio (5 modalidades 1-clic → modal rápido). Cualquier navegación
+  // antigua a 'create' (atajos, historial, agente) redirige limpia a Inicio.
+  if (view === 'create') view = 'home';
   // v2.11.1 · entrar a Proyectos desde cualquier vista (excepto volver del detalle) = ventana de nichos
   if (view === 'projects' && S.view !== 'project') _PROJ_NICHO = null;
   S.view = view;
   $$('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === view));
   refreshSidebar();
-  const views = { home: renderHome, create: renderCreate, projects: renderProjects,
+  const views = { home: renderHome, projects: renderProjects,
                   factory: renderFactory, publish: renderPublish, settings: renderSettings,
                   project: renderProject, agent: renderAgent, avatars: renderAvatars,
                   trends: renderTrends, mcp: renderMCP, clipper: renderClipper };
   (views[view] || renderHome)();
-}
-
-/* ── v2.7 · sidebar modular: CTA nicho + explorador con scroll ── */
-function openNicheCreator() {
-  nav('create'); W.mode = 'nicho'; W.step = 2; renderCreate();
 }
 
 /* v2.10.2: sidebar sin explorador ni CTA (petición del usuario) — la gestión
@@ -92,12 +91,6 @@ function renderHome() {
   const spark = Array.from({length: 7}, (_, i) => `<i style="height:${18 + Math.sin(i * 1.7) * 10 + 8}%"></i>`).join('');
   $('#view').innerHTML = `
     ${S.demo ? `<div class="demo-banner">⚠️ Modo DEMO — no detecto el backend en :8000. Arranca el servidor o los datos son de muestra.</div>` : ''}
-    <div class="agent-banner" onclick="nav('agent')">
-      <div class="ab-ico">🤖</div>
-      <div class="ab-txt"><b>Agente General</b>
-        <small>Habla con tu fábrica: «crea un video sobre el imperio romano» y listo — el motor produce todo.</small></div>
-      <button class="btn primary small">Probar →</button>
-    </div>
     <div class="grid-kpis">
       <div class="card kpi"><div class="num">${st.today ?? 0}</div><div class="lbl">Videos hoy</div><div class="spark">${spark}</div></div>
       <div class="card kpi"><div class="num">${st.total ?? 0}</div><div class="lbl">Proyectos totales</div></div>
@@ -109,7 +102,7 @@ function renderHome() {
 
     <h2 class="sec" style="display:flex; justify-content:space-between; align-items:center;">
       <span># ¿Cómo quieres empezar hoy?</span>
-      <span class="hint" style="font-size:12px; color:var(--muted); font-weight:normal;">4 Modalidades Rápidas · 1-Clic</span>
+      <span class="hint" style="font-size:12px; color:var(--muted); font-weight:normal;">5 Modalidades Rápidas · 1-Clic</span>
     </h2>
     <div class="modes labsia-modes" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:14px; margin-bottom:28px;">
       <div class="card mode-card labsia-card" onclick="openQuickCreateModal('script')" style="cursor:pointer; border-radius:12px; transition:transform 0.15s, border-color 0.15s;">
@@ -449,7 +442,7 @@ async function doTrends() {
         <small style="color:var(--muted);display:block;margin:4px 0 8px">Clic en una idea para crear el video con ella</small>
         ${ideas.map(i => {
           const js = JSON.stringify(i.title || '').replace(/"/g, '&quot;');
-          return `<div class="idea-item" style="cursor:pointer" onclick="W.mode='idea';W.idea=${js};nav('create')">
+          return `<div class="idea-item" style="cursor:pointer" onclick="openQuickCreateModal('idea',${js})">
             <span><b>${esc(i.title || '')}</b><br><span style="color:var(--muted);font-size:12px">${esc(i.angle || '')} — ${esc(i.why || '')}</span></span>
             <b style="color:var(--accent)">→ crear</b></div>`;
         }).join('')}
@@ -689,7 +682,8 @@ window.__appBoot = async function boot() {
   }
 
   updatePills();
-  loadTemplates();  // INT-087: catálogo del selector de plantillas (best-effort)
+  // INT-092: el selector de plantillas genéricas se purgó de la UI — sin
+  // precarga de catálogo; POST /api/templates sigue vivo para el backend.
 
   if (S.demo) {
     S.styles = S.styles.length ? S.styles : [];

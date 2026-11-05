@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
 """
-INT-087 · Selector de Plantillas de Nicho en la UI (asistente Crear).
+INT-087 · Plantillas de nicho: API + flujo de creación (la UI se purgó en INT-092).
 
-Cubre los 3 frentes de la tarea:
-  A. app-wizard.js — tarjetas de las 5 plantillas (iconos 🍳🧶🛍️⚡🖼️) en el
-     wizard de Crear (paso 1) Y en el modal de creación rápida 1-clic,
-     alimentadas por GET /api/templates (carga perezosa + best-effort).
-     Al hacer clic se AUTOCOMPLETAN nicho, voz, ritmo, subtítulos, estilo
-     y el cierre de marca (marca.json) — toggle: 2º clic deselecciona.
-  B. Payload — createProject() y quick-create envían template_id (y el
-     nicho de la marca) a POST /api/projects, que ya crea el workspace
-     modular con marca.json (INT-086).
-  C. Contratos — catálogo con pacing canónico (fast/normal/slow, el
-     lexicon de resolve_scene_count y de las tarjetas de ritmo de la UI)
-     + etiqueta humana «ritmo»; cache-busting app.js?v=__APP_VERSION__.
+Historia:
+  · INT-087 añadió el selector de plantillas al wizard y al modal rápido.
+  · INT-092 lo PURGÓ de la UI: las tarjetas genéricas estorbaban la pantalla
+    y la creación vive SOLO en Inicio (modal rápido 1-clic sin plantillas).
 
-Método: contratos de fuente congelados (app-wizard.js/app-core.js/index.html
-— INT-088 dividió app.js en módulos), API REAL con
-TestClient (catálogo + creación con plantilla) y validación de sintaxis
+Cubre:
+  A. Purga honesta de la UI — en los statics NO queda el selector
+     (tpl-card, renderTplCards, pickTemplate, loadTemplates, QC_STATE.tpl)
+     y el boot no precarga el catálogo.
+  B. Contratos — catálogo con pacing canónico (fast/normal/slow, el lexicon
+     de resolve_scene_count) + etiqueta humana «ritmo»; cache-busting
+     app.js?v=__APP_VERSION__.
+  C. API REAL con TestClient — GET /api/templates sigue vivo (backend) y
+     POST /api/projects acepta template_id+niche exactamente igual que
+     antes: purgar la UI NO cambió el contrato del backend.
+
+Método: contratos de fuente congelados (app-wizard.js/app-core.js — INT-088
+dividió app.js en módulos), API REAL con TestClient y validación de sintaxis
 JS vía node --check cuando node está disponible.
 
 Dual-mode: pytest (fixture client) y script directo.
@@ -58,37 +60,26 @@ def client():
     return TestClient(main.app)
 
 
-# ── A. contratos de fuente del selector (app-wizard.js; boot en app-core.js) ─
-def test_selector_js_fuente():
-    # INT-088: las tarjetas viven en app-wizard.js, pero el payload que envía
-    # template_id lo construye createProject() en app-projects.js → se leen ambos.
+# ── A. purga del selector en la UI (INT-092) — el backend NO se toca ─────
+def test_selector_ui_purgada():
+    """INT-092: las tarjetas de plantillas genéricas estorbaban la pantalla.
+    El wizard de 4 pasos y el selector murieron; el modal rápido NO trae
+    plantillas. El catálogo API sigue vivo para el backend/integraciones."""
     js = "\n".join((BACKEND / "static" / f).read_text(encoding="utf-8")
-                   for f in ("app-wizard.js", "app-projects.js"))
+                   for f in ("app-wizard.js", "app-projects.js", "app-core.js"))
+    for simbolo in ("renderTplCards", "pickTemplate", "tplCardHTML",
+                    "loadTemplates", "TPLS_LOADED", "QC_STATE.tpl",
+                    "body.template_id = QC_STATE.tpl"):
+        check(f"sin rastro del selector: {simbolo}", simbolo not in js)
+    check("sin tarjetas tpl-card en la UI", "tpl-card" not in js
+          and "data-tpl=" not in js)
     core_js = (BACKEND / "static" / "app-core.js").read_text(encoding="utf-8")
-    check("catálogo cargado desde GET /api/templates",
-          "fetch('/api/templates')" in js and "loadTemplates" in js)
-    check("carga perezosa + caché local",
-          "TPLS_LOADED" in js and "let TPLS = []" in js)
-    check("tarjetas con clase tpl-card e icono de la plantilla",
-          "tpl-card" in js and "data-tpl=" in js and "t.icono" in js)
-    check("selector en el wizard (paso 1) y en el modal rápido",
-          "renderTplCards('w')" in js and "renderTplCards('qc')" in js)
-    check("clic autocompleta nicho, voz, ritmo, subtítulos y estilo",
-          "W.nicheLabel" in js and "W.voice = t.voice" in js
-          and "W.pacing = t.pacing" in js and "W.subtitles = t.subtitle_style" in js
-          and "W.format = t.format" in js)
-    check("modal rápido autocompleta su estado",
-          "QC_STATE.tpl" in js and "QC_STATE.pacing = t.pacing" in js
-          and "QC_STATE.voice = t.voice" in js)
-    check("payload del wizard envía template_id + nicho de marca",
-          "body.template_id = W.tpl" in js and "body.niche = W.nicheLabel" in js)
-    check("payload del modal rápido envía template_id",
-          "body.template_id = QC_STATE.tpl" in js)
-    check("toggle: 2º clic deselecciona",
-          "=== id) ? '' : id" in js)
-    check("cierre de marca visible en la tarjeta seleccionada",
-          "cierre.frase" in js)
-    check("boot carga el catálogo", "loadTemplates();  // INT-087" in core_js)
+    check("boot ya no precarga el catálogo", "loadTemplates();" not in core_js)
+    # el modal rápido sigue siendo la única puerta de creación en Inicio
+    check("las 5 modalidades de Inicio abren el modal rápido",
+          js.count("openQuickCreateModal('") >= 5)
+    check("el modal rápido mantiene destino INT-091 y la voz INT-092",
+          "qcPickDestino" in js and "QC_STATE.voice" in js)
 
 
 def test_app_js_sintaxis_node():
@@ -109,7 +100,7 @@ def test_app_js_sintaxis_node():
           "; ".join(bad))
 
 
-# ── B. API real: catálogo y creación desde la UI ─────────────────────────
+# ── B. API real: catálogo y creación (contratos backend intactos) ────────
 def test_get_templates_para_ui(client):
     res = client.get("/api/templates")
     check("GET /api/templates → 200", res.status_code == 200)
@@ -123,8 +114,7 @@ def test_get_templates_para_ui(client):
 
 def test_catalogo_pacing_canonico():
     """El pacing de las plantillas usa el canon fast/normal/slow (el mismo
-    lexicon de resolve_scene_count y de las tarjetas de ritmo de la UI) y
-    trae etiqueta humana «ritmo» para el detalle de la tarjeta."""
+    lexicon de resolve_scene_count) y trae etiqueta humana «ritmo»."""
     from services import niche_templates as ntpl
     for t in ntpl.list_templates():
         check(f"{t['id']}: pacing canónico",
@@ -134,8 +124,9 @@ def test_catalogo_pacing_canonico():
 
 
 def test_flujo_ui_crea_proyecto_con_plantilla(client):
-    """Simula el payload EXACTO que construye createProject() al hacer clic
-    en una tarjeta: template_id + niche de la marca heredados."""
+    """El payload EXACTO que la UI enviaba al clicar una tarjeta sigue
+    siendo válido: template_id + niche de la marca heredados (contrato
+    backend intacto tras la purga UI de INT-092)."""
     res = client.post("/api/projects", json={
         "mode": "idea", "idea": "arepas rellenas de queso en 30s",
         "template_id": "cocina-recetas", "niche": "cocina"})
@@ -164,7 +155,7 @@ def test_flujo_ui_crea_proyecto_con_plantilla(client):
 
 def test_dashboard_sirve_app_js_con_cache_busting(client):
     """El HTML raíz referencia app.js?v=<versión> (INT-082): al subir de
-    versión el navegador descarga el selector nuevo sin cachestale."""
+    versión el navegador descarga la UI nueva sin cachestale."""
     res = client.get("/")
     check("GET / → 200", res.status_code == 200)
     html = res.text
@@ -175,8 +166,8 @@ def test_dashboard_sirve_app_js_con_cache_busting(client):
 
 # ── C. contrato de versión (cadena INT-080) ──────────────────────────────
 def test_version():
-    check("APP_VERSION 2.44.0 (INT-080: bump por cambio funcional)",
-          config.APP_VERSION == "2.44.0")
+    check("APP_VERSION 2.45.0 (INT-080: bump por cambio funcional)",
+          config.APP_VERSION == "2.45.0")
 
 
 if __name__ == "__main__":  # modo script directo
