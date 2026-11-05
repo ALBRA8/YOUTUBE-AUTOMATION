@@ -1,0 +1,23 @@
+name: CI YOUTUBE-AUTOMATION
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+      - name: Suite pytest (aislada de .env y con fixes 658740b)
+        run: python -m pytest tests/ -q
+      # La batería standalone tests/run_all.py requiere entorno Windows completo
+      # (Chrome/perfil, claves de proveedores): se ejecuta en la máquina del propietario.
