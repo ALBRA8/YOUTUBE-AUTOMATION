@@ -174,6 +174,7 @@ function renderProjectCards(list) {
 
 /* ── MODAL DE CREACIÓN RÁPIDA 1-CLIC (Estilo LabsIA · $0.00) ── */
 const QC_STATE = {
+  tpl: '',   // INT-087: plantilla de nicho seleccionada
   mode: 'idea',
   format: 'short',
   pacing: 'normal',
@@ -314,6 +315,8 @@ function renderQuickCreateModal() {
         </div>
 
         <div class="qc-tabs">${tabButtons}</div>
+
+        ${renderTplCards('qc')}
 
         ${inputField}
 
@@ -472,6 +475,7 @@ async function executeQuickCreate() {
       style_reference: true,
       auto_start: true
     };
+    if (QC_STATE.tpl) body.template_id = QC_STATE.tpl;  // INT-087: plantilla de nicho
     if (m === 'idea') body.idea = val;
     if (m === 'script') { body.script = val; body.title = val.slice(0, 48); }
     if (m === 'url') body.url = val;
@@ -645,7 +649,70 @@ const W = { step: 1, mode: 'idea', format: 'short', style: 'auto',
             title: '', idea: '', script: '', url: '', custom: '', voice: '', tts: '',
             avatar: '', platforms: ['youtube', 'tiktok'],
             transitions: true, styleReference: true, subtitles: 'shorts', brandProfile: '',
-            cookies: '', nicho: '', nichoAdjust: '', pacing: 'normal' };
+            cookies: '', nicho: '', nichoAdjust: '', pacing: 'normal',
+            tpl: '', nicheLabel: '' };  // INT-087: plantilla de nicho + nicho de marca
+
+/* ── INT-087 · selector de plantillas de nicho (marca.json + workspace) ── */
+let TPLS = [];            // catálogo GET /api/templates
+let TPLS_LOADED = false;
+
+async function loadTemplates(force) {
+  if (TPLS_LOADED && !force) return TPLS;
+  try {
+    const r = await fetch('/api/templates');
+    if (r.ok) { TPLS = await r.json(); TPLS_LOADED = true; }
+  } catch (e) { /* best-effort: la UI funciona sin catálogo */ }
+  return TPLS;
+}
+
+function tplCardHTML(t, ctx) {
+  const sel = (ctx === 'qc' ? QC_STATE.tpl : W.tpl) === t.id;
+  const cierre = (t.marca && t.marca.cierre) || {};
+  return `
+      <div class="card mode-card tpl-card ${sel ? 'sel' : ''}" data-tpl="${t.id}"
+           style="${sel ? 'border-color:var(--accent2)' : ''}"
+           onclick="pickTemplate('${t.id}','${ctx}')">
+        <div class="emoji">${t.icono || '🎬'}</div><h3>${esc(t.nombre || t.id)}</h3>
+        <p>${esc(t.descripcion || '')}</p>
+        ${sel ? `<small style="color:var(--accent2);display:block;margin-top:6px">🎯 ritmo ${esc(t.ritmo || t.pacing || 'normal')} · voz ${esc(t.voice || (t.marca && t.marca.voz_default) || 'auto')}${cierre.frase ? ` · cierre: ${esc(cierre.frase)}` : ''}</small>` : ''}
+      </div>`;
+}
+
+function renderTplCards(ctx) {
+  if (!TPLS.length) {
+    loadTemplates().then(() => { if (TPLS.length) (ctx === 'qc' ? renderQuickCreateModal() : renderCreate()); });
+    return `<p style="color:var(--muted);font-size:12px;margin:6px 0">Cargando plantillas…</p>`;
+  }
+  return `
+      <h3 style="font-size:14px;font-weight:800;margin:20px 0 4px">🧩 Plantillas de nicho (opcional)</h3>
+      <small style="color:var(--muted);display:block;margin-bottom:10px">Elige una y se autocompletan nicho, voz, ritmo, subtítulos y el cierre de tu marca (marca.json) — el proyecto nace en su carpeta propia data/projects/&lt;nicho&gt;_&lt;titulo&gt;_&lt;id&gt;/.</small>
+      <div class="modes">${TPLS.map(t => tplCardHTML(t, ctx)).join('')}</div>`;
+}
+
+function pickTemplate(id, ctx) {
+  const t = TPLS.find(x => x.id === id) || null;
+  if (ctx === 'qc') {
+    QC_STATE.tpl = (QC_STATE.tpl === id) ? '' : id;   // toggle: 2º clic deselecciona
+    if (QC_STATE.tpl && t) {
+      QC_STATE.format = t.format || QC_STATE.format;
+      QC_STATE.pacing = t.pacing || QC_STATE.pacing;
+      QC_STATE.subtitles = t.subtitle_style || QC_STATE.subtitles;
+      QC_STATE.voice = t.voice || QC_STATE.voice;
+    }
+    renderQuickCreateModal();
+  } else {
+    W.tpl = (W.tpl === id) ? '' : id;                 // toggle
+    if (W.tpl && t) {
+      W.format = t.format || W.format;
+      W.pacing = t.pacing || W.pacing;
+      W.subtitles = t.subtitle_style || W.subtitles;
+      W.voice = t.voice || W.voice;
+      W.style = t.style || W.style;
+      W.nicheLabel = (t.marca && t.marca.nicho) || '';
+    }
+    renderCreate();
+  }
+}
 
 function renderCreate() {
   const modes = [
@@ -663,7 +730,8 @@ function renderCreate() {
     body = `<div class="modes">${modes.map(m => `
       <div class="card mode-card ${W.mode === m.id ? 'sel' : ''}" style="${W.mode === m.id ? 'border-color:var(--accent2)' : ''}"
            onclick="W.mode='${m.id}';renderCreate()">
-        <div class="emoji">${m.emoji}</div><h3>${m.t}</h3><p>${m.d}</p></div>`).join('')}</div>`;
+        <div class="emoji">${m.emoji}</div><h3>${m.t}</h3><p>${m.d}</p></div>`).join('')}</div>
+      ${renderTplCards('w')}`;
   }
 
   if (W.step === 2 && isNicho) {
@@ -948,6 +1016,7 @@ async function createProject() {
                    subtitle_style: W.subtitles,
                    cookies_from_browser: W.cookies || null,
                    brand_profile_id: W.brandProfile || null };
+    if (W.tpl) { body.template_id = W.tpl; if (W.nicheLabel) body.niche = W.nicheLabel; }  // INT-087: plantilla + nicho de marca
     if (audioPath) body.audio_path = audioPath;  // INT-080: puerta legitima (antes PATCH → 403)
     if (W.mode === 'idea') body.idea = W.idea;
     if (W.mode === 'script') { body.script = W.script; body.title = W.title || W.script.slice(0, 50); }
@@ -2464,6 +2533,7 @@ async function refreshAll() {
   }
 
   updatePills();
+  loadTemplates();  // INT-087: catálogo del selector de plantillas (best-effort)
 
   if (S.demo) {
     S.styles = S.styles.length ? S.styles : [];

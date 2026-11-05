@@ -38,7 +38,8 @@ BUILTIN_TEMPLATES: list[dict] = [
                         "acústica suave. Subtítulos limpios inferiores."),
         "format": "short",
         "formatos": ["vertical", "horizontal"],
-        "pacing": "pausado",
+        "pacing": "slow",          # canon del backend (fast/normal/slow)
+        "ritmo": "Pausado (~6 s por plano)",
         "broll": "planos detalle del proceso y del plato terminado (macro)",
         "musica": "acústica suave",
         "style": "auto",
@@ -69,7 +70,8 @@ BUILTIN_TEMPLATES: list[dict] = [
                         "Ideal para tutoriales relajantes."),
         "format": "short",
         "formatos": ["vertical"],
-        "pacing": "pausado",
+        "pacing": "slow",          # canon del backend (fast/normal/slow)
+        "ritmo": "Pausado (~6 s por plano)",
         "broll": "primer plano de manos y tejido, cada paso numerado",
         "musica": "lofi tranquila",
         "style": "auto",
@@ -101,7 +103,8 @@ BUILTIN_TEMPLATES: list[dict] = [
                         "tercio medio."),
         "format": "short",
         "formatos": ["vertical"],
-        "pacing": "normal",
+        "pacing": "normal",        # canon del backend
+        "ritmo": "Normal (~4 s por plano)",
         "broll": "B-roll del producto en uso (unboxing, textura, resultado)",
         "musica": "energética moderna",
         "style": "auto",
@@ -132,7 +135,8 @@ BUILTIN_TEMPLATES: list[dict] = [
                         "virales."),
         "format": "short",
         "formatos": ["vertical"],
-        "pacing": "rápido",
+        "pacing": "fast",          # canon del backend (fast/normal/slow)
+        "ritmo": "Rápido (~2,5 s por plano · corte cada 3 s)",
         "broll": "cambio de plano cada 3 segundos, zoom punch en énfasis",
         "musica": "energética con subidas",
         "style": "auto",
@@ -164,7 +168,8 @@ BUILTIN_TEMPLATES: list[dict] = [
                         "listas para publicar o para reusar en tu editor."),
         "format": "short",
         "formatos": ["miniatura"],
-        "pacing": "normal",
+        "pacing": "normal",        # canon del backend
+        "ritmo": "Normal",
         "broll": "imagen principal de alto contraste con sujeto recortado",
         "musica": "",
         "style": "auto",

@@ -9,7 +9,8 @@
       "vertical",
       "horizontal"
     ],
-    "pacing": "pausado",
+    "pacing": "slow",
+    "ritmo": "Pausado (~6 s por plano)",
     "broll": "planos detalle del proceso y del plato terminado (macro)",
     "musica": "acústica suave",
     "style": "auto",
@@ -44,7 +45,8 @@
     "formatos": [
       "vertical"
     ],
-    "pacing": "pausado",
+    "pacing": "slow",
+    "ritmo": "Pausado (~6 s por plano)",
     "broll": "primer plano de manos y tejido, cada paso numerado",
     "musica": "lofi tranquila",
     "style": "auto",
@@ -80,6 +82,7 @@
       "vertical"
     ],
     "pacing": "normal",
+    "ritmo": "Normal (~4 s por plano)",
     "broll": "B-roll del producto en uso (unboxing, textura, resultado)",
     "musica": "energética moderna",
     "style": "auto",
@@ -113,7 +116,8 @@
     "formatos": [
       "vertical"
     ],
-    "pacing": "rápido",
+    "pacing": "fast",
+    "ritmo": "Rápido (~2,5 s por plano · corte cada 3 s)",
     "broll": "cambio de plano cada 3 segundos, zoom punch en énfasis",
     "musica": "energética con subidas",
     "style": "auto",
@@ -150,6 +154,7 @@
       "miniatura"
     ],
     "pacing": "normal",
+    "ritmo": "Normal",
     "broll": "imagen principal de alto contraste con sujeto recortado",
     "musica": "",
     "style": "auto",

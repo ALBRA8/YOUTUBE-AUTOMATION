@@ -168,4 +168,4 @@ def test_chat_vacio_sigue_400(client):
 # ═══════════════ 4 · contrato de versión (INT-080) ══════════════════════
 
 def test_version_2_39_0():
-    assert config.APP_VERSION == "2.41.0"   # INT-086b: compat Windows _link (symlink→hardlink→copia)
+    assert config.APP_VERSION == "2.42.0"   # INT-087: selector de plantillas en la UI

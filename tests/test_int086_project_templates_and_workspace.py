@@ -211,9 +211,9 @@ def test_post_projects_con_template(client):
         check("meta.template_id", meta.get("template_id") == "cocina-recetas")
         check("hereda voz de la plantilla",
               p.get("voice") == "es-CO-SalomeNeural", str(p.get("voice")))
-        check("hereda subtítulos (minimal) y ritmo (pausado)",
+        check("hereda subtítulos (minimal) y ritmo canónico (slow)",
               meta.get("subtitle_style") == "minimal"
-              and meta.get("pacing") == "pausado", str(meta))
+              and meta.get("pacing") == "slow", str(meta))
         ws = Path(p["workspace"])
         check("workspace devuelto y creado", ws.is_dir(), str(ws))
         marca = json.loads((ws / "marca.json").read_text(encoding="utf-8"))
@@ -239,9 +239,9 @@ def test_post_projects_body_gana_sobre_plantilla(client):
     try:
         check("body gana: voice del usuario respetado",
               p.get("voice") == "es-ES-AlvaroNeural", str(p.get("voice")))
-        check("plantilla aplicada en lo no elegido: hormozi + ritmo rápido",
+        check("plantilla aplicada en lo no elegido: hormozi + pacing fast",
               (p.get("meta") or {}).get("subtitle_style") == "hormozi"
-              and (p.get("meta") or {}).get("pacing") == "rápido")
+              and (p.get("meta") or {}).get("pacing") == "fast")
     finally:
         client.delete(f"/api/projects/{p['id']}")
 
@@ -368,8 +368,8 @@ def test_sync_artifacts_guion_desde_bd(tmp_path, monkeypatch):
 
 # ── contratos de fuente y versión (cadena INT-080) ───────────────────────
 def test_contratos_fuente_y_version():
-    check("APP_VERSION 2.41.0 (INT-080: bump por cambio funcional)",
-          config.APP_VERSION == "2.41.0")
+    check("APP_VERSION 2.42.0 (INT-080: bump por cambio funcional)",
+          config.APP_VERSION == "2.42.0")
     src_ws = (BACKEND / "pipeline" / "project_workspace.py").read_text(
         encoding="utf-8")
     check("firma pública del módulo workspace",

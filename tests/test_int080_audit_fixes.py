@@ -156,7 +156,7 @@ def test_circle_pip_border_color_whitelist(client, tmp_path, monkeypatch):
 
 # ── E4 · versión: única fuente de verdad ────────────────────────────────────
 def test_app_version_single_source(client):
-    assert config.APP_VERSION == "2.41.0"   # INT-086b: compat Windows _link (symlink→hardlink→copia)
+    assert config.APP_VERSION == "2.42.0"   # INT-087: selector de plantillas en la UI
     assert main.app.version == config.APP_VERSION
     res = client.get("/api/health")
     assert res.json()["version"] == config.APP_VERSION

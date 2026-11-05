@@ -945,7 +945,7 @@ async def projects():
 
 def _template_meta(tpl: dict) -> dict:
     """INT-086 · metadatos de producción heredables de la plantilla."""
-    keys = ("pacing", "broll", "musica", "estructura", "safe_zones",
+    keys = ("pacing", "ritmo", "broll", "musica", "estructura", "safe_zones",
             "formatos", "cortes_seg", "solo_miniaturas", "miniatura")
     d = {"template_id": tpl["id"]}
     d.update({k: tpl[k] for k in keys if k in tpl})
