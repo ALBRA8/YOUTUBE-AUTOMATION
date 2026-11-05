@@ -207,7 +207,7 @@ SHORT_W, SHORT_H = 1080, 1920     # 9:16
 LONG_W, LONG_H = 1920, 1080       # 16:9
 
 # INT-080 · única fuente de verdad de versión (FastAPI + /api/health)
-APP_VERSION = "2.45.0"   # INT-092: sin pestaña Crear, modal rápido limpio + tema coherente
+APP_VERSION = "2.46.0"   # INT-093: coherencia de color oscuro/claro — tokens de estado con override claro
 MUSIC_VOLUME = 0.18
 MUSIC_DIR = DATA_DIR / "music"
 MUSIC_DIR.mkdir(exist_ok=True)

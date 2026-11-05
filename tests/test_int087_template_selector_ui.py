@@ -166,8 +166,8 @@ def test_dashboard_sirve_app_js_con_cache_busting(client):
 
 # ── C. contrato de versión (cadena INT-080) ──────────────────────────────
 def test_version():
-    check("APP_VERSION 2.45.0 (INT-080: bump por cambio funcional)",
-          config.APP_VERSION == "2.45.0")
+    check("APP_VERSION 2.46.0 (INT-080: bump por cambio funcional)",
+          config.APP_VERSION == "2.46.0")
 
 
 if __name__ == "__main__":  # modo script directo

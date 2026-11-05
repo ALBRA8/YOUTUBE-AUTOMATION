@@ -775,8 +775,8 @@ function renderHookCards(p) {
   }
   const badgeColors = {
     'Curiosidad': 'background:rgba(168,85,247,0.15);color:#c084fc;border:1px solid rgba(168,85,247,0.3)',
-    'Contradicción': 'background:rgba(249,115,22,0.15);color:#fb923c;border:1px solid rgba(249,115,22,0.3)',
-    'Dato Chocante': 'background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.3)',
+    'Contradicción': 'background:rgba(249,115,22,0.15);color:var(--warn,#fb923c);border:1px solid rgba(249,115,22,0.3)',   /* INT-093: token → legible en claro */
+    'Dato Chocante': 'background:rgba(239,68,68,0.15);color:var(--err,#f87171);border:1px solid rgba(239,68,68,0.3)',       /* INT-093: token → legible en claro */
   };
   return `<div class="hook-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px">
     ${hooks.map(h => {
@@ -789,14 +789,14 @@ function renderHookCards(p) {
              onclick="selectProjectHook('${p.id}', '${esc(h.id)}', '${safeHook}')">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
             <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;${bColor}">Variante ${esc(h.id)} · ${esc(h.type || h.label || 'Hook')}</span>
-            <span style="font-size:11px;color:#10b981;font-weight:700;background:rgba(16,185,129,0.12);padding:2px 6px;border-radius:6px">⚡ ${esc(h.estimated_retention || '94%')}</span>
+            <span style="font-size:11px;color:var(--ok,#10b981);font-weight:700;background:rgba(16,185,129,0.12);padding:2px 6px;border-radius:6px">⚡ ${esc(h.estimated_retention || '94%')}</span>
           </div>
           <div style="font-size:13.5px;font-weight:600;line-height:1.4;margin-bottom:8px;color:var(--text,#fff)">«${esc(h.hook)}»</div>
           <div style="font-size:11.5px;color:var(--muted,#9ca3af);display:flex;align-items:center;gap:4px">
             <span>🎬</span> <em>${esc(h.visual_cue || 'Toma dinámica')}</em>
           </div>
           <div style="margin-top:10px;text-align:right">
-            ${isSel ? '<span style="font-size:11px;color:#10b981;font-weight:700">✓ ACTIVO EN ESCENA 1</span>' 
+            ${isSel ? '<span style="font-size:11px;color:var(--ok,#10b981);font-weight:700">✓ ACTIVO EN ESCENA 1</span>' 
                     : '<span style="font-size:11px;color:var(--muted);text-decoration:underline">Elegir este hook →</span>'}
           </div>
         </div>
