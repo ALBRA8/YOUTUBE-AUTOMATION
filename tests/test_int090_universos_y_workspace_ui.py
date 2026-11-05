@@ -309,18 +309,24 @@ def test_open_folder_honesto_sin_gui(client, tmp_path, monkeypatch):
     monkeypatch.setattr(_shutil, "which", lambda x: None)
     monkeypatch.setattr(_subprocess, "Popen",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("no GUI")))
-    # FIX-WIN-003 · cross-platform: en Windows _abrir_carpeta_sistema llama
+    # FIX-WIN-004 · cross-platform: en Windows _abrir_carpeta_sistema llama
     # _os.startfile (mismo módulo «os» que importa internamente) ANTES de
-    # consultar shutil.which/subprocess.Popen — sin este parche el test pasa
-    # en Linux/Mac pero abre el Explorador REAL en Windows y da verde falso.
-    # Forzamos SO sin startfile para que la rama sin GUI aplique en todos.
-    monkeypatch.setattr(_os, "name", "posix")
-    monkeypatch.delattr(_os, "startfile", raising=False)
+    # consultar shutil.which/subprocess.Popen — sin parche abriría el
+    # Explorador REAL en Windows y daría verde falso. NO se toca _os.name:
+    # fingir "posix" rompe pathlib en Windows (UnsupportedOperation al
+    # instanciar PosixPath); en su lugar startfile lanza OSError y el
+    # except de _abrir_carpeta_sistema responde honesto (abierto=False)
+    # igual en Windows, Linux y Mac.
+    monkeypatch.setattr(_os, "startfile",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("no GUI")),
+                        raising=False)
     p = client.post("/api/projects", json={"mode": "idea", "title": "Sin GUI"}).json()
     r = client.post(f"/api/projects/{p['id']}/open-folder")
     check("sin GUI → 200", r.status_code == 200, r.text[:200])
+    # FIX-WIN-004: con startfile lanzando OSError, el except de
+    # _abrir_carpeta_sistema responde «no se pudo abrir: no GUI»
     check("abierto False + motivo", r.json().get("abierto") is False
-          and "explorador" in r.json().get("metodo", ""), r.text[:200])
+          and "no se pudo abrir" in r.json().get("metodo", ""), r.text[:200])
     check("path incluido para el usuario", bool(r.json().get("path")))
 
 
