@@ -50,8 +50,8 @@ def _style_sidecar(image_path: str) -> Path:
 def _save_style_method(image_path: str, method: str) -> None:
     try:
         _style_sidecar(image_path).write_text(json.dumps({"method": method}))
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        log.warning("no se pudo guardar style sidecar para %s: %s", image_path, exc)
 
 
 def _load_style_method(image_path: str) -> str | None:

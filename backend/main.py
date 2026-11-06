@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 """
 YOUTUBE AUTOMATION v2.0 — Servidor principal (FastAPI)
 Dashboard en http://127.0.0.1:8000  ·  progreso por SSE  ·  coste $0/video
@@ -45,7 +46,41 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("main")
 
-app = FastAPI(title="YT Automation v2.0", version=config.APP_VERSION)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """P3-2: Gestor unificado del ciclo de vida (migración de @app.on_event)."""
+    # 1. Seguridad fail-closed (INT-080): HOST no-loopback sin MASTER_API_KEY
+    import os as _os
+    host = (_os.getenv("HOST") or str(HOST or "127.0.0.1")).strip().lower()
+    if host not in {"127.0.0.1", "localhost", "::1", "[::1]"} \
+            and not security.enabled() \
+            and _os.getenv("ALLOW_OPEN_LAN", "").strip() != "1":
+        raise RuntimeError(
+            "HOST no-loopback sin MASTER_API_KEY: la API quedaría abierta a la "
+            "LAN. Define MASTER_API_KEY en backend/.env o fuerza con "
+            "ALLOW_OPEN_LAN=1 si asumes el riesgo.")
+    try:
+        env_file = Path(config.__file__).resolve().parent / ".env"
+        if env_file.is_file() and (env_file.stat().st_mode & 0o077):
+            env_file.chmod(0o600)
+    except Exception as exc:
+        log.warning("no se pudo fijar permisos 0600 a .env: %s", exc)
+
+    # 2. Backups al arrancar y arranque de scheduler (v2.12.2)
+    try:
+        r = await asyncio.to_thread(backup_svc.create_backup, "arranque")
+        if r:
+            log.info("backup de arranque: %s (%.1f KB)", r["name"], r["size"] / 1024)
+    except Exception as e:
+        log.warning("backup de arranque falló: %s", str(e)[:120])
+    backup_svc.start_scheduler()
+
+    yield
+
+    # Shutdown si aplica
+
+
+app = FastAPI(title="YT Automation v2.0", version=config.APP_VERSION, lifespan=lifespan)
 # P3-1: Routers modulares (Fase 1: Nichos)
 app.include_router(niches_router.router)
 
@@ -53,17 +88,7 @@ app.include_router(niches_router.router)
 security.harden_pil(config.LIMITS["MAX_IMAGE_PIXELS"])
 
 
-@app.on_event("startup")
-async def _startup_tasks():
-    """v2.12.2 · hallazgo de la auditoría: la DB moría sin réplica.
-    Backup al arrancar (consistente, WAL-safe) + loop cada BACKUP_INTERVAL_H."""
-    try:
-        r = await asyncio.to_thread(backup_svc.create_backup, "arranque")
-        if r:
-            log.info("backup de arranque: %s (%.1f KB)", r["name"], r["size"] / 1024)
-    except Exception as e:  # noqa: BLE001
-        log.warning("backup de arranque falló: %s", str(e)[:120])
-    backup_svc.start_scheduler()
+# [P3-2] _startup_tasks migrado a lifespan
 
 AVATARS_DIR = DATA_DIR / "avatars"
 VALID_PLATFORMS = ("youtube", "tiktok", "instagram", "facebook")
@@ -292,26 +317,7 @@ def _path_contenida(raw: str) -> "Path | None":
 
 
 # ──────────────────────────────────────────────────────── básicos ──
-@app.on_event("startup")
-async def _int080_security_guard():
-    """INT-080 · fail-closed: HOST no-loopback sin MASTER_API_KEY = API abierta
-    a toda la LAN (lectura de .env, RCE vía MCP). No arrancar salvo escape
-    explícito ALLOW_OPEN_LAN=1. Además, best-effort: .env a 0600."""
-    import os as _os  # INT-080: main.py importa os de forma diferida
-    host = (_os.getenv("HOST") or str(HOST or "127.0.0.1")).strip().lower()
-    if host not in {"127.0.0.1", "localhost", "::1", "[::1]"} \
-            and not security.enabled() \
-            and _os.getenv("ALLOW_OPEN_LAN", "").strip() != "1":
-        raise RuntimeError(
-            "HOST no-loopback sin MASTER_API_KEY: la API quedaría abierta a la "
-            "LAN. Define MASTER_API_KEY en backend/.env o fuerza con "
-            "ALLOW_OPEN_LAN=1 si asumes el riesgo.")
-    try:
-        env_file = Path(config.__file__).resolve().parent / ".env"
-        if env_file.is_file() and (env_file.stat().st_mode & 0o077):
-            env_file.chmod(0o600)
-    except Exception:  # noqa: BLE001 — best-effort, nunca tumba el arranque
-        pass
+# [P3-2] _int080_security_guard migrado a lifespan
 
 
 @app.get("/api/health")
@@ -2137,10 +2143,12 @@ async def publish_video(pid: str, body: dict):
             publish_at=body.get("publish_at"),
         )
     except Exception as e:  # noqa: BLE001
+        log.error("Error publicando en YouTube para proyecto %s: %s", pid, e, exc_info=True)
+        cur_p = db.get_project(pid) or {}
+        cur_meta = dict(cur_p.get("meta") or {})
         db.update_job(jid, status="failed", step="failed", error=str(e)[:500],
                       message=f"publish falló: {str(e)[:120]}")
-        db.update_project(pid, meta={**(db.get_project(pid).get("meta") or {}),
-                                     "publish_state": "FAILED"})
+        db.update_project(pid, meta={**cur_meta, "publish_state": "FAILED"})
         raise HTTPException(500, str(e)[:300])
     db.update_job(jid, status="done", step="done", message=f"publicado {vid}")
     db.update_project(pid, status="published", youtube_id=vid,

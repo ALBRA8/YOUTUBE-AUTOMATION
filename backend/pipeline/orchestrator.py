@@ -927,13 +927,13 @@ def _memoria_episodio(job_id: str, project_id: str, origen: str) -> None:
             evidence=[{"kind": "job", "ref": job_id},
                       {"kind": "project", "ref": project_id}],
             confidence=1.0)
-    except Exception:  # noqa: BLE001 — nunca crítico
-        pass
+    except Exception as exc:  # noqa: BLE001
+        log.warning("memorydv.record_episode falló (%s): %s", project_id, exc)
     try:
         from services import metrics as _metrics
         _metrics.persist_snapshot()
-    except Exception:  # noqa: BLE001 — nunca crítico
-        pass
+    except Exception as exc:  # noqa: BLE001
+        log.warning("metrics.persist_snapshot falló (%s): %s", project_id, exc)
 
 
 def _description(result: dict, project: dict) -> str:
