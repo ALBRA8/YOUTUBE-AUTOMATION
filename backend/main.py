@@ -46,20 +46,6 @@ log = logging.getLogger("main")
 
 app = FastAPI(title="YT Automation v2.0", version=config.APP_VERSION)
 
-# [flow-bridge v1.1] CORS endurecido (fusión con la línea 2.2 del repo):
-# solo la extensión Chrome (chrome-extension:// con ID válido de 32 chars a-p)
-# y clientes locales (localhost/127.0.0.1). El fetch del Service Worker con
-# host_permissions del manifest 2.2 pasa sin CORS; el popup y un worker
-# remoto local sí lo necesitan. Sin credenciales.
-from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
-app.add_middleware(
-    CORSMiddleware,
-    allow_origin_regex=r"^(chrome-extension://[a-p]+|https?://(localhost|127\.0\.0\.1)(:\d+)?)$",
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-)
-
 # PHASE 1 · M10 — techo global anti bomba de descompresión (Pillow)
 security.harden_pil(config.LIMITS["MAX_IMAGE_PIXELS"])
 
@@ -80,40 +66,15 @@ AVATARS_DIR = DATA_DIR / "avatars"
 VALID_PLATFORMS = ("youtube", "tiktok", "instagram", "facebook")
 
 
-@app.middleware("http")
-async def security_headers(request, call_next):
-    """INT-082 · cabeceras de seguridad HTTP (mejora 7 del informe de revisión
-    en vivo). Blindaje por si el panel se expone por LAN o detrás de un proxy:
-    · X-Content-Type-Options: nosniff → en TODAS las respuestas (inofensivo
-      en JSON/MP4, decisivo en HTML subido por error).
-    · X-Frame-Options: DENY + CSP con frame-ancestors 'none' → anti
-      clickjacking del panel.
-    · CSP básica SOLO en el HTML del panel: 'unsafe-inline' en script/style
-      es imprescindible (el panel usa onclick inline y estilos dinámicos),
-      pero sigue bloqueando <script src> externo. /docs y /redoc quedan
-      fuera de la CSP: el Swagger UI de FastAPI carga scripts de CDN.
-    Definido PRIMERO ⇒ es el middleware MÁS EXTERNO: estampa cabeceras
-    también en las respuestas 401/403 que generan auth_guard/csrf_guard."""
-    resp = await call_next(request)
-    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
-    ct = resp.headers.get("content-type", "")
-    _p = request.url.path
-    if ct.startswith("text/html") and not _p.startswith(("/docs", "/redoc")):
-        resp.headers.setdefault("X-Frame-Options", "DENY")
-        resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-        resp.headers.setdefault("Content-Security-Policy",
-                                "default-src 'self'; "
-                                "script-src 'self' 'unsafe-inline'; "
-                                "style-src 'self' 'unsafe-inline' "
-                                "https://fonts.googleapis.com; "
-                                "font-src 'self' https://fonts.gstatic.com; "
-                                "img-src 'self' data: blob: https:; "
-                                "media-src 'self' blob:; "
-                                "connect-src 'self'; "
-                                "frame-ancestors 'none'; "
-                                "base-uri 'self'; form-action 'self'")
-    return resp
-
+# ── PILA DE MIDDLEWARES (P0-4: en Starlette/FastAPI el ÚLTIMO declarado
+#    es el más EXTERNO y envuelve a todos los anteriores).
+#    Orden de capas (exterior → interior):
+#      1. security_headers (nosniff en TODAS las respuestas, incluidas 401/403)
+#      2. CORSMiddleware   (preflight OPTIONS y headers CORS en respuestas 401/403)
+#      3. auth_guard       (exige MASTER_API_KEY; exime preflight OPTIONS)
+#      4. csrf_guard       (rechaza mutaciones con origen cross-site no permitido)
+#      5. no_cache_ui      (revalida recursos estáticos del panel)
+# ─────────────────────────────────────────────────────────────────────────────
 
 @app.middleware("http")
 async def no_cache_ui(request, call_next):
@@ -130,11 +91,14 @@ async def no_cache_ui(request, call_next):
 async def auth_guard(request, call_next):
     """Blindaje opcional del panel (auditoría externa: «cero autenticación»).
     Si MASTER_API_KEY está definida en backend/.env, TODAS las rutas /api/*
-    exigen la clave vía header X-API-Key, Bearer, cookie (SSE) o ?api_key=.
-    v2.19 · también cubre /mcp (antes el servidor MCP quedaba FUERA del
-    guard incluso con clave maestra: exponía lanzar_proyecto, cancelar
-    y doctor fix sin autenticación). En modo local (sin clave definida)
-    no bloquea nada: cero ruptura."""
+    exigen la clave vía header X-API-Key, Bearer o cookie (SSE).
+    v2.19 · también cubre /mcp.
+    P0-4 · exime métodos OPTIONS (preflight de navegadores jamás lleva credenciales).
+    En modo local (sin clave definida) no bloquea nada: cero ruptura."""
+    # P0-4: Preflights OPTIONS no deben exigir credenciales
+    if request.method.upper() == "OPTIONS":
+        return await call_next(request)
+
     _p = request.url.path
     # PHASE 1 · M1: la documentación y el schema abierto también exigen
     # clave (/docs, /redoc, /openapi.json — /mcp/* ya quedaba cubierto).
@@ -149,9 +113,6 @@ async def auth_guard(request, call_next):
             provided = auth[7:] if auth.startswith("Bearer ") else ""
         if not provided:
             provided = request.cookies.get(security.COOKIE_NAME, "")
-        # INT-080: el vector ?api_key= fue eliminado — la clave en la query
-        # termina en access-logs de uvicorn, historial del navegador y proxies.
-        # Para SSE/EventSource la cookie (mismo origen) hace ese papel.
         if not security.verify(provided):
             return JSONResponse(status_code=401,
                                 content={"detail": "clave maestra requerida "
@@ -184,6 +145,49 @@ async def csrf_guard(request, call_next):
     if cl.isdigit() and int(cl) > config.LIMITS["MAX_BODY_BYTES"]:
         return JSONResponse(status_code=413, content={"detail": "body demasiado grande"})
     return await call_next(request)
+
+
+# [flow-bridge v1.1] CORS endurecido (P0-4: declarado EXTERNO a auth_guard y csrf_guard
+# para que los preflights OPTIONS y las respuestas 401/403 reciban cabeceras CORS)
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"^(chrome-extension://[a-p]+|https?://(localhost|127\.0\.0\.1)(:\d+)?)$",
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    """INT-082 / P0-4 · cabeceras de seguridad HTTP.
+
+    En Starlette/FastAPI, el middleware declarado al FINAL es el más EXTERNO
+    en la pila de ejecución: envuelve todas las llamadas y estampa cabeceras
+    también en las respuestas 401/403/CORS generadas internamente por auth_guard/csrf_guard:
+    · X-Content-Type-Options: nosniff → en TODAS las respuestas.
+    · X-Frame-Options: DENY + CSP con frame-ancestors 'none' → anti clickjacking.
+    · CSP básica SOLO en el HTML del panel."""
+    resp = await call_next(request)
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    ct = resp.headers.get("content-type", "")
+    _p = request.url.path
+    if ct.startswith("text/html") and not _p.startswith(("/docs", "/redoc")):
+        resp.headers.setdefault("X-Frame-Options", "DENY")
+        resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        resp.headers.setdefault("Content-Security-Policy",
+                                "default-src 'self'; "
+                                "script-src 'self' 'unsafe-inline'; "
+                                "style-src 'self' 'unsafe-inline' "
+                                "https://fonts.googleapis.com; "
+                                "font-src 'self' https://fonts.gstatic.com; "
+                                "img-src 'self' data: blob: https:; "
+                                "media-src 'self' blob:; "
+                                "connect-src 'self'; "
+                                "frame-ancestors 'none'; "
+                                "base-uri 'self'; form-action 'self'")
+    return resp
 
 
 # ── PHASE 1 · helpers centralizados de seguridad de endpoints ──────────
