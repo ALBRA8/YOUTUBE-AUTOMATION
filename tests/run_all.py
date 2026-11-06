@@ -217,6 +217,10 @@ NON_HERMETIC_BATTERIES = {
 }
 
 def main(baterias: list[str] | None = None, argv: list[str] | None = None) -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     args = sys.argv[1:] if argv is None else argv
     hermetic = "--hermetic" in args or "--ci" in args
     if baterias is not None:
@@ -234,6 +238,7 @@ def main(baterias: list[str] | None = None, argv: list[str] | None = None) -> in
         proc = subprocess.run(
             [sys.executable, str(TESTS_DIR / nombre)],
             cwd=str(TESTS_DIR.parent), capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
         )
         if proc.stdout:
             sys.stdout.write(proc.stdout)
