@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -186,6 +187,17 @@ def qa_image(path: str | Path) -> dict:
     if w < MIN_DIM or h < MIN_DIM:
         info["flags"].append({"sev": "error",
                               "msg": f"dimensión degenerada {w}x{h} (<{MIN_DIM}px)"})
+    # P2-1: Inspección de método (placeholder PIL fallback)
+    sf = p.with_suffix(".style.json")
+    if sf.is_file():
+        try:
+            m = (json.loads(sf.read_text(encoding="utf-8")) or {}).get("method")
+            if m == "placeholder":
+                info["is_placeholder"] = True
+                info["flags"].append({"sev": "warn", "msg": "imagen generada con degradado placeholder (PIL fallback)"})
+        except Exception:
+            pass
+
     if not info["flags"]:
         info["flags"].append({"sev": "ok",
                               "msg": f"imagen válida {w}x{h} {info.get('format')}"})
@@ -323,7 +335,16 @@ def qa_project(pid: str) -> dict:
     if video_url and Path(str(video_url)).exists():
         final_info = qa_video(video_url, final=True)
 
-    errors = n_img_err + n_vid_err
+    # P2-1: Control de umbral de placeholders en Video QA
+    max_ph = int(os.getenv("MAX_ALLOWED_PLACEHOLDERS", "1"))
+    n_ph = sum(1 for s in per_scene if (s.get("image") or {}).get("is_placeholder"))
+    if n_ph > max_ph:
+        for s in per_scene:
+            if (s.get("image") or {}).get("is_placeholder"):
+                s["image"]["flags"].append({"sev": "error",
+                                            "msg": f"placeholder supera umbral permitido ({n_ph} > {max_ph})"})
+
+    errors = n_img_err + n_vid_err + (1 if n_ph > max_ph else 0)
     if final_info and _worst(final_info["flags"]) == "error":
         errors += 1
     return {"ok": True, "project_id": pid,
@@ -332,7 +353,8 @@ def qa_project(pid: str) -> dict:
                                               else "ok"),
             "scenes": per_scene, "final": final_info,
             "summary": {"scenes": len(scenes), "image_errors": n_img_err,
-                        "clip_errors": n_vid_err,
+                        "clip_errors": n_vid_err, "placeholders": n_ph,
+                        "max_allowed_placeholders": max_ph,
                         "final_present": bool(final_info)}}
 
 

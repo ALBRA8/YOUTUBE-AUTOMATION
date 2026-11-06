@@ -446,7 +446,8 @@ async def _run_flow_render(job_id: str, project_id: str) -> None:
 # con 1 escena degradada de N).
 
 def _gate_imagenes_reales(project_id: str, scenes: list[dict]) -> None:
-    """Falla si TODAS las escenas quedaron con imagen placeholder PIL."""
+    """P2-1: Falla si las escenas placeholder superan MAX_ALLOWED_PLACEHOLDERS (defecto 1).
+    Evita entregar videos de tarjetas planas cuando la mayoría de escenas fallaron."""
     metodos: list[str] = []
     for sc in scenes:
         p = sc.get("image_path")
@@ -454,7 +455,6 @@ def _gate_imagenes_reales(project_id: str, scenes: list[dict]) -> None:
             continue
         sf = Path(str(p)).with_suffix(".style.json")
         try:
-            # [FIX-ENC-WIN] encoding explícito (Windows: cp1252 por defecto)
             metodo = (json.loads(sf.read_text(encoding="utf-8")) or {}).get("method") or "?"
         except Exception:  # noqa: BLE001 — sin style.json no se puede saber
             metodo = "?"
@@ -462,16 +462,19 @@ def _gate_imagenes_reales(project_id: str, scenes: list[dict]) -> None:
     if not metodos:
         return
     n_ph = sum(1 for m in metodos if m == "placeholder")
-    if n_ph == len(metodos):
+    max_allowed = int(os.getenv("MAX_ALLOWED_PLACEHOLDERS", "1"))
+    if n_ph > max_allowed:
+        db.update_project(project_id, status="failed",
+                          error=f"Preflight de calidad: {n_ph}/{len(metodos)} imágenes son placeholder (máximo permitido: {max_allowed}). Calidad insuficiente para entrega.",
+                          step_label="Error")
         raise RuntimeError(
-            f"Preflight de producto: TODAS las imágenes ({len(metodos)}) son "
-            "placeholder — el video sería un degradado sin contenido real. "
-            "Causas posibles: GEMINI_API_KEY ausente/inválida o sin cuota, "
-            "CLI z-ai no instalado y sin capturas de la extensión. Configura "
-            "un proveedor de imágenes real y relanza el proyecto.")
+            f"Preflight de calidad: {n_ph}/{len(metodos)} imágenes son placeholder "
+            f"(máximo permitido: {max_allowed}). "
+            "El video sería un degradado sin contenido real. "
+            "Configura un proveedor de imágenes real (Flow MCP/Gemini) y relanza el proyecto.")
     if n_ph:
         log.warning("preflight imágenes: degradación parcial %d/%d placeholder "
-                    "(el render continúa)", n_ph, len(metodos))
+                    "(dentro del umbral permitido <= %d)", n_ph, len(metodos), max_allowed)
 
 
 def _gate_voz_real(project_id: str, scenes: list[dict]) -> None:
@@ -703,6 +706,29 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
         await imgs.generate_all(db.get_project(project_id), scenes, img_prog,
                                 is_cancelled(job_id))
         scenes = db.get_scenes(project_id)
+
+        # P2-1: Si hay placeholders por encima del umbral, reintentar esas escenas con Flow/Gemini antes del gate
+        max_ph_allowed = int(os.getenv("MAX_ALLOWED_PLACEHOLDERS", "1"))
+        cur_methods = []
+        for sc in scenes:
+            p_img = sc.get("image_path")
+            sf = Path(str(p_img)).with_suffix(".style.json") if p_img else None
+            try:
+                cur_methods.append((json.loads(sf.read_text(encoding="utf-8")) or {}).get("method") if sf and sf.is_file() else "?")
+            except Exception:
+                cur_methods.append("?")
+        cur_ph = sum(1 for m in cur_methods if m == "placeholder")
+        if cur_ph > max_ph_allowed:
+            log.warning("P2-1: Detectados %d/%d placeholders (> umbral %d). Reintentando escenas fallidas...", cur_ph, len(scenes), max_ph_allowed)
+            proj_dict = db.get_project(project_id)
+            for idx, sc in enumerate(scenes):
+                if cur_methods[idx] == "placeholder":
+                    try:
+                        await imgs.generate_scene_image(sc, proj_dict, idx)
+                    except Exception as ex_re:
+                        log.warning("Reintento de escena %d falló: %s", idx, ex_re)
+            scenes = db.get_scenes(project_id)
+
         _gate_imagenes_reales(project_id, scenes)
 
         # PASO 3 — TTS + alineación
