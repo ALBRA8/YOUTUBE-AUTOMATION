@@ -12,9 +12,9 @@
 
 ---
 
+## Historial
 
-**Estado:** IN_PROGRESS — migración AGENTE-GENERAL ↔ harness: P3-B PASS según informe; publicación de commits de código P3-B pendiente de verificación.  
-**Última actualización:** 2026-10-22.  
+**Estado (2026-10-22, HISTÓRICO — sustituido por el Estado vigente del 2026-11-06):** IN_PROGRESS — migración AGENTE-GENERAL ↔ harness: P3-B PASS según informe; publicación de commits de código P3-B pendiente de verificación.  
 **Fuente:** Archivos del repo `harness-v1` y auditorías técnicas. Este snapshot no reemplaza tests ni convierte simulaciones en E2E real.
 
 
