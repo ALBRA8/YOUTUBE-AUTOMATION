@@ -8,6 +8,7 @@ o no puede ejecutarse.
 
 Uso:  cd yt_automation_v2 && python3 tests/run_all.py
 """
+import os
 import re
 import subprocess
 import sys
