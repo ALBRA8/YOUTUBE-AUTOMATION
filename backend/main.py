@@ -38,6 +38,7 @@ from services import (general_agent as agent_svc,  # INT-028: cerebro único (ex
                       tts_service, universos,  # INT-090: blindaje de universos
                       url_mode, whisper_service, youtube_publish)
 from services import avatar_schema
+from routers import niches as niches_router
 from services.themes import STYLES, get_style
 
 logging.basicConfig(level=logging.INFO,
@@ -45,6 +46,8 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger("main")
 
 app = FastAPI(title="YT Automation v2.0", version=config.APP_VERSION)
+# P3-1: Routers modulares (Fase 1: Nichos)
+app.include_router(niches_router.router)
 
 # PHASE 1 · M10 — techo global anti bomba de descompresión (Pillow)
 security.harden_pil(config.LIMITS["MAX_IMAGE_PIXELS"])
@@ -1655,43 +1658,7 @@ async def generate(pid: str, body: dict | None = None):
     return {"job_id": job_id}
 
 
-# ───────────────────────────────────────── módulo "Desde Nicho" (v2.6) ──
-@app.get("/api/niches")
-async def niches_list():
-    """Plantillas de nicho + nº de proyectos que usan cada una."""
-    templates = niches_svc.list_templates()
-    counts: dict[str, int] = {}
-    for p in db.list_projects(limit=500):
-        key = (p.get("niche") or "").strip().lower()
-        if key:
-            counts[key] = counts.get(key, 0) + 1
-    out = []
-    for t in templates:
-        t = dict(t)
-        t["projects"] = counts.get((t.get("name") or "").strip().lower(), 0)
-        t["folder"] = niches_svc.folder_name(t)
-        out.append(t)
-    return out
-
-
-@app.get("/api/niches/templates")
-async def niches_templates():
-    return niches_svc.list_templates()
-
-
-@app.post("/api/niches/templates")
-async def niches_template_save(body: dict):
-    try:
-        return niches_svc.upsert_template(body)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-
-@app.delete("/api/niches/templates/{tid}")
-async def niches_template_delete(tid: str):
-    if not niches_svc.delete_template(tid):
-        raise HTTPException(404, "plantilla no encontrada")
-    return {"ok": True}
+# [P3-1] Módulo Nichos migrado a routers/niches.py
 
 
 @app.get("/api/library")
