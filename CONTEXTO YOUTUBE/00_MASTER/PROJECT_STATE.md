@@ -88,21 +88,29 @@ YOUTUBE-AUTOMATION es la especialización audiovisual de ALBRA. `ALBRA8/AGENTE-G
 ## Estado del sistema
 La base tiene infraestructura de Production JSON/P1, cola Flow Bridge con jobs/leases/heartbeat/retries, validación de assets, QA, métricas, Doctor/preflight, seguridad, MemoryDV, skills/autonomía y HANDS aislado según `ESTADO_REAL.md`. Los tests declarados allí prueban sus respectivos alcances; no equivalen a proveedor real.
 
-## Gap crítico
+## Gap crítico: GAP-002 (Start Frame) y FAIL-005 (Binding de Imagen de Entrada)
+- **Estado oficial:** NOT_DEMONSTRATED (No demostrado sin captura en vivo de tráfico real).
 - Execution Contract construye `start_frame: None` y `end_frame: None` en la implementación auditada.
 - Start/End Frame no figuran entre los controles verificables enumerados.
 - `references` transportadas no implican que Flow las use.
 - `mediaIdToScene` registra resultados; no demuestra el binding de una imagen de entrada.
 - El HAR histórico de Camino mostró `WuwhI / MEDIA_GENERATION`, `videoModelKey=abra_i2v_6s` y `inputFrames.firstFrame.mediaId`; se observaron variantes como `startImage.mediaId`. No universalizar ese campo.
 
-## Plan inmediato
-1. En Chrome con sesión habitual de Flow, DevTools → Network → Preserve log.
-2. Ejecutar desde ALBRA una única generación con una imagen conocida.
-3. Capturar request, payload relevante, respuesta y resultado; correlacionar job/scene, asset y mediaId.
-4. Sanear cookies, tokens, credenciales, URLs firmadas y datos personales antes de compartir HAR o extractos.
-5. Clasificar: A) imagen no cargada/seleccionada; B) cargada pero no vinculada; C) campo/protocolo incorrecto; D) binding correcto; E) rechazo/capability del proveedor.
-6. Solo después diseñar prueba aislada, solución mínima, regresión y verificación real.
-7. Actualizar `ESTADO_REAL.md` y esta memoria con evidencia y commit.
+## Checklist Mandatorio de Captura Real (Pre-requisito para Implementación GAP-002 / FAIL-005)
+- [ ] 1. En Chrome con sesión habitual autenticada de Flow, DevTools → Network → Activar "Preserve log".
+- [ ] 2. Ejecutar desde ALBRA una única generación con una imagen conocida seleccionada como Start Frame.
+- [ ] 3. Capturar request completa, payload relevante (RPC `batchExecute` / `eb1hJf` / `WuwhI`), respuesta y resultado.
+- [ ] 4. Correlacionar job/scene, asset cargado y `mediaId` (ej. `inputFrames.firstFrame.mediaId` vs `startImage.mediaId`).
+- [ ] 5. Sanear cookies (`__Secure-*`, `SID`, `APISID`), tokens, credenciales, URLs firmadas y datos personales antes de compartir HAR o extractos.
+- [ ] 6. Clasificar según taxonomía de causa:
+    - A) imagen no cargada/seleccionada en UI;
+    - B) cargada pero no vinculada en payload;
+    - C) campo/protocolo incorrecto en la estructura Protobuf;
+    - D) binding correcto y aceptado;
+    - E) rechazo/capability del proveedor.
+- [ ] 7. Solo después de verificar 1-6 con captura real, diseñar la prueba aislada, solución mínima, regresión y verificación real.
+- [ ] 8. Actualizar `ESTADO_REAL.md`, `FAILURE_INDEX.md` y esta memoria con evidencia y commit.
+- **Regla estricta:** Queda terminantemente PROHIBIDO declarar implementado o PASS el Start Frame sin esta captura real; su estado permanece formalmente como NOT_DEMONSTRATED.
 
 ## Límites y reglas
 - No implementar Start Frame antes de captura real.
