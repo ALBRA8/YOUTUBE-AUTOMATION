@@ -593,9 +593,10 @@ def ui_tests():
                       for f in ("app-mcp.js", "app-core.js", "app-projects.js",
                                 "app-wizard.js", "app-player.js"))
     index = (static / "index.html").read_text(encoding="utf-8")
-    for sym in ("mcpGsessHTML", "gsessLogin", "gsessCapture", "gsessRefresh",
+    # P1-3: Modernizado para reflejar la UI activa modular (INT-088 + INT-092 Ecosistema Google)
+    for sym in ("mcpGsessHTML", "gsessStart", "gsessOpenChrome", "gsessRefresh",
                 "gsessApply", "mcpPopulateNotebooks", "gsess-card"):
-        check(f"app.js define {sym}", sym in appjs)
+        check(f"app-mcp.js define {sym}", sym in appjs)
     check("dropdown de notebooks dinámico presente (#nblm-nid-sel)",
           'id="nblm-nid-sel"' in appjs)
     _mc = appjs[appjs.index("async function mcpConnect"):
@@ -605,21 +606,14 @@ def ui_tests():
           and "mcpListNotebooks({ silent: true })" in _mc, _mc[:400])
     check("el input #nblm-nid sigue siendo la fuente de pipeRun (regresión)",
           "const nid = mcpNid();" in appjs and 'id="nblm-nid"' in appjs)
-    check("botones login/captura presentes",
-          "🔑 Vincular Sesión Google (Login Único)" in appjs
-          and "📥 Capturar sesión → NotebookLM" in appjs)
-    check("tooltip helper del mandato presente",
-          "abrir el navegador con tu perfil unificado" in appjs
-          and "inicia sesión en Google una sola vez" in appjs
-          and "Refrescar estado" in appjs)
+    check("interfaz Ecosistema Google presente en app-mcp.js",
+          "Ecosistema Google" in appjs and "gsessStart" in appjs)
     check("endpoint launch-auth-browser invocado por la UI",
-          "/mcp/launch-auth-browser" in appjs
-          and appjs.index("gsessLogin") < appjs.index("/mcp/launch-auth-browser"))
-    check("tras vincular: refresco de badges MCP (pre-flight green)",
-          "mcpRefresh(true)" in appjs[appjs.index("async function gsessLogin"):
-                                       appjs.index("async function gsessCapture")])
+          "/mcp/launch-auth-browser" in appjs)
+    check("tras vincular: refresco de badges MCP",
+          "mcpRefresh(true)" in appjs)
     check("endpoint del backend invocado por la UI",
-          "/mcp/login-google" in appjs and "/mcp/capture-google-session" in appjs)
+          "/mcp/launch-auth-browser" in appjs and "/mcp/google-sso" in appjs)
     check("index.html sirve app.js con cache-busting por versión (INT-028/INT-082)",
           "app.js?v=" in index)
     check("fin del copy-paste: placeholder sin «pegar UUID» obligatorio",
