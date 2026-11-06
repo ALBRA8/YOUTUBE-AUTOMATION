@@ -210,13 +210,14 @@ BATERIAS = [
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")
 
 
-def main() -> int:
+def main(baterias: list[str] | None = None) -> int:
+    lista = BATERIAS if baterias is None else baterias
     total_ok = 0
     total_fail = 0
     fallidas: list[str] = []
 
-    for i, nombre in enumerate(BATERIAS, 1):
-        print(f"\n──────── [{i}/{len(BATERIAS)}] {nombre} ────────")
+    for i, nombre in enumerate(lista, 1):
+        print(f"\n──────── [{i}/{len(lista)}] {nombre} ────────")
         proc = subprocess.run(
             [sys.executable, str(TESTS_DIR / nombre)],
             cwd=str(TESTS_DIR.parent), capture_output=True, text=True,
@@ -229,15 +230,16 @@ def main() -> int:
         coincidencias = _RESUMEN.findall(proc.stdout)
         if coincidencias:
             ok, fail = (int(n) for n in coincidencias[-1])
+            if proc.returncode != 0 and fail == 0:
+                fail = 1  # exit != 0 sin fallos en resumen cuenta como mínimo 1 fallo
             detalle = f"{ok} OK · {fail} fallos"
         else:
-            ok, fail = 0, -1  # sin resumen → la batería no terminó (crash)
+            ok = 0
+            fail = 1  # sin resumen (crash/anormal) cuenta como mínimo 1 fallo
             detalle = "SIN RESUMEN (¿crash?)"
         verde = proc.returncode == 0 and fail == 0
-        if fail < 0:
-            fail = 0
         total_ok += ok
-        total_fail += max(fail, 0)
+        total_fail += fail
         if not verde:
             fallidas.append(nombre)
         print(f"  → {nombre}: {detalle} · exit {proc.returncode}"
