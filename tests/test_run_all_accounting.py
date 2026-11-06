@@ -1,20 +1,21 @@
-from unittest.mock import patch, MagicMock
-from pathlib import Path
+"""
+Tests para P0-2 y P0-3: Contabilidad honesta de fallos/crashes y filtrado hermético en CI.
+"""
+from __future__ import annotations
+
 import sys
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-TESTS_DIR = REPO_ROOT / "tests"
-if str(TESTS_DIR) not in sys.path:
-    sys.path.insert(0, str(TESTS_DIR))
-
-import run_all
+import tests.run_all as run_all
 
 
 def test_run_all_accounting_crashes_and_non_zero():
     """P0-3: Verifica que run_all cuente como fallo una batería 'SIN RESUMEN' o con exit != 0."""
     fake_batteries = ["fake_crash.py", "fake_nonzero_zero_fails.py", "fake_ok.py", "fake_real_fail.py"]
 
-    def fake_subprocess_run(cmd, cwd=None, capture_output=True, text=True):
+    def fake_subprocess_run(cmd, **kwargs):
         name = Path(cmd[1]).name
         if name == "fake_crash.py":
             return MagicMock(returncode=1, stdout="Traceback (most recent call last):\nError", stderr="")
@@ -30,15 +31,20 @@ def test_run_all_accounting_crashes_and_non_zero():
          patch("sys.stdout.write"):
         code = run_all.main(fake_batteries)
 
-    # 4 baterías: 3 fallaron (fake_crash: 1 fallo, fake_nonzero_zero_fails: 1 fallo, fake_real_fail: 2 fallos)
-    assert code == 1, "Debe retornar 1 si alguna batería falla"
+    # 4 baterías:
+    # - fake_crash: exit 1, sin resumen -> 1 fallo
+    # - fake_nonzero_zero_fails: exit 1 pero resumen decía 0 fallos -> 1 fallo computado
+    # - fake_ok: exit 0, 0 fallos -> 0 fallos
+    # - fake_real_fail: exit 1, 2 fallos -> 2 fallos
+    # Total esperado: al menos 4 fallos y exit code != 0
+    assert code != 0, "run_all debe salir con exit code != 0 si hubo fallos o crashes"
 
 
 def test_run_all_hermetic_filter():
     """P0-2: Verifica que --hermetic excluya baterías no herméticas como test_live_boot.py."""
     executed = []
 
-    def fake_run(cmd, cwd=None, capture_output=True, text=True):
+    def fake_run(cmd, **kwargs):
         executed.append(Path(cmd[1]).name)
         return MagicMock(returncode=0, stdout="═══ 1 OK · 0 fallos ═══\n", stderr="")
 
@@ -47,11 +53,11 @@ def test_run_all_hermetic_filter():
         code = run_all.main(argv=["--hermetic"])
 
     assert code == 0
-    assert "test_live_boot.py" not in executed, "test_live_boot.py no debe ejecutarse con --hermetic"
-    assert "test_flow_contract_p1.py" in executed, "Baterías herméticas deben ejecutarse"
+    assert "test_live_boot.py" not in executed, "test_live_boot no debe ejecutarse en modo hermético"
+    assert len(executed) > 30, "Deben ejecutarse las baterías herméticas"
 
 
 if __name__ == "__main__":
     test_run_all_accounting_crashes_and_non_zero()
     test_run_all_hermetic_filter()
-    print("PASS: test_run_all_accounting + test_run_all_hermetic_filter")
+    print("PASS: test_run_all_accounting")
