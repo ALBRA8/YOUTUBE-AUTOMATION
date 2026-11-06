@@ -2623,7 +2623,8 @@ async def inspect_media_binary(body: dict):
 
 
 
-@app.api_route("/mcp", methods=["GET", "POST"])
+@app.api_route("/mcp", methods=["GET", "POST"],
+               operation_id="mcp_proxy_sin_barra")  # P2-3: id único OpenAPI
 async def mcp_sin_barra(req: _Req):
     """Proxy de /mcp exacto → evita el 307 a /mcp/ para clientes MCP."""
     if req.method == "GET":
@@ -3703,7 +3704,8 @@ async def pipeline_render_file(run_id: str):
     return FileResponse(out, media_type="video/mp4", filename=out.name)
 
 
-@app.api_route("/", methods=["GET", "HEAD"])
+@app.api_route("/", methods=["GET", "HEAD"],
+               operation_id="dashboard_index")  # P2-3: id único OpenAPI
 async def index(request: Request):
     """INT-082 · dos mejoras del informe de revisión en vivo en la raíz:
     · Mejora 4 (cache-busting unificado): las TRES versiones de assets que
