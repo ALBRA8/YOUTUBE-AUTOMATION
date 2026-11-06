@@ -2623,9 +2623,9 @@ async def inspect_media_binary(body: dict):
 
 
 
-@app.api_route("/mcp", methods=["GET", "POST"],
-               operation_id="mcp_proxy_sin_barra")  # P2-3: id único OpenAPI
-async def mcp_sin_barra(req: _Req):
+@app.post("/mcp", operation_id="mcp_proxy_sin_barra_post")  # P2-3: id único POR MÉTODO
+@app.get("/mcp", operation_id="mcp_proxy_sin_barra_get")  # (un id compartido en un
+async def mcp_sin_barra(req: _Req):  # api_route multi-método DUPLICA el id en OpenAPI)
     """Proxy de /mcp exacto → evita el 307 a /mcp/ para clientes MCP."""
     if req.method == "GET":
         return await mcp_server.info()
@@ -3704,9 +3704,10 @@ async def pipeline_render_file(run_id: str):
     return FileResponse(out, media_type="video/mp4", filename=out.name)
 
 
-@app.api_route("/", methods=["GET", "HEAD"],
-               operation_id="dashboard_index")  # P2-3: id único OpenAPI
-async def index(request: Request):
+@app.head("/", operation_id="dashboard_index_head",
+          include_in_schema=False)  # P2-3: HEAD fuera del esquema (un id POR MÉTODO)
+@app.get("/", operation_id="dashboard_index")  # (un id compartido en un api_route
+async def index(request: Request):  # multi-método DUPLICA el id en OpenAPI)
     """INT-082 · dos mejoras del informe de revisión en vivo en la raíz:
     · Mejora 4 (cache-busting unificado): las TRES versiones de assets que
       declara index.html (style.css, auth.js, app.js) salen ahora del token
