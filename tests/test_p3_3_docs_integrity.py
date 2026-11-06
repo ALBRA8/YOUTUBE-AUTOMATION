@@ -24,7 +24,7 @@ def test_estado_real_battery_count_and_table_format():
 
 
 def test_project_state_unified_status_and_pat_revocation():
-    """P3-3: PROJECT_STATE.md debe tener un único Estado unificado en cabecera y confirmar revocación del PAT."""
+    """P3-3: PROJECT_STATE.md debe tener un único Estado unificado en cabecera y la revocación del PAT marcada PENDIENTE DE CONFIRMACIÓN POR EL DUEÑO (P0-3)."""
     path = Path("CONTEXTO YOUTUBE/00_MASTER/PROJECT_STATE.md")
     assert path.is_file()
     content = path.read_text(encoding="utf-8")
@@ -33,7 +33,11 @@ def test_project_state_unified_status_and_pat_revocation():
     header_section = content[:1500]
     assert "**Estado Unificado:**" in header_section, "Debe tener un bloque unificado de Estado"
     assert "IN_PROGRESS — migración AGENTE-GENERAL" not in header_section, "No debe haber bloque de Estado contradictorio en cabecera"
-    assert "REVOCADO" in content, "Debe constar que el PAT histórico fue revocado formalmente"
+    # P0-3 (auditoría de verificación): NO se afirma revocación sin evidencia.
+    # La redacción honesta es "PENDIENTE DE CONFIRMACIÓN POR EL DUEÑO".
+    assert "PENDIENTE DE CONFIRMACIÓN POR EL DUEÑO" in content, (
+        "PROJECT_STATE.md debe declarar la revocación del PAT como pendiente "
+        "de confirmación del dueño, nunca como hecho sin evidencia")
 
 
 def test_failure_index_records_audit_006():
