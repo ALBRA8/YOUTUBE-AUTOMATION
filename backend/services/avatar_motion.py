@@ -16,6 +16,8 @@ import asyncio
 import base64
 import inspect
 import logging
+
+import video_encode  # P1-2: codificación unificada
 import math
 import os
 import shutil
@@ -209,10 +211,8 @@ def animate_liveportrait_local(
             "ffmpeg", "-y",
             "-framerate", str(fps),
             "-i", str(tmp_frames_dir / "frame_%04d.png"),
-            "-c:v", "libx264",
+            *video_encode.get_video_encoder(final=True),  # P1-2: FINAL avatar
             "-pix_fmt", "yuv420p",
-            "-preset", "ultrafast",
-            "-crf", "22",
             str(output_video)
         ]
         res = subprocess.run(cmd, capture_output=True, text=True)
@@ -282,10 +282,8 @@ def lipsync_musetalk_local(
             "-framerate", str(fps),
             "-i", str(tmp_frames_dir / "frame_%04d.png"),
             "-i", str(audio_path),
-            "-c:v", "libx264",
+            *video_encode.get_video_encoder(final=True),  # P1-2: FINAL avatar
             "-pix_fmt", "yuv420p",
-            "-preset", "ultrafast",
-            "-crf", "22",
             "-c:a", "aac",
             "-b:a", "192k",
             "-shortest",
@@ -600,9 +598,9 @@ def normalize_vertical_916(
     cmd = [
         "ffmpeg", "-y", "-i", str(video_path),
         "-vf", vf,
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20",
+        *video_encode.get_video_encoder(final=False),  # P1-2: intermedio
+        "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "192k",
-        "-movflags", "+faststart",
         str(tmp_out),
     ]
     res = subprocess.run(cmd, capture_output=True, text=True)

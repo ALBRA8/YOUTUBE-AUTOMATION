@@ -17,6 +17,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+
+import video_encode  # P1-2: codificación unificada
 import os
 import re
 import shutil
@@ -626,9 +628,7 @@ async def render_vertical_moment(
             "-filter_complex", vf,
             "-map", "[outv]",
             "-map", "0:a?",
-            "-c:v", "libx264",
-            "-preset", "fast",
-            "-crf", "22",
+            *video_encode.get_video_encoder(final=True),  # P1-2: FINAL
             "-c:a", "aac",
             "-b:a", "192k",
             "-movflags", "+faststart",

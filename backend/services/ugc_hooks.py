@@ -9,6 +9,8 @@ el Stop-Rate (retención de los primeros 3 segundos).
 from __future__ import annotations
 
 import logging
+
+import video_encode  # P1-2: codificación unificada
 import math
 import subprocess
 from pathlib import Path
@@ -223,9 +225,7 @@ def stitch_hook_variants(
         "[v0][0:a][v1][1:a]concat=n=2:v=1:a=1[outv][outa]",
         "-map", "[outv]",
         "-map", "[outa]",
-        "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-crf", "23",
+        *video_encode.get_video_encoder(final=True),  # P1-2: FINAL (faststart)
         "-c:a", "aac",
         "-b:a", "128k",
         str(output_path)

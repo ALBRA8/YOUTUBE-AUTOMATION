@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import json
 import logging
+
+import video_encode  # P1-2: codificación unificada
 import os
 import shutil
 import subprocess
@@ -159,8 +161,6 @@ def build_scene_cmd(entry: dict, plan: dict, run_dir: Path) -> dict:
     m = manifest_res(run_dir)  # resolución del manifest persistido
     w, h = m
     fps = int(_cfg("FPS", 30))
-    preset = str(_cfg("RENDER_X264_PRESET", "veryfast"))
-    crf = int(_cfg("RENDER_CRF", 20))
     target = plan["target"]
     out_dir = run_dir / NORM_DIRNAME
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -191,7 +191,7 @@ def build_scene_cmd(entry: dict, plan: dict, run_dir: Path) -> dict:
                 "-ac", "2"]
     cmd += ["-vf", _video_chain(plan, w, h, fps),
             "-t", f"{target:.3f}", "-r", str(fps),
-            "-c:v", "libx264", "-preset", preset, "-crf", str(crf),
+            *video_encode.get_video_encoder(final=False),  # P1-2: intermedio
             "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2",
             str(out)]
@@ -367,8 +367,8 @@ def build_burn_cmd(src: Path, srt: Path, out: Path) -> dict:
     en el filtro → cero problemas de escaping de rutas Windows/espacios."""
     cmd = [FFMPEG_BIN, "-y", "-hide_banner", "-loglevel", "error",
            "-i", str(src), "-vf", f"subtitles={srt.name}",
-           "-c:v", "libx264", "-preset", str(_cfg("RENDER_X264_PRESET", "veryfast")),
-           "-crf", str(int(_cfg("RENDER_CRF", 20))), "-pix_fmt", "yuv420p",
+           *video_encode.get_video_encoder(final=True),  # P1-2: FINAL (faststart)
+           "-pix_fmt", "yuv420p",
            "-c:a", "copy", str(out)]
     return {"cmd": cmd, "out": out}
 

@@ -37,12 +37,12 @@ def test_intermediate_vs_final_video_encoder_flags():
 
 def test_nvenc_evaluation_probe():
     """P2-2: Evaluación de aceleración por hardware NVENC."""
-    with patch("backend.pipeline.video.ENABLE_NVENC", False):
-        with patch("backend.pipeline.video._NVENC_AVAILABLE", None):
+    with patch("video_encode.ENABLE_NVENC", False):
+        with patch("video_encode._NVENC_AVAILABLE", None):
             assert _probe_nvenc() is False
 
-    with patch("backend.pipeline.video.ENABLE_NVENC", True):
-        with patch("backend.pipeline.video._NVENC_AVAILABLE", True):
+    with patch("video_encode.ENABLE_NVENC", True):
+        with patch("video_encode._NVENC_AVAILABLE", True):
             enc = get_video_encoder(final=True)
             assert "h264_nvenc" in enc
             assert "-cq" in enc

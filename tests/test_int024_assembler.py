@@ -343,9 +343,9 @@ def s4_ffmpeg_construction(tmp: Path):
           and "crop=1080:1920" in c1 and "fps=30" in c1)
     check("S4 s1: locución → apad a duración exacta + aac 48k stereo",
           "apad=whole_dur=" in c1 and "aac" in c1 and "-ar" in c1 and "48000" in c1)
-    check("S4 s1: H.264 preset/CRF configurables",
-          "libx264" in c1 and config.RENDER_X264_PRESET in c1
-          and f"-crf {config.RENDER_CRF}" in c1)
+    check("S4 s1: H.264 intermedio P1-2 (CRF 10 ultrafast, casi sin pérdida)",
+          "libx264" in c1 and config.INTERMEDIATE_PRESET in c1
+          and f"-crf {config.INTERMEDIATE_CRF}" in c1)
     check("S4 s1: -t exacto = duration_sec del manifest",
           f"-t {manifest['scenes'][0]['duration_sec']:.3f}" in c1)
     check("S4 s1: salida determinista norm/scene_001.mp4",

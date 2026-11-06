@@ -9,6 +9,8 @@ en la esquina del video (9:16 o 16:9).
 from __future__ import annotations
 
 import logging
+
+import video_encode  # P1-2: codificación unificada
 import subprocess
 from pathlib import Path
 from typing import Any, Callable
@@ -143,9 +145,7 @@ def apply_pip_to_video(
         "-filter_complex", f"[0:v][1:v]{overlay_filter}[v]",
         "-map", "[v]",
         "-map", "0:a?",
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "20",
+        *video_encode.get_video_encoder(final=True),  # P1-2: FINAL (faststart)
         "-c:a", "copy",
         str(video_out)
     ]

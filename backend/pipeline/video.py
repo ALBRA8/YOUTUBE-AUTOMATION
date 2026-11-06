@@ -30,10 +30,9 @@ import random
 import subprocess
 from pathlib import Path
 
-from config import (AUDIO_MASTER_BROADCAST, ENABLE_NVENC, FPS,
-                    INTERMEDIATE_CRF, INTERMEDIATE_PRESET, LONG_H, LONG_W,
-                    MUSIC_VOLUME, OUTPUT_DIR, SHORT_H, SHORT_W,
-                    VIDEO_CRF, VIDEO_PRESET)
+from config import (AUDIO_MASTER_BROADCAST, FPS,
+                    LONG_H, LONG_W,
+                    MUSIC_VOLUME, OUTPUT_DIR, SHORT_H, SHORT_W)
 from pipeline import subtitles as subs_mod
 from pipeline import typography as typo_mod
 from pipeline.tts_step import GAP as VOICE_GAP  # pausa real de voice_full
@@ -72,16 +71,9 @@ def _probe_nvenc() -> bool:
     return _NVENC_AVAILABLE
 
 
-def get_video_encoder(final: bool = True) -> list[str]:
-    """Devuelve los parámetros ffmpeg de codificación de video.
-    Intermedios (final=False): casi sin pérdida con INTERMEDIATE_CRF (default 10) y preset ultrafast.
-    Final (final=True): codificación única de calidad con VIDEO_PRESET y VIDEO_CRF (o NVENC),
-    añadiendo -movflags +faststart para streaming inmediato (P2-5)."""
-    if not final:
-        return ["-c:v", "libx264", "-preset", INTERMEDIATE_PRESET, "-crf", str(INTERMEDIATE_CRF)]
-    if _probe_nvenc():
-        return ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", str(VIDEO_CRF), "-movflags", "+faststart"]
-    return ["-c:v", "libx264", "-preset", VIDEO_PRESET, "-crf", str(VIDEO_CRF), "-movflags", "+faststart"]
+# P1-2: el helper vive en el módulo NEUTRAL video_encode (pipeline y
+# services sin dependencias cruzadas). Re-export por compatibilidad.
+from video_encode import get_video_encoder, _probe_nvenc  # noqa: E402,F401
 FACTOR_MAX = 2.5      # cap de slow-mo por segmento (retime setpts)
 CLIP_TOL = 0.25       # tolerancia milimétrica post-render (s) clip vs target
 # INT-077 · tipos de escena UGC (scene['type'] o scene['meta']['type'],
