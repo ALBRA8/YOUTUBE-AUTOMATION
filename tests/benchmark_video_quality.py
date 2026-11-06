@@ -116,8 +116,118 @@ def run_benchmark(tmp_dir: Path | None = None) -> dict:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+def run_benchmark_flowlike(tmp_dir: Path | None = None) -> dict:
+    """P1-4 · Escenario FLOW-LIKE reproducible: clip Ken Burns (gradients +
+    zoompan 3 fases) con audio, 1080x1920 @ 4 s — imita una escena real del
+    pipeline. Compara Cadena A (re-codificación) vs Cadena B (intermedios
+    CRF 10 + única final CRF 18) contra referencia lossless.
+
+    VMAF: si el ffmpeg local tiene libvmaf se añade; si no, se registra
+    NOT_DEMONSTRATED (este sandbox solo trae vmafmotion). Clips REALES de
+    Flow: NO_DEMONSTRATED en sandbox (requiere generación con Flow vivo);
+    el escenario es sintético pero determinista.
+    """
+    cleanup = False
+    if tmp_dir is None:
+        tmp_dir = Path(tempfile.mkdtemp(prefix="bench_flow_"))
+        cleanup = True
+    try:
+        tiene_vmaf = "libvmaf" in subprocess.run(
+            ["ffmpeg", "-hide_banner", "-filters"],
+            capture_output=True, text=True).stdout
+        # Escena Flow-like: degradado + zoompan Ken Burns + tono de audio
+        cmd_src = [
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i", "gradients=s=1080x1920:n=3:d=4:r=30",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=4",
+            "-vf", ("zoompan=z='min(1+0.2*on/24,1.2)'"
+                    ":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+                    ":d=120:s=1080x1920:fps=30"),
+            "-c:v", "libx264", "-crf", "0", "-pix_fmt", "yuv420p",
+            "-c:a", "pcm_s16le", str(tmp_dir / "ref_flow.mp4")]
+        subprocess.run(cmd_src, check=True, capture_output=True)
+        ref = tmp_dir / "ref_flow.mp4"
+
+        # Cadena A: crf20 → crf18 → crf20 (legacy, sin faststart)
+        a1, a2, a3 = (tmp_dir / "fa1.mp4"), (tmp_dir / "fa2.mp4"), (tmp_dir / "fa3.mp4")
+        t0 = time.time()
+        subprocess.run(["ffmpeg", "-y", "-i", str(ref), "-an", "-c:v", "libx264",
+                        "-preset", "veryfast", "-crf", "20", str(a1)],
+                       check=True, capture_output=True)
+        subprocess.run(["ffmpeg", "-y", "-i", str(a1), "-c:v", "libx264",
+                        "-preset", "veryfast", "-crf", "18", str(a2)],
+                       check=True, capture_output=True)
+        subprocess.run(["ffmpeg", "-y", "-i", str(a2), "-c:v", "libx264",
+                        "-preset", "veryfast", "-crf", "20", str(a3)],
+                       check=True, capture_output=True)
+        t_a = time.time() - t0
+
+        # Cadena B: crf10 ultrafast → crf10 ultrafast → crf18 veryfast final
+        b1, b2, b3 = (tmp_dir / "fb1.mp4"), (tmp_dir / "fb2.mp4"), (tmp_dir / "fb3.mp4")
+        t0 = time.time()
+        subprocess.run(["ffmpeg", "-y", "-i", str(ref), "-an", "-c:v", "libx264",
+                        "-preset", "ultrafast", "-crf", "10", str(b1)],
+                       check=True, capture_output=True)
+        subprocess.run(["ffmpeg", "-y", "-i", str(b1), "-c:v", "libx264",
+                        "-preset", "ultrafast", "-crf", "10", str(b2)],
+                       check=True, capture_output=True)
+        subprocess.run(["ffmpeg", "-y", "-i", str(b2), "-c:v", "libx264",
+                        "-preset", "veryfast", "-crf", "18",
+                        "-movflags", "+faststart", str(b3)],
+                       check=True, capture_output=True)
+        t_b = time.time() - t0
+
+        def medir(probe: Path) -> tuple[float, float]:
+            r = subprocess.run(
+                ["ffmpeg", "-i", str(probe), "-i", str(ref),
+                 "-lavfi", "ssim;[0:v][1:v]psnr", "-f", "null", "-"],
+                capture_output=True, text=True)
+            s = re.search(r"All:([0-9.]+)", r.stderr)
+            p = re.search(r"average:([0-9.]+)", r.stderr)
+            return (float(s.group(1)) if s else 0.0,
+                    float(p.group(1)) if p else 0.0)
+
+        sa, pa = medir(a3)
+        sb, pb = medir(b3)
+        res = {
+            "escenario": "flow_like_1080x1920_4s_kenburns",
+            "libvmaf": tiene_vmaf,
+            "cadena_a": {"ssim": sa, "psnr_db": pa, "time_sec": round(t_a, 2),
+                         "size_mb": round(a3.stat().st_size / 1e6, 2)},
+            "cadena_b": {"ssim": sb, "psnr_db": pb, "time_sec": round(t_b, 2),
+                         "size_mb": round(b3.stat().st_size / 1e6, 2)},
+            "gain": {"psnr_delta_db": round(pb - pa, 2),
+                     "ssim_higher": sb > sa},
+        }
+        texto_vmaf = ("medido" if tiene_vmaf else
+                      "NOT_DEMONSTRATED (ffmpeg sin libvmaf; solo vmafmotion)")
+        lineas = [
+            "# Resultados P1-4 · Benchmark de calidad (escenario Flow-like)", "",
+            f"- Escenario: {res['escenario']} (sintético determinista; clips "
+            "REALES de Flow: NOT_DEMONSTRATED en sandbox)",
+            f"- VMAF completo: {texto_vmaf}",
+            "",
+            "| cadena | SSIM | PSNR dB | tiempo s | tamaño MB |", "|---|---|---|---|---|",
+            f"| A legacy (crf20→18→20) | {sa:.5f} | {pa:.2f} | {t_a:.1f} | {a3.stat().st_size/1e6:.1f} |",
+            f"| B única final (crf10→10→18) | {sb:.5f} | {pb:.2f} | {t_b:.1f} | {b3.stat().st_size/1e6:.1f} |",
+            "",
+            f"**Ganancia B sobre A: +{res['gain']['psnr_delta_db']} dB PSNR, "
+            f"SSIM {'mayor' if sb > sa else 'NO mayor'}**",
+        ]
+        out = Path(__file__).resolve().parents[1] / "tests" / "resultados_benchmark_video.md"
+        out.write_text("\n".join(lineas) + "\n", encoding="utf-8")
+        return res
+    finally:
+        if cleanup:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 if __name__ == "__main__":
     report = run_benchmark()
+    report_flow = run_benchmark_flowlike()
+    print(f"Flow-like: A {report_flow['cadena_a']['psnr_db']} dB vs B "
+          f"{report_flow['cadena_b']['psnr_db']} dB "
+          f"(+{report_flow['gain']['psnr_delta_db']} dB)")
     print("=== BENCHMARK DE CALIDAD DE VIDEO (P2-2) ===")
     print(f"Cadena A (legacy):   SSIM={report['cadena_a']['ssim']:.5f} | PSNR={report['cadena_a']['psnr_db']:.2f} dB | Tiempo={report['cadena_a']['time_sec']}s")
     print(f"Cadena B (rediseño): SSIM={report['cadena_b']['ssim']:.5f} | PSNR={report['cadena_b']['psnr_db']:.2f} dB | Tiempo={report['cadena_b']['time_sec']}s")
