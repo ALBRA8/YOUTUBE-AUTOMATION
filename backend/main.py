@@ -122,16 +122,25 @@ async def auth_guard(request, call_next):
 
 @app.middleware("http")
 async def csrf_guard(request, call_next):
-    """PHASE 1 · M2 — política CSRF para mutaciones + tope de body.
+    """PHASE 1 · M2 / P0-5 — política CSRF para mutaciones + anti DNS rebinding + tope de body.
 
     POST/PUT/PATCH/DELETE con Origin o Referer PRESENTE deben pasar la
-    política security.origin_allowed (mismo host, cliente local o la
+    política security.origin_allowed (mismo host confiable, cliente local o la
     extensión Chrome); un origen externo (p. ej. https://evil.example que
     lanza fetch no-cors/sendBeacon) → 403. Sin Origin/Referer (curl, API
     clients, workers internos) se PERMITE: los navegadores siempre envían
     Origin en mutaciones cross-site, así que la ausencia implica cliente
     no-navegador. Además, Content-Length por encima del tope global → 413
-    (nunca consumir bodies ilimitados — A7/DoS)."""
+    (nunca consumir bodies ilimitados — A7/DoS).
+    P0-5 · si no hay MASTER_API_KEY (modo local abierto), el Host DEBE pertenecer
+    a la allowlist local (localhost, 127.0.0.1, [::1], testserver o ALLOWED_HOSTS)."""
+    # P0-5: Validación de Host anti DNS rebinding cuando no hay clave maestra
+    if not security.enabled():
+        req_host = request.headers.get("Host", "")
+        if req_host and not security.is_trusted_host(req_host):
+            return JSONResponse(status_code=403,
+                                content={"detail": "Host no permitido en modo local (anti DNS rebinding)"})
+
     m = request.method.upper()
     if m in ("POST", "PUT", "PATCH", "DELETE"):
         source = (request.headers.get("Origin")

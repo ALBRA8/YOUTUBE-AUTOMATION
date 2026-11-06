@@ -239,12 +239,46 @@ def safe_urlopen(url: str, timeout: float = 30.0, allow_private: bool = False,
 _LOCAL_ORIGIN_RE = _re.compile(
     r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$", _re.IGNORECASE)
 _EXT_ORIGIN_RE = _re.compile(r"^chrome-extension://[a-p]+$", _re.IGNORECASE)
+_ALLOWED_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "testserver"}
+
+
+def _extract_host_only(host_str: str) -> str:
+    """Extrae el host sin puerto, tolerando IPv4, IPv6 con/sin corchetes y hostnames."""
+    s = (host_str or "").strip().lower()
+    if not s:
+        return ""
+    if s.startswith("["):
+        if "]" in s:
+            return s[1:s.index("]")]
+        return s.strip("[]")
+    if s.count(":") > 1:
+        return s.strip("[]")
+    if ":" in s:
+        return s.rsplit(":", 1)[0]
+    return s
+
+
+def is_trusted_host(host_header: str) -> bool:
+    """P0-5: Valida si el Host pertenece a la allowlist local o hosts configurados.
+    Cierra el vector de ataque por DNS rebinding."""
+    h = _extract_host_only(host_header)
+    if not h:
+        return False
+    if h in _ALLOWED_LOCAL_HOSTS:
+        return True
+    configured = os.getenv("ALLOWED_HOSTS", "").split(",")
+    for item in configured:
+        item = item.strip().lower()
+        if item and h == item:
+            return True
+    return False
 
 
 def origin_allowed(origin: str, request_host: str) -> bool:
     """¿Puede ESTE origen lanzar una mutación al API?
 
-    Permite: (1) mismo host que el request (dashboard same-origin);
+    Permite: (1) mismo host que el request (dashboard same-origin), SOLO si el Host
+    es un host local/legítimo verificado (anti DNS rebinding);
     (2) clientes locales http(s)://localhost|127.0.0.1|[::1]:puerto;
     (3) la extensión Chrome (chrome-extension:// con ID válido).
     Rechaza todo lo demás (p. ej. https://evil.example). Un request SIN
@@ -257,11 +291,13 @@ def origin_allowed(origin: str, request_host: str) -> bool:
     p = _up.urlparse(o)
     if p.scheme not in ("http", "https", "chrome-extension"):
         return False
-    netloc = (p.netloc or "").lower()
-    origin_host = netloc.rsplit(":", 1)[0].strip("[]") if netloc else ""
-    host_only = (request_host or "").rsplit(":", 1)[0].strip("[]").lower()
+    origin_host = _extract_host_only(p.netloc)
+    host_only = _extract_host_only(request_host)
     if origin_host and origin_host == host_only:
-        return True
+        # P0-5: Origin==Host solo es aceptable si el host es de confianza (anti DNS rebinding)
+        if is_trusted_host(host_only):
+            return True
+        return False
     if p.scheme == "chrome-extension":
         return bool(_EXT_ORIGIN_RE.match(o))
     return bool(_LOCAL_ORIGIN_RE.match(o))
