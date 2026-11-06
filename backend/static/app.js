@@ -28,8 +28,11 @@
 
   // versión del propio loader (?v=__APP_VERSION__) → cache-busting en cascada
   let v = '';
-  try { v = new URLSearchParams(document.currentScript.src).get('v') || ''; } catch (e) { /* sin v → sin busting */ }
-  const qs = v ? ('?v=' + encodeURIComponent(v)) : '';
+  try {
+    const u = new URL(document.currentScript.src, window.location.href);
+    v = u.searchParams.get('v') || '';
+  } catch (e) { /* sin v */ }
+  const qs = v ? ('?v=' + encodeURIComponent(v) + '&_t=' + Date.now()) : ('?_t=' + Date.now());
 
   let i = 0;
   function loadNext() {

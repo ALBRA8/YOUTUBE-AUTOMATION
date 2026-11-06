@@ -26,7 +26,7 @@ FLOW_MCP_ENABLED = os.getenv("FLOW_MCP_ENABLED", "0").strip().lower() in ("1", "
 FLOW_MCP_VIDEO_ENABLED = os.getenv("FLOW_MCP_VIDEO_ENABLED", "0").strip().lower() in ("1", "true", "yes")
 FLOW_MCP_DIR = Path(os.getenv("FLOW_MCP_DIR", str(BASE_DIR.parent / "tools" / "GoogleFlowMCP"))).resolve()
 FLOW_MCP_MODEL = os.getenv("FLOW_MCP_MODEL", "2").strip()
-FLOW_MCP_TIMEOUT = float(os.getenv("FLOW_MCP_TIMEOUT", "120.0"))
+FLOW_MCP_TIMEOUT = float(os.getenv("FLOW_MCP_TIMEOUT", "300.0"))
 
 # ── MCP Connection Manager (INT-022) — panel ↔ servidores MCP stdio ──────
 # Puerto CDP del Chrome DEDICADO de GoogleFlowMCP (debe coincidir con
@@ -324,7 +324,7 @@ def reload() -> None:
     FLOW_MCP_VIDEO_ENABLED = os.getenv("FLOW_MCP_VIDEO_ENABLED", "0").strip().lower() in ("1", "true", "yes")
     FLOW_MCP_DIR = Path(os.getenv("FLOW_MCP_DIR", str(BASE_DIR.parent / "tools" / "GoogleFlowMCP"))).resolve()
     FLOW_MCP_MODEL = os.getenv("FLOW_MCP_MODEL", "2").strip()
-    FLOW_MCP_TIMEOUT = float(os.getenv("FLOW_MCP_TIMEOUT", "120.0"))
+    FLOW_MCP_TIMEOUT = float(os.getenv("FLOW_MCP_TIMEOUT", "300.0"))
     NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()
     NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "moonshotai/kimi-k3").strip()
     NVIDIA_BASE_URL = os.getenv(

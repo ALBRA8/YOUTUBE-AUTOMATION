@@ -1370,16 +1370,27 @@ def _pick_folder_dialog() -> tuple[bool, str]:
     titulo = "Selecciona la carpeta para tu proyecto"
     try:
         if _os.name == "nt":
-            ps = ("(New-Object -ComObject Shell.Application).BrowseForFolder("
-                  f"0, '{titulo}', 0, 0).Self.Path")
-            r = subprocess.run(
-                ["powershell.exe", "-NoProfile", "-STA", "-NonInteractive",
-                 "-Command", ps],
-                capture_output=True, text=True, timeout=1800,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            ruta = (r.stdout or "").strip().strip('"').strip()
-            # carpeta VIRTUAL (p. ej. «Este equipo») → .Self.Path vacío:
-            # se trata como cancelado para no crear workspaces sin ruta real
+            # Abre el diálogo nativo de Windows acoplado a la ventana activa (GetForegroundWindow)
+            # para garantizar que salga al frente de Chrome y nunca detrás
+            ps_script = Path(__file__).resolve().parent / "pick_folder.ps1"
+            if ps_script.exists():
+                r = subprocess.run(
+                    ["powershell.exe", "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass",
+                     "-File", str(ps_script)],
+                    capture_output=True, text=True, timeout=1800)
+            else:
+                script = (
+                    "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
+                    "Add-Type -AssemblyName System.Windows.Forms; "
+                    "$f = New-Object System.Windows.Forms.FolderBrowserDialog; "
+                    f"$f.Description = '{titulo}'; "
+                    "$f.ShowNewFolderButton = $true; "
+                    "if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.SelectedPath }"
+                )
+                r = subprocess.run(
+                    ["powershell.exe", "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script],
+                    capture_output=True, text=True, timeout=1800)
+            ruta = (r.stdout or "").strip().replace("/", "\\")
             if r.returncode == 0 and ruta:
                 return True, ruta
             return False, ""
@@ -1404,6 +1415,48 @@ def _pick_folder_dialog() -> tuple[bool, str]:
     return False, ""
 
 
+@app.get("/api/dialog/resolve-folder-path")
+async def dialog_resolve_folder_path(name: str):
+    """Resuelve el nombre de carpeta elegido en showDirectoryPicker (patrón de la extensión)
+    a la ruta física absoluta real en el PC de Johan."""
+    import os
+    from pathlib import Path
+    clean = (name or "").strip().strip('"').lower()
+    if not clean:
+        return {"ok": False, "error": "Nombre vacío"}
+    roots = [
+        Path(r"D:\PROYECTOS\CANALES DE YOUTUBE Y TIKTOK\NICHOS"),
+        Path(r"D:\PROYECTOS\CANALES DE YOUTUBE Y TIKTOK"),
+        Path(r"D:\PROYECTOS\YOUTUBE AUTOMATION"),
+        Path(r"D:\PROYECTOS"),
+        Path(r"C:\Users\Johan\Downloads"),
+        Path(r"C:\Users\Johan\Documents"),
+        Path(r"D:\NAS CLONADOR"),
+    ]
+    for root in roots:
+        if not root.exists():
+            continue
+        try:
+            for entry in os.scandir(root):
+                if entry.is_dir() and entry.name.lower() == clean:
+                    return {"ok": True, "path": entry.path}
+        except PermissionError:
+            pass
+        try:
+            for entry in os.scandir(root):
+                if entry.is_dir():
+                    try:
+                        for sub in os.scandir(entry.path):
+                            if sub.is_dir() and sub.name.lower() == clean:
+                                return {"ok": True, "path": sub.path}
+                    except PermissionError:
+                        pass
+        except PermissionError:
+            pass
+    sug = str(Path(r"D:\PROYECTOS\CANALES DE YOUTUBE Y TIKTOK\NICHOS") / name)
+    return {"ok": True, "path": sug}
+
+
 @app.post("/api/dialog/pick-folder")
 async def dialog_pick_folder():
     """INT-091 · abre el diálogo NATIVO de Windows (Explorador de archivos)
@@ -1412,10 +1465,61 @@ async def dialog_pick_folder():
     · cancelada → {"ok": false, "cancelled": true}
     El path devuelto viaja luego en POST /api/projects como
     custom_workspace_path y el pipeline lo respeta ABSOLUTO (INT-091)."""
-    aceptado, ruta = _pick_folder_dialog()
+    import asyncio
+    aceptado, ruta = await asyncio.to_thread(_pick_folder_dialog)
     if not aceptado:
         return {"ok": False, "cancelled": True}
     return {"ok": True, "path": ruta}
+
+
+@app.get("/api/dialog/browse-dirs")
+async def dialog_browse_dirs(path: str = ""):
+    """Explorador visual in-browser: navega discos y carpetas de la máquina sin depender de ventanas emergentes."""
+    import os, string
+    from pathlib import Path
+    clean_p = (path or "").strip().strip('"').strip()
+    if not clean_p:
+        drives = []
+        if os.name == "nt":
+            import ctypes
+            bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+            for letter in string.ascii_uppercase:
+                if bitmask & 1:
+                    d = f"{letter}:\\"
+                    if os.path.exists(d):
+                        drives.append({"name": f"Disco ({letter}:)", "path": d})
+                bitmask >>= 1
+        return {"ok": True, "current": "", "parent": "", "dirs": drives}
+
+    target = Path(clean_p).resolve()
+    if not target.exists() or not target.is_dir():
+        return {"ok": False, "error": f"Carpeta no encontrada: {target}"}
+
+    parent = str(target.parent) if target.parent != target else ""
+    subdirs = []
+    try:
+        for entry in os.scandir(target):
+            if entry.is_dir() and not entry.name.startswith("."):
+                subdirs.append({"name": entry.name, "path": entry.path})
+        subdirs.sort(key=lambda x: x["name"].lower())
+    except PermissionError:
+        pass
+    return {"ok": True, "current": str(target), "parent": parent, "dirs": subdirs}
+
+
+@app.post("/api/dialog/create-dir")
+async def dialog_create_dir(body: dict):
+    """Crea una carpeta nueva en la ruta seleccionada."""
+    from pathlib import Path
+    ruta = (body.get("path") or "").strip().strip('"')
+    if not ruta:
+        return {"ok": False, "error": "Ruta requerida"}
+    p = Path(ruta).resolve()
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+        return {"ok": True, "path": str(p)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 # ── AGENTE 2 · Abrir Carpeta en el PC del usuario (1 clic en la web) ────

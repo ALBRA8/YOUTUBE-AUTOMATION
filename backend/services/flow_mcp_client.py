@@ -228,7 +228,7 @@ async def call_tool(
         raise FlowMCPError("Binario 'node' no encontrado en el sistema.")
 
     entry_script = getattr(config, "FLOW_MCP_DIR", Path(".")) / "src" / "mcp.js"
-    op_timeout = timeout if timeout is not None else getattr(config, "FLOW_MCP_TIMEOUT", 120.0)
+    op_timeout = timeout if timeout is not None else getattr(config, "FLOW_MCP_TIMEOUT", 300.0)
     work_dir = cwd or getattr(config, "FLOW_MCP_DIR", Path("."))
 
     stderr_chunks: list[bytes] = []
@@ -418,7 +418,7 @@ async def upload_file(
     file_path: Path,
     name: str | None = None,
     replace: bool = False,
-    timeout: float = 120.0,
+    timeout: float = 300.0,
 ) -> dict[str, Any]:
     """Sube un archivo de imagen al proyecto de Flow y registra su etiqueta @name."""
     p = Path(file_path).resolve()
