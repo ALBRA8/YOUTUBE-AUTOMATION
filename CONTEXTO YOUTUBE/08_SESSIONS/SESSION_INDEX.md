@@ -25,3 +25,14 @@
 ## SES-2026-10-20-03 — GoogleFlowMCP: puente implementado y robustez de transporte
 - **Estado:** Implementación consolidada en main; LIVE TEST 1 preparado.
 - **Hecho:** Implementación del cliente Stdio MCP, buffer de salida en bridge.js, selectores DOM con contingencia, purga de stale locks y sanitización de prompts.
+
+## SES-2026-11-06-01 — INT-091 Selector de carpetas, Timeout 300 s y Render 4K
+- **Estado:** CLOSED / PASS.
+- **Hecho:** Implementación del selector nativo de carpetas de Windows vía `window.showDirectoryPicker()`, elevación de `FLOW_MCP_TIMEOUT` a 300 s, renderizado vertical 4K de prueba y desacoplamiento de NotebookLM en Connection Manager.
+- **Referencia:** `SES-2026-11-06-01_CUSTOM_FOLDER_FLOW_TIMEOUT_4K_VALIDATION.md`.
+
+## SES-2026-11-06-02 — Auditoría Técnica Integral P0-P3, Remediación y Sincronización
+- **Estado:** CLOSED / PASS.
+- **Hecho:** Remediación secuencial quirúrgica de los 17 puntos de la auditoría técnica (P0 a P3), rebase con `origin/main` (memoria viva `LEEME_PRIMERO.md`, `ROADMAP.md`, reubicación de lanzadores en `launchers/` y decisiones D-010/D-011) y sincronización con el repositorio remoto.
+- **Resultado:** 40/40 tests PASS en suites de auditoría y suite de lanzadores.
+- **Referencia:** `SES-2026-11-06-02_AUDITORIA_TECNICA_P0_P3_REMEDIACION_INTEGRAL.md`.
