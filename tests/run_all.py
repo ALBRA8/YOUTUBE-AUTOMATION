@@ -233,12 +233,16 @@ def main(baterias: list[str] | None = None, argv: list[str] | None = None) -> in
     total_fail = 0
     fallidas: list[str] = []
 
+    child_env = os.environ.copy()
+    child_env["PYTHONIOENCODING"] = "utf-8"
+    child_env["PYTHONUTF8"] = "1"
+
     for i, nombre in enumerate(lista, 1):
         print(f"\n──────── [{i}/{len(lista)}] {nombre} ────────")
         proc = subprocess.run(
             [sys.executable, str(TESTS_DIR / nombre)],
             cwd=str(TESTS_DIR.parent), capture_output=True, text=True,
-            encoding="utf-8", errors="replace",
+            encoding="utf-8", errors="replace", env=child_env,
         )
         if proc.stdout:
             sys.stdout.write(proc.stdout)
