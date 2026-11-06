@@ -16,7 +16,8 @@
 ## HECHO
 - INT-091 selector de carpetas; INT-092 timeout Flow 300 s y render 4K (2026-11-06).
 - Memoria del repo: LEEME_PRIMERO.md + ROADMAP.md; lanzadores → launchers/
-  (rutas verificadas por test); estado unificado (ESTADO_REAL 53 baterías,
+  (rutas verificadas por test de COMPILACIÓN ast/py_compile + compileall
+  en CI — P0-1 cerrado 2026-11-06); estado unificado (ESTADO_REAL 53 baterías,
   tabla CONTRACT reparada, PROJECT_STATE un solo Estado, D-010/D-011) y
   baterías HANDS en CI (2026-11-06).
 - Auditoría Técnica Fase 1 (P0-1 a P0-5, P1-1 a P1-3): SSRF safe_fetch_bytes,
