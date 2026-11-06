@@ -18,3 +18,7 @@
 - HANDS (control manual del PC): dormido.
 ## HECHO
 - INT-091 selector de carpetas; INT-092 timeout Flow 300 s y render 4K (2026-11-06).
+- Memoria del repo: LEEME_PRIMERO.md + ROADMAP.md; lanzadores → launchers/
+  (rutas verificadas por test); estado unificado (ESTADO_REAL 53 baterías,
+  tabla CONTRACT reparada, PROJECT_STATE un solo Estado, D-010/D-011) y
+  baterías HANDS en CI (2026-11-06).

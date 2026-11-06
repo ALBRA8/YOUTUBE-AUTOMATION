@@ -29,3 +29,4 @@ abajo en "Última sesión".
 
 ## Última sesión
 - Fecha / modelo / qué se hizo / qué quedó pendiente:
+- 2026-11-06 · constructor LLM (Z.ai/GLM) · orden del repo y memoria: LEEME_PRIMERO.md + ROADMAP.md creados, lanzadores movidos a launchers/ (rutas re-ancladas, test_launchers_relocation 7/7), estado unificado (ESTADO_REAL 53 baterías + tabla CONTRACT reparada, PROJECT_STATE un solo Estado + Historial, D-010 HANDS en reserva + D-011 memoria), baterías HANDS añadidas al CI · pytest 478 pass / 1 fallo conocido (test_int088, magic number — Fase 1); run_all 2548 OK / 2 fallos en 3 baterías preexistentes (int025 crash, security_hardening, int028 — Fase 1) · pendiente: Fase 1 completa y confirmación del dueño de que el PAT mencionado en PROJECT_STATE.md fue revocado (NOT_DEMONSTRATED).
