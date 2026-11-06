@@ -186,12 +186,30 @@ def scene_clip_cmd(img: Path, duration: float, out: Path, w: int, h: int,
     peak = ZOOM_PEAK if zoom_dir > 0 else 1.12
     zexpr = kenburns_3phase_expr(frames, peak=peak)
     sw, sh = safe_kenburns_scale(w, h)
-    parts = [
-        f"scale={sw}:{sh}:force_original_aspect_ratio=increase",
-        f"crop={sw}:{sh}",
-        f"zoompan=z='{zexpr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
-        f":d={frames}:s={w}x{h}:fps={fps}",
-    ]
+    # P1-1 (medición tools/medir_jitter_kenburns.py): si safe_kenburns_scale
+    # deja el factor por debajo de 2.0 (salidas grandes, p. ej. 4K 2160x3840
+    # → 1.125x), la mitigación NO actúa (jitter simulado 0.42 vs 0.44 sin
+    # mitigar). Ruta B: zoompan a MEDIA resolución con factor 2x real
+    # (jitter 0.22, ~48% menos) + reescalado final lanczos (mapeo fijo, sin
+    # cuantización por frame). Memoria acotada: intermedio = resolución
+    # original; NUNCA 4320x7680 (133 MB/frame, riesgo OOM).
+    if w >= 2 and sw / max(w, 1) < 2.0:
+        hw = max((w // 2) // 2 * 2, 2)   # mitad de salida, par
+        hh = max((h // 2) // 2 * 2, 2)
+        parts = [
+            f"scale={hw * 2}:{hh * 2}:force_original_aspect_ratio=increase",
+            f"crop={hw * 2}:{hh * 2}",
+            f"zoompan=z='{zexpr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+            f":d={frames}:s={hw}x{hh}:fps={fps}",
+            f"scale={w}:{h}:flags=lanczos",
+        ]
+    else:
+        parts = [
+            f"scale={sw}:{sh}:force_original_aspect_ratio=increase",
+            f"crop={sw}:{sh}",
+            f"zoompan=z='{zexpr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+            f":d={frames}:s={w}x{h}:fps={fps}",
+        ]
     if rotate_deg and rotate_deg > 0:
         parts.append(
             f"rotate='{rotate_deg}*PI/180*sin(2*PI*t/{rotate_speed})'"

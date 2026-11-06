@@ -44,7 +44,34 @@ def test_scene_clip_cmd_uses_safe_scaling():
     assert "zoompan=" in cmd_str
 
 
+def test_scene_clip_cmd_4k_usa_ruta_b_factor_2x():
+    """P1-1: en 4K el factor de safe_kenburns_scale cae a 1.125 (mitigación
+    inerte). La ruta B debe activarse: zoompan a media resolución con factor
+    2x real + upscale lanczos final; NUNCA intermedio 4320x7680."""
+    cmd = scene_clip_cmd(
+        img=Path("dummy.png"), duration=2.0, out=Path("out.mp4"),
+        w=2160, h=3840, fps=30, zoom_dir=1, rotate_deg=0)
+    s = " ".join(cmd)
+    assert "zoompan=" in s and "s=1080x1920" in s, "zoompan debe salir a media resolución"
+    assert "scale=2160:3840:flags=lanczos" in s, "upscale final lanczos"
+    assert "scale=2160:3840:force_original_aspect_ratio=increase" in s,         "intermedio = resolución original (2x de 1080p), memoria acotada"
+    assert "scale=2430:4320" not in s, "factor 1.125 NO debe usarse en 4K"
+    assert "4320:7680" not in s, "prohibido intermedio 8K (OOM)"
+
+
+def test_scene_clip_cmd_1080p_mantiene_camino_directo():
+    """P1-1: con factor ≥ 2.0 (1080p → 2.25x) NO cambia el comportamiento."""
+    cmd = scene_clip_cmd(
+        img=Path("dummy.png"), duration=2.0, out=Path("out.mp4"),
+        w=1080, h=1920, fps=30, zoom_dir=1, rotate_deg=0)
+    s = " ".join(cmd)
+    assert "scale=2430:4320" in s and "s=1080x1920" in s
+    assert "flags=lanczos" not in s, "sin upscale extra en 1080p"
+
+
 if __name__ == "__main__":
     test_safe_kenburns_scale_bounds()
     test_scene_clip_cmd_uses_safe_scaling()
+    test_scene_clip_cmd_4k_usa_ruta_b_factor_2x()
+    test_scene_clip_cmd_1080p_mantiene_camino_directo()
     print("PASS: test_p2_4_kenburns_jitter")
