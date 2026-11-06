@@ -338,6 +338,9 @@ async def _run_flow_render(job_id: str, project_id: str) -> None:
         if faltan_img:
             raise RuntimeError(f"Escenas sin imagen de Flow: {faltan_img}. "
                                "Importa el ZIP de Escena_XX primero.")
+        # P1-5: el render con assets Flow importados TAMBIÉN respeta el
+        # umbral de placeholders (el orquestador MCP entra por aquí).
+        _gate_imagenes_reales(project_id, scenes)
         db.update_project(project_id, status="render", error=None,
                           step_label="Render Flow", progress=50)
         await _emit(job_id, project_id, "tts", 50, "Sintetizando voz (assets Flow)…")
@@ -462,7 +465,7 @@ def _gate_imagenes_reales(project_id: str, scenes: list[dict]) -> None:
     if not metodos:
         return
     n_ph = sum(1 for m in metodos if m == "placeholder")
-    max_allowed = int(os.getenv("MAX_ALLOWED_PLACEHOLDERS", "1"))
+    max_allowed = config.max_allowed_placeholders()  # P1-5: fuente única
     if n_ph > max_allowed:
         db.update_project(project_id, status="failed",
                           error=f"Preflight de calidad: {n_ph}/{len(metodos)} imágenes son placeholder (máximo permitido: {max_allowed}). Calidad insuficiente para entrega.",
@@ -708,7 +711,7 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
         scenes = db.get_scenes(project_id)
 
         # P2-1: Si hay placeholders por encima del umbral, reintentar esas escenas con Flow/Gemini antes del gate
-        max_ph_allowed = int(os.getenv("MAX_ALLOWED_PLACEHOLDERS", "1"))
+        max_ph_allowed = config.max_allowed_placeholders()  # P1-5: fuente única
         cur_methods = []
         for sc in scenes:
             p_img = sc.get("image_path")

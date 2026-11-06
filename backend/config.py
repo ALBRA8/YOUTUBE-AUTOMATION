@@ -163,6 +163,16 @@ RENDER_X264_PRESET = os.getenv("RENDER_X264_PRESET", "veryfast").strip()
 RENDER_CRF = int(os.getenv("RENDER_CRF", "18"))
 # P2-2: Configuración de calidad de video y codificación única / intermedios sin pérdida
 VIDEO_CRF = int(os.getenv("VIDEO_CRF", str(RENDER_CRF)))
+
+# P1-5 · Umbral de placeholders permitidos antes de fallar el render
+# (fuente ÚNICA; antes duplicado con os.getenv en orchestrator.py x2 y video_qa.py).
+# Leer con max_allowed_placeholders() para respetar overrides de .env en caliente.
+MAX_ALLOWED_PLACEHOLDERS = int(os.getenv("MAX_ALLOWED_PLACEHOLDERS", "1"))
+
+
+def max_allowed_placeholders() -> int:
+    """Umbral vigente de placeholders (respeta MAX_ALLOWED_PLACEHOLDERS del entorno)."""
+    return int(os.getenv("MAX_ALLOWED_PLACEHOLDERS", str(MAX_ALLOWED_PLACEHOLDERS)))
 VIDEO_PRESET = os.getenv("VIDEO_PRESET", RENDER_X264_PRESET).strip()
 INTERMEDIATE_CRF = int(os.getenv("INTERMEDIATE_CRF", "10"))
 INTERMEDIATE_PRESET = os.getenv("INTERMEDIATE_PRESET", "ultrafast").strip()

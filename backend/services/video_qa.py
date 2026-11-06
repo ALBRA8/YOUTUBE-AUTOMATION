@@ -30,6 +30,7 @@ import re
 import subprocess
 from pathlib import Path
 
+import config  # P1-5: umbral de placeholders centralizado
 from config import OUTPUT_DIR
 from database import get_project, get_scenes
 
@@ -336,7 +337,7 @@ def qa_project(pid: str) -> dict:
         final_info = qa_video(video_url, final=True)
 
     # P2-1: Control de umbral de placeholders en Video QA
-    max_ph = int(os.getenv("MAX_ALLOWED_PLACEHOLDERS", "1"))
+    max_ph = config.max_allowed_placeholders()  # P1-5: fuente única
     n_ph = sum(1 for s in per_scene if (s.get("image") or {}).get("is_placeholder"))
     if n_ph > max_ph:
         for s in per_scene:
