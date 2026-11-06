@@ -248,6 +248,19 @@ def pytest_configure(config):
     assert Path(_dbmod.DB_PATH) == Path(_cfgmod.DB_PATH), (
         "database.DB_PATH no quedó ligado a la SQLite de sesión")
 
+    # P1-1: Hermetización de resolución DNS para pruebas (evita llamadas de red en tests de viral_clipper)
+    import socket
+    _orig_getaddrinfo = socket.getaddrinfo
+
+    def _hermetic_getaddrinfo(host, port, *args, **kwargs):
+        h = str(host or "").lower()
+        if h in ("www.youtube.com", "youtube.com", "m.youtube.com", "youtu.be",
+                 "example.com", "www.example.com"):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("142.250.190.46", port or 0))]
+        return _orig_getaddrinfo(host, port, *args, **kwargs)
+
+    socket.getaddrinfo = _hermetic_getaddrinfo
+
     config._p1work_session_tmp = str(session_tmp)
 
 
