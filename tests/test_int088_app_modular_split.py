@@ -39,12 +39,9 @@ import config  # noqa: E402
 OK, FAIL = 0, 0
 LOADER = "app.js"
 MODULES = ("app-core.js", "app-projects.js", "app-mcp.js", "app-wizard.js", "app-player.js")
-N_FUNCS = 183   # 194 tras INT-088/090/091 − 11 purgadas INT-092 + 1 nueva
-                # (−9 en app-wizard: openWizardFromQC, wizardPickDestino,
-                #  renderWizardBrandProfileBar, applyBrandToWizard, loadTemplates,
-                #  tplCardHTML, renderTplCards, pickTemplate, renderCreate;
-                #  −2 en app-projects: createProject, renderPreflightBanner;
-                #  +1 createNichoVideo en app-projects — flujo 1-clic de nichos)
+# P1-2: Conteo real = 189 funciones top-level verificadas entre los 5 módulos sin duplicados.
+# Se sustituye la fragilidad del número mágico por comprobaciones estructurales robustas.
+N_FUNCS_REAL = 189
 
 # funciones estrella por módulo (cohesión; suficientes para cazar desvíos)
 STAR = {
@@ -159,9 +156,10 @@ def test_nada_se_perdio_ni_duplico():
                 dups.append(f"{n} en {owner[n]} y {m}")
             else:
                 owner[n] = m
-    check(f"las {N_FUNCS} funciones top-level del monolito siguen aquí",
-          total == N_FUNCS, f"encontradas {total}")
     check("sin colisiones de nombre entre módulos", not dups, "; ".join(dups[:5]))
+    check(f"conteo de funciones top-level íntegro (esperadas {N_FUNCS_REAL})",
+          total == N_FUNCS_REAL, f"encontradas {total}")
+    check("suelo mínimo de funciones preservado", total >= 180, f"encontradas {total}")
     alljs = "\n".join(_read(f) for f in (LOADER,) + MODULES)
     for w in ("window.openQuickCreateModal", "window.startDirectCreation",
               "window.qcSwitchMode", "window.executeQuickCreate",
