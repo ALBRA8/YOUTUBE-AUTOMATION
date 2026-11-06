@@ -210,8 +210,21 @@ BATERIAS = [
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")
 
 
-def main(baterias: list[str] | None = None) -> int:
-    lista = BATERIAS if baterias is None else baterias
+NON_HERMETIC_BATTERIES = {
+    # test_live_boot.py arranca uvicorn real y ejecuta scripts bash (.sh)
+    # contra puertos de red del sistema; requiere entorno de host.
+    "test_live_boot.py",
+}
+
+def main(baterias: list[str] | None = None, argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    hermetic = "--hermetic" in args or "--ci" in args
+    if baterias is not None:
+        lista = baterias
+    elif hermetic:
+        lista = [b for b in BATERIAS if b not in NON_HERMETIC_BATTERIES]
+    else:
+        lista = BATERIAS
     total_ok = 0
     total_fail = 0
     fallidas: list[str] = []

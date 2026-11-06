@@ -23,13 +23,14 @@ jobs:
       - name: Suite pytest (aislada de .env y con fixes 658740b)
         run: python -m pytest tests/ -q
       # D-010: HANDS está en RESERVA (dormido), pero su código no puede
-      # pudrirse: sus 4 baterías son herméticas (locales, sin Chrome ni
-      # claves) y corren en CI. Si fallan, el CI falla.
-      - name: Baterías HANDS (herméticas, D-010)
-        run: |
-          python tests/test_hands.py
-          python tests/test_hands_operators.py
-          python tests/test_hands_chaos.py
-          python tests/test_hands_contract.py
-      # La batería standalone tests/run_all.py requiere entorno Windows completo
-      # (Chrome/perfil, claves de proveedores): se ejecuta en la máquina del propietario.
+      # pudrirse: sus 4 baterías son herméticas y corren dentro del paso hermético.
+      # Baterías standalone herméticas (P0-2): ejecutan las suites excluidas de pytest
+      # en procesos aislados (incluidas las 4 de HANDS, seguridad, gobernanza, etc.).
+      # Si cualquiera falla, el job falla (exit != 0).
+      # Exclusiones de Linux CI documentadas:
+      # - test_live_boot.py: requiere levantar uvicorn en background y ejecutar
+      #   scripts bash interactivos contra puertos de red del host.
+      # - test_live_execution*.py (c1, c2, 1, 2): scripts de host ligados a la
+      #   máquina Windows del usuario (D:\PROYECTOS\...) y sesión viva de Google Chrome.
+      - name: Baterías standalone herméticas (P0-2 y D-010 HANDS)
+        run: python tests/run_all.py --hermetic
