@@ -36,7 +36,7 @@
 
 **Importante — no confundir informe de ejecución con publicación:** el informe P3-B declaró commits locales `a552b3d` + `56be4b9` en YT-AUT, rama `p3b-g01-publish-envelope`, y `8859b4b` en AG-G, rama `p3b-skills-host`. La publicación se reportó `BLOCKED BY AUTH`. No declarar estos cambios en GitHub `main` hasta verificar los refs remotos y completar los flujos de publicación respectivos.
 
-El PAT que circuló por el chat fue REVOCADO formalmente y rotado; no se almacena ningún secreto en este repositorio ni en los contextos documentales.
+El PAT que circuló por el chat está PENDIENTE DE CONFIRMACIÓN POR EL DUEÑO de su revocación/rotación (el constructor NO puede verificar GitHub; no afirmar su revocación sin evidencia). No se almacena ningún secreto en este repositorio ni en los contextos documentales.
 
 **STOP:** no iniciar P4 ni implementar PB-03/G-02 sin autorización explícita. No ejecutar producción, publicación real, Flow LIVE ni render como parte de esta actualización documental.
 
