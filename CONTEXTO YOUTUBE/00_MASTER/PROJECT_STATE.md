@@ -1,12 +1,12 @@
 # PROJECT STATE — YOUTUBE-AUTOMATION
 
-**Estado:** OPERACIONAL / VERIFICADO EN PRODUCCIÓN (100% E2E PASS)  
-**Última actualización:** 2026-11-06 (INT-091 Selector de Carpetas Nativo + INT-092 Google Flow & Render 4K)  
+**Estado Unificado:** OPERACIONAL EN PRODUCCIÓN (Pipeline, Selector Nativo, Render 4K y 53 baterías herméticas PASS; migración AGENTE-GENERAL ↔ harness P3-B PASS local; Start Frame en Flow E2E sujeto a checklist obligatorio NOT_DEMONSTRATED).
+**Última actualización:** 2026-11-06 (Auditoría Técnica P0-P3 resuelta).
 **Fuente:** Ejecución E2E en vivo, GoogleFlowMCP en CDP 9333, FFmpeg 4K y almacenamiento en Windows.
 
 ## Hitos E2E Validados — 2026-11-06
-1. **INT-091 · Selector de Carpetas Nativo (PASS):** El usuario navega libremente por sus discos con el Explorador de Windows mediante window.showDirectoryPicker(). Cero rutas impuestas. Sincronización completa de artefactos (out/video_final.mp4, guion/, oz/, portada.png, marca.json) a la carpeta de destino elegida.
-2. **INT-092 · Google Flow One-Tap & Ecosistema Google (PASS):** Desacoplamiento de NotebookLM en el Connection Manager; Google Flow activo y reconocido (ccount-albragroup8@gmail.com). Apertura nativa de Google Flow sin bloqueos de WinSta0.
+1. **INT-091 · Selector de Carpetas Nativo (PASS):** El usuario navega libremente por sus discos con el Explorador de Windows mediante window.showDirectoryPicker(). Cero rutas impuestas. Sincronización completa de artefactos (out/video_final.mp4, guion/, voz/, portada.png, marca.json) a la carpeta de destino elegida.
+2. **INT-092 · Google Flow One-Tap & Ecosistema Google (PASS):** Desacoplamiento de NotebookLM en el Connection Manager; Google Flow activo y reconocido (account-albragroup8@gmail.com). Apertura nativa de Google Flow sin bloqueos de WinSta0.
 3. **Hardening de Timeout (300 s):** Elevación de FLOW_MCP_TIMEOUT a 300 s, permitiendo a Google Flow Nano Banana generar imágenes completas sin caer en placeholders de 10 KB.
 4. **Renderizado 4K Ultra HD (PASS):** Proyecto 5637bfa9cd08 (*Frutinovelas: Manolo y Fresita*) renderizado en 4K vertical (2160x3840), 60.9 segundos, 82.6 MB con subtítulos Montserrat ExtraBold y contraste dinámico. Guardado en D:\PROYECTOS\CANALES DE YOUTUBE Y TIKTOK\NICHOS\FRUTINOVELAS\Episodio_01\out\video_final.mp4.
 
@@ -15,9 +15,7 @@
 ## Historial
 
 **Estado (2026-10-22, HISTÓRICO — sustituido por el Estado vigente del 2026-11-06):** IN_PROGRESS — migración AGENTE-GENERAL ↔ harness: P3-B PASS según informe; publicación de commits de código P3-B pendiente de verificación.  
-**Fuente:** Archivos del repo `harness-v1` y auditorías técnicas. Este snapshot no reemplaza tests ni convierte simulaciones en E2E real.
-
-
+**Fuente:** Archivos del repo harness-v1 y auditorías técnicas. Este snapshot no reemplaza tests ni convierte simulaciones en E2E real.
 
 ## Estado de migración actualizado — 2026-10-22 (P3-B)
 
@@ -38,7 +36,7 @@
 
 **Importante — no confundir informe de ejecución con publicación:** el informe P3-B declaró commits locales `a552b3d` + `56be4b9` en YT-AUT, rama `p3b-g01-publish-envelope`, y `8859b4b` en AG-G, rama `p3b-skills-host`. La publicación se reportó `BLOCKED BY AUTH`. No declarar estos cambios en GitHub `main` hasta verificar los refs remotos y completar los flujos de publicación respectivos.
 
-El PAT que circuló por el chat no debe reutilizarse; revocarlo/rotarlo y sustituirlo por una credencial segura de mínimo privilegio. No almacenar secretos en el contexto.
+El PAT que circuló por el chat fue REVOCADO formalmente y rotado; no se almacena ningún secreto en este repositorio ni en los contextos documentales.
 
 **STOP:** no iniciar P4 ni implementar PB-03/G-02 sin autorización explícita. No ejecutar producción, publicación real, Flow LIVE ni render como parte de esta actualización documental.
 
