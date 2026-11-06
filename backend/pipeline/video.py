@@ -30,8 +30,10 @@ import random
 import subprocess
 from pathlib import Path
 
-from config import (AUDIO_MASTER_BROADCAST, FPS, LONG_H, LONG_W,
-                    MUSIC_VOLUME, OUTPUT_DIR, SHORT_H, SHORT_W)
+from config import (AUDIO_MASTER_BROADCAST, ENABLE_NVENC, FPS,
+                    INTERMEDIATE_CRF, INTERMEDIATE_PRESET, LONG_H, LONG_W,
+                    MUSIC_VOLUME, OUTPUT_DIR, SHORT_H, SHORT_W,
+                    VIDEO_CRF, VIDEO_PRESET)
 from pipeline import subtitles as subs_mod
 from pipeline import typography as typo_mod
 from pipeline.tts_step import GAP as VOICE_GAP  # pausa real de voice_full
@@ -46,6 +48,40 @@ TRANSITION_DUR = 0.5  # segundos de crossfade entre escenas (compensado en el pa
 # integrado -14 LUFS, rango LRA 11, true peak -1.0 dBTP, dual_mono=true para
 # fuentes mono como el TTS). Un único filtro para ambas ramas del mux.
 BROADCAST_LOUDNORM = "loudnorm=I=-14:LRA=11:TP=-1.0:dual_mono=true"
+
+# P2-2: Control de codificación y evaluación de aceleración por hardware (NVENC)
+_NVENC_AVAILABLE = None
+
+def _probe_nvenc() -> bool:
+    """Evalúa si el encoder por hardware NVENC (h264_nvenc) está activo y funcional."""
+    global _NVENC_AVAILABLE
+    if _NVENC_AVAILABLE is not None:
+        return _NVENC_AVAILABLE
+    if not ENABLE_NVENC:
+        _NVENC_AVAILABLE = False
+        return False
+    try:
+        p = subprocess.run(
+            ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=0.1:size=64x64:rate=10",
+             "-c:v", "h264_nvenc", "-f", "null", "-"],
+            capture_output=True, timeout=5
+        )
+        _NVENC_AVAILABLE = (p.returncode == 0)
+    except Exception:
+        _NVENC_AVAILABLE = False
+    return _NVENC_AVAILABLE
+
+
+def get_video_encoder(final: bool = True) -> list[str]:
+    """Devuelve los parámetros ffmpeg de codificación de video.
+    Intermedios (final=False): casi sin pérdida con INTERMEDIATE_CRF (default 10) y preset ultrafast.
+    Final (final=True): codificación única de calidad con VIDEO_PRESET y VIDEO_CRF (o NVENC),
+    añadiendo -movflags +faststart para streaming inmediato (P2-5)."""
+    if not final:
+        return ["-c:v", "libx264", "-preset", INTERMEDIATE_PRESET, "-crf", str(INTERMEDIATE_CRF)]
+    if _probe_nvenc():
+        return ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", str(VIDEO_CRF), "-movflags", "+faststart"]
+    return ["-c:v", "libx264", "-preset", VIDEO_PRESET, "-crf", str(VIDEO_CRF), "-movflags", "+faststart"]
 FACTOR_MAX = 2.5      # cap de slow-mo por segmento (retime setpts)
 CLIP_TOL = 0.25       # tolerancia milimétrica post-render (s) clip vs target
 # INT-077 · tipos de escena UGC (scene['type'] o scene['meta']['type'],
@@ -155,7 +191,7 @@ def scene_clip_cmd(img: Path, duration: float, out: Path, w: int, h: int,
     return ["ffmpeg", "-y", "-loop", "1", "-i", str(img),
             "-frames:v", str(frames_out), "-t", f"{duration:.3f}",
             "-vf", vf, "-r", str(fps), "-an",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", str(out)]
+            *get_video_encoder(final=False), str(out)]
 
 
 def retime_clip_cmd(src: Path, target_dur: float, out: Path, w: int, h: int,
@@ -192,7 +228,7 @@ def retime_clip_cmd(src: Path, target_dur: float, out: Path, w: int, h: int,
     cmd += ["-i", str(src), "-vf", vf, "-an",
             "-frames:v", str(frames_out),
             "-t", f"{target_dur:.3f}", "-r", str(fps),
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", str(out)]
+            *get_video_encoder(final=False), str(out)]
     return cmd
 
 
@@ -412,8 +448,8 @@ async def _concat_xfade(project: dict, clips: list[Path], out: Path,
             f":offset={offset:.3f}{label}")
         prev = label
     cmd = ["ffmpeg", "-y", *inputs, "-filter_complex", ";".join(chains),
-           "-map", prev, "-c:v", "libx264", "-profile:v", "main", "-level", "4.0",
-           "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "18",
+           "-map", prev, "-pix_fmt", "yuv420p",
+           *get_video_encoder(final=False),
            "-r", str(FPS), str(out)]
     p = await asyncio.to_thread(lambda: _run_ffmpeg(cmd, timeout=1800))
     if p.returncode != 0:
@@ -526,16 +562,18 @@ async def burn_subtitles(project: dict, video_raw: Path, words_path: Path) -> Pa
     if typo_mod.FONT_DIR.is_dir():
         sub_filter += (f":fontsdir="
                        f"{typo_mod.FONT_DIR.as_posix().replace(':', '\\\\:')}")
-    # INT-012: en 4K (2160x3840) libass+libx264 «medium» superó los 900 s y el
-    # TimeoutExpired — no capturado — tumbaba TODO el pipeline aunque el resto
-    # del render fuera válido. Dos mitigaciones quirúrgicas: (1) preset
-    # veryfast, el mismo que ya usan kenburns/transitions en este módulo
-    # (típicamente 3-5× más rápido en 4K con coste de calidad marginal a CRF
-    # 20); (2) el timeout se captura y se degrada por el MISMO camino honesto
-    # que un rc != 0 (copia sin subtítulos + subs_status.json → el QA final
-    # la reporta como warn; jamás un ready silencioso con degradación).
+    # INT-012 / P2-2: Una única codificación final de calidad (o intermedia casi sin pérdida
+    # si downstream hay overlays que re-codificarían).
+    badge_cfg = (project.get("meta") or {}).get("ecommerce_badge")
+    will_badge = bool(project.get("mode") == "product" or badge_cfg)
+    meta = project.get("meta") or {}
+    avatar_id = project.get("avatar_id") or meta.get("avatar_id")
+    pip_cfg = meta.get("circle_avatar_pip")
+    will_pip = bool(avatar_id and pip_cfg)
+    is_last_step = not (will_badge or will_pip)
+
     cmd = ["ffmpeg", "-y", "-i", str(video_raw), "-vf", sub_filter,
-           "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+           *get_video_encoder(final=is_last_step),
            "-c:a", "copy", str(final)]
     try:
         p = await asyncio.to_thread(lambda: _run_ffmpeg(cmd, timeout=900))
@@ -572,11 +610,12 @@ async def burn_subtitles(project: dict, video_raw: Path, words_path: Path) -> Pa
 
             overlay_filter = build_ecommerce_ffmpeg_filter(badge_png, start_sec=0.5, duration_sec=6.0, position="top")
             badged_video = proj_dir / f"{project['id']}_badged.mp4"
+            badge_is_last = not will_pip
             badge_cmd = [
                 "ffmpeg", "-y", "-i", str(final), "-i", str(badge_png),
                 "-filter_complex", f"[0:v][1:v]{overlay_filter}[v]",
                 "-map", "[v]", "-map", "0:a?",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                *get_video_encoder(final=badge_is_last),
                 "-c:a", "copy", str(badged_video)
             ]
             pb = await asyncio.to_thread(lambda: _run_ffmpeg(badge_cmd, timeout=300))
@@ -613,7 +652,7 @@ async def burn_subtitles(project: dict, video_raw: Path, words_path: Path) -> Pa
                     "ffmpeg", "-y", "-i", str(final), "-i", str(pip_png),
                     "-filter_complex", f"[0:v][1:v]{pip_filter}[v]",
                     "-map", "[v]", "-map", "0:a?",
-                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                    *get_video_encoder(final=True),
                     "-c:a", "copy", str(pip_video)
                 ]
                 pb_pip = await asyncio.to_thread(lambda: _run_ffmpeg(pip_cmd, timeout=300))
