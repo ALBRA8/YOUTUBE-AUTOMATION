@@ -14,7 +14,7 @@ import time
 import webbrowser
 import subprocess
 
-BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # raiz: el script vive en launchers/
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # raiz: el script vive en launchers/
 BACKEND = os.path.join(BASE, "backend")
 PYW = os.path.join(BACKEND, ".venv", "Scripts", "pythonw.exe")
 LOG = os.path.join(BASE, ".server_log.txt")

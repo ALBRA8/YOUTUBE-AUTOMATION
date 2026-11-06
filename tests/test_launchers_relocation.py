@@ -1,74 +1,89 @@
 # -*- coding: utf-8 -*-
-"""PASO 3 — regresión de la reubicación de lanzadores a launchers/.
+"""P0-1 — regresión dura de la reubicación de lanzadores a launchers/.
 
-Verifica (hermético, sin ejecutar nada):
-  1. Los 7 lanzadores viven en launchers/ y ya NO en la raíz.
-  2. start.sh y start.bat resuelven el backend un nivel arriba.
-  3. INICIAR-ALBRA.vbs toma la raíz como ABUELO y llama a los
-     compañeros dentro de launchers/.
-  4. lanzador_albra.py ancla BASE en la raíz (doble dirname).
-  5. README.md documenta la nueva ubicación.
+Lección de 654d1cb: el test anterior solo buscaba SUBCADENAS y dejó pasar
+un SyntaxError (paréntesis de más) en lanzador_albra.py. Ahora:
+  1. Cada .py de launchers/ se compila de verdad (py_compile + ast.parse).
+  2. BASE de lanzador_albra.py se resuelve EJECUTANDO su propia línea
+     BASE=..., no buscando el texto.
+  3. Los .bat/.sh/.vbs conservan sus anclajes de ruta (subcadena, aquí
+     sí es lo correcto: son texto, no código Python).
+  4. Los 7 lanzadores viven en launchers/ y ya NO en la raíz.
 
 Ejecutar: python3 -m pytest tests/test_launchers_relocation.py -q
 """
+import ast
 import pathlib
+import py_compile
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
+LAUNCH = REPO / "launchers"
 LANZADORES = (
     "INICIAR-ALBRA.vbs", "DETENER-ALBRA.vbs", "DETENER-con-ventana.bat",
     "lanzador_albra.py", "start.bat", "start.sh", "LANZADORES-LEEME.txt",
 )
+PY_LAUNCHERS = ("lanzador_albra.py",)
 
 
 def _leer(nombre):
-    return (REPO / "launchers" / nombre).read_text(encoding="utf-8")
+    return (LAUNCH / nombre).read_text(encoding="utf-8")
 
 
 def test_los_siete_lanzadores_viven_en_launchers():
     for nombre in LANZADORES:
-        assert (REPO / "launchers" / nombre).is_file(), f"falta launchers/{nombre}"
+        assert (LAUNCH / nombre).is_file(), f"falta launchers/{nombre}"
         assert not (REPO / nombre).exists(), (
             f"{nombre} sigue en la raíz; debe vivir solo en launchers/"
         )
 
 
+def test_todos_los_python_de_launchers_compilan():
+    """P0-1: py_compile REAL — un SyntaxError aquí hace fallar el test."""
+    for nombre in PY_LAUNCHERS:
+        ruta = LAUNCH / nombre
+        py_compile.compile(str(ruta), doraise=True)  # levanta en error
+        ast.parse(ruta.read_text(encoding="utf-8"), filename=str(ruta))
+
+
+def test_base_de_lanzador_resuelve_la_raiz_de_verdad():
+    """Resuelve BASE ejecutando la asignación real del archivo (no subcadena)."""
+    arbol = ast.parse(_leer("lanzador_albra.py"), filename="lanzador_albra.py")
+    asignaciones = [
+        n for n in arbol.body
+        if isinstance(n, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "BASE" for t in n.targets
+        )
+    ]
+    assert len(asignaciones) == 1, "BASE debe asignarse exactamente una vez"
+    entorno = {"os": __import__("os"), "__file__": str(LAUNCH / "lanzador_albra.py")}
+    base = eval(  # noqa: S307 — código propio del repo, entorno controlado
+        ast.unparse(asignaciones[0].value), {"__builtins__": {}}, entorno
+    )
+    assert pathlib.Path(base).resolve() == REPO, (
+        f"BASE={base!r} debe ser la raíz del repo (abuelo de launchers/)"
+    )
+
+
 def test_start_sh_resuelve_backend_un_nivel_arriba():
     sh = _leer("start.sh")
-    assert 'cd "$(dirname "$0")/../backend"' in sh, (
-        "start.sh debe hacer cd al backend del PADRE de launchers/"
-    )
-    # y la ruta resuelta existe de verdad
-    destino = (REPO / "launchers").resolve().parent / "backend"
+    assert 'cd "$(dirname "$0")/../backend"' in sh
+    destino = LAUNCH.resolve().parent / "backend"
     assert (destino / "main.py").is_file()
 
 
 def test_start_bat_resuelve_backend_un_nivel_arriba():
     bat = _leer("start.bat")
-    assert 'cd /d "%~dp0..\\backend"' in bat, (
-        'start.bat debe hacer cd /d "%~dp0..\\backend" (padre de launchers/)'
-    )
+    assert 'cd /d "%~dp0..\\backend"' in bat
 
 
 def test_iniciar_albra_vbs_toma_raiz_como_abuelo():
     vbs = _leer("INICIAR-ALBRA.vbs")
-    # doble GetParentFolderName: launchers/ -> raíz
     doble = "GetParentFolderName(fso.GetParentFolderName(WScript.ScriptFullName))"
-    assert doble in vbs, "el .vbs debe subir DOS niveles (launchers -> raíz)"
+    assert doble in vbs
     assert "launchers\\lanzador_albra.py" in vbs
     assert "launchers\\start.bat" in vbs
     assert 'carpeta & "\\backend\\.venv\\Scripts\\python.exe"' in vbs
-
-
-def test_lanzador_albra_py_ancla_base_en_raiz():
-    py = _leer("lanzador_albra.py")
-    assert "os.path.dirname(os.path.dirname(os.path.abspath(__file__)))" in py, (
-        "BASE debe ser el abuelo del script (el script vive en launchers/)"
-    )
-    assert 'os.path.join(BASE, "launchers", "start.bat")' in py
-    # comprobación viva del ancla: doble dirname == raíz del repo
-    base = (REPO / "launchers" / "lanzador_albra.py").resolve().parent.parent
-    assert base == REPO
 
 
 def test_readme_documenta_launchers():
@@ -81,6 +96,7 @@ def test_readme_documenta_launchers():
 def test_leeme_lanzadores_declara_ubicacion():
     leeme = _leer("LANZADORES-LEEME.txt")
     assert "launchers/" in leeme
+
 
 if __name__ == "__main__":
     sys.exit(__import__("pytest").main([__file__, "-q"]))
