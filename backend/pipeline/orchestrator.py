@@ -459,7 +459,10 @@ def _gate_imagenes_reales(project_id: str, scenes: list[dict]) -> None:
         sf = Path(str(p)).with_suffix(".style.json")
         try:
             metodo = (json.loads(sf.read_text(encoding="utf-8")) or {}).get("method") or "?"
-        except Exception:  # noqa: BLE001 — sin style.json no se puede saber
+        except Exception as _ex:  # P2-2: un style.json corrupto OCULTA un
+            # placeholder del gate — visible siempre
+            log.warning("style.json ilegible (%s): método desconocido para %s",
+                        _ex, sf)
             metodo = "?"
         metodos.append(metodo)
     if not metodos:
@@ -718,7 +721,9 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
             sf = Path(str(p_img)).with_suffix(".style.json") if p_img else None
             try:
                 cur_methods.append((json.loads(sf.read_text(encoding="utf-8")) or {}).get("method") if sf and sf.is_file() else "?")
-            except Exception:
+            except Exception as _ex:  # P2-2: visible, no silenciar
+                log.warning("style.json ilegible (%s) en reintento P2-1: %s",
+                            _ex, sf)
                 cur_methods.append("?")
         cur_ph = sum(1 for m in cur_methods if m == "placeholder")
         if cur_ph > max_ph_allowed:

@@ -399,8 +399,9 @@ async def render_scenes(project: dict, scenes: list[dict], durations: list[float
             out.with_suffix(".json").write_text(json.dumps(
                 {"src": str(src), "dur": round(target, 3),
                  "measured": round(measured, 3), "fitted": bool(fitted)}))
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _ex:  # P2-2: sin log, el caché de idempotencia
+            log.warning("sidecar de retime no escrito (%s): se perderá la "
+                        "reutilización idempotente de %s", _ex, out.name)
         if on_progress:
             await on_progress(i + 1, n_scenes, None)
         return out
