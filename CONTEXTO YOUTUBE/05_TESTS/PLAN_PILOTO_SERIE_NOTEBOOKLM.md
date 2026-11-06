@@ -116,3 +116,10 @@ Crear un paquete de referencia versionado con:
 - docs/PRODUCTION_DOCTOR.md — audit/fix/verify/preflight.
 - CONTEXTO YOUTUBE/05_TESTS/ANTIGRAVITY_VALIDACION_PRODUCCION.md — ejecución real de NotebookLM, Flow y pipeline.
 - CONTEXTO YOUTUBE/06_INTEGRATIONS/INT-069_NOTEBOOKLM_STUDIO_BRIDGE_AND_SESSION_HARDENING.md y INT-069B_ALINEACION_TOOLS_NOTEBOOKLM_V085.md — puente Studio y alineación NotebookLM v0.8.5.
+
+
+## Documentación funcional complementaria (2026-11-06)
+
+Antes de ejecutar el piloto, aplicar también la especificación `CONTEXTO YOUTUBE/05_TESTS/ESPECIFICACION_AUTOMATIZACION_MINIDRAMAS_NOTEBOOKLM_FLOW.md`. Ese documento convierte el video tutorial, el Master Prompt y el catálogo de herramientas en requisitos comprobables: ingesta y trazabilidad de fuentes, aprobación obligatoria de uno de cinco títulos, biblia de personajes, 5 episodios × 6 clips, contrato de prompts, gates de Flow, render, QA, continuidad y publicación separada.
+
+**Regla de precedencia:** este plan sigue siendo el procedimiento de prueba operativa; la especificación complementaria define los requisitos editoriales/funcionales. Si una etapa no tiene evidencia real, se conserva como pendiente y no se marca PASS. No se deben duplicar motores ni puentes existentes: mapear el paquete editorial al Production JSON y al Flow Bridge ya implementados.
