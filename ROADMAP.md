@@ -14,6 +14,11 @@
 ## EN RESERVA (no tocar)
 - HANDS (control manual del PC): dormido.
 ## HECHO
+- Re-verificación independiente de la auditoría de 12 puntos (P0-1 a P2-5):
+  11 confirmados con evidencia; P2-3 tenía duplicados reales de operation id
+  y test en falso → corregidos (OpenAPI a 0 warnings, 1a72157). Suites
+  completas verdes: pytest 534/0 (0 warnings) y run_all 2627 OK · 0 fallos en
+  53/53 baterías (2026-11-06).
 - INT-091 selector de carpetas; INT-092 timeout Flow 300 s y render 4K (2026-11-06).
 - Memoria del repo: LEEME_PRIMERO.md + ROADMAP.md; lanzadores → launchers/
   (rutas verificadas por test de COMPILACIÓN ast/py_compile + compileall

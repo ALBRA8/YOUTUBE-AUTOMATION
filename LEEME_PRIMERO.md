@@ -40,3 +40,11 @@ abajo en "Última sesión".
   en flow_render, trinquete de except Exception (283), humo de render,
   OpenAPI limpio y protocolo Fase 3 preparado (sin ejecutar) — detalle:
   CONTEXTO YOUTUBE/08_SESSIONS/SES-2026-11-06-03_VERIFICACION_P0_P3.md.
+- 2026-11-06 · LLM Z.ai/GLM · re-verificación independiente de los 12 puntos:
+  P2-3 tenía duplicados REALES (dashboard_index y mcp_proxy_sin_barra x2 por
+  método en api_route multi-método) y su test pasaba en falso (buscaba
+  'operation_id' con guion bajo); corregido id por método + test por conteo
+  real del esquema. Evidencia: pytest 534/0 (0:03:06, 0 warnings) y run_all
+  2627 OK · 0 fallos en 53/53 baterías (incl. 20/24/51, colgadas solo por el
+  patrón de sesión del sandbox, no por código) — detalle: CONTEXTO YOUTUBE/
+  08_SESSIONS/SES-2026-11-06-04_REVERIFICACION_INDEPENDIENTE.md.
