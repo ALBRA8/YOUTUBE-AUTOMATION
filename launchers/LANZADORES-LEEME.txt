@@ -1,6 +1,10 @@
 LANZADORES ALBRA — DOBLE CLICK, CERO TERMINALES
 ================================================
 
+UBICACION: todos los lanzadores viven en la carpeta launchers/ del
+proyecto (desde 2026-11-06). Doble click sobre launchers\INICIAR-ALBRA.vbs
+y listo; los scripts resuelven solos la raiz del proyecto.
+
 COMO FUNCIONA AHORA (modo silencioso)
 -------------------------------------
 SOLO NECESITAS 2 ARCHIVOS:

@@ -14,7 +14,7 @@ import time
 import webbrowser
 import subprocess
 
-BASE = os.path.dirname(os.path.abspath(__file__))          # raiz del proyecto
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # raiz: el script vive en launchers/
 BACKEND = os.path.join(BASE, "backend")
 PYW = os.path.join(BACKEND, ".venv", "Scripts", "pythonw.exe")
 LOG = os.path.join(BASE, ".server_log.txt")
@@ -121,7 +121,7 @@ def launch():
     #     (start.bat verifica 14 modulos, reinstala con barras y deja el server)
     if not deps_ok():
         subprocess.Popen(
-            ["cmd", "/c", os.path.join(BASE, "start.bat")],
+            ["cmd", "/c", os.path.join(BASE, "launchers", "start.bat")],
             creationflags=0x00000010,  # CREATE_NEW_CONSOLE: ventana visible
         )
         return 0

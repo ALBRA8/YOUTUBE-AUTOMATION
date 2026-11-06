@@ -20,7 +20,7 @@ Restaurar a mano (disaster recovery, otro PC):
      (borra también yt_automation.db-wal y .shm si existen)
   2. Copia token.json.bak → backend/data/token.json (si había canal)
   3. Copia env.bak → backend/.env
-  4. Arranca con start.sh / start.bat — proyectos y videos JSON intactos.
+  4. Arranca con launchers/start.sh / launchers/start.bat — proyectos y videos JSON intactos.
      (los MP4 en data/output/ NO se respaldan: regenerables o respaldo
      externo a criterio del operador)
 """

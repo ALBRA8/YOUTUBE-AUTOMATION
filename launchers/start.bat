@@ -47,7 +47,7 @@ shift
 goto parse_args
 :args_done
 
-cd /d "%~dp0backend"
+cd /d "%~dp0..\backend"
 
 REM CR para refrescar lineas del spinner (receta copy /Z)
 for /f %%a in ('copy /Z "%SELF%" nul') do set "CR=%%a"

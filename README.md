@@ -27,9 +27,9 @@ Pipeline completo: **guion (Gemini 2.5) → imágenes (Gemini 2.5 Flash Image) �
 
 ### 2. Arrancar
 ```bash
-# Windows: doble clic en start.bat
+# Windows: doble clic en launchers/start.bat (o launchers/INICIAR-ALBRA.vbs, silencioso)
 # Linux/Mac:
-chmod +x start.sh && ./start.sh
+chmod +x launchers/start.sh && ./launchers/start.sh
 ```
 O manual:
 ```bash
@@ -186,7 +186,8 @@ yt_automation_v2/
 │   ├── static/               # dashboard v2 (HTML/CSS/JS sin build)
 │   └── data/                 # DB, videos, audios, thumbs (gitignored)
 ├── extension/                # Chrome MV3: puente ImageFX
-├── start.sh / start.bat
+├── launchers/                # arranque: INICIAR/DETENER-ALBRA.vbs,
+│                             #   start.bat / start.sh, LANZADORES-LEEME.txt
 └── README.md
 ```
 

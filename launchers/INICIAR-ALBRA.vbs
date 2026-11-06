@@ -8,14 +8,18 @@ Option Explicit
 Dim fso, sh, carpeta, py
 Set fso = CreateObject("Scripting.FileSystemObject")
 Set sh = CreateObject("WScript.Shell")
-carpeta = fso.GetParentFolderName(WScript.ScriptFullName)
+' El lanzador vive en launchers\: la raiz del proyecto es el ABUELO
+' de este script (launchers -> raiz).
+Dim raiz
+raiz = fso.GetParentFolderName(fso.GetParentFolderName(WScript.ScriptFullName))
+carpeta = raiz
 sh.CurrentDirectory = carpeta
 py = carpeta & "\backend\.venv\Scripts\python.exe"
 
 If fso.FileExists(py) Then
     ' Ruta silenciosa: ventana oculta (0), sin esperar (False)
-    sh.Run """" & py & """ lanzador_albra.py", 0, False
+    sh.Run """" & py & """ launchers\lanzador_albra.py", 0, False
 Else
     ' Primera vez: asistente visible (crea venv + dependencias + arranca)
-    sh.Run "cmd /c """ & carpeta & "\start.bat""", 1, False
+    sh.Run "cmd /c """ & carpeta & "\launchers\start.bat""", 1, False
 End If
