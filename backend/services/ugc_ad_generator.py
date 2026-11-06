@@ -15,7 +15,9 @@ from __future__ import annotations
 import logging
 import re
 from typing import Any
-import urllib.request
+import urllib.request  # solo para construir Request; la descarga va por security
+
+import security
 
 log = logging.getLogger("ugc_ad_generator")
 
@@ -76,11 +78,13 @@ def scrape_product_info(url_or_text: str) -> dict[str, Any]:
         "Accept-Language": "es-ES,es;q=0.9,en;q=0.8"
     }
 
-    req = urllib.request.Request(input_str, headers=headers)
     html_content = ""
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            html_content = resp.read().decode("utf-8", errors="ignore")
+        # P0-2: validar_url + safe_fetch_bytes (anti-SSRF: file://, loopback,
+        # 169.254.x, IPs privadas y redirects revalidados; tope 5 MB)
+        raw = security.safe_fetch_bytes(
+            input_str, timeout=15, headers=headers, max_bytes=5 * 1024 * 1024)
+        html_content = raw.decode("utf-8", errors="ignore")
     except Exception as ex:
         log.warning("[ugc_ad_generator] Falló scraping HTTP de %s: %s", input_str, ex)
         # Fallback extrayendo palabras del slug de la URL

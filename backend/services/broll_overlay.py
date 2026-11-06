@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+
+import security  # P0-2: validar el link antes de descargarlo
 import os
 import re
 import shutil
@@ -162,6 +164,10 @@ async def fetch_stock_video_pexels(query: str, dest_path: Path, orientation: str
 
             if not best_link:
                 return False
+
+            # P0-2: el link viene del JSON de respuesta de Pexels (no es
+            # constante) → misma guardia anti-SSRF que el resto del repo.
+            best_link = security.validar_url(str(best_link))
 
             # Descargar archivo MP4
             dl_resp = await client.get(best_link)

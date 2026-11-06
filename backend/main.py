@@ -798,11 +798,11 @@ async def avatars_image(aid: str):
             import urllib.parse
             encoded = urllib.parse.quote(prompt[:300])
             url = f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true"
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                if resp.status == 200:
-                    out.write_bytes(resp.read())
-                    method = "pollinations_ai"
+            # P0-2: descarga también por la guardia central (host fijo
+            # image.pollinations.ai, tope 15 MB)
+            out.write_bytes(security.safe_fetch_bytes(
+                url, timeout=30, max_bytes=15 * 1024 * 1024))
+            method = "pollinations_ai"
         except Exception as e2:  # noqa: BLE001
             log.warning("Retrato Pollinations falló: %s", str(e2)[:120])
     if method == "placeholder":
@@ -3250,13 +3250,13 @@ async def product_studio_preview(body: dict):
     out_dir = STATIC_DIR / "studio_previews"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    import urllib.request
     import time
     timestamp = int(time.time())
     raw_img = out_dir / f"raw_{timestamp}.png"
-    req = urllib.request.Request(image_url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        raw_img.write_bytes(resp.read())
+    # P0-2: urlopen seguía redirects sin revalidar (el validar_url de arriba
+    # solo cubría la URL original) → safe_fetch_bytes revalida cada salto.
+    raw_img.write_bytes(security.safe_fetch_bytes(
+        image_url, timeout=15, max_bytes=15 * 1024 * 1024))
 
     cutout = out_dir / f"cutout_{timestamp}.png"
     ecommerce_overlays.remove_product_background(raw_img, cutout)
