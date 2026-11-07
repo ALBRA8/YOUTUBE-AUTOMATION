@@ -5,6 +5,12 @@
   intervención manual.
 - Start Frame de Flow (sujeto a captura real de red según checklist en PROJECT_STATE).
 ## SIGUIENTE
+- Panel MCP (U1-U7): verificación VISUAL en navegador real por el dueño
+  (semáforos, Avanzado, selector nicho/cuaderno, gate del Run) — en el
+  sandbox no hay Chrome de escritorio: NOT_DEMONSTRATED. Decisión sobre
+  el default de contexto del NotebookLM (chat_ask → notebook_query) y
+  migración de las tools legacy de nlm_studio al catálogo real de
+  notebooklm-mcp-server v0.1.15 (ver INT-093).
 - Minidramas NotebookLM+Flow: registro y validador endurecidos (R1-R6 +
   cierre Q1-Q6, ver HECHO). Pendiente del dueño: correr la sonda INT-093
   en su máquina (q1-q7 hoy NOT_DEMONSTRATED), activar
@@ -21,6 +27,26 @@
 ## EN RESERVA (no tocar)
 - HANDS (control manual del PC): dormido.
 ## HECHO
+- Panel MCP honesto (U1-U7, 2026-11-07): U1 agregador SOLO LECTURA
+  GET /api/mcp/resumen (semáforo por pieza chrome CDP/flow/notebooklm/
+  cuaderno + listo_para_pipeline + siguiente_paso en español; todo_
+  conectado SOLO con las 4 piezas ok, 7922428); U2 tarjeta única
+  «Ecosistema Google» con 3 filas de semáforo REAL de U1, badge verde
+  solo si todo_conectado y «Conectar todo» → connect-all-google con
+  aviso de login en la ventana (4b5787b); U3 bloque plegado «Avanzado»
+  (tarjetas por servicio, Test Pipeline, reparar, consola) con volcado
+  de stderr SOLO ahí y aviso humano de FastMCP («no afecta»)
+  (ca1594f); U4 selector nicho+cuaderno en la tarjeta principal,
+  auto-relleno al conectar y memoria POR NICHO en el registro Q4,
+  vacíos que dicen qué hacer (d2bb932); U5 Run Full Pipeline
+  deshabilitado con motivo exacto mientras listo_para_pipeline=false
+  y guardia ANTES del POST (97ba839); U6 paquete real notebooklm-mcp-
+  server v0.1.15 vs server_info 2.14.5=FastMCP corregido en panel/
+  docstring/INT-093 + trinquete de catálogo (683d766). Baterías nuevas
+  (57 en run_all): test_u1_mcp_resumen (14) + test_u_panel_ecosistema
+  (12) + test_u6_catalogo_contrato (7). Lo visual en navegador real:
+  NOT_DEMONSTRATED (sandbox sin Chrome de escritorio) — pendiente del
+  dueño. La lógica de conexión (mcp_manager/GoogleFlowMCP) intacta.
 - Cierre Q1-Q6 del registro/sonda/validador (2026-11-07): Q1 punto de
   paso común en database.create_project — TODO proyecto de las 13 vías
   reales (API, A2A, clipper, 3 tools MCP, agente general, scheduler,
