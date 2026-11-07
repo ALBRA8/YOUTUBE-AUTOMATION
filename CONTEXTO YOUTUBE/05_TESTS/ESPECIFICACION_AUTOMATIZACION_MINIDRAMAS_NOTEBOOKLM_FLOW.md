@@ -39,6 +39,14 @@ El archivo `Compt-ytube-MASTERPROMPT-MINIDRAMA.docx` define:
 
 Estas reglas se consideran requisitos de producto, no sugerencias de estilo.
 
+**Estado de las fuentes originales (brecha de trazabilidad):** ni el
+`.docx` del Master Prompt ni el catálogo `herramientas-ia-v5-julio-2026.pdf`
+están hoy en el repositorio. La sección 1.2 es una transcripción de sus
+reglas funcionales, no el documento original. Acción pendiente del dueño:
+subir los originales a `CONTEXTO YOUTUBE/00_MASTER/fuentes/` o declarar
+por escrito que esta transcripción es la versión canónica. No se inventa
+ni se reconstruye contenido que no esté transcrito aquí.
+
 ### 1.3 Catálogo de herramientas adjunto
 
 El PDF `herramientas-ia-v5-julio-2026.pdf` identifica, entre otras, estas herramientas:
@@ -198,11 +206,38 @@ Cada clip debe tener una ficha estructurada, como mínimo:
 1. El prompt que se envía a Flow debe conservarse íntegro y trazable.
 2. Un párrafo continuo por clip, según el Master Prompt.
 3. Nombres en MAYÚSCULAS.
-4. Diálogo en español, máximo 12 palabras por clip. El validador debe contar palabras de forma determinista y mostrar el texto que excede el límite.
+4. Diálogo en español, máximo 12 palabras habladas por clip. El validador debe contar palabras de forma determinista y mostrar el texto que excede el límite.
 5. El estado final a 9.9 s debe estar dentro del párrafo.
+
+   **Definición determinista de «contar palabras» (contrato del validador):**
+   - Solo se cuentan como palabras habladas los fragmentos atribuidos a un
+     personaje entre comillas (`"..."` o «...»); la descripción visual y la
+     acción del párrafo NO cuentan.
+   - Token = secuencia de caracteres alfanuméricos (incluye acentos y ñ)
+     delimitada por espacios o signos de puntuación.
+   - Los números en cifra cuentan como una palabra cada uno (`2026` = 1);
+     los escritos en letras cuentan por sus tokens (`dos mil veintiséis` = 3).
+   - Guiones: un compuesto con guion medio (`algo-bueno`) cuenta 2 palabras;
+     el guion de diálogo de apertura (`—Hola`) no añade tokens propios.
+   - Interjecciones y muletillas (`eh`, `ah`) cuentan como cualquier palabra.
+   - Límite honesto: validar que el texto esté en español es HEURÍSTICO
+     (diccionario/frecuencias), no una prueba formal de idioma; el QA
+     humano sigue siendo la barrera final de idioma y acento.
 6. Duración objetivo exacta de 10 s; si la interfaz/proveedor no puede garantizarla, registrar duración solicitada y observada por separado. No declarar cumplimiento solo porque el prompt diga “10 seconds”.
 7. Incluir referencia real de personaje/imagen cuando la interfaz lo permita; si no se puede adjuntar, detener o marcar como excepción aprobada, nunca fingir consistencia.
 8. No incluir instrucciones incompatibles, múltiples acciones simultáneas imposibles o diálogos que excedan el tiempo de habla.
+
+**Dependencia declarada — Start Frame (GAP-002):** la regla «estado final a
+9.9 s que enlaza con el siguiente clip» asume poder fijar el ÚLTIMO frame
+de un clip como frame inicial del siguiente (Start Frame de Flow; GAP-002
+en PROJECT_STATE — NOT_DEMONSTRATED en Flow real). Mientras Start Frame no
+esté demostrado, el enlace continuo entre clips NO puede garantizarse por
+técnica y no debe fingirse. **Plan B sin Start Frame:** (a) referencias de
+personaje adjuntas en cada clip (Flow Characters) para consistencia de
+identidad; (b) cortes deliberados entre clips, aceptados como lenguaje de
+montaje, sin pretender transición continua. El QA debe etiquetar cada
+enlace clip→clip como `CONTINUO` (Start Frame real evidenciado) o `CORTE`
+(plan B), jamás como continuo sin evidencia.
 
 **Gate E:** validación automática de 30 clips por temporada (5×6), 10 s objetivo, diálogo, campos requeridos, referencias y continuidad. Los clips no válidos no se encolan.
 
@@ -220,9 +255,43 @@ Orden obligatorio y trazable:
 9. Reintentar solo según política limitada; cada intento debe tener ID propio. No confundir un tile/error temporal de la UI con el resultado final del job.
 10. Si hay rechazo, cambio de UI, falta de capacidad o estado no verificable, detener ese job y conservar evidencia. No inventar un PASS.
 
+**Sonda obligatoria de capacidades (pre-vuelo):** antes de encolar clips,
+la sesión de Flow debe dejar REGISTRADO qué duraciones (p. ej. 8 s frente
+a 10 s), relaciones de aspecto y pistas de audio soporta realmente el
+modelo/configuración activos — capturado de la UI/contrato observado, no
+de memoria. El contrato actual de jobs valida duración observada contra
+la pedida y mata el job si no cuadra (`backend/services/flow_jobs.py`,
+CONTRACT_VIOLATION; su documentación ejemplifica hoy con una spec de 8 s).
+El Master Prompt exige 6 × 10 s; si la sonda demuestra que 10 s exactos no
+existe en la sesión, **decisión PENDIENTE DEL DUEÑO** entre planes B:
+(i) clips de 8 s manteniendo 6 clips (48 s por episodio: rompe los 60 s
+objetivo, hay que aceptarlo o compensarlo); (ii) otra cadencia (p. ej. 7–8
+clips) que preserve los ~60 s; (iii) unir clips hasta 10 s en montaje, con
+validación de costura. Ninguna opción se implementa por defecto ni se
+declara equivalente al objetivo sin aprobación explícita.
+
 **Gate F:** no pasar al render hasta que todos los clips requeridos tengan assets válidos o una excepción aprobada. La extensión/bridge y el backend deben confirmar el job; un mock, DOM simulado, fixture o test hermético no cuenta como generación real.
 
 ### Fase G — Voz, sonido, montaje y render
+
+**Decisión abierta — fuente del diálogo (PENDIENTE DEL DUEÑO):** el Master
+Prompt mete el diálogo DENTRO del prompt del clip (lo habla Flow con su
+audio nativo), mientras que esta fase contempla TTS por personaje. Opciones
+documentadas para decisión humana; NINGUNA se implementa por defecto:
+- **A) Diálogo nativo del clip (lo habla Flow).** Pros: lipsync generado
+  por el propio modelo; una sola generación por clip; máxima coherencia
+  audio-video. Contras: voz poco controlable por personaje; regrabar una
+  línea obliga a regenerar el clip; el límite de 12 palabras sigue siendo
+  crítico; calidad de español/acento dependiente del modelo.
+- **B) Clip mudo + TTS/lipsync posterior.** Pros: control total de voz,
+  pronunciación y casting vocal por personaje; una línea se re-graba sin
+  tocar el clip; proveedor TTS configurable. Contras: dos cadenas que
+  sincronizar; riesgo de lipsync falso o desalineado; QA y coste mayores.
+- **C) Híbrido.** Pros: diálogo crítico/emocional nativo y narración o
+  líneas secundarias por TTS; equilibrio de coste y control. Contras:
+  mezcla de dos fuentes de voz en el mismo episodio; homogeneidad más
+  difícil de QA; la política de cuándo usar cada vía debe escribirse
+  antes del piloto.
 
 - Proveedor TTS configurable (Google AI Studio o ElevenLabs, según disponibilidad/decisión); no codificar precios ni cuotas del PDF como valores permanentes.
 - Voz consistente por personaje, pronunciación y español definido para la audiencia.
@@ -259,6 +328,19 @@ La publicación no forma parte del piloto automático por defecto. Requiere:
 
 Autopublicación desactivada durante las pruebas. Nunca convertir el éxito de render en consentimiento para publicar.
 
+**Puerta de políticas de YouTube (obligatoria antes de publicar):**
+- Etiquetado de contenido sintético/modificado por IA en los metadatos de
+  la plataforma, cuando aplique al material generado de la serie.
+- Reglas sobre contenido repetitivo o producido en masa: cada episodio
+  debe aportar valor original diferenciable; no publicar variantes casi
+  idénticas entre sí.
+- El chequeo de políticas es un PASO ACTIVO del flujo: **verificar la
+  política vigente en la fecha de publicación** contra la fuente oficial
+  del momento — las reglas cambian y NO se codifican aquí de memoria. Si la
+  verificación no puede ejecutarse ese día, el estado de publicación no
+  avanza.
+- Sin esta puerta completada, `APPROVED_FOR_PUBLISH` no es alcanzable.
+
 ---
 
 ## 4. Contrato de datos recomendado
@@ -272,10 +354,22 @@ Campos de control adicionales recomendados:
 - Evidencia: `source_refs`, `flow_job_id`, `attempt_id`, `asset_sha256`, `asset_path`, `observed_settings`.
 - Estado: `editorial_state`, `generation_state`, `qa_state`, `creative_review_state`, `publish_state`.
 
-Estados sugeridos por etapa:
-`DRAFT → NEEDS_APPROVAL → APPROVED → READY → QUEUED → GENERATING → ASSET_VALIDATED → RENDERED → QA_PASSED → CREATIVE_REVIEW → APPROVED_FOR_PUBLISH → PUBLISHED`.
+Estados sugeridos, separados en DOS máquinas de estado con niveles distintos:
 
-Los estados de error/indeterminación deben ser terminales o requerir una transición explícita de recuperación; nunca mapear `UNKNOWN`, `UNVERIFIABLE` o timeout a éxito.
+**Nivel CLIP (por cada clip):**
+`DRAFT → NEEDS_APPROVAL → APPROVED → READY → QUEUED → GENERATING → ASSET_VALIDATED → RENDERED → QA_PASSED`.
+Terminales de error/indeterminación del clip: `FAILED` (fallo técnico con evidencia), `BLOCKED` (no puede avanzar: falta capacidad, rechazo de política, sesión no válida) y `UNVERIFIABLE` (el resultado no pudo probarse: timeout, UI cambiada, evidencia ausente).
+
+**Nivel EPISODIO (agregado, derivado SOLO del estado de sus clips):**
+`DRAFT → NEEDS_APPROVAL → APPROVED → IN_PRODUCTION → CLIPS_COMPLETE → RENDERED → QA_PASSED → CREATIVE_REVIEW → APPROVED_FOR_PUBLISH → PUBLISHED`.
+Terminales de error/indeterminación del episodio: `FAILED`, `BLOCKED`, `UNVERIFIABLE` (mismas definiciones).
+
+Reglas de agregación: un episodio solo pasa a `CLIPS_COMPLETE` si TODOS sus
+clips están en `QA_PASSED` (o con excepción aprobada y persistida); cualquier
+clip en `FAILED`, `BLOCKED` o `UNVERIFIABLE` mantiene al episodio fuera del
+éxito y visible en el manifiesto. Los estados de error/indeterminación son
+terminales o requieren una transición explícita de recuperación con
+evidencia; nunca se mapean `UNKNOWN`, `UNVERIFIABLE` o timeout a éxito.
 
 ---
 
