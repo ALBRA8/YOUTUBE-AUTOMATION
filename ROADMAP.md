@@ -5,6 +5,11 @@
   intervención manual.
 - Start Frame de Flow (sujeto a captura real de red según checklist en PROJECT_STATE).
 ## SIGUIENTE
+- Minidramas NotebookLM+Flow: piloto mínimo de UN episodio corto —
+  ejecutar Gate 0/Gate 3 con Flow real (máquina del dueño; checklist y
+  observador listos) y resolver las decisiones marcadas PENDIENTE DEL
+  DUEÑO en la spec (fuente del diálogo A/B/C; duraciones reales de Flow
+  vía sonda). El validador Fase E ya está implementado y probado.
 - Google Flow Multi-Cuenta: balanceador de cuentas en mcp_manager para rotación
   automática de créditos Veo (inspirado en análisis Sloth v0.3.48).
 - Hoja de contacto visual (hoja de escenas con safe zones) para QA instantáneo.
@@ -14,6 +19,16 @@
 ## EN RESERVA (no tocar)
 - HANDS (control manual del PC): dormido.
 ## HECHO
+- Validador editorial Fase E de minidramas (Python puro, sin red/Flow):
+  campos del Production JSON, párrafo único, MAYÚSCULAS, conteo
+  determinista de palabras habladas con texto excedente, duración
+  configurable — 33 tests herméticos (800a80e). Observador solo-lectura
+  del piloto mínimo Gate 0/Gate 3 con veredicto PASS/FAIL/
+  NOT_DEMONSTRATED — 12 tests herméticos (ae99dbe). Siete enmiendas a la
+  spec minidramas (diálogo A/B/C, sonda Flow, Start Frame GAP-002,
+  máquinas de estado clip/episodio, conteo de palabras, políticas
+  YouTube, fuentes originales) y regresión de higiene (prefijo de PAT
+  redactado de SES-05, 4df9036) (2026-11-07).
 - Hermeticidad total (H1-H3): guardia de red en pytest (conftest) y en
   baterías run_all (sitecustomize); test de producto con doble de prueba y
   broll sin DNS real; higiene de secretos (prefijo PAT redactado + guardia

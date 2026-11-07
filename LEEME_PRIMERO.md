@@ -54,3 +54,11 @@ abajo en "Última sesión".
   sitecustomize (internet DISPONIBLE y bloqueado, verificado con curl).
   H2: prefijo de PAT redactado de las notas + guardia test_h2; push por el
   dueño — detalle: CONTEXTO YOUTUBE/08_SESSIONS/SES-2026-11-06-05_HERMETICIDAD.md.
+- 2026-11-07 · LLM Z.ai/GLM · SES-05 había vuelto a copiar el prefijo del
+  PAT → redactado (regresión de higiene 2/2). 7 enmiendas a la spec
+  minidramas (diálogo A/B/C, sonda Flow, Start Frame, estados
+  clip/episodio con FAILED/BLOCKED/UNVERIFIABLE, conteo de palabras,
+  políticas YouTube, fuentes). Validador Fase E (Python puro, 33 tests) y
+  observador del piloto mínimo Gate 0/Gate 3 (12 tests) — todo lo que
+  exige Flow real queda NOT_DEMONSTRATED; minidramas en SIGUIENTE —
+  detalle: CONTEXTO YOUTUBE/08_SESSIONS/SES-2026-11-06-06_VALIDADOR_FASE_E_PILOTO_MINIMO.md.
