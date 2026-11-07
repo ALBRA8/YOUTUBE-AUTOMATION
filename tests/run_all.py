@@ -206,6 +206,18 @@ BATERIAS = [
                                  # {mediaIdPresent, fingerprint}, ids por
                                  # huella, cropCoordinates, startImage hist.,
                                  # VAL malformado diagnóstico, T1..T10 (67)
+    # ── MINIDRAMAS (PASO 0.2) — tests pytest-nativos registrados como
+    # baterías: su __main__ imprime el resumen "N OK · M fallos" que este
+    # runner parsea (plugin de conteo). Herméticas (sin DNS ni internet).
+    "test_minidrama_clip_validator.py",  # Validador editorial Fase E (43):
+                                 # dialogue estructurado {personaje,texto}
+                                 # como fuente de verdad, heurística rayas/
+                                 # verbo de habla, aviso DIALOGO_SIN_COMILLAS,
+                                 # párrafo único, MAYÚSCULAS, duración
+    "test_observador_piloto.py", # Observador del piloto mínimo Gate 0/3 (12):
+                                 # veredicto PASS/FAIL/NOT_DEMONSTRATED
+                                 # honesto, MP4 con ffprobe local,
+                                 # barrido de secretos con redacción
 ]
 
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")
