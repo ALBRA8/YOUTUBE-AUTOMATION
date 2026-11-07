@@ -156,7 +156,7 @@ def test_circle_pip_border_color_whitelist(client, tmp_path, monkeypatch):
 
 # ── E4 · versión: única fuente de verdad ────────────────────────────────────
 def test_app_version_single_source(client):
-    assert config.APP_VERSION == "2.46.0"   # INT-092: limpieza de UI + tema coherente
+    assert config.APP_VERSION == "2.47.0"   # U1: agregador /api/mcp/resumen
     assert main.app.version == config.APP_VERSION
     res = client.get("/api/health")
     assert res.json()["version"] == config.APP_VERSION
