@@ -254,9 +254,10 @@ function ecoRowHTML(etiqueta, pieza) {
     `</div>`;
 }
 
-/* U2 · botón primario: 1 clic → POST /api/mcp/connect-all-google (ya
-   existía). Si Chrome no está arriba (según U1), el dueño debe INICIAR
-   SESIÓN en la ventana que se abre — se avisa antes y tras el clic. */
+/* U2/W2 · botón primario: 1 clic → POST /api/mcp/connect-all-google.
+   Muestra el resultado REAL de la respuesta: si chrome_up es false,
+   mensaje de error con la acción siguiente («Chrome no abrió: pulsa
+   «Abrir ventana de Chrome» en Avanzado»); NUNCA un «listo» genérico. */
 async function gsessConnectAll() {
   const btn = $('#gsess-connect-all');
   const chromeOk = !!(S.eco && S.eco.piezas && S.eco.piezas.chrome &&
@@ -265,14 +266,30 @@ async function gsessConnectAll() {
   if (!chromeOk) toast('Se va a abrir una ventana de Chrome: INICIA SESIÓN con tu cuenta de Google en la ventana que se abre.', 'info');
   try {
     const res = await api('/mcp/connect-all-google', { method: 'POST', body: {} });
-    const acts = ((res && res.actions) || []).join(' · ');
     const nota = $('#gsess-connectall-nota');
-    if (nota) {
-      if (!chromeOk) { nota.style.display = ''; nota.textContent = 'Chrome estaba apagado: inicia sesión en la ventana que se abrió y pulsa «Refrescar estado».'; }
-      else nota.style.display = 'none';
+    if (!res || res.chrome_up === false) {
+      const errDetalle = (res && res.chrome_error) ? (' (' + res.chrome_error + ')') : '';
+      if (nota) {
+        nota.style.display = '';
+        nota.textContent = 'Chrome no abrió: pulsa «Abrir ventana de Chrome» en Avanzado.';
+      }
+      toast('Chrome no abrió: pulsa «Abrir ventana de Chrome» en Avanzado' + errDetalle, 'err');
+    } else {
+      if (nota) {
+        if (!chromeOk) {
+          nota.style.display = '';
+          nota.textContent = 'Chrome estaba apagado: inicia sesión en la ventana que se abrió y pulsa «Refrescar estado».';
+        } else {
+          nota.style.display = 'none';
+        }
+      }
+      if (res.ok) {
+        toast('Ecosistema Google conectado correctamente ✅', 'ok');
+      } else {
+        toast(chromeOk ? 'Chrome activo pero servicios pendientes: verifica sesión o pulsa «Refrescar estado».' :
+          'Chrome se abrió: si te pide login, INICIA SESIÓN en esa ventana y pulsa «Refrescar estado».', 'info');
+      }
     }
-    toast(chromeOk ? ('Conectar todo: ' + (acts || 'listo')) :
-      'Chrome se abrió: si te pide login, INICIA SESIÓN en esa ventana y pulsa «Refrescar estado».', chromeOk ? 'ok' : 'info');
   } catch (e) { toast('Conectar todo: ' + e.message, 'err'); }
   finally { if (btn) { btn.disabled = false; btn.textContent = '🚀 Conectar todo'; } }
   await gsessRefresh(true);

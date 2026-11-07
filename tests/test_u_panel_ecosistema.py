@@ -98,6 +98,17 @@ def test_u2_boton_conectar_todo_con_login_claro():
     assert "piezas.chrome.ok" in MCP_JS
 
 
+def test_w2_conectar_todo_muestra_resultado_real():
+    """W2 · «Conectar todo» muestra el resultado REAL de la respuesta.
+    Si chrome_up es false, mensaje de error con la acción siguiente
+    («Chrome no abrió: pulsa «Abrir ventana de Chrome» en Avanzado»);
+    nunca un «listo» genérico."""
+    fn = _entre(MCP_JS, "async function gsessConnectAll() {", "async function gsessRepairProfile() {")
+    assert "res.chrome_up === false" in fn
+    assert "Chrome no abrió: pulsa «Abrir ventana de Chrome» en Avanzado" in fn
+    assert "'Conectar todo: ' + (acts || 'listo')" not in fn
+
+
 def test_u2_contratos_vigentes_int025_int088():
     """Los nombres que fijan los tests INT-025/INT-088 siguen definidos
     (gsessApply/gsessRefresh/mcpGsessHTML/gsessStart/mcpPopulateNotebooks…)."""
