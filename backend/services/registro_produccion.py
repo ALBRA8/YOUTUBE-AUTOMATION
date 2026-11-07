@@ -525,6 +525,79 @@ def registrar_proyecto_creado(project: dict | None) -> None:
                        pid, type(exc).__name__, exc)
 
 
+# ── disparo de la sincronización al empezar la fase Flow (Q3) ────────────
+LIMITACION_Q7 = ("Q3 · Flow genera sobre el proyecto ACTIVO y no queda "
+                 "demostrado que la generación se dirija al proyecto "
+                 "creado (sonda q7 != SOPORTADO): el flow_project_id "
+                 "queda registrado pero la generación NO se redirige")
+
+
+def leer_sonda_q7(ruta: Path | None = None) -> str:
+    """Q3 · Lee el veredicto q7 del informe guardado de la sonda INT-093
+    (¿flow_new_project cambia el proyecto activo sobre el que generan las
+    demás herramientas?). Sin informe, ilegible o sin la pregunta →
+    NOT_DEMONSTRATED (honesto: sin demostración NO se dirige generación)."""
+    ruta = Path(ruta) if ruta else _ruta_sonda_defecto()
+    try:
+        informe = json.loads(ruta.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "NOT_DEMONSTRATED"
+    if not isinstance(informe, dict):
+        return "NOT_DEMONSTRATED"
+    preguntas = ((informe.get("servicios") or {}).get("google-flow") or {}
+                 ).get("preguntas") or []
+    for p in preguntas:
+        if isinstance(p, dict) \
+                and p.get("id") == "q7_flow_new_project_cambia_activo":
+            return str(p.get("veredicto") or "NOT_DEMONSTRATED")
+    return "NOT_DEMONSTRATED"
+
+
+def disparo_sync_flow(production_id: str, *,
+                      ruta_sonda: Path | None = None,
+                      sinc_activa: bool | None = None,
+                      timeout: float = 30.0) -> dict:
+    """Q3 · DISPARO de la sincronización con Flow cuando empieza la fase
+    Flow de una producción (lo llama flow_jobs.enqueue_project desde un
+    hilo — el adaptador usa asyncio.run y NO puede correr dentro de un
+    event loop, por eso el disparo nunca va inline).
+
+    - Gate FLOW_REGISTRO_SYNC (apagado por defecto): con el flag apagado
+      NO toca nada (ni MCP ni registro) — el sistema no cambia.
+    - NUNCA bloquea ni hace fallar la producción: captura solo excepciones
+      tipadas (trinquete P2-2) y devuelve un dict de estado; el fallo del
+      MCP ya es dato (R1: ERROR + limitación, sin estado falso).
+    - Si la sonda no demuestra que la generación se dirige al proyecto
+      creado (q7 != SOPORTADO), la generación NO se redirige: el id se
+      registra y la limitación queda anotada (NOT_DEMONSTRATED honesto).
+      Segundo disparo (idempotente, 2.5) → YA_VINCULADO sin re-anotar.
+
+    En tests NUNCA Flow real: doble en flow_mcp_client.new_project
+    (monkeypatch) o sinc_activa con dobles de alto nivel."""
+    activa = (bool(getattr(config, "FLOW_REGISTRO_SYNC", False))
+              if sinc_activa is None else bool(sinc_activa))
+    if not activa:
+        return {"estado": "APAGADO",
+                "detalle": "config.FLOW_REGISTRO_SYNC=0: no se toca nada"}
+    try:
+        res = sincronizar_flow_real(production_id, ruta_sonda=ruta_sonda,
+                                    sinc_activa=True, timeout=timeout)
+    except (ValueError, OSError, RuntimeError) as exc:
+        logger.warning("disparo_sync_flow(%s): sincronización no lanzada "
+                       "(%s: %s)", production_id, type(exc).__name__, exc)
+        return {"estado": "ERROR_DISPARO",
+                "error": f"{type(exc).__name__}: {exc}"}
+    if res.get("flow_project_id") and res.get("estado") != "YA_VINCULADO":
+        try:
+            if leer_sonda_q7(ruta_sonda) != "SOPORTADO":
+                anota_limitacion(production_id, LIMITACION_Q7)
+        except (ValueError, OSError, RuntimeError) as exc:
+            logger.warning("disparo_sync_flow(%s): limitación q7 no "
+                           "anotada (%s)", production_id,
+                           type(exc).__name__)
+    return res
+
+
 # ── listado (endpoint GET /api/registro, 3.2) ────────────────────────────
 def listar_producciones() -> list[dict]:
     """Lista todas las producciones registradas (solo lectura): id, nicho,

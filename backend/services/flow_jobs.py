@@ -33,10 +33,12 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import config
 import database as db
 from config import OUTPUT_DIR
 from pipeline.flow_export import DEFAULT_BRAND, build_script_json
@@ -197,8 +199,46 @@ def enqueue_project(pid: str, fmt: str = "transformacion",
                      "queued", 0, MAX_ATTEMPTS["video"], now, now))
                 created += 1
                 videos += 1
+    # Q3 · la fase Flow de la producción empieza aquí: dispara (sin
+    # bloquear, sin fallar) la sincronización registro↔Flow del proyecto.
+    _programar_disparo_sync(pid)
     return {"ok": True, "project_id": pid, "created": created,
             "images": images, "videos": videos}
+
+
+# ── Q3 · disparo de la sincronización con Flow (fire-and-forget) ──────
+_TAREAS_DISPARO: set = set()   # refs vivas anti-GC de las tareas programadas
+
+
+def _disparo_sync(pid: str) -> None:
+    """Punto de inyección para tests (dobles): llama al disparo del registro
+    (que tiene su propio gate FLOW_REGISTRO_SYNC y jamás lanza)."""
+    from services import registro_produccion
+    registro_produccion.disparo_sync_flow(pid)
+
+
+def _programar_disparo_sync(pid: str) -> None:
+    """Q3 · Programa el disparo de la sincronización con Flow SIN bloquear
+    la fase de Flow (fire-and-forget; el fallo jamás afecta al enqueue).
+
+    El adaptador del registro usa asyncio.run, que NO puede correr dentro
+    de un event loop: desde contexto async se envía a un hilo worker vía
+    asyncio.to_thread; desde contexto síncrono (p. ej. tool MCP
+    flow_encolar), hilo daemon directo. Con FLOW_REGISTRO_SYNC apagado
+    (default) ni siquiera se programa: el gate autoritativo vive en
+    registro_produccion.disparo_sync_flow."""
+    if not getattr(config, "FLOW_REGISTRO_SYNC", False):
+        return
+    import asyncio as _asyncio
+    try:
+        loop = _asyncio.get_running_loop()
+    except RuntimeError:            # contexto síncrono → hilo daemon
+        threading.Thread(target=_disparo_sync, args=(pid,), daemon=True,
+                         name=f"flow-sync-{pid}").start()
+        return
+    tarea = loop.create_task(_asyncio.to_thread(_disparo_sync, pid))
+    _TAREAS_DISPARO.add(tarea)
+    tarea.add_done_callback(_TAREAS_DISPARO.discard)
 
 
 # ── claim atómico + recuperación de leases ───────────────────────────────────
