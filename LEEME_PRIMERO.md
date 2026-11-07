@@ -16,6 +16,11 @@ música → publicación opcional en YouTube.
    tenga MCP ni API. Sus pruebas siguen corriendo.
 6. Nunca guardar secretos (claves, tokens) en el repo ni en las notas.
 7. Máximo 2 tareas en AHORA. Lo nuevo entra a SIGUIENTE.
+8. Rutas verificadas por el dueño: las rutas `POST /api/mcp/google-sso/launch`
+   (con `force_window: true`), `POST /api/mcp/launch-auth-browser`,
+   `POST /api/mcp/repair-profile` y `POST /api/mcp/connect` (servicio
+   `google-flow`) no se sustituyen ni se cambia su semántica sin evidencia
+   de la máquina del dueño (ver CONTEXTO YOUTUBE/00_MASTER/RUTAS_VERIFICADAS_POR_EL_DUENO.md).
 
 ## Dónde está cada cosa
 - Qué hacer y en qué orden: ROADMAP.md
