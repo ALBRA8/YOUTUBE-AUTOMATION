@@ -35,7 +35,8 @@ Fecha: 2026-11-06 · Modelo: Z.ai/GLM · Base: d0cab7d (+ commits de esta sesió
 ## H2 · Higiene de secretos — commit de esta sesión
 
 - `CONTEXTO YOUTUBE/05_TESTS/ANTIGRAVITY_VALIDACION_PRODUCCION.md:19`
-  guardaba el prefijo del PAT del chat (`ghp_IoIr...`) → REDACTADO. La nota
+  guardaba el prefijo del PAT que circuló por el chat (aquí redactado: se
+  nombra solo como "el prefijo del PAT", jamás se copia) → REDACTADO. La nota
   ahora fija la regla: NUNCA pedir/guardar/escribir tokens en ficheros,
   notas ni logs; el push lo hace el dueño con su credential helper.
 - `tests/test_h2_secrets_hygiene.py` (2 tests): barrido de *.md/*.txt del
