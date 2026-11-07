@@ -205,5 +205,67 @@ def test_u3_sintaxis_js():
     _node_check()
 
 
+# ══ U4 · selector de cuaderno auto-relleno + memoria por nicho ═══════════
+
+def test_u4_selector_en_tarjeta_principal():
+    """El selector nicho+cuaderno vive en la tarjeta principal (después de
+    las filas del semáforo) y los IDs de contrato (#nblm-nid-sel,
+    #nblm-nid, #nblm-list-btn) se conservan; la tarjeta de Avanzado ya no
+    duplica el desplegable."""
+    tarjeta = _entre(MCP_JS, "function mcpGsessHTML() {",
+                     "async function gsessStart() {")
+    for contenido in ("ecoNichoNidHTML()", 'id="nblm-nicho-sel"',
+                      'id="nblm-nid-sel"', 'id="nblm-nid"', "nblm-list-btn"):
+        assert contenido in tarjeta, f"falta en la tarjeta principal: {contenido!r}"
+    svc = _entre(MCP_JS, "function mcpSvcHTML(",
+                 "function renderMCP() {")
+    assert "nblm-nid-sel" not in svc, "el desplegable no debe duplicarse en Avanzado"
+
+
+def test_u4_memoria_por_nicho_en_registro_q4():
+    """Al elegir cuaderno con nicho activo → POST /api/registro/nicho
+    (UN cuaderno por nicho, Q4); sin nicho → avisa que no se recuerda."""
+    pick = _entre(MCP_JS, "function mcpPickNotebook(", "function mcpZoneHTML(")
+    assert "api('/registro/nicho', { method: 'POST', body: {" in pick
+    assert "nicho_id: nicho, notebook_id: id" in pick
+    assert "nombre_cuaderno:" in pick
+    assert "elige un nicho arriba para que se recuerde" in pick
+    assert "NICHOS_KEY" in MCP_JS and "yta-eco-nicho" in MCP_JS
+    # cargar nichos: GET /api/niches/templates y restaurar cuaderno del nicho
+    cargar = _entre(MCP_JS, "async function mcpNichosCargar(",
+                    "function mcpZoneHTML(")
+    assert "api('/niches/templates')" in cargar
+    assert "api('/registro/nicho/' + encodeURIComponent(nicho))" in cargar
+
+
+def test_u4_autorelleno_al_conectar_y_vacios_utiles():
+    """Al conectar NotebookLM el desplegable se rellena solo (ya existía) y
+    el texto del vacío reacciona al estado REAL: conectado → «pulsa
+    Listar», no conectado → «conecta NotebookLM»."""
+    assert "mcpListNotebooks({ silent: true })" in MCP_JS
+    assert "NotebookLM conectado: pulsa «🔄 Listar / refrescar notebooks»" in MCP_JS
+    assert "— conecta NotebookLM para listar los tuyos —" in MCP_JS
+    # la actualización del vacío vive en mcpApplyStatus (reacciona al estado)
+    apply = _entre(MCP_JS, "function mcpApplyStatus(", "async function mcpRefresh(")
+    assert "op0.textContent" in apply
+    assert "(S.mcp && (S.mcp.notebooklm || {}).state === 'connected')" in apply
+
+
+def test_u4_endpoints_usados_existen():
+    """Los endpoints que consume U4 están en la app real (misma auth)."""
+    import asyncio
+    import httpx
+    import main as _main  # noqa: F401
+    schema = _main.app.openapi()
+    rutas = set(schema["paths"])
+    assert "/api/registro/nicho" in rutas
+    assert "/api/registro/nicho/{nicho_id}" in rutas
+    assert "/api/niches/templates" in rutas
+
+
+def test_u4_sintaxis_js():
+    _node_check()
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))

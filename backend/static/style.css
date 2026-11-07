@@ -926,3 +926,8 @@ details.mcp-adv { margin-top: 14px; border: 1px solid var(--border); border-radi
 details.mcp-adv > summary { cursor: pointer; font-weight: 600; opacity: .85; user-select: none; }
 details.mcp-adv > summary:hover { opacity: 1; }
 details.mcp-adv[open] > summary { margin-bottom: 10px; }
+
+/* ── U4 · selector nicho+cuaderno en la tarjeta principal ── */
+.eco-nicho { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.eco-nicho label { font-size: 12px; opacity: .75; }
+.eco-nicho select { width: 100%; }

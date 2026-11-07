@@ -28,29 +28,14 @@ function mcpBadgeHTML(state) {
 }
 
 function mcpSvcHTML(svc, label, hint) {
-  const isNblm = svc === 'notebooklm';
-  // INT-025 · dropdown dinámico en lugar del input crudo: se autorellena al
-  // conectar notebooklm (mcpListNotebooks silent) o con «🔄 Listar».
-  const nidBlock = isNblm ? `<div class="mcp-row">
-      <label for="nblm-nid-sel">Notebook activo</label>
-      <select id="nblm-nid-sel" onchange="mcpPickNotebook(this.value)">
-        <option value="">— conecta NotebookLM para listar los tuyos —</option>
-        <option value="__manual__">✍️ Pegar ID manual…</option>
-      </select>
-      <input id="nblm-nid" type="text" placeholder="ej. 9a1b2c3d… (vacío = auto-descubrir en [0/3])"
-             value="${esc(localStorage.getItem(NID_KEY) || '')}" oninput="mcpSaveId()"
-             style="display:none; margin-top:6px">
-    </div>
-    <div class="mcp-row btns">
-      <button class="btn ghost" id="nblm-list-btn" onclick="mcpListNotebooks()">🔄 Listar / refrescar notebooks</button>
-    </div>` : '';
+  // U4 · el selector de nicho/cuaderno vive en la TARJETA PRINCIPAL
+  // (ecoNichoNidHTML); esta tarjeta (Avanzado) queda para diagnóstico.
   return `<div class="mcp-svc">
     <div class="mcp-svc-head">
       <h3>${label}</h3>
       <span id="mcp-${svc}-badge">${mcpBadgeHTML('disconnected')}</span>
     </div>
     <p class="hintline">${hint}</p>
-    ${nidBlock}
     <div class="mcp-row btns">
       <button class="btn" id="mcp-${svc}-connect" onclick="mcpConnect('${svc}')">🔌 Conectar</button>
       <button class="btn ghost" id="mcp-${svc}-disc" onclick="mcpDisconnect('${svc}')">⏏️ Desconectar</button>
@@ -135,6 +120,7 @@ function renderMCP() {
   </div>`;
   mcpRefresh();
   gsessRefresh(true);   // INT-025 · estado de la sesión unificada sin ruido
+  mcpNichosCargar();    // U4 · nichos + cuaderno recordado
 }
 
 function mcpSaveId() { const el = $('#nblm-nid'); if (el) localStorage.setItem(NID_KEY, el.value.trim()); }
@@ -171,7 +157,73 @@ function mcpGsessHTML() {
     </div>
     <p class="hintline" id="gsess-connectall-nota" style="display:none"></p>
     <p class="hintline" id="eco-aviso" style="display:none"></p>
+    ${ecoNichoNidHTML()}
   </div>`;
+}
+
+/* U4 · selector de NICHO + CUADERNO en la tarjeta principal. Al conectar
+   NotebookLM el desplegable se rellena solo (list-notebooks) y la
+   elección se RECUERDA por nicho en el registro de nichos (Q4:
+   POST /api/registro/nicho — UN cuaderno por nicho, nunca por
+   historia). Los vacíos dicen qué hacer, no «conecta NotebookLM» si ya
+   está conectado. */
+const NICHOS_KEY = 'yta-eco-nicho';
+
+function ecoNichoNidHTML() {
+  return `<div class="mcp-row eco-nicho">
+    <label for="nblm-nicho-sel">Nicho (recuerda tu cuaderno)</label>
+    <select id="nblm-nicho-sel" onchange="mcpNichoChange(this.value)">
+      <option value="">— sin nicho: la elección no se recuerda —</option>
+    </select>
+    <label for="nblm-nid-sel">Notebook activo</label>
+    <select id="nblm-nid-sel" onchange="mcpPickNotebook(this.value)">
+      <option value="">— conecta NotebookLM para listar los tuyos —</option>
+      <option value="__manual__">✍️ Pegar ID manual…</option>
+    </select>
+    <input id="nblm-nid" type="text" placeholder="ej. 9a1b2c3d… (vacío = auto-descubrir en [0/3])"
+           value="${esc(localStorage.getItem(NID_KEY) || '')}" oninput="mcpSaveId()"
+           style="display:none; margin-top:6px">
+    <div class="mcp-row btns">
+      <button class="btn ghost" id="nblm-list-btn" onclick="mcpListNotebooks()">🔄 Listar / refrescar notebooks</button>
+    </div>
+  </div>`;
+}
+
+/* U4 · rellena el selector de nichos (GET /api/niches/templates) y
+   restaura el nicho recordado + su cuaderno del registro. */
+async function mcpNichosCargar() {
+  const sel = $('#nblm-nicho-sel');
+  if (!sel) return;
+  try {
+    const nbs = await api('/niches/templates');
+    const cur = localStorage.getItem(NICHOS_KEY) || '';
+    sel.innerHTML = '<option value="">— sin nicho: la elección no se recuerda —</option>' +
+      (nbs || []).map(n =>
+        `<option value="${esc(n.id)}">${esc((n.emoji ? n.emoji + ' ' : '') + (n.name || n.id))}</option>`).join('');
+    if (cur) { sel.value = cur; if (sel.value === cur) await mcpNichoChange(cur, true); }
+  } catch (e) { /* sin nichos registrados: el selector queda honesto */ }
+}
+
+/* U4 · al cambiar de nicho, carga su cuaderno recordado (si lo hay) y
+   preselecciona en el desplegable; 404 = aún sin cuaderno (silencio). */
+async function mcpNichoChange(nicho, silencioso) {
+  nicho = (nicho || '').trim();
+  localStorage.setItem(NICHOS_KEY, nicho);
+  if (!nicho) return;
+  try {
+    const js = await api('/registro/nicho/' + encodeURIComponent(nicho));
+    const nid = (js && js.notebook_id) || '';
+    if (!nid) return;
+    const el = $('#nblm-nid'), sel = $('#nblm-nid-sel');
+    if (el) el.value = nid;
+    mcpSaveId();
+    if (sel) {
+      const hit = Array.from(sel.options).find(o => o.value === nid);
+      sel.value = hit ? nid : '__manual__';
+      if (el) el.style.display = (sel.value === '__manual__') ? '' : 'none';
+    }
+    if (!silencioso) toast('Cuaderno del nicho cargado: ' + (js.nombre_cuaderno || nid), 'ok');
+  } catch (e) { /* nicho sin cuaderno todavía — se elige al listar */ }
 }
 
 async function gsessStart() {
@@ -417,7 +469,20 @@ function mcpPickNotebook(id) {
   if (!id) return;
   if (el) { el.value = id; el.style.display = 'none'; mcpSaveId(); }
   if (sel) sel.value = id;
-  toast('Notebook fijado ✅ ' + id.slice(0, 8) + '… — ya puedes lanzar el pipeline');
+  // U4 · UN cuaderno por nicho: se guarda en el registro (Q4) si hay
+  // nicho elegido; sin nicho no hay memoria (se avisa con qué hacer).
+  const nicho = (localStorage.getItem(NICHOS_KEY) || '').trim();
+  const titulo = (sel && sel.selectedIndex >= 0)
+    ? String(sel.options[sel.selectedIndex].text.split(' · ')[0] || '') : '';
+  if (nicho) {
+    api('/registro/nicho', { method: 'POST', body: {
+      nicho_id: nicho, notebook_id: id,
+      nombre_cuaderno: titulo || ('Cuaderno del nicho ' + nicho) } })
+      .then(() => toast('Notebook fijado ✅ y recordado para el nicho «' + nicho + '» — ya puedes lanzar el pipeline', 'ok'))
+      .catch(e => toast('Notebook fijado ✅ (no se pudo recordar por nicho: ' + e.message + ')', 'info'));
+  } else {
+    toast('Notebook fijado ✅ ' + id.slice(0, 8) + '… — elige un nicho arriba para que se recuerde');
+  }
 }
 
 /* U3 · traducción HUMANA de avisos conocidos de la consola (p. ej.
@@ -475,6 +540,15 @@ function mcpApplyStatus(services) {
   const aviso = avisoHumanoDe(services);
   const elAviso = $('#eco-aviso');
   if (elAviso) { elAviso.style.display = aviso ? '' : 'none'; if (aviso) elAviso.textContent = aviso; }
+  // U4 · el texto del vacío dice qué hacer: si NotebookLM ya está
+  // conectado, NO puede seguir diciendo «conecta NotebookLM».
+  const op0 = ($('#nblm-nid-sel') || {}).querySelector ?
+    $('#nblm-nid-sel').querySelector('option[value=""]') : null;
+  if (op0 && op0.textContent !== '— elige notebook —') {
+    op0.textContent = (S.mcp && (S.mcp.notebooklm || {}).state === 'connected')
+      ? 'NotebookLM conectado: pulsa «🔄 Listar / refrescar notebooks» para cargar tus cuadernos'
+      : '— conecta NotebookLM para listar los tuyos —';
+  }
   updatePills();
 }
 
