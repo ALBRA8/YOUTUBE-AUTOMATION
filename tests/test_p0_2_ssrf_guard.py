@@ -132,6 +132,8 @@ def test_guardia_sin_red_cruda_fuera_de_la_lista_blanca():
     ofensores = []
     for path in sorted(BACKEND.rglob("*.py")):
         rel = path.relative_to(BACKEND).as_posix()
+        if rel.startswith(('.venv', '.env', '__pycache__', 'data/')):
+            continue
         if rel in WHITELIST:
             continue
         try:

@@ -25,6 +25,9 @@ _PATRON = re.compile(r"^\s*except\s+Exception\b")
 def _cuenta() -> tuple[int, dict]:
     por_archivo: dict[str, int] = {}
     for path in sorted(BACKEND.rglob("*.py")):
+        rel = path.relative_to(BACKEND).as_posix()
+        if rel.startswith(('.venv', '.env', '__pycache__', 'data/')):
+            continue
         n = sum(1 for linea in path.read_text(encoding="utf-8").split("\n")
                 if _PATRON.match(linea))
         if n:

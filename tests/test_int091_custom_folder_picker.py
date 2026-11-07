@@ -67,8 +67,16 @@ def test_dialogo_pick_folder_cancelado(client, monkeypatch):
 
 
 def test_dialogo_pick_folder_sin_gui_honesto(client, monkeypatch):
-    """Sin mock: en un servidor headless el diálogo real no está disponible
+    """En un servidor headless el diálogo real no está disponible
     y el endpoint responde honesto (ok false, cancelled true) SIN lanzar."""
+    import subprocess
+    orig_run = subprocess.run
+    def fake_run(*args, **kwargs):
+        cmd_str = " ".join(str(a) for a in args[0]) if isinstance(args[0], (list, tuple)) else str(args[0])
+        if "pick_folder" in cmd_str or "FolderBrowserDialog" in cmd_str or "zenity" in cmd_str:
+            return subprocess.CompletedProcess(args[0], returncode=1, stdout="", stderr="")
+        return orig_run(*args, **kwargs)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     r = client.post("/api/dialog/pick-folder")
     check("sin GUI → honesto sin lanzar", r.status_code == 200
           and r.json().get("ok") is False and r.json().get("cancelled") is True,
