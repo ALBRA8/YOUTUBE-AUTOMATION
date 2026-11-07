@@ -270,6 +270,103 @@ def test_episodio_vacio_falla_con_regla_propia():
     assert any(f["regla"] == "EPISODIO_CON_CLIPS" for f in r["fallos_episodio"])
 
 
+# ── 0.1 · diálogo estructurado y heurística sin comillas ─────────────
+
+def _raya_de(n: int) -> str:
+    return "—" + " ".join(f"palabra{i}" for i in range(1, n + 1)) + "—"
+
+
+def test_raya_con_20_palabras_falla_antes_valido():
+    """Caso de regresión 0.1: 20 palabras entre rayas pasaban como válidos."""
+    r = validar_clip(clip_bueno(video_prompt=f"Cocina nocturna. {_raya_de(20)}",
+                                casting=["MARÍA"]))
+    assert not r["ok"]
+    assert r["palabras_habladas"] == 20
+    assert any(f["regla"] == "MAX_PALABRAS_HABLADAS" for f in r["fallos"])
+    assert r["exceso"] == "palabra13 " + " ".join(
+        f"palabra{i}" for i in range(14, 21))
+
+
+def test_verbo_habla_14_palabras_falla_antes_valido():
+    """Caso de regresión 0.1: 14 palabras tras 'dice:' pasaban como válidos."""
+    catorce = " ".join(f"v{i}" for i in range(1, 15))
+    r = validar_clip(clip_bueno(video_prompt=f"JORGE dice: {catorce}",
+                                casting=["JORGE"]))
+    assert not r["ok"]
+    assert r["palabras_habladas"] == 14
+    assert r["exceso"] == "v13 v14"
+
+
+def test_habla_fuera_de_comillas_genera_aviso_sin_romper_ok():
+    r = validar_clip(clip_bueno(
+        video_prompt="MARÍA limpia la cocina. —no puedo más— y sale.",
+        casting=["MARÍA"]))
+    assert r["ok"], r["fallos"]          # 3 palabras: no excede
+    assert any(a["regla"] == "DIALOGO_SIN_COMILLAS" for a in r["avisos"])
+    assert r["fuente_conteo"] == "video_prompt"
+
+
+def test_verbo_habla_con_comillas_no_duplica_conteo():
+    r = validar_clip(clip_bueno(
+        video_prompt='MARÍA dice: "hola que tal" y se va.', casting=["MARÍA"]))
+    assert r["ok"], r["fallos"]
+    assert r["palabras_habladas"] == 3   # no 6
+    assert not any(a["regla"] == "DIALOGO_SIN_COMILLAS" for a in r["avisos"])
+
+
+def test_dialogue_estructurado_es_fuente_de_verdad():
+    """(a) El campo `dialogue` manda: el prompt no se escanea."""
+    doce = " ".join(f"p{i}" for i in range(1, 13))
+    r = validar_clip(clip_bueno(
+        video_prompt=f"Cocina nocturna con MARÍA. {_raya_de(20)}",
+        casting=["MARÍA"], dialogue=[{"personaje": "MARÍA", "texto": doce}]))
+    assert r["ok"], (r["fallos"], r["avisos"])
+    assert r["palabras_habladas"] == 12
+    assert r["fuente_conteo"] == "dialogue"
+    assert not r["avisos"]               # no hay heurística → sin avisos
+
+
+def test_dialogue_estructurado_con_exceso_falla_y_devuelve_exceso():
+    catorce = " ".join(f"p{i}" for i in range(1, 15))
+    r = validar_clip(clip_bueno(dialogue=[
+        {"personaje": "MARÍA", "texto": catorce}]))
+    assert not r["ok"]
+    assert any(f["campo"] == "dialogue" and
+               f["regla"] == "MAX_PALABRAS_HABLADAS" for f in r["fallos"])
+    assert r["exceso"] == "p13 p14"
+
+
+def test_dialogue_vacio_significa_sin_dialogo():
+    r = validar_clip(clip_bueno(dialogue=[]))
+    assert r["palabras_habladas"] == 0
+    assert r["fuente_conteo"] == "dialogue"
+
+
+def test_dialogue_malformado_cae_a_heuristica_con_aviso():
+    veinte = " ".join(f"p{i}" for i in range(1, 21))
+    r = validar_clip(clip_bueno(video_prompt=f"Cocina. {_raya_de(20)}",
+                                casting=["MARÍA"],
+                                dialogue=[{"sin": "texto"}, 42]))
+    assert not r["ok"]
+    assert any(a["regla"] == "DIALOGUE_MALFORMADO" for a in r["avisos"])
+    assert r["palabras_habladas"] == 20  # heurística del prompt
+    assert r["fuente_conteo"] == "video_prompt"
+
+
+def test_dialogue_personaje_en_minusculas_falla():
+    r = validar_clip(clip_bueno(dialogue=[{"personaje": "jorge",
+                                           "texto": "hola"}]))
+    assert not r["ok"]
+    assert any(f["campo"] == "dialogue" and
+               f["regla"] == "NOMBRE_MAYUSCULAS" for f in r["fallos"])
+
+
+def test_prompt_sin_habla_no_genera_avisos():
+    r = validar_clip(clip_bueno())
+    assert r["ok"] and r["avisos"] == []
+    assert r["palabras_habladas"] == 5   # la cita del clip_bueno sigue contando
+
+
 # ── robustez ──────────────────────────────────────────────────────────
 
 def test_entrada_que_no_es_dict_no_explota():

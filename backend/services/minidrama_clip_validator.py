@@ -20,14 +20,30 @@ Qué valida (por clip):
      caso falla; el nombre ausente del prompt falla como regla propia).
   4. Máximo de palabras HABLADAS (12 por defecto), contadas de forma
      DETERMINISTA según la definición escrita en la spec (§ Fase E,
-     regla 4): solo cuentan los fragmentos entre comillas ("...", “…” o
-     «...») atribuibles a un personaje; token = secuencia alfanumérica
-     (acentos y ñ incluidas); números en cifra = 1 palabra, escritos en
-     letras = sus tokens; compuesto con guion = 2 palabras; la raya de
-     diálogo de apertura no añade tokens; muletillas cuentan.
-     Si el límite se excede, el resultado DEVUELVE EL TEXTO QUE EXCEDE
-     (`exceso`: las palabras a partir de la límite+1) junto al diálogo
-     completo y el total contado.
+     regla 4). FUENTE DE VERDAD, en orden de prioridad:
+     a) Campo estructurado `dialogue` (lista de {personaje, texto}, como
+        pide la ficha de la Fase E; «dialogue» es el nombre que ya usa el
+        Production JSON — no se inventan alias). Cuenta SOLO el texto de
+        sus entradas; el prompt NO se escanea; sin avisos.
+     b) Si `dialogue` falta (o no contiene texto extraíble), heurística
+        sobre `video_prompt` (DOCUMENTADA, determinista):
+        - comillas ("...", “…” o «...») → hablado;
+        - segmentos entre RAYAS (—...—) sin comillas dentro → hablado;
+        - texto tras VERBO DE HABLA + ":" (dice, grita, susurra, responde,
+          pregunta) hasta fin de oración (punto o salto) → hablado, SOLO
+          si ese resto no empieza por comilla o raya (no se duplica lo ya
+          contado).
+        Cada fragmento hallado por (rayas/verbo) genera el AVISO
+        DIALOGO_SIN_COMILLAS: el clip sigue validando si no excede el
+        límite, pero el aviso pide mover el diálogo a comillas o al campo
+        `dialogue`.
+     - Token = secuencia alfanumérica (acentos y ñ incluidas); números en
+       cifra = 1 palabra, escritos en letras = sus tokens; compuesto con
+       guion = 2 palabras; la raya de apertura no añade tokens; muletillas
+       cuentan.
+     - Si el límite se excede, el resultado DEVUELVE EL TEXTO QUE EXCEDE
+       (`exceso`: las palabras a partir de la límite+1) junto a
+       `dialogo` (fragmentos contados) y el total.
   5. `final_state` presente y no vacío (estado final a 9.9 s). La
      verificación de que ese estado está DESCRITO dentro del párrafo es
      heurística y NO se intenta aquí (QA humano + Fase F).
@@ -79,8 +95,19 @@ CAMPOS_OBLIGATORIOS = (
 # la spec. La cifra "2026" produce UN match → 1 palabra.
 _RE_PALABRA = re.compile(r"[0-9A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+")
 
-# Fragmentos de diálogo hablado: comillas rectas, curvas o angulares.
+# Fragmentos de diálogo hablado entre comillas: rectas, curvas o angulares.
 _RE_DIALOGO = re.compile(r'«([^»]*?)»|"([^"]*?)"|“([^”]*?)”')
+
+# Heurística (fuente b, ver docstring): rayas —…— y verbo de habla + «:».
+_RE_RAYA = re.compile(r"—([^—\n]+?)—")
+_VERBOS_HABLA = ("dice", "grita", "susurra", "responde", "pregunta")
+_RE_VERBO_HABLA = re.compile(
+    r"\b(?:" + "|".join(_VERBOS_HABLA) + r")\s*:\s*([^.«»“\"\n]*)",
+    re.IGNORECASE)
+
+# Claves aceptadas en el campo estructurado `dialogue` (Production JSON).
+_CLAVES_PERSONAJE = ("personaje", "speaker", "name", "nombre")
+_CLAVES_TEXTO = ("texto", "text", "line")
 
 
 def extraer_dialogo(texto: str) -> list[str]:
@@ -99,11 +126,71 @@ def contar_palabras_habladas(texto: str) -> int:
     return sum(len(_RE_PALABRA.findall(frag)) for frag in extraer_dialogo(texto))
 
 
-def _texto_que_excede(texto: str, limite: int) -> str | None:
+def _dialogue_estructurado(dialogue: Any) -> tuple[list[str], list[str], bool]:
+    """Fragmentos hablados desde el campo estructurado `dialogue`
+    (lista de {personaje, texto}). Devuelve (fragmentos, avisos, util).
+    `util` es False si el campo no sirve como fuente de verdad (no es
+    lista o sus entradas no traen texto) — el llamador cae entonces a la
+    heurística del prompt."""
+    if not isinstance(dialogue, (list, tuple)):
+        avisos = ["DIALOGUE_MALFORMADO"] if dialogue not in (None, "") else []
+        return [], avisos, False
+    if not dialogue:
+        return [], [], True  # lista vacía explícita = sin diálogo
+    frags: list[str] = []
+    avisos: list[str] = []
+    malformados = 0
+    for item in dialogue:
+        if isinstance(item, str):
+            if item.strip():
+                frags.append(item)
+            continue
+        if not isinstance(item, dict):
+            malformados += 1
+            continue
+        texto = next((item.get(c) for c in _CLAVES_TEXTO
+                      if isinstance(item.get(c), str) and item.get(c).strip()),
+                     None)
+        if texto is None:
+            malformados += 1
+            continue
+        frags.append(texto)
+    if malformados:
+        avisos.append("DIALOGUE_MALFORMADO")
+    return frags, avisos, bool(frags)
+
+
+def _fragmentos_heuristicos(texto: str) -> tuple[list[str], int]:
+    """Fuente (b), ver docstring: comillas + rayas —…— + verbo de habla.
+    Devuelve (fragmentos, nº de fragmentos hallados FUERA de comillas).
+    El texto tras verbo no se cuenta si empieza por comilla/raya (ya se
+    cuenta por otra vía — nunca se duplica)."""
+    if not isinstance(texto, str):
+        return [], 0
+    frags: list[str] = []
+    fuera = 0
+    for m in _RE_DIALOGO.finditer(texto):
+        frags.append(m.group(1) or m.group(2) or m.group(3) or "")
+    residuo = _RE_DIALOGO.sub("«»", texto)   # comillas ya contadas («» bloquea)
+    for m in _RE_RAYA.finditer(residuo):
+        frag = (m.group(1) or "").strip()
+        if frag:
+            frags.append(frag)
+            fuera += 1
+    residuo = _RE_RAYA.sub("«»", residuo)    # rayas ya contadas («» bloquea)
+    for m in _RE_VERBO_HABLA.finditer(residuo):
+        frag = (m.group(1) or "").strip()
+        if frag and frag[:1] not in ('"', "“", "«", "—"):
+            frags.append(frag)
+            fuera += 1
+    return frags, fuera
+
+
+def _texto_que_excede(fragmentos: list[str], limite: int) -> str | None:
     """Palabras habladas desde la límite+1 en adelante (el texto que
     excede el límite), o None si no excede."""
     restantes = limite
-    for frag in extraer_dialogo(texto):
+    for frag in fragmentos:
         tokens = _RE_PALABRA.findall(frag)
         if restantes - len(tokens) < 0:
             return " ".join(tokens[restantes:])
@@ -151,16 +238,19 @@ def validar_clip(
           "ok": bool,
           "clip_id": str|None,
           "fallos": [{"campo", "regla", "detalle"}, ...],
+          "avisos": [{"campo", "regla", "detalle"}, ...],  # no afectan ok
+          "fuente_conteo": "dialogue"|"video_prompt"|"ninguna",
           "palabras_habladas": int,
           "max_palabras": int,
           "exceso": str|None,   # el TEXTO que excede el límite, o None
-          "dialogo": [str],     # fragmentos entre comillas encontrados
+          "dialogo": [str],     # fragmentos contados (fuente de verdad)
         }
     """
     fallos: list[dict[str, str]] = []
     if not isinstance(clip, dict):
         return {"ok": False, "clip_id": None,
                 "fallos": [_fallo("clip", "TIPO", "la ficha debe ser un dict")],
+                "avisos": [], "fuente_conteo": "ninguna",
                 "palabras_habladas": 0, "max_palabras": max_palabras,
                 "exceso": None, "dialogo": []}
 
@@ -206,15 +296,50 @@ def validar_clip(
                     f"el personaje '{nombre}' del casting no aparece "
                     "en video_prompt"))
 
-    # 4 · Máximo de palabras habladas (conteo determinista) + texto excedente
-    dialogo = extraer_dialogo(prompt) if prompt else []
+    # 4 · Máximo de palabras habladas — fuente de verdad: campo
+    #     estructurado `dialogue`; si no sirve, heurística del prompt
+    #     (ver docstring). Los avisos NO afectan `ok`.
+    avisos: list[dict[str, str]] = []
+    frag_struct, avisos_dial, util = _dialogue_estructurado(
+        clip.get("dialogue"))
+    if util:
+        dialogo = frag_struct
+        fuente = "dialogue"
+    else:
+        dialogo, fuera = _fragmentos_heuristicos(prompt)
+        fuente = "video_prompt" if dialogo else "ninguna"
+        if fuera:
+            avisos.append(_fallo(
+                "video_prompt", "DIALOGO_SIN_COMILLAS",
+                f"{fuera} fragmento(s) hablado(s) fuera de comillas "
+                "(rayas o verbo de habla); muévelos a comillas o al "
+                "campo `dialogue`"))
+    for codigo in avisos_dial:
+        avisos.append(_fallo(
+            "dialogue", codigo,
+            "el campo `dialogue` no aporta texto utilizable; se contó "
+            "con la heurística del prompt"))
     palabras = sum(len(_RE_PALABRA.findall(f)) for f in dialogo)
-    exceso = _texto_que_excede(prompt, max_palabras) if prompt else None
+    exceso = _texto_que_excede(dialogo, max_palabras)
     if palabras > max_palabras:
         fallos.append(_fallo(
-            "video_prompt", "MAX_PALABRAS_HABLADAS",
+            "dialogue" if fuente == "dialogue" else "video_prompt",
+            "MAX_PALABRAS_HABLADAS",
             f"{palabras} palabras habladas > {max_palabras}; excede: "
             f"\"{exceso}\""))
+
+    # 4b · Personaje del campo `dialogue` en MAYÚSCULAS (misma regla 3)
+    if isinstance(clip.get("dialogue"), (list, tuple)):
+        for item in clip["dialogue"]:
+            if not isinstance(item, dict):
+                continue
+            per = next((item.get(c) for c in _CLAVES_PERSONAJE
+                        if isinstance(item.get(c), str)
+                        and item.get(c).strip()), None)
+            if per and per != per.upper():
+                fallos.append(_fallo(
+                    "dialogue", "NOMBRE_MAYUSCULAS",
+                    f"'{per}' no está en MAYÚSCULAS"))
 
     # 5 · Estado final presente (el campo ya se exigió arriba; aquí se
     #     valida que sea texto con contenido si vino como str)
@@ -246,6 +371,8 @@ def validar_clip(
         "ok": not fallos,
         "clip_id": clip_id,
         "fallos": fallos,
+        "avisos": avisos,
+        "fuente_conteo": fuente,
         "palabras_habladas": palabras,
         "max_palabras": max_palabras,
         "exceso": exceso,
