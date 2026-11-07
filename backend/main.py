@@ -2809,10 +2809,12 @@ async def mcp_launch_clean_login():
 
 
 @app.post("/api/mcp/connect-all-google")
-async def mcp_connect_all_google():
+async def mcp_connect_all_google(body: dict | None = None):
     """🚀 1-Clic: Sanea perfil, levanta Chrome interactivo en puerto 9333 y conecta Flow + NotebookLM."""
+    b = body or {}
+    timeout = b.get("timeout_s") or b.get("cdp_timeout_s")
     try:
-        return await _mcpm.manager.connect_all_google()
+        return await _mcpm.manager.connect_all_google(cdp_timeout_s=float(timeout) if timeout else None)
     except Exception as e:
         raise HTTPException(500, f"Error al conectar servicios Google: {e}") from e
 

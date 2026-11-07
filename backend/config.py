@@ -97,6 +97,7 @@ GOOGLE_LOGIN_URL = os.getenv(
 # FLOW_CDP_PORT para que Flow se enganche a este Chrome (sesión compartida).
 GOOGLE_LOGIN_CDP_PORT = int(os.getenv(
     "GOOGLE_LOGIN_CDP_PORT", str(FLOW_CDP_PORT)))
+MCP_CONNECT_ALL_CDP_TIMEOUT_S = float(os.getenv("MCP_CONNECT_ALL_CDP_TIMEOUT_S", "30.0"))
 # Binario Chrome explícito (vacío = autodetección: chrome/google-chrome/
 # chromium/edge/brave según plataforma).
 MCP_LOGIN_CHROME_BIN = os.getenv("MCP_LOGIN_CHROME_BIN", "").strip()
