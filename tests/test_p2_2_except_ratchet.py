@@ -17,7 +17,12 @@ import sys
 REPO = pathlib.Path(__file__).resolve().parents[1]
 BACKEND = REPO / "backend"
 
-BASELINE = 283  # 2026-11-06 — NO subir sin justificación en el commit
+# 2026-11-07: 283 → 286. +3 netos por R3/R4 del registro de producciones
+# (255aa48: +1 en _json_guarda — rollback atómico; 39b6bf9: +2 en
+# _post_create_init — best-effort documentado que nunca invalida la
+# creación del proyecto). El +1 del adaptador R5 (8567229) se eliminó
+# capturando excepciones tipadas (FlowMCPError/RuntimeError/OSError).
+BASELINE = 286  # NO subir sin justificación en el commit
 
 _PATRON = re.compile(r"^\s*except\s+Exception\b")
 

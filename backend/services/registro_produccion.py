@@ -450,7 +450,10 @@ def adaptador_crear_proyecto(nombre_flow: str, *, timeout: float = 30.0,
     try:
         raw = asyncio.run(fmc.new_project(timeout=timeout, name=enviar,
                                           name_prop=prop or "name"))
-    except Exception as exc:  # noqa: BLE001 — el fallo ES el dato (R1)
+    except (fmc.FlowMCPError, RuntimeError, OSError) as exc:
+        # FlowMCPError cubre las tipadas del cliente MCP (auth, timeout,
+        # respuesta); RuntimeError, el asyncio.run en un event loop; OSError,
+        # spawn/I/O del subproceso. Un bug de otro tipo SÍ explota: visible.
         logger.warning("adaptador_crear_proyecto: el MCP falló (%s): %s",
                        type(exc).__name__, exc)
         return {"flow_project_id": None, "nombre_observado": None,
