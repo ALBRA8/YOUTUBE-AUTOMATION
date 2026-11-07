@@ -14,6 +14,11 @@
 ## EN RESERVA (no tocar)
 - HANDS (control manual del PC): dormido.
 ## HECHO
+- Hermeticidad total (H1-H3): guardia de red en pytest (conftest) y en
+  baterías run_all (sitecustomize); test de producto con doble de prueba y
+  broll sin DNS real; higiene de secretos (prefijo PAT redactado + guardia
+  test_h2). Evidencia: pytest 536/0 (58.5 s, cero red) y run_all 2627 OK ·
+  0 fallos en 53/53 con internet disponible y bloqueado (2026-11-06).
 - Re-verificación independiente de la auditoría de 12 puntos (P0-1 a P2-5):
   11 confirmados con evidencia; P2-3 tenía duplicados reales de operation id
   y test en falso → corregidos (OpenAPI a 0 warnings, 1a72157). Suites

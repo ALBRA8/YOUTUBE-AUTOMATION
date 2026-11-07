@@ -48,3 +48,9 @@ abajo en "Última sesión".
   2627 OK · 0 fallos en 53/53 baterías (incl. 20/24/51, colgadas solo por el
   patrón de sesión del sandbox, no por código) — detalle: CONTEXTO YOUTUBE/
   08_SESSIONS/SES-2026-11-06-04_REVERIFICACION_INDEPENDIENTE.md.
+- 2026-11-06 · LLM Z.ai/GLM · hermeticidad total (H1-H3): pytest 536/0 en
+  58.5 s con guardia de red en conftest (cero DNS/internet, antes 3:06 con
+  red) y run_all 2627 OK · 0 fallos en 53/53 baterías bajo guardia
+  sitecustomize (internet DISPONIBLE y bloqueado, verificado con curl).
+  H2: prefijo de PAT redactado de las notas + guardia test_h2; push por el
+  dueño — detalle: CONTEXTO YOUTUBE/08_SESSIONS/SES-2026-11-06-05_HERMETICIDAD.md.
