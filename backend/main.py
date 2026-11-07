@@ -40,6 +40,7 @@ from services import (general_agent as agent_svc,  # INT-028: cerebro único (ex
                       url_mode, whisper_service, youtube_publish)
 from services import avatar_schema
 from routers import niches as niches_router
+from routers import registro as registro_router
 from services.themes import STYLES, get_style
 
 logging.basicConfig(level=logging.INFO,
@@ -83,6 +84,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="YT Automation v2.0", version=config.APP_VERSION, lifespan=lifespan)
 # P3-1: Routers modulares (Fase 1: Nichos)
 app.include_router(niches_router.router)
+# PASO 3.2 minidramas: registro de producciones (SOLO LECTURA)
+app.include_router(registro_router.router)
 
 # PHASE 1 · M10 — techo global anti bomba de descompresión (Pillow)
 security.harden_pil(config.LIMITS["MAX_IMAGE_PIXELS"])

@@ -265,6 +265,27 @@ def registrar_flow_proyecto(production_id: str, crear_proyecto: Callable,
             "nombre_observado": reg["flow_project_nombre_observado"]}
 
 
+# ── conexión con Flow (3.1) — APAGADA por defecto ────────────────────────
+def sincronizar_flow(production_id: str, crear_proyecto: Callable, *,
+                     nombres_soportados: str | None = None,
+                     sinc_activa: bool | None = None) -> dict:
+    """Gate 3.1: SOLO crea/vincula el proyecto de Flow si
+    config.FLOW_REGISTRO_SYNC está activa (APAGADA por defecto; el dueño
+    la activa en su máquina). Los tests pasan `sinc_activa` o monkeypatchean
+    config y SIEMPRE usan un doble en `crear_proyecto` — nunca Flow real.
+
+    El nombre se pasa a Flow SOLO si la sonda INT-093 marcó SOPORTADO;
+    si no, `registrar_flow_proyecto` guarda el nombre solo en local y
+    anota la limitación."""
+    activa = (bool(getattr(config, "FLOW_REGISTRO_SYNC", False))
+              if sinc_activa is None else bool(sinc_activa))
+    if not activa:
+        return {"estado": "APAGADO",
+                "detalle": "config.FLOW_REGISTRO_SYNC=0: no se crea nada"}
+    return registrar_flow_proyecto(production_id, crear_proyecto,
+                                   nombres_soportados=nombres_soportados)
+
+
 # ── listado (endpoint GET /api/registro, 3.2) ────────────────────────────
 def listar_producciones() -> list[dict]:
     """Lista todas las producciones registradas (solo lectura): id, nicho,
