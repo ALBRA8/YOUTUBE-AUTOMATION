@@ -267,5 +267,47 @@ def test_u4_sintaxis_js():
     _node_check()
 
 
+# ══ U5 · Run Full Pipeline deshabilitado con motivo exacto ═══════════════
+
+def test_u5_gate_por_u1_con_motivo():
+    """pipeGateApply: mientras U1 diga listo_para_pipeline=false, el botón
+    se deshabilita y el motivo EXACTO (pieza rota + detalle) queda
+    visible; sin datos de U1 no bloquea por adivinanza."""
+    gate = _entre(MCP_JS, "function pipeGateApply(", "function pipeApply(")
+    assert "eco.listo_para_pipeline === false" in gate
+    assert "btn.disabled = true" in gate
+    assert "rota[0] + ': ' + rota[1].detalle" in gate
+    assert "pipe-block-reason" in gate
+    assert "eco.listo_para_pipeline" not in gate.split("btn.disabled = corriendo")[1]
+    # el elemento del motivo vive en la tarjeta del pipeline (cuerpo, no Avanzado)
+    cuerpo = MCP_JS.split('<details class="mcp-adv" id="mcp-advanced">', 1)[0]
+    assert 'id="pipe-block-reason"' in cuerpo
+
+
+def test_u5_el_gate_manda_sobre_pipeapply():
+    """pipeApply delega la decisión final en pipeGateApply y cada refresco
+    del ecosistema (gsessRefresh) re-evalúa el gate."""
+    assert "pipeGateApply();" in MCP_JS
+    apply = _entre(MCP_JS, "function pipeApply(", "async function pipeRefresh(")
+    assert "pipeGateApply();" in apply
+    refresh = _entre(MCP_JS, "async function gsessRefresh(", "async function gsessOpenNotebooks(")
+    assert "pipeGateApply();" in refresh
+
+
+def test_u5_defensa_antes_del_clic():
+    """pipeRun NO lanza si U1 dice que no está listo: avisa con el
+    siguiente paso y vuelve a aplicar el gate (antes fallaba después)."""
+    run = _entre(MCP_JS, "async function pipeRun(", "async function pipeRetry(")
+    orden_guard = run.index("S.eco.listo_para_pipeline === false")
+    orden_post = run.index("api('/pipeline/run'")
+    assert orden_guard < orden_post, "la guardia de U1 debe ir ANTES del POST"
+    assert "No listo: " in run
+    assert "pipeGateApply();" in run
+
+
+def test_u5_sintaxis_js():
+    _node_check()
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))

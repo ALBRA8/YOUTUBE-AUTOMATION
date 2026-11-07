@@ -86,6 +86,7 @@ function renderMCP() {
         <a class="btn ghost" id="pipe-dl-link" style="display:none" href="#" download>⬇️ Descargar MP4</a>
         <button class="btn ghost" onclick="pipeRefresh()">🔄 Actualizar</button>
       </div>
+      <p class="hintline" id="pipe-block-reason" style="display:none"></p>
       <div class="mcp-row" id="pipe-force-wrap" style="display:none">
         <label class="hintline"><input type="checkbox" id="pipe-force-ph"> forzar placeholders en escenas fallidas (clip de color con su narración — el testeo nunca se deadlocka)</label>
       </div>
@@ -388,6 +389,7 @@ async function gsessRefresh(silent) {
     ]);
     S.eco = eco;
     gsessApply(eco, sso);
+    pipeGateApply();      // U5 · habilita/deshabilita Run con motivo
     return eco;
   } catch (e) { if (!silent) toast('Estado ecosistema: ' + e.message, 'err'); return null; }
 }
@@ -685,6 +687,32 @@ function pipeStepsHTML(run) {
   return h;
 }
 
+/* U5 · «Run Full Pipeline» deshabilitado mientras U1 diga
+   listo_para_pipeline=false, mostrando el motivo EXACTO (pieza rota +
+   detalle). Sin datos de U1 NO bloquea por adivinanza; si la corrida
+   está activa, sigue bloqueado como siempre. */
+function pipeGateApply() {
+  const btn = $('#pipe-run-btn');
+  const motivo = $('#pipe-block-reason');
+  if (!btn) return;
+  const corriendo = pipeActive(S.pipeRun);
+  const eco = S.eco || {};
+  if (eco.listo_para_pipeline === false) {
+    btn.disabled = true;
+    btn.title = 'Pendiente: ' + (eco.siguiente_paso || 'ecosistema incompleto');
+    if (motivo) {
+      const rota = Object.entries(eco.piezas || {}).find(([, p]) => p && !p.ok);
+      motivo.textContent = '⛔ Run Full Pipeline bloqueado — ' +
+        (rota ? rota[0] + ': ' + rota[1].detalle
+              : (eco.siguiente_paso || 'ecosistema incompleto'));
+      motivo.style.display = '';
+    }
+    return;
+  }
+  if (motivo) { motivo.style.display = 'none'; motivo.textContent = ''; }
+  btn.disabled = corriendo;   // sin bloqueo de U1: como siempre
+}
+
 function pipeApply(run) {
   const badge = $('#pipe-stage-badge');
   if (badge) badge.innerHTML = pipeBadgeHTML(run);
@@ -707,6 +735,7 @@ function pipeApply(run) {
   if (rbtn) rbtn.style.display = (run && run.failed_scene_ids && run.failed_scene_ids.length && !pipeActive(run)) ? '' : 'none';
   const rbtn2 = $('#pipe-run-btn');
   if (rbtn2) rbtn2.disabled = pipeActive(run);
+  pipeGateApply();          // U5 · la última palabra la tiene U1
   // INT-024 · botón de render final + flag de placeholders + descarga MP4
   const render = (run && run.render) || {};
   const rbtnR = $('#pipe-render-btn');
@@ -757,6 +786,13 @@ async function pipeRun() {
   const body = { idea: idea.trim(), format: ($('#pipe-fmt') || {}).value || 'short' };
   if (nid) body.notebook_id = nid;
   if (!body.idea) { toast('Escribe la idea del video primero', 'err'); return; }
+  // U5 · defensa en profundidad: si U1 dice que NO está listo, no se
+  // lanza (antes fallaba después del clic).
+  if (S.eco && S.eco.listo_para_pipeline === false) {
+    toast('No listo: ' + (S.eco.siguiente_paso || 'ecosistema incompleto'), 'err');
+    pipeGateApply();
+    return;
+  }
   if (!nid) toast('notebook_id vacío: [0/3] intentará auto-descubrirlo (list tool); si no hay, aborta con PRE_FLIGHT_MISSING_NOTEBOOK_ID');
   try {
     const js = await api('/pipeline/run', { method: 'POST', body });

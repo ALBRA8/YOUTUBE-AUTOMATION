@@ -48,7 +48,9 @@ MODULES = ("app-core.js", "app-projects.js", "app-mcp.js", "app-wizard.js", "app
 # U4 (2026-11-07): 189 → 192 — entran ecoNichoNidHTML (selector nicho+cuaderno
 # en la tarjeta principal), mcpNichosCargar y mcpNichoChange (memoria por
 # nicho en el registro Q4); sale el bloque nblm de mcpSvcHTML.
-N_FUNCS_REAL = 192
+# U5 (2026-11-07): 192 → 193 — entra pipeGateApply (Run Full Pipeline
+# deshabilitado con motivo exacto mientras U1 diga listo_para_pipeline=false).
+N_FUNCS_REAL = 193
 
 # funciones estrella por módulo (cohesión; suficientes para cazar desvíos)
 STAR = {
