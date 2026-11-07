@@ -139,6 +139,40 @@ def test_endpoint_es_solo_lectura(aislado):
     assert (rp.registro_path("P1")).read_text(encoding="utf-8") == antes
 
 
+def test_creacion_proyecto_conecta_registro_local_sin_duplicar(aislado):
+    """R4 · Al crear un proyecto en main.py se crea registro local. Si ya existe, no se recrea."""
+    import main as _main
+
+    async def crear_p():
+        transport = httpx.ASGITransport(app=_main.app)
+        async with httpx.AsyncClient(transport=transport,
+                                     base_url="http://testserver") as c:
+            return await c.post("/api/projects", json={
+                "title": "Aventura Frutal",
+                "mode": "idea",
+                "nicho": "frutinovelas"
+            })
+
+    resp = asyncio.run(crear_p())
+    assert resp.status_code == 200
+    pdata = resp.json()
+    pid = pdata["id"]
+
+    reg = rp.leer(pid)
+    assert reg is not None
+    assert reg["production_id"] == pid
+    assert reg["nicho_id"] == "frutinovelas"
+    assert reg["titulo_historia"] == "Aventura Frutal"
+    assert reg["numero_serie"] == 1
+    assert reg["nombre_flow"] == "FRUTINOVELAS · S001 · Aventura Frutal"
+
+    # Llamar _post_create_init de nuevo con el mismo proyecto no lo recrea
+    _main._post_create_init(pdata, None)
+    reg2 = rp.leer(pid)
+    assert reg2["numero_serie"] == 1
+    assert reg2["actualizado_en"] == reg["actualizado_en"]
+
+
 def test_endpoint_vacio_sin_registros(aislado):
     import main as _main
 

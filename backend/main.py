@@ -1066,6 +1066,26 @@ def _post_create_init(project: dict, tpl: dict | None,
     except Exception:  # noqa: BLE001
         log.warning("post-create init falló para %s (no fatal)",
                     project.get("id"), exc_info=True)
+    # R4 · Conexión REAL del registro local (siempre activa, sin red)
+    try:
+        from services import registro_produccion
+        pid = project.get("id")
+        if pid and not registro_produccion.leer(pid):
+            nicho = project.get("niche") or (tpl.get("id") if tpl else None) or "general"
+            titulo = project.get("title") or "Sin título"
+            reg = registro_produccion.crear(
+                production_id=pid,
+                nicho_id=nicho,
+                titulo_historia=titulo,
+            )
+            try:
+                registro_produccion.propaga_notebook(pid)
+            except Exception:
+                pass
+            project["registro"] = reg
+    except Exception:  # noqa: BLE001
+        log.warning("registro_produccion.crear falló para %s (no fatal)",
+                    project.get("id"), exc_info=True)
     return project
 
 
@@ -2417,12 +2437,12 @@ async def agent_execute(body: dict):
         pmeta = {}
         if g.get("camara"):
             pmeta["camara"] = g["camara"]
-        return db.create_project(
+        return _post_create_init(db.create_project(
             title=(g.get("titulo") or f"Producción A2A ({requester})"),
             mode="production_json", style=g.get("estilo") or "auto",
             format=g.get("formato") or "short", voice=g.get("voz"),
             meta=pmeta, platforms=g.get("plataformas") or ["youtube"],
-            niche=g.get("nicho"))
+            niche=g.get("nicho")), None)
 
     try:
         rep = await prod_svc.ingest(
