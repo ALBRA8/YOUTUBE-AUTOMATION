@@ -218,6 +218,13 @@ BATERIAS = [
                                  # veredicto PASS/FAIL/NOT_DEMONSTRATED
                                  # honesto, MP4 con ffprobe local,
                                  # barrido de secretos con redacción
+    # ── U-SERIES · PANEL MCP HONESTO (U1-U7) — herméticas con dobles ──
+    "test_u1_mcp_resumen.py",    # U1: GET /api/mcp/resumen — agregador solo
+                                 # lectura del ecosistema Google; todo_
+                                 # conectado SOLO con las 4 piezas ok (14)
+    "test_u_panel_ecosistema.py", # U2-U5: tarjeta única con semáforo de U1,
+                                 # Conectar todo, bloque Avanzado, cuaderno
+                                 # por nicho y gate del Run Full Pipeline
 ]
 
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")

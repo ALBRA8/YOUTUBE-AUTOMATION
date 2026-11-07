@@ -39,9 +39,11 @@ import config  # noqa: E402
 OK, FAIL = 0, 0
 LOADER = "app.js"
 MODULES = ("app-core.js", "app-projects.js", "app-mcp.js", "app-wizard.js", "app-player.js")
-# P1-2: Conteo real = 189 funciones top-level verificadas entre los 5 módulos sin duplicados.
-# Se sustituye la fragilidad del número mágico por comprobaciones estructurales robustas.
-N_FUNCS_REAL = 189
+# P1-2: Conteo real = 188 funciones top-level verificadas entre los 5 módulos sin duplicados.
+# U2 (2026-11-07): 189 → 188 — salen gsessDisconnectedHTML/gsessWaitingHTML/
+# gsessConnectedHTML (los 3 estados pintados a mano del Hub, sustituidos por el
+# semáforo REAL de U1); entra ecoRowHTML + gsessConnectAll (Conectar todo).
+N_FUNCS_REAL = 188
 
 # funciones estrella por módulo (cohesión; suficientes para cazar desvíos)
 STAR = {
@@ -193,8 +195,8 @@ def test_boot_orden_y_auth():
 
 # ── 6 · contrato de versión (cadena INT-080) ─────────────────────────────
 def test_version():
-    check("APP_VERSION 2.46.0 (INT-080: bump por cambio funcional)",
-          config.APP_VERSION == "2.46.0")
+    check("APP_VERSION 2.47.0 (INT-080: bump por cambio funcional — U1 resumen)",
+          config.APP_VERSION == "2.47.0")
 
 
 if __name__ == "__main__":  # modo script directo

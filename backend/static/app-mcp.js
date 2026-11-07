@@ -136,12 +136,20 @@ const G_LOGO_SVG = '<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden=
 let gsessPollTimer = null;
 
 function mcpGsessHTML() {
+  /* U2 · LA tarjeta principal: semáforo REAL por fila (fuente: U1
+     /api/mcp/resumen) + botón primario «Conectar todo». */
   return `<div class="mcp-svc ghub" id="gsess-card">
     <div class="mcp-svc-head">
       <h3>${G_LOGO_SVG}<span>Ecosistema Google</span></h3>
-      <span id="gsess-badge"><span class="mcp-badge mcp-b-gray">SIN VERIFICAR</span></span>
+      <span id="gsess-badge"><span class="mcp-badge mcp-b-gray">COMPROBANDO…</span></span>
     </div>
-    <div id="gsess-body"><p class="hintline">Comprobando ecosistema…</p></div>
+    <div id="gsess-profile"></div>
+    <div id="gsess-rows"><p class="hintline">Comprobando el estado real del ecosistema…</p></div>
+    <div class="mcp-row btns" style="margin-top:10px">
+      <button class="btn" id="gsess-connect-all" onclick="gsessConnectAll()">🚀 Conectar todo</button>
+      <button class="btn ghost" onclick="gsessRefresh()">🔄 Refrescar estado</button>
+    </div>
+    <p class="hintline" id="gsess-connectall-nota" style="display:none"></p>
   </div>`;
 }
 
@@ -172,76 +180,40 @@ function gsessNameFromEmail(email) {
 
 function gsessSvcState(s) { return s && s.state === 'connected'; }
 
-function gsessDisconnectedHTML(js) {
-  const storage = (js && js.notebooklm_storage) || {};
-  const timeout = js && js.sso_phase === 'timeout';
-  const extra = storage.exists
-    ? `Tienes un storage_state capturado (${Math.round((storage.size_bytes || 0) / 1024)} KB) — si tu sesión sigue viva, la conexión será directa.`
-    : 'El backend detecta la sesión cada 2 s y conecta Google Flow + NotebookLM automáticamente.';
-  return `<div class="ghub-disconnected">
-    <p class="ghub-sub">Inicia sesión <b>una sola vez</b> para conectar automáticamente
-      <b>Google Flow</b> (VideoFX/ImageFX), <b>NotebookLM</b> (Investigación y Studio)
-      y tu <b>Google Drive</b>.</p>
-    <button class="gbtn" id="gsess-gbtn" onclick="gsessStart()">
-      ${G_LOGO_SVG}<span>Continuar con Google</span>
-    </button>
-    <p class="hintline" style="margin-top:10px">${extra}</p>
-    ${timeout ? '<p class="hintline">⌛ Tiempo de espera agotado sin login — pulsa el botón cuando quieras reintentar.</p>' : ''}
-    <div class="ghub-foot">
-      <button class="btn ghost" onclick="gsessOpenWindow()">🪟 Abrir ventana de Chrome</button>
-      <button class="btn ghost" onclick="gsessRepairProfile()">🔧 Reparar perfil</button>
-      <button class="btn ghost" onclick="gsessRefresh()">🔄 Refrescar estado</button>
-    </div>
-  </div>`;
+/* U2 · fila del semáforo REAL: cada fila toma su estado de U1
+   (/api/mcp/resumen) — nada de deducciones locales que puedan mentir. */
+function ecoRowHTML(etiqueta, pieza) {
+  const p = pieza || { ok: false, detalle: 'sin dato', accion_siguiente: '' };
+  return `<div class="eco-row ${p.ok ? 'eco-ok' : 'eco-ko'}">` +
+    `<div class="eco-row-head"><span class="eco-dot">${p.ok ? '🟢' : '🔴'}</span>` +
+    `<b>${esc(etiqueta)}</b><span class="hintline">${esc(p.detalle || '')}</span></div>` +
+    (p.accion_siguiente ? `<p class="eco-accion">→ ${esc(p.accion_siguiente)}</p>` : '') +
+    `</div>`;
 }
 
-function gsessWaitingHTML(js) {
-  const poll = (js && js.poll_s) || 2;
-  return `<div class="ghub-waiting">
-    <div class="ghub-pulse"></div>
-    <p><b>Esperando tu inicio de sesión…</b></p>
-    <p class="hintline">Chrome se abrió en el <b>selector de cuentas de Google</b> con Flow y NotebookLM.
-      Elige tu cuenta una vez: detectamos la cookie de sesión cada ${poll} s y conectamos
-      Flow + NotebookLM automáticamente.</p>
-    <p class="hintline">Puedes cerrar esta pestaña sin problema — la vigilancia sigue en el backend.</p>
-  </div>`;
-}
-
-function gsessConnectedHTML(js) {
-  const acc = (js && js.account) || {};
-  const email = acc.email || 'Cuenta Google';
-  const name = acc.name || gsessNameFromEmail(email);
-  const ini = (acc.initial || name[0] || 'G').toUpperCase();
-  const st = (js && js.services) || {};
-  const pill = (ok, label, extra) =>
-    `<span class="ghub-pill ${ok ? 'on' : 'off'}"><span class="ghub-dot"></span> ${label}${extra ? ' · ' + esc(extra) : ''}</span>`;
-  const flowExtra = js.cdp_port ? 'CDP ' + js.cdp_port : '';
-  const nbExtra = st.notebooklm && st.notebooklm.tools ? st.notebooklm.tools + ' tools' : '';
-  return `<div class="ghub-connected">
-    <div class="ghub-profile">
-      <div class="ghub-avatar">${esc(ini)}</div>
-      <div class="ghub-id">
-        <div class="ghub-name">${esc(name)}</div>
-        <div class="ghub-email">${esc(email)}</div>
-      </div>
-      <span class="mcp-badge mcp-b-green">🟢 Ecosistema Google Conectado</span>
-    </div>
-    <div class="ghub-pills">
-      ${pill(gsessSvcState(st.flow), '🟢 Google Flow', flowExtra)}
-      ${pill(gsessSvcState(st.notebooklm), '⚪ NotebookLM MCP (Opcional)', nbExtra || (gsessSvcState(st.notebooklm) ? '' : 'desconectado'))}
-      ${pill(st.workspace && st.workspace.state === 'connected', '🟢 Google Workspace & Gemini', 'misma sesión')}
-    </div>
-    <div class="ghub-actions">
-      <button class="btn" onclick="window.open('https://flow.google.com', '_blank')">🌐 Abrir Google Flow</button>
-      <button class="btn ghost" onclick="gsessOpenNotebooks()">📂 Ver mis Notebooks</button>
-      <button class="btn ghost" onclick="gsessOpenChrome()">🌐 Abrir Chrome</button>
-      <button class="btn ghost" onclick="gsessLogout()">🚪 Cambiar cuenta / Desconectar</button>
-    </div>
-    <div class="ghub-foot">
-      <button class="btn ghost" onclick="gsessRepairProfile()">🔧 Reparar perfil</button>
-      <button class="btn ghost" onclick="gsessRefresh()">🔄 Refrescar</button>
-    </div>
-  </div>`;
+/* U2 · botón primario: 1 clic → POST /api/mcp/connect-all-google (ya
+   existía). Si Chrome no está arriba (según U1), el dueño debe INICIAR
+   SESIÓN en la ventana que se abre — se avisa antes y tras el clic. */
+async function gsessConnectAll() {
+  const btn = $('#gsess-connect-all');
+  const chromeOk = !!(S.eco && S.eco.piezas && S.eco.piezas.chrome &&
+                      S.eco.piezas.chrome.ok);
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Conectando…'; }
+  if (!chromeOk) toast('Se va a abrir una ventana de Chrome: INICIA SESIÓN con tu cuenta de Google en la ventana que se abre.', 'info');
+  try {
+    const res = await api('/mcp/connect-all-google', { method: 'POST', body: {} });
+    const acts = ((res && res.actions) || []).join(' · ');
+    const nota = $('#gsess-connectall-nota');
+    if (nota) {
+      if (!chromeOk) { nota.style.display = ''; nota.textContent = 'Chrome estaba apagado: inicia sesión en la ventana que se abrió y pulsa «Refrescar estado».'; }
+      else nota.style.display = 'none';
+    }
+    toast(chromeOk ? ('Conectar todo: ' + (acts || 'listo')) :
+      'Chrome se abrió: si te pide login, INICIA SESIÓN en esa ventana y pulsa «Refrescar estado».', chromeOk ? 'ok' : 'info');
+  } catch (e) { toast('Conectar todo: ' + e.message, 'err'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '🚀 Conectar todo'; } }
+  await gsessRefresh(true);
+  await mcpRefresh(true);
 }
 
 async function gsessRepairProfile() {
@@ -273,33 +245,50 @@ async function gsessOpenWindow() {
   } catch (e) { toast('Abrir ventana: ' + e.message, 'err'); }
 }
 
-function gsessApply(js) {
-  const badge = $('#gsess-badge'), body = $('#gsess-body');
-  if (!body) return;
-  const phase = (js && js.sso_phase) || 'idle';
-  const auth = !!(js && js.session_auth);
-  const st = (js && js.services) || {};
-  const connected = gsessSvcState(st.flow) || gsessSvcState(st.notebooklm) || (js && js.sso_phase === 'connected') || !!(js && js.account);
+/* U2 · el badge verde del ecosistema SOLO aparece si U1 confirma
+   todo_conectado (TODAS las piezas ok). Con cualquier pieza caída se
+   pinta INCOMPLETO con el contador real — fin del estado mentiroso. */
+function gsessApply(eco, sso) {
+  const badge = $('#gsess-badge'), rows = $('#gsess-rows');
+  if (!rows) return;
+  eco = eco || {}; sso = sso || {};
+  const piezas = eco.piezas || {};
+  const nOk = Object.values(piezas).filter(p => p && p.ok).length;
   if (badge) {
-    if (connected) badge.innerHTML = '<span class="mcp-badge mcp-b-green">ECOSISTEMA CONECTADO</span>';
-    else if (phase === 'watching') badge.innerHTML = '<span class="mcp-badge mcp-b-yellow">ESPERANDO LOGIN…</span>';
-    else if (phase === 'connecting') badge.innerHTML = '<span class="mcp-badge mcp-b-yellow">CONECTANDO…</span>';
-    else if (auth) badge.innerHTML = '<span class="mcp-badge mcp-b-yellow">SESIÓN SIN MCP</span>';
-    else badge.innerHTML = '<span class="mcp-badge mcp-b-gray">DESCONECTADO</span>';
+    badge.innerHTML = eco.todo_conectado
+      ? '<span class="mcp-badge mcp-b-green">ECOSISTEMA CONECTADO</span>'
+      : `<span class="mcp-badge mcp-b-gray">ECOSISTEMA INCOMPLETO · ${nOk}/4</span>`;
   }
-  if (connected) {
-    body.innerHTML = gsessConnectedHTML(js);
-    gsessStopPoll();
-    mcpRefresh(true);          // pills globales del header en verde
-    return;
+  const esperando = (sso.sso_phase === 'watching' || sso.sso_phase === 'connecting')
+    ? `<p class="hintline">⏳ Esperando tu inicio de sesión en la ventana de Chrome — conectamos al ver la sesión (vigilancia cada ${(sso.poll_s || 2)} s)…</p>`
+    : '';
+  const cuaderno = piezas.cuaderno || {};
+  rows.innerHTML = esperando +
+    ecoRowHTML('Chrome (CDP 9333)', piezas.chrome) +
+    ecoRowHTML('Google Flow', piezas.flow) +
+    ecoRowHTML('NotebookLM', piezas.notebooklm) +
+    `<p class="hintline eco-cuaderno">${cuaderno.ok ? '🟢' : '🔴'} Cuaderno: ${esc(cuaderno.detalle || 'sin dato')}` +
+    (cuaderno.accion_siguiente ? ` — ${esc(cuaderno.accion_siguiente)}` : '') + `</p>`;
+  const prof = $('#gsess-profile');
+  if (prof) {
+    const acc = sso.account || {};
+    if (acc.email) {
+      prof.innerHTML = `<div class="ghub-profile ghub-mini">
+        <div class="ghub-id">
+          <div class="ghub-name">${esc(acc.name || gsessNameFromEmail(acc.email))}</div>
+          <div class="ghub-email">${esc(acc.email)}</div>
+        </div>
+        <div class="ghub-actions">
+          <button class="btn ghost" onclick="gsessOpenChrome()">🌐 Abrir Chrome</button>
+          <button class="btn ghost" onclick="gsessLogout()">🚪 Cambiar cuenta</button>
+        </div>
+      </div>`;
+    } else if (!esperando) {
+      prof.innerHTML = `<button class="gbtn" id="gsess-gbtn" onclick="gsessStart()">${G_LOGO_SVG}<span>Continuar con Google</span></button>`;
+    } else prof.innerHTML = '';
   }
-  if (phase === 'watching' || phase === 'connecting') {
-    body.innerHTML = gsessWaitingHTML(js);
-    gsessStartPoll();
-    return;
-  }
-  body.innerHTML = gsessDisconnectedHTML(js);
-  gsessStopPoll();
+  if (sso.sso_phase === 'watching' || sso.sso_phase === 'connecting') gsessStartPoll();
+  else gsessStopPoll();
 }
 
 /* Polling del Hub: 2 s mientras el backend vigila el login; sin poll en
@@ -315,11 +304,18 @@ function gsessStopPoll() {
   if (gsessPollTimer) { clearInterval(gsessPollTimer); gsessPollTimer = null; }
 }
 
+/* U2 · fuente de verdad = U1: el semáforo del ecosistema sale SIEMPRE
+   de /api/mcp/resumen (agregador solo lectura); el estado SSO aporta
+   solo el perfil (cuenta) y la fase de vigilancia del login. */
 async function gsessRefresh(silent) {
   try {
-    const js = await api('/mcp/google-sso/status');
-    gsessApply(js);
-    return js;
+    const [eco, sso] = await Promise.all([
+      api('/mcp/resumen'),
+      api('/mcp/google-sso/status').catch(() => ({})),
+    ]);
+    S.eco = eco;
+    gsessApply(eco, sso);
+    return eco;
   } catch (e) { if (!silent) toast('Estado ecosistema: ' + e.message, 'err'); return null; }
 }
 
