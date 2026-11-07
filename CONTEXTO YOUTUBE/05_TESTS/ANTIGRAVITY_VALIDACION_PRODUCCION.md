@@ -16,7 +16,7 @@
 ## 0. Prerrequisitos (5 min)
 
 - [ ] Repo actualizado: `git pull origin main` → HEAD ≥ `8a5ec67`.
-- [ ] PAT antiguo (`ghp_IoIr...`) **revocado** en GitHub → Settings → Developer settings → Tokens. El nuevo token NO se guarda en ficheros del repo.
+- [ ] PAT antiguo (prefijo REDACTADO por higiene de secretos, H2) **revocado** en GitHub → Settings → Developer settings → Tokens. NUNCA se pide, guarda ni escribe un token en ficheros del repo, notas ni logs (H2). El push lo hace el dueño con su credential helper.
 - [ ] `.env` del backend con claves reales (Gemini/TTS, MASTER_API_KEY). Referencia de variables: `backend/.env.example`.
 - [ ] Chrome cerrado por completo antes de los pasos que lo lanzan (los lanzadores capturan sesión con CDP; un Chrome ya abierto sin puerto de debug los confunde).
 
