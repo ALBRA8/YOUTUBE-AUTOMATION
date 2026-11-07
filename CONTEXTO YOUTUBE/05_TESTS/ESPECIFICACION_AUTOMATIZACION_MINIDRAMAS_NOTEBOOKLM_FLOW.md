@@ -227,6 +227,16 @@ Cada clip debe tener una ficha estructurada, como mínimo:
 7. Incluir referencia real de personaje/imagen cuando la interfaz lo permita; si no se puede adjuntar, detener o marcar como excepción aprobada, nunca fingir consistencia.
 8. No incluir instrucciones incompatibles, múltiples acciones simultáneas imposibles o diálogos que excedan el tiempo de habla.
 
+**Fuente de verdad del diálogo (Q5):** el conteo de palabras habladas y la
+detección de diálogo sin comillas se hacen SOLO sobre el campo
+estructurado `dialogue` (`{personaje, texto}`) de la ficha del clip —
+sobre el párrafo libre del prompt el validador solo emite AVISOS
+(`DIALOGO_SIN_COMILLAS`, `HABLA_SIN_COMILLAS_POSIBLE` cuando el texto
+tras «:» supera el límite, sea cual sea el verbo; es sospecha, no
+veredicto). **Recomendación:** hacer `dialogue` OBLIGATORIO en la
+próxima versión del contrato (Production JSON / ficha Fase E) para que
+el límite de 12 palabras sea verificable sin heurística.
+
 **Dependencia declarada — Start Frame (GAP-002):** la regla «estado final a
 9.9 s que enlaza con el siguiente clip» asume poder fijar el ÚLTIMO frame
 de un clip como frame inicial del siguiente (Start Frame de Flow; GAP-002
