@@ -26,6 +26,13 @@ FLOW_MCP_ENABLED = os.getenv("FLOW_MCP_ENABLED", "0").strip().lower() in ("1", "
 # PASO 3.1 minidramas: crear/vincular el proyecto de Flow del registro
 # (APAGADO por defecto — solo el dueño lo activa en su máquina).
 FLOW_REGISTRO_SYNC = os.getenv("FLOW_REGISTRO_SYNC", "0").strip().lower() in ("1", "true", "yes")
+# R5 · Informe guardado de la sonda INT-093 (SOLO LECTURA para el registro):
+# lo genera el dueño con  python tools/sonda_capacidades_nombres.py --salida
+# sonda_nombres.json  en la raíz del repo. Si no existe, el veredicto es
+# NOT_DEMONSTRATED y el nombre del proyecto NO se envía a Flow.
+SONDA_NOMBRES_JSON = Path(os.getenv(
+    "SONDA_NOMBRES_JSON",
+    str(BASE_DIR.parent / "sonda_nombres.json")))
 FLOW_MCP_VIDEO_ENABLED = os.getenv("FLOW_MCP_VIDEO_ENABLED", "0").strip().lower() in ("1", "true", "yes")
 FLOW_MCP_DIR = Path(os.getenv("FLOW_MCP_DIR", str(BASE_DIR.parent / "tools" / "GoogleFlowMCP"))).resolve()
 FLOW_MCP_MODEL = os.getenv("FLOW_MCP_MODEL", "2").strip()

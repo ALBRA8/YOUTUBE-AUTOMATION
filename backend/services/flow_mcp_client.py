@@ -451,7 +451,18 @@ async def list_assets(timeout: float = 30.0) -> list[str]:
     return assets
 
 
-async def new_project(timeout: float = 30.0) -> str:
-    """Crea un nuevo proyecto en Google Flow y devuelve su identificador."""
-    raw_text = await call_tool("flow_new_project", {}, timeout=timeout)
+async def new_project(timeout: float = 30.0, name: str | None = None,
+                      name_prop: str = "name") -> str:
+    """Crea un nuevo proyecto en Google Flow y devuelve su identificador.
+
+    `name` SOLO se envía si la sonda INT-093 marcó SOPORTADO que
+    flow_new_project acepta nombre en su esquema (ver
+    services/registro_produccion.adaptador_crear_proyecto y
+    services/registro_produccion.leer_sonda); `name_prop` es la propiedad
+    EXACTA que expone el esquema real del MCP según ese informe ('name'
+    por defecto). Sin nombre, arguments queda vacío ({})."""
+    arguments: dict[str, Any] = {}
+    if name:
+        arguments[name_prop] = name.strip()
+    raw_text = await call_tool("flow_new_project", arguments, timeout=timeout)
     return raw_text.strip()

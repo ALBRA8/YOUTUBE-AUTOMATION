@@ -35,6 +35,7 @@ tiempo de llamada (respetan el aislamiento de tests/conftest.py).
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -372,6 +373,116 @@ def sincronizar_flow(production_id: str, crear_proyecto: Callable, *,
                 "detalle": "config.FLOW_REGISTRO_SYNC=0: no se crea nada"}
     return registrar_flow_proyecto(production_id, crear_proyecto,
                                    nombres_soportados=nombres_soportados)
+
+
+# ── adaptador REAL con el MCP de Flow (R5) — detrás de FLOW_REGISTRO_SYNC ─
+ARCHIVO_SONDA = "sonda_nombres.json"
+_RE_PROP_NOMBRE = re.compile(r"flow_new_project acepta '([A-Za-z_]+)'")
+
+
+def _ruta_sonda_defecto() -> Path:
+    """Informe de la sonda INT-093 que el dueño guarda en la raíz del repo
+    (tools/sonda_capacidades_nombres.py --salida sonda_nombres.json);
+    configurable con config.SONDA_NOMBRES_JSON."""
+    return Path(getattr(config, "SONDA_NOMBRES_JSON",
+                        Path(config.DATA_DIR).parent / ARCHIVO_SONDA))
+
+
+def leer_sonda(ruta: Path | None = None) -> dict:
+    """Lee el informe guardado de la sonda INT-093 y responde a q1
+    (¿flow_new_project acepta nombre?) con {"veredicto", "prop"}:
+
+    - "veredicto": SOPORTADO | NO_SOPORTADO | NOT_DEMONSTRATED (tal cual
+      lo dejó la sonda; JAMÁS se inventa o se amplía aquí).
+    - "prop": la propiedad exacta del esquema (p. ej. 'name') SOLO si el
+      detalle marca que flow_new_project la acepta; None si el soporte es
+      solo vía tool de renombrar (esa vía no se usa en la creación).
+
+    Sin informe, ilegible o sin la pregunta → NOT_DEMONSTRATED (honesto:
+    sin capacidad demostrada, el nombre NO viaja a Flow)."""
+    ruta = Path(ruta) if ruta else _ruta_sonda_defecto()
+    out: dict = {"veredicto": "NOT_DEMONSTRATED", "prop": None}
+    try:
+        informe = json.loads(ruta.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.warning("sonda INT-093 ilegible en %s (%s): NOT_DEMONSTRATED",
+                       ruta, type(exc).__name__)
+        return out
+    if not isinstance(informe, dict):
+        return out
+    preguntas = ((informe.get("servicios") or {}).get("google-flow") or {}
+                 ).get("preguntas") or []
+    for p in preguntas:
+        if not isinstance(p, dict) or p.get("id") != "q1_flow_proyecto_nombre":
+            continue
+        veredicto = str(p.get("veredicto") or "").strip()
+        out["veredicto"] = veredicto or "NOT_DEMONSTRATED"
+        if veredicto == "SOPORTADO":
+            m = _RE_PROP_NOMBRE.search(str(p.get("detalle") or ""))
+            out["prop"] = m.group(1) if m else None
+        break
+    return out
+
+
+def adaptador_crear_proyecto(nombre_flow: str, *, timeout: float = 30.0,
+                             ruta_sonda: Path | None = None) -> dict:
+    """R5 · Adaptador real para registrar_flow_proyecto: crea el proyecto
+    vía flow_mcp_client.new_project y devuelve {flow_project_id,
+    nombre_observado} en el formato que registrar_flow_proyecto espera.
+
+    El nombre SOLO se pasa al MCP si leer_sonda() devolvió SOPORTADO con
+    propiedad de nombre en el esquema; con el informe ausente (o
+    NO_SOPORTADO) el proyecto se crea SIN nombre — el nombre vive solo en
+    el registro local y registrar_flow_proyecto anota la limitación.
+
+    Cualquier fallo del MCP (FlowMCPError, timeout, node ausente…) NO
+    explota: devuelve flow_project_id None → registrar_flow_proyecto lo
+    convierte en ERROR + limitación anotada (R1: sin estado falso).
+
+    SÍNCRONO (asyncio.run): llamar desde script/hilo propio, nunca dentro
+    de un event loop. En tests NO se llama aquí: se usa sincronizar_flow
+    con dobles o se monkeypatchea flow_mcp_client.new_project."""
+    sonda = leer_sonda(ruta_sonda)
+    prop = sonda["prop"] if sonda["veredicto"] == "SOPORTADO" else None
+    nombre = str(nombre_flow or "").strip() or None
+    enviar = nombre if (prop and nombre) else None
+    from services import flow_mcp_client as fmc
+    try:
+        raw = asyncio.run(fmc.new_project(timeout=timeout, name=enviar,
+                                          name_prop=prop or "name"))
+    except Exception as exc:  # noqa: BLE001 — el fallo ES el dato (R1)
+        logger.warning("adaptador_crear_proyecto: el MCP falló (%s): %s",
+                       type(exc).__name__, exc)
+        return {"flow_project_id": None, "nombre_observado": None,
+                "error": f"{type(exc).__name__}: {exc}"}
+    return {"flow_project_id": str(raw or "").strip() or None,
+            "nombre_observado": enviar}
+
+
+def sincronizar_flow_real(production_id: str, *,
+                          ruta_sonda: Path | None = None,
+                          sinc_activa: bool | None = None,
+                          timeout: float = 30.0) -> dict:
+    """R5 · Entrada REAL de la conexión con Flow: gate FLOW_REGISTRO_SYNC
+    (apagado por defecto) + adaptador MCP + veredicto de la sonda leído
+    del informe guardado (sonda_nombres.json; ausente → NOT_DEMONSTRATED
+    → sin nombre a Flow). Guarda flow_project_id en el registro; es
+    idempotente (2.5: nunca un segundo proyecto).
+
+    SOPORTADO solo vía renombrar (sin propiedad de nombre en
+    flow_new_project) se trata aquí como sin nombre en la creación: la
+    limitación queda anotada en el registro. En tests NUNCA se llama con
+    Flow real: se monkeypatchea flow_mcp_client.new_project (doble)."""
+    sonda = leer_sonda(ruta_sonda)
+    nombres = sonda["veredicto"]
+    if sonda["veredicto"] == "SOPORTADO" and not sonda["prop"]:
+        nombres = None   # renombrar ≠ nombre en la creación
+    return sincronizar_flow(
+        production_id,
+        lambda n: adaptador_crear_proyecto(n, timeout=timeout,
+                                           ruta_sonda=ruta_sonda),
+        nombres_soportados=nombres,
+        sinc_activa=sinc_activa)
 
 
 # ── listado (endpoint GET /api/registro, 3.2) ────────────────────────────
