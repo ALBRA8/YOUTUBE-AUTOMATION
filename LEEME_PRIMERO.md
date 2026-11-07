@@ -34,6 +34,12 @@ abajo en "Última sesión".
 
 ## Última sesión
 - Fecha / modelo / qué se hizo / qué quedó pendiente:
+- 2026-11-07 · LLM Google Deepmind · robustez «Conectar todo» y salvaguarda de
+  rutas verificadas (W1-W4): connect_all_google con relanzamiento forzado y
+  sondeo de 30 s (W1, 7ddcbf4), panel con resultado real y guía a Avanzado en
+  fallo de Chrome (W2, adc5f93), catálogo RUTAS_VERIFICADAS_POR_EL_DUENO.md,
+  regla de oro 8 y guardia estática test_w3 (W3, a8ff771); suite hermética
+  limpia, comportamiento con Chrome real NOT_DEMONSTRATED.
 - 2026-11-06 · LLM Google Deepmind · remediación P0-P3 completa (SSRF, CI,
   middlewares, DNS rebinding, tests, placeholders, codificación única,
   loudnorm, faststart, routers, lifespan) — detalle: CONTEXTO YOUTUBE/

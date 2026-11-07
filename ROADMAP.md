@@ -5,6 +5,11 @@
   intervención manual.
 - Start Frame de Flow (sujeto a captura real de red según checklist en PROJECT_STATE).
 ## SIGUIENTE
+- «Conectar todo» y rutas verificadas (W1-W4): connect_all_google robusto
+  con relanzamiento forzado, timeout 30s configurable y reporte de
+  chrome_up honesto (W1-W2); catálogo de rutas críticas comprobadas por el
+  dueño (W3). La verificación con Chrome y servidores MCP reales en la PC
+  del dueño queda como NOT_DEMONSTRATED (sandbox sin Chrome de escritorio).
 - Panel MCP (U1-U7): verificación VISUAL en navegador real por el dueño
   (semáforos, Avanzado, selector nicho/cuaderno, gate del Run) — en el
   sandbox no hay Chrome de escritorio: NOT_DEMONSTRATED. Decisión sobre
@@ -27,6 +32,18 @@
 ## EN RESERVA (no tocar)
 - HANDS (control manual del PC): dormido.
 ## HECHO
+- Robustez «Conectar todo» y salvaguarda de rutas verificadas (W1-W4, 2026-11-07):
+  W1 `connect_all_google` relanza con `force_window=True` cuando el puerto CDP
+  no responde o detecta un zombi sin ventana visible, sondea cada 0.5s hasta
+  timeout configurable (default 30s) y devuelve `chrome_up` y `chrome_error`
+  explícitos sin falsear con `ok` (7ddcbf4); W2 panel `gsessConnectAll` muestra
+  el resultado real de la respuesta, guiando al usuario hacia «Abrir ventana
+  de Chrome» en Avanzado si `chrome_up` es false (adc5f93); W3 catálogo de
+  rutas verificadas por el dueño en `CONTEXTO YOUTUBE/00_MASTER/RUTAS_VERIFICADAS_POR_EL_DUENO.md`,
+  regla de oro 8 en `LEEME_PRIMERO.md` y guardia estática `test_w3_rutas_verificadas.py`
+  que impide retirar o desvincular del panel o backend las rutas críticas comprobadas
+  en la máquina del dueño (a8ff771); W4 cierre y verificación (tests herméticos con
+  dobles; comportamiento con Chrome real en NOT_DEMONSTRATED).
 - Panel MCP honesto (U1-U7, 2026-11-07): U1 agregador SOLO LECTURA
   GET /api/mcp/resumen (semáforo por pieza chrome CDP/flow/notebooklm/
   cuaderno + listo_para_pipeline + siguiente_paso en español; todo_

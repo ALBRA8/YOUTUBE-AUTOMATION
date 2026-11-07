@@ -228,6 +228,8 @@ BATERIAS = [
     "test_u6_catalogo_contrato.py", # U6/S2: contrato del paquete REAL
                                  # notebooklm-mcp-server v0.1.15 + trinquete
                                  # de tools del código vs catálogo real
+    "test_w3_rutas_verificadas.py", # W3: guardia estática de rutas verificadas
+                                 # por el dueño en su máquina (4)
 ]
 
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")
