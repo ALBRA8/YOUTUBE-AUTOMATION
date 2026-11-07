@@ -244,3 +244,55 @@ def test_enqueue_project_flag_apagado_no_programa(aislado, monkeypatch):
     assert res["ok"] is True
     time.sleep(0.2)
     assert not llamado.is_set()
+
+
+# ── auditoría Q3 · vía inline del orquestador + veredicto literal ────────
+
+def test_via_orquestador_programa_el_disparo(aislado, monkeypatch):
+    """La fase Flow inline del orquestador (PASO 3.5 de start_pipeline)
+    dispara la sync por el MISMO punto de paso que enqueue_project."""
+    import pipeline.orchestrator as orch
+    llamadas = []
+    monkeypatch.setattr(flow_jobs, "_programar_disparo_sync",
+                        lambda pid: llamadas.append(pid))
+    orch._disparar_sync_registro("P-ORQ")
+    assert llamadas == ["P-ORQ"]
+
+
+def test_via_orquestador_jamas_lanza_si_el_import_falla(aislado, monkeypatch):
+    """Fire-and-forget en la vía del orquestador: si importar el disparador
+    falla, la fase Flow SIGUE (aviso en el log, sin excepción)."""
+    import builtins
+
+    import pipeline.orchestrator as orch
+    real_import = builtins.__import__
+
+    def rompe(name, *args, **kwargs):
+        if name == "services.flow_jobs":
+            raise ImportError("simulado por el test")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", rompe)
+    orch._disparar_sync_registro("P-ORQ-ROTO")   # no debe lanzar
+
+
+def test_limitacion_q7_incrusta_veredicto_literal(aislado, tmp_path,
+                                                  monkeypatch):
+    """La limitación escrita en registro.json contiene el veredicto LITERAL
+    de la sonda (grepeable): con NO_SOPORTADO explícito, el texto lo lleva
+    incrustado; el caso default mantiene LIMITACION_Q7 (NOT_DEMONSTRATED)."""
+    sonda = _sonda(tmp_path / "sonda_nombres.json", q7="NO_SOPORTADO")
+    rp.crear("P1", "frutinovelas", "La prueba del veredicto")
+    llamadas = []
+    monkeypatch.setattr(fmc, "new_project", _doble_new_project(llamadas))
+    monkeypatch.setattr(config, "FLOW_REGISTRO_SYNC", True)
+    res = rp.disparo_sync_flow("P1", ruta_sonda=sonda)
+    assert res["estado"] == "VINCULADO"
+    lims = rp.leer("P1")["limitaciones"]
+    assert any("sonda q7: NO_SOPORTADO != SOPORTADO" in l for l in lims)
+    assert rp.LIMITACION_Q7 not in lims          # default distinto del literal
+    # y el caso default (sin sonda) sigue siendo LIMITACION_Q7 tal cual
+    rp.crear("P2", "frutinovelas", "default")
+    rp.disparo_sync_flow("P2")
+    assert rp.LIMITACION_Q7 in rp.leer("P2")["limitaciones"]
+    assert "NOT_DEMONSTRATED" in rp.LIMITACION_Q7

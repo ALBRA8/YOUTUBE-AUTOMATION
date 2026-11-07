@@ -552,8 +552,23 @@ def registrar_proyecto_creado(project: dict | None) -> None:
 # ── disparo de la sincronización al empezar la fase Flow (Q3) ────────────
 LIMITACION_Q7 = ("Q3 · Flow genera sobre el proyecto ACTIVO y no queda "
                  "demostrado que la generación se dirija al proyecto "
-                 "creado (sonda q7 != SOPORTADO): el flow_project_id "
-                 "queda registrado pero la generación NO se redirige")
+                 "creado (sonda q7: NOT_DEMONSTRATED != SOPORTADO): el "
+                 "flow_project_id queda registrado pero la generación NO "
+                 "se redirige")
+
+
+def _limitacion_q7(veredicto: str) -> str:
+    """Q3 · Texto de la limitación q7 con el veredicto LITERAL de la sonda
+    incrustado (grepeable en registro.json: la carta exige «la limitación
+    escrita como NOT_DEMONSTRATED»). Para el caso por defecto (sin
+    informe de sonda) devuelve LIMITACION_Q7 tal cual; para otros
+    veredictos no-SOPORTADO (p. ej. NO_SOPORTADO) los incrusta."""
+    if veredicto == "NOT_DEMONSTRATED":
+        return LIMITACION_Q7
+    return ("Q3 · Flow genera sobre el proyecto ACTIVO y no queda "
+            "demostrado que la generación se dirija al proyecto creado "
+            f"(sonda q7: {veredicto} != SOPORTADO): el flow_project_id "
+            "queda registrado pero la generación NO se redirige")
 
 
 def leer_sonda_q7(ruta: Path | None = None) -> str:
@@ -613,8 +628,9 @@ def disparo_sync_flow(production_id: str, *,
                 "error": f"{type(exc).__name__}: {exc}"}
     if res.get("flow_project_id") and res.get("estado") != "YA_VINCULADO":
         try:
-            if leer_sonda_q7(ruta_sonda) != "SOPORTADO":
-                anota_limitacion(production_id, LIMITACION_Q7)
+            veredicto_q7 = leer_sonda_q7(ruta_sonda)
+            if veredicto_q7 != "SOPORTADO":
+                anota_limitacion(production_id, _limitacion_q7(veredicto_q7))
         except (ValueError, OSError, RuntimeError) as exc:
             logger.warning("disparo_sync_flow(%s): limitación q7 no "
                            "anotada (%s)", production_id,

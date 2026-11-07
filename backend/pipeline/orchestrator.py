@@ -67,6 +67,27 @@ def _record_duration_deviations(project_id: str) -> None:
         log.warning("production_json: registro de desviaciones falló: %s", e)
 
 
+def _disparar_sync_registro(project_id: str) -> None:
+    """Q3 · La fase Flow de una producción también empieza aquí (vía
+    inline del orquestador, PASO 3.5 de start_pipeline): dispara la
+    sincronización registro↔Flow EXACTAMENTE por el mismo punto de paso
+    que la vía de la cola de la extensión (flow_jobs.enqueue_project).
+
+    Fire-and-forget: nunca bloquea ni hace fallar la producción; con
+    FLOW_REGISTRO_SYNC apagado (default) no programa nada. Import tardío
+    para no crear círculo de imports con flow_jobs. Solo se capturan
+    excepciones tipadas (trinquete P2-2): ImportError del módulo y
+    RuntimeError del scheduling de hilos — un fallo del propio disparo
+    muere dentro del hilo worker (disparo_sync_flow ya lo anota)."""
+    try:
+        from services.flow_jobs import _programar_disparo_sync
+        _programar_disparo_sync(project_id)
+    except (ImportError, RuntimeError, AttributeError) as exc:
+        log.warning("disparo de sync registro↔Flow no programado para %s "
+                    "(%s: %s) — la producción sigue", project_id,
+                    type(exc).__name__, exc)
+
+
 # ── Control de concurrencia de renders (blindaje CPU) ──────────────────
 # FFmpeg (zoompan + xfade) usa todos los núcleos: si 2+ proyectos renderizan
 # a la vez, el servidor se queda sin CPU y el resto de peticiones sufre.
@@ -770,6 +791,10 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
                 OUTPUT_DIR / project_id, list(range(len(scenes)))
             )
             if flow_mcp_client.available():
+                # Q3 · aquí arranca de verdad la fase Flow inline: dispara
+                # la sync registro↔Flow (mismo punto de paso que enqueue);
+                # fire-and-forget, jamás bloquea ni tumba el pipeline.
+                _disparar_sync_registro(project_id)
                 await _emit(job_id, project_id, "flow_video", 73, "Generando videos de escena en Google Flow…")
                 total_scenes = len(scenes)
                 for idx, sc in enumerate(scenes):
