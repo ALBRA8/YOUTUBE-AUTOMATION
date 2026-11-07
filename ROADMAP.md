@@ -5,15 +5,13 @@
   intervención manual.
 - Start Frame de Flow (sujeto a captura real de red según checklist en PROJECT_STATE).
 ## SIGUIENTE
-- Minidramas NotebookLM+Flow: registro local endurecido (R1-R6: sin estado
-  falso si el MCP no entrega id, production_id validado contra escapes,
-  escritura atómica + lock por nicho, conexión local en la creación de
-  proyectos, adaptador real Flow tras FLOW_REGISTRO_SYNC con sonda INT-093,
-  regla de la raya en el validador). Pendiente del dueño: correr la sonda
-  en su máquina (hoy todo NOT_DEMONSTRATED), decidir diálogo A/B/C y
-  duraciones (spec PENDIENTE DEL DUEÑO) y ejecutar el piloto mínimo
-  Gate 0/Gate 3 con Flow real (checklist y observador listos). El
-  validador Fase E está implementado y probado.
+- Minidramas NotebookLM+Flow: registro y validador endurecidos (R1-R6 +
+  cierre Q1-Q6, ver HECHO). Pendiente del dueño: correr la sonda INT-093
+  en su máquina (q1-q7 hoy NOT_DEMONSTRATED), activar
+  FLOW_REGISTRO_SYNC solo si la sonda demuestra q7 SOPORTADO, decidir
+  diálogo A/B/C y duraciones (spec PENDIENTE DEL DUEÑO) y ejecutar el
+  piloto mínimo Gate 0/Gate 3 con Flow real (checklist y observador
+  listos).
 - Google Flow Multi-Cuenta: balanceador de cuentas en mcp_manager para rotación
   automática de créditos Veo (inspirado en análisis Sloth v0.3.48).
 - Hoja de contacto visual (hoja de escenas con safe zones) para QA instantáneo.
@@ -23,6 +21,23 @@
 ## EN RESERVA (no tocar)
 - HANDS (control manual del PC): dormido.
 ## HECHO
+- Cierre Q1-Q6 del registro/sonda/validador (2026-11-07): Q1 punto de
+  paso común en database.create_project — TODO proyecto de las 13 vías
+  reales (API, A2A, clipper, 3 tools MCP, agente general, scheduler,
+  arnés) queda con registro.json, idempotente, sin duplicados (cbd4c9e);
+  Q2 sonda INT-093 q6 (¿la generación acepta id de proyecto/destino?) y
+  q7 (¿new_project cambia el proyecto activo?) SOLO LECTURA con veredictos
+  del trío y evidencia de esquema (aefe0c5); Q3 disparo de
+  sincronizar_flow_real vía asyncio.to_thread al empezar la fase Flow en
+  sus DOS puertas (cola de la extensión y orquestador inline), solo con
+  FLOW_REGISTRO_SYNC=1, fire-and-forget, limitación con veredicto literal
+  grepeable (9fa5db8 + 00bab1e); Q4 POST/GET /api/registro/nicho con la
+  misma auth que /api, un cuaderno por nicho, propaga_notebook deja de
+  callar (7834bd0); Q5 aviso HABLA_SIN_COMILLAS_POSIBLE (texto tras «:»
+  supera el límite, sea cual sea el verbo) + dialogue documentado como
+  fuente de verdad y recomendado obligatorio en el contrato (96b5875 +
+  7cd1d35). Todo hermético con dobles; lo que exige Flow real sigue
+  NOT_DEMONSTRATED (sonda pendiente de correrse en la máquina del dueño).
 - Registro de producciones y su conexión con Flow (R1-R6, 2026-11-07):
   R1 estado falso eliminado (sin id del MCP → ERROR + limitación,
   ccc8c19); R2 production_id validado (escapes ../, absolutas,
