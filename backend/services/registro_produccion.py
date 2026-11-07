@@ -488,6 +488,43 @@ def sincronizar_flow_real(production_id: str, *,
         sinc_activa=sinc_activa)
 
 
+# ── punto de paso común del registro (Q1) ────────────────────────────────
+def registrar_proyecto_creado(project: dict | None) -> None:
+    """Q1 · PUNTO DE PASO COMÚN: registra en el registro de producciones
+    TODO proyecto recién creado vía database.create_project — las 14 vías
+    (API /api/projects, A2A, clipper, MCP crear_video / guion_json /
+    production_json, agente general, scheduler de fábrica, arnés YouTube)
+    cruzan por ahí, así que no hay que parchear llamada por llamada.
+
+    Idempotente: si el proyecto ya tiene registro (p. ej. los sitios que
+    registran por su cuenta vía _post_create_init) es un no-op — nunca
+    duplica numero_serie ni reescribe.
+
+    BEST-EFFORT y JAMÁS lanza: una falla del registro no puede invalidar
+    la creación del proyecto (misma doctrina que _post_create_init, R4).
+    Captura SOLO excepciones tipadas (trinquete P2-2): ValueError del
+    validador de IDs (R2), OSError de I/O, TypeError/KeyError de datos
+    inesperados y RuntimeError. Un bug de otro tipo SÍ explota (visible).
+    """
+    if not isinstance(project, dict):
+        return
+    pid = str(project.get("id") or "").strip()
+    if not pid:
+        return
+    try:
+        if leer(pid):          # ya registrado (idempotente, 2.5/Q1)
+            return
+        crear(
+            production_id=pid,
+            nicho_id=str(project.get("niche") or "").strip() or "general",
+            titulo_historia=str(project.get("title") or "").strip()
+            or "Sin título",
+        )
+    except (ValueError, OSError, TypeError, KeyError, RuntimeError) as exc:
+        logger.warning("registro automático de %s omitido (%s: %s)",
+                       pid, type(exc).__name__, exc)
+
+
 # ── listado (endpoint GET /api/registro, 3.2) ────────────────────────────
 def listar_producciones() -> list[dict]:
     """Lista todas las producciones registradas (solo lectura): id, nicho,

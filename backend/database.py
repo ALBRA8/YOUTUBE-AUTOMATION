@@ -288,7 +288,25 @@ def create_project(**fields) -> dict:
     marks = ", ".join("?" for _ in fields)
     with connect() as con:
         con.execute(f"INSERT INTO projects({cols}) VALUES({marks})", tuple(fields.values()))
-    return get_project(pid)
+    project = get_project(pid)
+    _registro_post_creacion(project)   # Q1 · best-effort, jamás lanza
+    return project
+
+
+def _registro_post_creacion(project: dict | None) -> None:
+    """Q1 · ÚNICO punto de paso del registro de producciones: todo proyecto
+    creado vía create_project (API, A2A, clipper, MCP, agente, scheduler,
+    arnés…) queda registrado sin parchear cada llamada. Best-effort: el
+    hook interno ya captura sus fallos tipados; aquí solo se defiende la
+    disponibilidad del import (sin ciclo a nivel de módulo)."""
+    if not project:
+        return
+    try:
+        from services import registro_produccion  # import tardío (sin ciclo)
+        registro_produccion.registrar_proyecto_creado(project)
+    except ImportError:
+        log.warning("registro post-creación no disponible para %s "
+                    "(services no importable)", project.get("id"))
 
 
 def get_project(pid: str) -> dict | None:
