@@ -123,3 +123,43 @@ Crear un paquete de referencia versionado con:
 Antes de ejecutar el piloto, aplicar también la especificación `CONTEXTO YOUTUBE/05_TESTS/ESPECIFICACION_AUTOMATIZACION_MINIDRAMAS_NOTEBOOKLM_FLOW.md`. Ese documento convierte el video tutorial, el Master Prompt y el catálogo de herramientas en requisitos comprobables: ingesta y trazabilidad de fuentes, aprobación obligatoria de uno de cinco títulos, biblia de personajes, 5 episodios × 6 clips, contrato de prompts, gates de Flow, render, QA, continuidad y publicación separada.
 
 **Regla de precedencia:** este plan sigue siendo el procedimiento de prueba operativa; la especificación complementaria define los requisitos editoriales/funcionales. Si una etapa no tiene evidencia real, se conserva como pendiente y no se marca PASS. No se deben duplicar motores ni puentes existentes: mapear el paquete editorial al Production JSON y al Flow Bridge ya implementados.
+
+## Piloto mínimo — UN episodio corto (Gate 0 y Gate 3 listos, NO EJECUTADO)
+
+Alcance cerrado: UN episodio corto (6 clips), sin ampliar a temporada.
+Todo lo que exige la máquina del dueño y Flow real queda
+**NOT_DEMONSTRATED** hasta que exista evidencia guardada; este piloto NO
+se ejecuta sin Flow real. El observador (solo lectura) es
+`tools/observador_piloto_minidrama.py`: recorre estos ítems, dictamina
+PASS / FAIL / NOT_DEMONSTRATED por ítem y escribe el reporte en
+`data/output/<pid>/qa/observador_piloto_*.{md,json}`.
+
+### Gate 0 — Preparación segura (piloto mínimo)
+
+- [ ] Repo actualizado y SHA de rama anotado. *(observador: PASS local)*
+- [ ] Backend arriba y `/api/health` OK. *(observador: loopback)*
+- [ ] Production Doctor audit/report guardado en el proyecto. *(observador)*
+- [ ] REAL FLOW PREFLIGHT PASS para el proyecto de prueba. *(NOT_DEMONSTRATED sin máquina del dueño)*
+- [ ] Autopublicación y cron/fábrica desactivados durante el piloto. *(confirmación del dueño; el observador la lista como pendiente)*
+- [ ] Claves configuradas desde el panel — nunca copiar secretos a este documento ni a logs. *(dueño; NOT_DEMONSTRATED)*
+- [ ] Sesión válida de NotebookLM y Google Flow. *(dueño; NOT_DEMONSTRATED)*
+- [ ] Extensión Chrome instalada y botón «Puente Backend» activo. *(dueño; NOT_DEMONSTRATED)*
+
+**STOP:** preflight BLOCKED ⇒ no se genera; error literal + informe guardados.
+
+### Gate 3 — Ejecución real controlada (piloto mínimo, UN episodio)
+
+1. [ ] Prueba mínima de UNA escena/imagen en Flow real (ANTIGRAVITY §4). *(NOT_DEMONSTRATED sin Flow real)*
+2. [ ] Job en `done`, asset en la ruta esperada, QA sin errores. *(NOT_DEMONSTRATED sin Flow real; un mock/fixture/test hermético no cuenta)*
+3. [ ] Los 6 clips del episodio corto generados y válidos contra la Fase E (el observador usa `services.minidrama_clip_validator.validar_episodio`). *(pendiente del paquete real)*
+4. [ ] Locución, subtítulos y render del episodio. *(pendiente de pipeline real)*
+5. [ ] MP4 final observado con ffprobe: duración, resolución, pista de audio. *(observador local)*
+6. [ ] Reporte video_qa guardado en `qa/`. *(observador local)*
+7. [ ] Logs/evidencias saneados: sin secretos (detección por prefijos, redacción automática). *(observador local)*
+
+**Comando del dueño (máquina real):** `python tools/observador_piloto_minidrama.py --proyecto <pid> --url http://127.0.0.1:8000`
+
+**Veredicto global del observador:** FAIL si algún ítem falla;
+NOT_DEMONSTRATED mientras queden pendientes sin FAIL; PASS solo con TODA
+la evidencia. Los tests de `tests/test_observador_piloto.py` son
+herméticos y prueban que el observador no inventa PASS sin evidencia.
