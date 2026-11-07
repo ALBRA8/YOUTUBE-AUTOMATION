@@ -36,13 +36,28 @@ tiempo de llamada (respetan el aislamiento de tests/conftest.py).
 from __future__ import annotations
 
 import json
+import logging
+import os
 import re
+import threading
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 import config
+
+logger = logging.getLogger("registro_produccion")
+
+_LOCK_MASTER = threading.Lock()
+_LOCKS_NICHO: dict[str, threading.Lock] = {}
+
+
+def _get_nicho_lock(nicho_id: str) -> threading.Lock:
+    with _LOCK_MASTER:
+        if nicho_id not in _LOCKS_NICHO:
+            _LOCKS_NICHO[nicho_id] = threading.Lock()
+        return _LOCKS_NICHO[nicho_id]
 
 ARCHIVO_NICHOS = "registro_nichos.json"
 ESTADOS = ("DRAFT", "READY", "GENERANDO", "RENDERIZADO", "QA_OK", "ERROR")
@@ -128,16 +143,33 @@ def _nichos_path() -> Path:
 
 
 def _json_carga(ruta: Path, defecto: Any) -> Any:
+    if not ruta.is_file():
+        return defecto
     try:
-        return json.loads(ruta.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        raw = ruta.read_text(encoding="utf-8")
+        return json.loads(raw)
+    except (ValueError, json.JSONDecodeError) as e:
+        logger.warning("JSON corrupto detectado en %s: %s", ruta, e)
+        return defecto
+    except OSError as e:
+        logger.warning("Error de I/O leyendo %s: %s", ruta, e)
         return defecto
 
 
 def _json_guarda(ruta: Path, datos: Any) -> None:
     ruta.parent.mkdir(parents=True, exist_ok=True)
-    ruta.write_text(json.dumps(datos, ensure_ascii=False, indent=2) + "\n",
-                    encoding="utf-8")
+    contenido = json.dumps(datos, ensure_ascii=False, indent=2) + "\n"
+    tmp_path = ruta.with_name(f"{ruta.name}.tmp.{os.getpid()}.{threading.get_ident()}")
+    try:
+        tmp_path.write_text(contenido, encoding="utf-8")
+        os.replace(tmp_path, ruta)
+    except Exception:
+        if tmp_path.is_file():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+        raise
 
 
 # ── registro por producción (2.1) ────────────────────────────────────────
@@ -162,16 +194,33 @@ def guardar(registro: dict) -> dict:
 
 def siguiente_numero(nicho_id: str, raiz: Path | None = None) -> int:
     """Nº de serie siguiente para el nicho: escanea los registro.json de
-    data/output/* y devuelve max+1 (1 si no hay ninguno). Determinista."""
+    data/output/* y devuelve max+1 (1 si no hay ninguno). Determinista.
+    Si detecta JSON corrupto, registra el aviso y no reutiliza números."""
     raiz = Path(raiz) if raiz else _output_dir()
     maximo = 0
+    corruptos_sin_numero = 0
     if raiz.is_dir():
         for d in raiz.iterdir():
-            reg = _json_carga(d / "registro.json", None)
-            if (isinstance(reg, dict)
-                    and reg.get("nicho_id") == nicho_id
-                    and isinstance(reg.get("numero_serie"), int)):
-                maximo = max(maximo, reg["numero_serie"])
+            reg_file = d / "registro.json"
+            if not reg_file.is_file():
+                continue
+            raw = ""
+            try:
+                raw = reg_file.read_text(encoding="utf-8")
+                reg = json.loads(raw)
+                if (isinstance(reg, dict)
+                        and reg.get("nicho_id") == nicho_id
+                        and isinstance(reg.get("numero_serie"), int)):
+                    maximo = max(maximo, reg["numero_serie"])
+            except (ValueError, json.JSONDecodeError) as err:
+                logger.warning("JSON corrupto detectado en %s: %s", reg_file, err)
+                m_num = re.search(r'"numero_serie"\s*:\s*(\d+)', raw)
+                m_nicho = re.search(r'"nicho_id"\s*:\s*"([^"]+)"', raw)
+                if m_num and (not m_nicho or m_nicho.group(1) == nicho_id):
+                    maximo = max(maximo, int(m_num.group(1)))
+                else:
+                    corruptos_sin_numero += 1
+    maximo += corruptos_sin_numero
     return maximo + 1
 
 
@@ -179,26 +228,28 @@ def crear(production_id: str, nicho_id: str, titulo_historia: str, *,
           nicho_nombre: str = "", estado: str = "DRAFT",
           numero_serie: int | None = None) -> dict:
     """Crea (o completa) el registro de una producción con la convención
-    de nombres. Idempotente: si ya existe, se respeta su numero_serie."""
-    previo = leer(production_id) or {}
-    numero = int(previo.get("numero_serie") or numero_serie
-                 or siguiente_numero(nicho_id))
-    nicho_n = nicho_nombre or nicho_id
-    registro = {
-        "production_id": production_id,
-        "nicho_id": nicho_id,
-        "titulo_historia": titulo_historia,
-        "numero_serie": numero,
-        "nombre_flow": previo.get("nombre_flow")
-        or nombre_produccion(nicho_n, numero, titulo_historia),
-        "flow_project_id": previo.get("flow_project_id"),
-        "flow_project_nombre_observado": previo.get(
-            "flow_project_nombre_observado"),
-        "notebook_id_nicho": previo.get("notebook_id_nicho"),
-        "estado": estado if estado in ESTADOS else "DRAFT",
-        "limitaciones": previo.get("limitaciones", []),
-    }
-    return guardar(registro)
+    de nombres. Idempotente: si ya existe, se respeta su numero_serie.
+    Usa bloqueo por nicho para evitar carreras en concurrencia."""
+    with _get_nicho_lock(nicho_id):
+        previo = leer(production_id) or {}
+        numero = int(previo.get("numero_serie") or numero_serie
+                     or siguiente_numero(nicho_id))
+        nicho_n = nicho_nombre or nicho_id
+        registro = {
+            "production_id": production_id,
+            "nicho_id": nicho_id,
+            "titulo_historia": titulo_historia,
+            "numero_serie": numero,
+            "nombre_flow": previo.get("nombre_flow")
+            or nombre_produccion(nicho_n, numero, titulo_historia),
+            "flow_project_id": previo.get("flow_project_id"),
+            "flow_project_nombre_observado": previo.get(
+                "flow_project_nombre_observado"),
+            "notebook_id_nicho": previo.get("notebook_id_nicho"),
+            "estado": estado if estado in ESTADOS else "DRAFT",
+            "limitaciones": previo.get("limitaciones", []),
+        }
+        return guardar(registro)
 
 
 def anota_limitacion(production_id: str, detalle: str) -> dict:

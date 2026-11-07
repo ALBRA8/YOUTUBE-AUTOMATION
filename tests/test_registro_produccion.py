@@ -87,6 +87,47 @@ def test_registro_path_seguridad_rechaza_traversal_y_separadores(aislado):
         rp.registro_path("a" * 81)
 
 
+def test_crear_concurrente_sin_carreras(aislado):
+    """R3 · Concurrencia: hilos simultáneos en el mismo nicho no duplican numero_serie."""
+    import concurrent.futures
+
+    nicho = "nicho_concurrente"
+    total = 10
+
+    def trabajador(i):
+        return rp.crear(f"PROD_{i}", nicho, f"Historia {i}")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futuros = [executor.submit(trabajador, i) for i in range(total)]
+        resultados = [f.result() for f in concurrent.futures.as_completed(futuros)]
+
+    numeros = [r["numero_serie"] for r in resultados]
+    assert len(numeros) == total
+    assert len(set(numeros)) == total, f"Números duplicados detectados: {numeros}"
+    assert set(numeros) == set(range(1, total + 1))
+
+
+def test_json_corrupto_registra_aviso_y_no_reutiliza_numero(aislado, caplog):
+    """R3 · JSON corrupto: emite warning y no reutiliza el número."""
+    import logging
+
+    rp.crear("P1", "nicho_corrupto", "Historia 1")
+    rp.crear("P2", "nicho_corrupto", "Historia 2")
+    assert rp.siguiente_numero("nicho_corrupto") == 3
+
+    # Corromper el archivo de P2
+    p2_file = rp.registro_path("P2")
+    p2_file.write_text('{"production_id": "P2", "numero_serie": 2, CORRUPTO...', encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        sig = rp.siguiente_numero("nicho_corrupto")
+
+    # El siguiente número sigue siendo 3 (no reutiliza el 2)
+    assert sig == 3
+    # Registró el aviso
+    assert any("JSON corrupto detectado" in record.message for record in caplog.records)
+
+
 def test_crear_y_leer_roundtrip(aislado):
     rp.crear("P1", "frutinovelas", "La receta del caos",
              nicho_nombre="Frutinovelas")
