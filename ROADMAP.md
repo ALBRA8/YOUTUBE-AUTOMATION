@@ -5,11 +5,12 @@
   intervención manual.
 - Start Frame de Flow (sujeto a captura real de red según checklist en PROJECT_STATE).
 ## SIGUIENTE
-- Minidramas NotebookLM+Flow: registro local listo (registro.json por
-  producción con ID estable, UN cuaderno por nicho, nombres
-  «FRUTINOVELAS · S003 · Título», GET /api/registro, sonda de
-  capacidades INT-093 y gate FLOW_REGISTRO_SYNC apagado). Pendiente del
-  dueño: correr la sonda en su máquina, decidir diálogo A/B/C y
+- Minidramas NotebookLM+Flow: registro local endurecido (R1-R6: sin estado
+  falso si el MCP no entrega id, production_id validado contra escapes,
+  escritura atómica + lock por nicho, conexión local en la creación de
+  proyectos, adaptador real Flow tras FLOW_REGISTRO_SYNC con sonda INT-093,
+  regla de la raya en el validador). Pendiente del dueño: correr la sonda
+  en su máquina (hoy todo NOT_DEMONSTRATED), decidir diálogo A/B/C y
   duraciones (spec PENDIENTE DEL DUEÑO) y ejecutar el piloto mínimo
   Gate 0/Gate 3 con Flow real (checklist y observador listos). El
   validador Fase E está implementado y probado.
@@ -22,6 +23,19 @@
 ## EN RESERVA (no tocar)
 - HANDS (control manual del PC): dormido.
 ## HECHO
+- Registro de producciones y su conexión con Flow (R1-R6, 2026-11-07):
+  R1 estado falso eliminado (sin id del MCP → ERROR + limitación,
+  ccc8c19); R2 production_id validado (escapes ../, absolutas,
+  separadores, contención en OUTPUT_DIR, 543ed90); R3 escritura atómica
+  + lock por nicho anti-carreras + JSON corrupto con aviso sin reutilizar
+  números (255aa48); R4 registro local conectado a la creación de
+  proyectos sin duplicar (39b6bf9); R5 adaptador real crear_proyecto
+  (flow_mcp_client.new_project) tras gate FLOW_REGISTRO_SYNC con veredicto
+  guardado de la sonda INT-093 — sin informe → NOT_DEMONSTRATED, sin
+  nombre a Flow (8567229); R6 regla de la raya en el validador Fase E
+  (acotación narrativa ≠ diálogo; solo tras verbo de habla, «:» o inicio
+  de línea, 4299c6a). Todo hermético con dobles de MCP; Flow real queda
+  NOT_DEMONSTRATED hasta la sonda en la máquina del dueño.
 - Validador editorial Fase E de minidramas (Python puro, sin red/Flow):
   campos del Production JSON, párrafo único, MAYÚSCULAS, conteo
   determinista de palabras habladas con texto excedente, duración
