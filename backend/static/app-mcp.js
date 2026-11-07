@@ -50,18 +50,7 @@ function renderMCP() {
   <div class="card">
     <h2 class="sec">🔌 MCP Connection Manager <span class="hint">servidores MCP stdio gestionados por el backend</span></h2>
     ${mcpGsessHTML()}
-    ${mcpSvcHTML('google-flow', '🎬 Google Flow MCP',
-      'Servidor tools/GoogleFlowMCP (Node). Con el login unificado se engancha POR CDP al Chrome del perfil ' +
-      'compartido (<code>GOOGLE_PROFILE_GLOBAL</code>, puerto <code>FLOW_CDP_PORT</code>) y hereda la sesión — ' +
-      'sin login separado. Sin el login global, usa su Chrome dedicado de siempre. Requiere ' +
-      '<code>FLOW_MCP_ENABLED=1</code> en backend/.env.')}
-    ${mcpSvcHTML('notebooklm', '📚 NotebookLM MCP',
-      'Servidor <code>notebooklm-mcp</code> (uv tool install "notebooklm-py[browser]"). Autenticación: ' +
-      '«🔑 Login Google» + «📥 Capturar sesión» (arriba) escribe el <code>storage_state.json</code> desde el ' +
-      'MISMO login — o <code>notebooklm login</code> clásico. El notebook se elige del DROPDOWN (se rellena ' +
-      'solo al conectar); si lo dejas vacío, el pre-flight [0/3] intenta auto-descubrirlo y, si no puede, ' +
-      'aborta con <code>PRE_FLIGHT_MISSING_NOTEBOOK_ID</code>.')}
-    <div class="mcp-svc" id="pipe-card">
+        <div class="mcp-svc" id="pipe-card">
       <div class="mcp-svc-head">
         <h3>🚀 Pipeline completo (NotebookLM → Agente → Flow)</h3>
         <span id="pipe-stage-badge"></span>
@@ -500,13 +489,26 @@ function avisoHumanoDe(services) {
   return '';
 }
 
-function mcpZoneHTML(st) {
+function mcpZoneHTML(svc, st) {
   let h = '';
   if (st.auth_detail) h += `<p class="hintline">🔐 ${esc(st.auth_detail)}</p>`;
   if (st.last_error) h += `<p class="hintline" style="color:var(--err)">⚠ ${esc(st.last_error)}</p>`;
-  if (st.server_info && st.server_info.name)
-    h += `<p class="hintline">Servidor: <b>${esc(st.server_info.name)}</b> v${esc(st.server_info.version || '?')}` +
-         (st.pid ? ` · PID ${st.pid} · ${st.uptime_s || 0}s` : '') + `</p>`;
+  if (st.server_info && st.server_info.name) {
+    if (svc === 'notebooklm') {
+      // U6 · honestidad de paquete: el server real es notebooklm-mcp-server
+      // v0.1.15 (comandos notebooklm-mcp / notebooklm-mcp-auth); la versión
+      // de server_info es del FRAMEWORK FastMCP — nunca se presenta como
+      // versión del paquete.
+      h += `<p class="hintline">Paquete: <b>notebooklm-mcp-server v0.1.15</b>` +
+           ` (comandos <code>notebooklm-mcp</code> · <code>notebooklm-mcp-auth</code>)` +
+           (st.pid ? ` · PID ${st.pid} · ${st.uptime_s || 0}s` : '') + `</p>`;
+      h += `<p class="hintline">Versión de server_info: ${esc(st.server_info.version || '?')} ` +
+           `(framework <b>FastMCP</b>, NO la versión del paquete)</p>`;
+    } else {
+      h += `<p class="hintline">Servidor: <b>${esc(st.server_info.name)}</b> v${esc(st.server_info.version || '?')}` +
+           (st.pid ? ` · PID ${st.pid} · ${st.uptime_s || 0}s` : '') + `</p>`;
+    }
+  }
   if (st.tools && st.tools.length)
     h += `<details class="mcp-tools"><summary>🔧 ${st.tools.length} tools expuestas</summary><ul>` +
          st.tools.map(t => `<li><b>${esc(t.name)}</b>${t.description ? ' — ' + esc(t.description) : ''}</li>`).join('') +
@@ -532,7 +534,7 @@ function mcpApplyStatus(services) {
     const badge = $('#mcp-' + svc + '-badge');
     if (badge) badge.innerHTML = mcpBadgeHTML(st.state || 'disconnected');
     const zone = $('#mcp-' + svc + '-zone');
-    if (zone) zone.innerHTML = mcpZoneHTML(st);
+    if (zone) zone.innerHTML = mcpZoneHTML(svc, st);
     const btnC = $('#mcp-' + svc + '-connect'), btnD = $('#mcp-' + svc + '-disc');
     if (btnC) { btnC.disabled = st.state === 'connecting'; btnC.textContent = st.state === 'connecting' ? '⏳ Conectando…' : '🔌 Conectar'; }
     if (btnD) btnD.disabled = st.state === 'connecting' || st.state === 'disconnected';

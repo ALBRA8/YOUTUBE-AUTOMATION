@@ -49,7 +49,7 @@ código, `analizar_tools`):
 | servicio | versión declarada | cómo se verificó |
 |---|---|---|
 | google-flow (`srz-google-flow-mcp`) | 1.0.1 en `tools/GoogleFlowMCP/package.json` del repo | lectura del repo; **la versión EN EJECUCIÓN se confirma con `server_info` del handshake — por confirmar en la máquina del dueño** |
-| notebooklm (`notebooklm-mcp`, paquete `notebooklm-py[browser]`) | pin v0.8.5 (documentado en `services/mcp_manager.py` y `services/nlm_studio.py`) | lectura del repo; **confirmar con `server_info` al ejecutar la sonda** |
+| notebooklm (`notebooklm-mcp-server`) | **v0.1.15 real** (comandos `notebooklm-mcp` y `notebooklm-mcp-auth`; `uv tool list` en la máquina del dueño) | dato del dueño (U6, 2026-11-07) + PyPI JSON `pypi.org/pypi/notebooklm-mcp-server/json` (última = 0.1.15). **OJO: la versión que llega en `server_info` (p. ej. 2.14.5) es la del FRAMEWORK FastMCP, no la del paquete — no usarla como versión del paquete.** El pin histórico `notebooklm-py[browser]==0.8.5` de INT-069 se refería al upstream ANTERIOR: el servidor realmente instalado es otro paquete |
 
 ## Cómo cerrar los veredictos (máquina del dueño)
 
@@ -76,3 +76,44 @@ queda anotada — jamás se simula que Flow lo recibió.
 Los tests `tests/test_sonda_capacidades.py` (15) son herméticos y usan
 DOBLES de catálogo: ningún test arranca Flow, NotebookLM, Chrome ni
 subprocess de MCP. El análisis de esquemas es una función pura.
+
+## ACTUALIZACIÓN U6 (2026-11-07) · paquete real y catálogo de notebooklm-mcp-server v0.1.15
+
+Dato del dueño (y confirmado en PyPI): el MCP de NotebookLM instalado en
+su máquina es **`notebooklm-mcp-server` v0.1.15**, con comandos
+**`notebooklm-mcp`** y **`notebooklm-mcp-auth`** (`uv tool list` lo
+confirma). La instalación correcta es
+`uv tool install notebooklm-mcp-server` (NO «uv tool install
+notebooklm-py[browser]», texto antiguo del panel ya corregido).
+
+Catálogo REAL de la v0.1.15 según la documentación del paquete (PyPI,
+31 tools declaradas; tabla pública con 27 nombres):
+
+`notebook_list, notebook_create, notebook_get, notebook_describe,
+source_describe, source_get_content, notebook_rename, chat_configure,
+notebook_delete, notebook_add_url, notebook_add_text,
+notebook_add_drive, notebook_query, source_list_drive,
+source_sync_drive, source_delete, research_start, research_status,
+research_import, audio_overview_create, video_overview_create,
+infographic_create, slide_deck_create, studio_status, studio_delete,
+refresh_auth, save_auth_tokens`
+
+### Cotejo: herramientas que NUESTRO código llama vs el catálogo real
+
+| nombre llamado | dónde | ¿está en v0.1.15? | efecto |
+|---|---|---|---|
+| `notebook_list` | mcp_manager (probe + listado) | ✅ | OK |
+| `notebook_create` | mcp_manager (`_NO_NOTEBOOK_TOOLS`), nlm_studio | ✅ | OK |
+| `studio_status` | nlm_studio | ✅ | OK |
+| `list_notebooks` | mcp_manager (alias de reserva en `_LIST_NOTEBOOK_TOOLS`) | ❌ | inofensivo: solo se intenta si `notebook_list` no existe |
+| `chat_ask` | pipeline_orchestrator (DEFAULT de `NOTEBOOKLM_CONTEXT_TOOL`) | ❌ | **REAL: en v0.1.15 la tool de contexto es `notebook_query`** — sin `NOTEBOOKLM_CONTEXT_TOOL=notebook_query` el paso [1/3] fallará con TOOL_UNKNOWN en la máquina del dueño |
+| `source_add` | nlm_studio | ❌ | legado del upstream viejo (notebooklm-py 0.8.5); en v0.1.15 son `notebook_add_url/_text/_drive` |
+| `studio_generate` | nlm_studio | ❌ | ídem; en v0.1.15 son `audio/video_overview_create`, `infographic_create`, `slide_deck_create` |
+| `studio_download` | nlm_studio | ❌ | ídem (no existe en el catálogo) |
+
+El cotejo está fijado como trinquete en
+`tests/test_u6_catalogo_contrato.py` (usa este nombre y versión reales):
+si el código empieza a llamar otra tool ausente del catálogo, el test
+falla y obliga a documentarla aquí. La recomendación de migración de
+`chat_ask → notebook_query` y de las tools de nlm_studio queda como
+decisión del dueño (SIGUIENTE), no se cambia comportamiento en U6.

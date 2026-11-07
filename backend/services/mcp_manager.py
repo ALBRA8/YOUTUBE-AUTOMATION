@@ -11,9 +11,11 @@ Servicios soportados:
                 con CDP persistente (FLOW_CDP_PORT + user-data-dir propio de
                 la herramienta); Chrome sobrevive al proceso, así que la
                 sesión de Google persiste entre ejecuciones (§2 del mandato).
-  notebooklm  : servidor `notebooklm-mcp` (uv tool install
-                "notebooklm-py[browser]==0.8.5" — pin recomendado: el upstream
-                renombró tools/parámetros entre versiones)
+  notebooklm  : servidor `notebooklm-mcp-server` v0.1.15 (comandos
+                `notebooklm-mcp` y `notebooklm-mcp-auth`; `uv tool list`
+                lo confirma en la máquina del dueño, U6 2026-11-07).
+                OJO: la versión que llega en server_info (p. ej. 2.14.5)
+                es la del FRAMEWORK FastMCP, no la del paquete.
                 — sesión vía storage_state.json (0600) en NOTEBOOKLM_HOME;
                 el expirar de cookies se detecta en preflight → AUTH_REQUIRED
                 e intenta UN refresh automático (`notebooklm auth refresh
