@@ -23,6 +23,9 @@ load_dotenv(ENV_PATH)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
 FLOW_MCP_ENABLED = os.getenv("FLOW_MCP_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+# PASO 3.1 minidramas: crear/vincular el proyecto de Flow del registro
+# (APAGADO por defecto — solo el dueño lo activa en su máquina).
+FLOW_REGISTRO_SYNC = os.getenv("FLOW_REGISTRO_SYNC", "0").strip().lower() in ("1", "true", "yes")
 FLOW_MCP_VIDEO_ENABLED = os.getenv("FLOW_MCP_VIDEO_ENABLED", "0").strip().lower() in ("1", "true", "yes")
 FLOW_MCP_DIR = Path(os.getenv("FLOW_MCP_DIR", str(BASE_DIR.parent / "tools" / "GoogleFlowMCP"))).resolve()
 FLOW_MCP_MODEL = os.getenv("FLOW_MCP_MODEL", "2").strip()
