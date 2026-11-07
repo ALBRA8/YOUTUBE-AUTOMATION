@@ -5,7 +5,7 @@
 QUÉ HACE: se conecta a los dos MCP del repo vía `services.mcp_manager`
 (transporte stdio JSON-RPC ya implementado — NUNCA habla directo con Flow
 ni con NotebookLM), lista las herramientas con su `inputSchema` y responde
-con evidencia las 5 preguntas de la convención de nombres:
+con evidencia las 7 preguntas de la convención de nombres:
 
   q1_flow_proyecto_nombre   ¿flow_new_project acepta nombre o hay
                             herramienta para renombrar proyecto?
@@ -13,6 +13,12 @@ con evidencia las 5 preguntas de la convención de nombres:
   q3_notebook_create_titulo ¿notebook_create acepta título?
   q4_notebook_renombrar     ¿existe herramienta para renombrar cuaderno?
   q5_source_add_titulo      ¿source_add acepta título?
+  q6_flow_generacion_destino  ¿flow_generate_image / flow_generate_video /
+                            flow_upload_file aceptan un identificador de
+                            proyecto o destino? (Q2, 2026-11-07)
+  q7_flow_new_project_cambia_activo  ¿flow_new_project cambia el proyecto
+                            ACTIVO sobre el que generan las demás
+                            herramientas? (Q2, 2026-11-07)
 
 VEREDICTO por pregunta: SOPORTADO (hay evidencia en el esquema) /
 NO_SOPORTADO (hay catálogo y NO está) / NOT_DEMONSTRATED (sin catálogo
@@ -55,6 +61,12 @@ PREGUNTAS = (
      "¿existe herramienta para renombrar cuaderno?"),
     ("q5_source_add_titulo",
      "¿source_add acepta título?"),
+    ("q6_flow_generacion_destino",
+     "¿flow_generate_image / flow_generate_video / flow_upload_file aceptan "
+     "un identificador de proyecto o destino?"),
+    ("q7_flow_new_project_cambia_activo",
+     "¿flow_new_project cambia el proyecto activo sobre el que generan "
+     "las demás herramientas?"),
 )
 
 CONFIRMACION_REQUERIDA = "SI CREAR"
@@ -71,6 +83,25 @@ _RE_CREAR_PERSONAJE = re.compile(
 _RE_RENOMBRAR_CUADERNO = re.compile(
     r"(rename|renombrar|update).*(notebook|cuaderno)"
     r"|notebook.*(rename|renombrar|update)", re.IGNORECASE)
+
+# Q2 · q6: herramientas de generación/subida de Flow y su identificador de
+# destino; q7: indicios de «proyecto activo» en la DESCRIPCIÓN de
+# flow_new_project (es conducta, no esquema: sin evidencia explícita el
+# veredicto honesto es NOT_DEMONSTRATED).
+_RE_GENERACION = re.compile(
+    r"^flow_(generate_image|generate_video|upload_file)$", re.IGNORECASE)
+_RE_DESTINO = re.compile(
+    r"^(project_id|project|project_name|proyecto|proyecto_id|destino|"
+    r"destination|target|target_project|folder|folder_id|workspace|"
+    r"workspace_id|parent|parent_id)$", re.IGNORECASE)
+_RE_ACTIVO_SI = re.compile(
+    r"(cambia|activa|selecciona|fija|establece|switch|activat|sets?|select)"
+    r"[\w\s]*(proyecto activo|active project|current project|proyecto actual)",
+    re.IGNORECASE)
+_RE_ACTIVO_NO = re.compile(
+    r"(no cambia|sin cambiar|does not change|doesn't change|leaves the|"
+    r"conserva el)[\w\s]*(proyecto activo|active project|current project|"
+    r"proyecto actual)", re.IGNORECASE)
 
 
 def _props(schema: dict) -> set[str]:
@@ -144,13 +175,55 @@ def analizar_tools(service: str, tools: list[dict]) -> list[dict]:
                             f"tool '{cp.get('name')}' acepta "
                             f"'{_toma_nombre(props.get(cp.get('name'), set()))}'"
                             if acepta else "")
+        # q6 (Q2) · ¿la generación acepta identificador de proyecto/destino?
+        gen = [(t, {p for p in props.get(t.get("name"), set())
+                    if _RE_DESTINO.match(p)})
+               for t in tools if _RE_GENERACION.match(str(t.get("name") or ""))]
+        if not hay:
+            v6, d6 = PEND, "sin catálogo real del MCP (NOT_DEMONSTRATED)"
+        elif not gen:
+            v6, d6 = PEND, ("no hay herramientas flow_generate_image/"
+                            "flow_generate_video/flow_upload_file en el "
+                            "catálogo observado")
+        elif all(con for _, con in gen):
+            v6 = SOPORTADO
+            d6 = "aceptan destino: " + "; ".join(
+                f"{t.get('name')} acepta '{sorted(con)[0]}'"
+                for t, con in gen if con)
+        else:
+            v6 = NO_SOPORTADO
+            d6 = ("generación sin destino uniforme: " + "; ".join(
+                f"{t.get('name')} "
+                + (f"acepta '{sorted(con)[0]}'" if con
+                   else "sin propiedad de destino")
+                for t, con in gen))
+        # q7 (Q2) · ¿flow_new_project cambia el proyecto ACTIVO? Es CONDUCTA,
+        # no esquema: solo hay veredicto con evidencia explícita.
+        if not hay or fnp is None:
+            v7, d7 = PEND, ("sin catálogo real del MCP (NOT_DEMONSTRATED)"
+                            if not hay else
+                            "flow_new_project no está en el catálogo observado")
+        else:
+            desc = str(fnp.get("description") or "")
+            if _RE_ACTIVO_NO.search(desc):
+                v7 = NO_SOPORTADO
+                d7 = "la descripción de flow_new_project declara que NO cambia "\
+                     "el proyecto activo"
+            elif _RE_ACTIVO_SI.search(desc):
+                v7 = SOPORTADO
+                d7 = "la descripción de flow_new_project declara que cambia el " \
+                     "proyecto activo: «" + _RE_ACTIVO_SI.search(desc).group(0) + "»"
+            else:
+                v7, d7 = PEND, ("la descripción de flow_new_project no demuestra "
+                                "el comportamiento (conducta, no esquema); "
+                                "requiere demostración en la máquina del dueño")
     else:
         if hay:
-            v1 = v2 = PEND
-            d1 = d2 = "pregunta de Flow; el catálogo es de " + service
+            v1 = v2 = v6 = v7 = PEND
+            d1 = d2 = d6 = d7 = "pregunta de Flow; el catálogo es de " + service
         else:
-            v1 = v2 = PEND
-            d1 = d2 = "sin catálogo real del MCP (NOT_DEMONSTRATED)"
+            v1 = v2 = v6 = v7 = PEND
+            d1 = d2 = d6 = d7 = "sin catálogo real del MCP (NOT_DEMONSTRATED)"
 
     if service == "notebooklm":
         # q3 · notebook_create con título — v0.8.5 nombra el parámetro
@@ -184,7 +257,9 @@ def analizar_tools(service: str, tools: list[dict]) -> list[dict]:
                "q2_flow_personaje_nombre": (v2, d2),
                "q3_notebook_create_titulo": (v3, d3),
                "q4_notebook_renombrar": (v4, d4),
-               "q5_source_add_titulo": (v5, d5)}
+               "q5_source_add_titulo": (v5, d5),
+               "q6_flow_generacion_destino": (v6, d6),
+               "q7_flow_new_project_cambia_activo": (v7, d7)}
     return [{"id": pid, "pregunta": texto, "veredicto": salidas[pid][0],
              "detalle": salidas[pid][1]}
             for pid, texto in PREGUNTAS]

@@ -12,7 +12,7 @@ desde el sandbox del constructor (requiere la máquina del dueño con
 conecta a los dos MCP del repo por la vía única (`services.mcp_manager`,
 transporte stdio JSON-RPC), lista las herramientas con su `inputSchema`
 (`tools_catalog`, método público nuevo de `mcp_manager`) y responde con
-evidencia 5 preguntas de la convención de nombres:
+evidencia 7 preguntas de la convención de nombres y destino:
 
 | id | pregunta | veredicto |
 |---|---|---|
@@ -21,10 +21,28 @@ evidencia 5 preguntas de la convención de nombres:
 | q3_notebook_create_titulo | ¿notebook_create acepta título? | **NOT_DEMONSTRATED** |
 | q4_notebook_renombrar | ¿existe herramienta para renombrar cuaderno? | **NOT_DEMONSTRATED** |
 | q5_source_add_titulo | ¿source_add acepta título? | **NOT_DEMONSTRATED** |
+| q6_flow_generacion_destino (Q2) | ¿flow_generate_image / flow_generate_video / flow_upload_file aceptan un identificador de proyecto o destino? | **NOT_DEMONSTRATED** |
+| q7_flow_new_project_cambia_activo (Q2) | ¿flow_new_project cambia el proyecto ACTIVO sobre el que generan las demás herramientas? | **NOT_DEMONSTRATED** |
 
 Veredictos posibles: `SOPORTADO` (evidencia en el esquema) /
 `NO_SOPORTADO` (hay catálogo real y NO está) / `NOT_DEMONSTRATED`
 (sin catálogo real — sin máquina del dueño).
+
+Reglas de veredicto de las preguntas Q2 (documentadas en el propio
+código, `analizar_tools`):
+
+- **q6**: SOPORTADO solo si TODAS las herramientas de generación
+  presentes (flow_generate_image / flow_generate_video /
+  flow_upload_file) exponen en su esquema una propiedad de
+  proyecto/destino (project_id, destino, folder, workspace…); si una
+  sola no la expone → NO_SOPORTADO con el detalle de cuál; sin
+  herramientas de generación en el catálogo → NOT_DEMONSTRATED.
+- **q7**: es CONDUCTA, no esquema: solo hay veredicto con evidencia
+  explícita en la DESCRIPCIÓN de flow_new_project (declara que cambia
+  el proyecto activo → SOPORTADO; declara que NO lo cambia →
+  NO_SOPORTADO); descripción muda → NOT_DEMONSTRATED. Mientras q7 no
+  sea SOPORTADO, Q3 NO dirige la generación al proyecto creado: el id
+  se registra y la limitación queda escrita.
 
 ## Versiones de los MCP
 

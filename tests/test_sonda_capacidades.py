@@ -249,3 +249,122 @@ def test_tools_catalog_servicio_desconocido():
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
+
+
+# ── Q2 · q6/q7: generación con destino y proyecto activo ─────────────
+
+FLOW_Q6_OK = [
+    {"name": "flow_generate_image", "description": "genera imagen",
+     "inputSchema": {"type": "object",
+                     "properties": {"prompt": {"type": "string"},
+                                    "project_id": {"type": "string"}}}},
+    {"name": "flow_generate_video", "description": "genera video",
+     "inputSchema": {"type": "object",
+                     "properties": {"prompt": {"type": "string"},
+                                    "project_id": {"type": "string"}}}},
+    {"name": "flow_upload_file", "description": "sube archivo",
+     "inputSchema": {"type": "object",
+                     "properties": {"file": {"type": "string"},
+                                    "destino": {"type": "string"}}}},
+]
+
+FLOW_Q6_MIXTO = [
+    {"name": "flow_generate_image", "description": "genera imagen",
+     "inputSchema": {"type": "object",
+                     "properties": {"prompt": {"type": "string"},
+                                    "project_id": {"type": "string"}}}},
+    {"name": "flow_generate_video", "description": "genera video",
+     "inputSchema": {"type": "object",
+                     "properties": {"prompt": {"type": "string"}}}},
+]
+
+FLOW_Q7_SI = [
+    {"name": "flow_new_project",
+     "description": "Crea un proyecto y cambia el proyecto activo de la sesión",
+     "inputSchema": {"type": "object", "properties": {}}},
+]
+
+FLOW_Q7_NO = [
+    {"name": "flow_new_project",
+     "description": "Crea un proyecto sin cambiar el proyecto activo actual",
+     "inputSchema": {"type": "object", "properties": {}}},
+]
+
+FLOW_Q7_MUDA = [
+    {"name": "flow_new_project", "description": "Crea un proyecto",
+     "inputSchema": {"type": "object", "properties": {}}},
+]
+
+
+def test_q6_generacion_con_destino_es_soportado():
+    """q6: TODAS las herramientas de generación presentes aceptan destino."""
+    r = _por_id(analizar_tools("google-flow", FLOW_Q6_OK))
+    q6 = r["q6_flow_generacion_destino"]
+    assert q6["veredicto"] == SOPORTADO
+    assert "project_id" in q6["detalle"] and "destino" in q6["detalle"]
+
+
+def test_q6_destino_mixto_es_no_soportado():
+    """q6: si UNA sola no acepta destino, la generación no es dirigible de
+    forma uniforme → NO_SOPORTADO, y el detalle dice cuál falla."""
+    r = _por_id(analizar_tools("google-flow", FLOW_Q6_MIXTO))
+    q6 = r["q6_flow_generacion_destino"]
+    assert q6["veredicto"] == NO_SOPORTADO
+    assert "flow_generate_video" in q6["detalle"]
+
+
+def test_q6_sin_herramientas_de_generacion_es_not_demonstrated():
+    """q6: catálogo sin herramientas de generación → NOT_DEMONSTRATED."""
+    r = _por_id(analizar_tools("google-flow", FLOW_SIN_NOMBRE))
+    assert r["q6_flow_generacion_destino"]["veredicto"] == PEND
+
+
+def test_q6_catalogo_ajeno_queda_not_demonstrated():
+    """q6 es de Flow: con catálogo de NotebookLM → NOT_DEMONSTRATED."""
+    r = _por_id(analizar_tools("notebooklm", NLM_OK))
+    assert r["q6_flow_generacion_destino"]["veredicto"] == PEND
+
+
+def test_q7_cambia_activo_con_evidencia_en_descripcion():
+    """q7: SOPORTADO solo con evidencia explícita en la descripción."""
+    r = _por_id(analizar_tools("google-flow", FLOW_Q7_SI))
+    assert r["q7_flow_new_project_cambia_activo"]["veredicto"] == SOPORTADO
+    assert "proyecto activo" in r["q7_flow_new_project_cambia_activo"]["detalle"]
+
+
+def test_q7_declara_que_no_cambia_es_no_soportado():
+    r = _por_id(analizar_tools("google-flow", FLOW_Q7_NO))
+    assert r["q7_flow_new_project_cambia_activo"]["veredicto"] == NO_SOPORTADO
+
+
+def test_q7_descripcion_muda_es_not_demonstrated():
+    """q7 es CONDUCTA, no esquema: descripción sin evidencia → honesto
+    NOT_DEMONSTRATED (jamás se inventa el comportamiento)."""
+    r = _por_id(analizar_tools("google-flow", FLOW_Q7_MUDA))
+    assert r["q7_flow_new_project_cambia_activo"]["veredicto"] == PEND
+
+
+def test_q6_q7_catalogo_vacio_y_cruzadas():
+    """Invariantes conservados: catálogo vacío → PEND; catálogo de
+    NotebookLM no responde preguntas de Flow (q6/q7 incluidas)."""
+    for servicio in ("google-flow", "notebooklm"):
+        r = _por_id(analizar_tools(servicio, []))
+        assert r["q6_flow_generacion_destino"]["veredicto"] == PEND
+        assert r["q7_flow_new_project_cambia_activo"]["veredicto"] == PEND
+    r = _por_id(analizar_tools("notebooklm", NLM_OK))
+    assert r["q6_flow_generacion_destino"]["veredicto"] == PEND
+    assert r["q7_flow_new_project_cambia_activo"]["veredicto"] == PEND
+
+
+def test_informe_guardado_incluye_q6_y_q7(tmp_path):
+    """El informe de la sonda (--salida → sonda_nombres.json) lleva las 7
+    preguntas: leer_sonda (q1) y el disparo de Q3 (q7) pueden leerlas."""
+    import json
+
+    informe = {"servicios": {"google-flow": {"preguntas": analizar_tools(
+        "google-flow", FLOW_Q7_SI + FLOW_Q6_OK)}}}
+    ruta = tmp_path / "sonda_nombres.json"
+    ruta.write_text(json.dumps(informe, ensure_ascii=False), encoding="utf-8")
+    ids = {p["id"] for p in informe["servicios"]["google-flow"]["preguntas"]}
+    assert {"q1_flow_proyecto_nombre", "q6_flow_generacion_destino",
+            "q7_flow_new_project_cambia_activo"} <= ids
