@@ -426,6 +426,91 @@ def test_raya_al_inicio_de_linea_cuenta():
     assert fuera == 1
 
 
+# ── Q5 · HABLA_SIN_COMILLAS_POSIBLE (verbo fuera de la lista cerrada) ──
+
+_LARGAS = ("uno dos tres cuatro cinco seis siete ocho nueve diez "
+           "once doce trece catorce")
+
+
+def test_ladra_con_14_palabras_genera_aviso():
+    """«ladra:» no está en la lista cerrada → la heurística no lo cuenta,
+    pero con texto tras «:» por encima del límite YA no pasa en silencio:
+    aviso HABLA_SIN_COMILLAS_POSIBLE (sin afectar `ok`)."""
+    c = clip_bueno(video_prompt=(
+        f"Cocina nocturna. JORGE sirve agua. EL PERRO ladra: {_LARGAS}. "
+        "MARÍA cubre su oreja."))
+    r = validar_clip(c)
+    assert r["ok"], r["fallos"]          # el aviso no es un fallo
+    assert any(a["regla"] == "HABLA_SIN_COMILLAS_POSIBLE"
+               for a in r["avisos"]), r["avisos"]
+    assert "ladra" in next(a["detalle"] for a in r["avisos"]
+                           if a["regla"] == "HABLA_SIN_COMILLAS_POSIBLE")
+    assert r["palabras_habladas"] == 0   # la heurística NO lo cuenta
+
+
+def test_acotacion_normal_no_avisa():
+    """Acotación narrativa (sin «verbo:» largo) NO genera el aviso Q5."""
+    c = clip_bueno(video_prompt=(
+        "Cocina nocturna. JORGE trae el sobre y MARÍA lo abre; el sol "
+        "—que ya caía— quemaba el camino y la cena se enfría mientras "
+        "los dos miran la mesa."))
+    r = validar_clip(c)
+    assert r["ok"], r["fallos"]
+    assert not any(a["regla"] == "HABLA_SIN_COMILLAS_POSIBLE"
+                   for a in r["avisos"])
+
+
+def test_habla_corta_con_verbo_desconocido_no_avisa():
+    """«ladra:» con texto corto (≤ límite) no avisa — solo el exceso."""
+    c = clip_bueno(video_prompt=(
+        "Cocina nocturna. JORGE duda y MARÍA imita al perro ladra: "
+        "guau guau. Los dos ríen."))
+    r = validar_clip(c)
+    assert r["ok"], r["fallos"]
+    assert not any(a["regla"] == "HABLA_SIN_COMILLAS_POSIBLE"
+                   for a in r["avisos"])
+
+
+def test_verbo_cerrado_largo_no_duplica_el_aviso():
+    """«grita:» + 14 palabras: la heurística YA lo cuenta (MAX_PALABRAS_
+    HABLADAS + DIALOGO_SIN_COMILLAS) — el aviso Q5 NO se duplica."""
+    c = clip_bueno(video_prompt=(
+        f"Cocina nocturna. JORGE se levanta de golpe y MARÍA grita: "
+        f"{_LARGAS}. JORGE baja la vista."))
+    r = validar_clip(c)
+    assert r["ok"] is False               # 14 > 12 → fallo MAX
+    assert any(f["regla"] == "MAX_PALABRAS_HABLADAS" for f in r["fallos"])
+    assert any(a["regla"] == "DIALOGO_SIN_COMILLAS" for a in r["avisos"])
+    assert not any(a["regla"] == "HABLA_SIN_COMILLAS_POSIBLE"
+                   for a in r["avisos"])
+
+
+def test_con_dialogue_estructurado_el_prompt_no_se_escanea():
+    """Fuente de verdad: `dialogue` (Q5, documentado). El «ladra:» del
+    prompt ni cuenta ni avisa — con `dialogue` presente el prompt no se
+    escanea; queda anotada la recomendación de hacerlo obligatorio."""
+    c = clip_bueno(
+        video_prompt=(f"Cocina nocturna. JORGE espera. EL PERRO ladra: "
+                      f"{_LARGAS}. MARÍA tapa la olla."),
+        dialogue=[{"personaje": "MARÍA", "texto": "basta ya"}])
+    r = validar_clip(c)
+    assert r["fuente_conteo"] == "dialogue"
+    assert r["palabras_habladas"] == 2
+    assert not any(a["regla"] == "HABLA_SIN_COMILLAS_POSIBLE"
+                   for a in r["avisos"])
+
+
+def test_no_duplica_lo_ya_contado_por_comillas_o_rayas():
+    """El escaneo Q5 corre sobre comillas y rayas YA blankadas: lo contado
+    por otras vías no vuelve a avisar (nunca se duplica)."""
+    c = clip_bueno(video_prompt=(
+        "Cocina. JORGE entra y MARÍA dice: \"hasta aquí llegamos y no "
+        "hay más que hablar hoy\" —el sobre— sin mirar a los ojos."))
+    r = validar_clip(c)
+    assert not any(a["regla"] == "HABLA_SIN_COMILLAS_POSIBLE"
+                   for a in r["avisos"]), r["avisos"]
+
+
 # ── robustez ──────────────────────────────────────────────────────────
 
 def test_entrada_que_no_es_dict_no_explota():

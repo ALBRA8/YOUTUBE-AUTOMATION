@@ -43,6 +43,14 @@ Qué valida (por clip):
         DIALOGO_SIN_COMILLAS: el clip sigue validando si no excede el
         límite, pero el aviso pide mover el diálogo a comillas o al campo
         `dialogue`.
+        - Q5 · la lista de verbos de habla es CERRADA: un «verbo:» fuera de
+          ella («ladra:», «confiesa:»…) se le escapa al conteo. Para no
+          dejarlo pasar en silencio, si el texto tras CUALQUIER «palabra:»
+          supera el límite se emite el AVISO HABLA_SIN_COMILLAS_POSIBLE
+          (no afecta `ok`; es una sospecha, no un fallo). Se salta los
+          verbos de la lista cerrada (ya los cuenta la heurística) y el
+          contenido ya contado por comillas/rayas se blanka antes de
+          escanear (nunca se duplica).
      - Token = secuencia alfanumérica (acentos y ñ incluidas); números en
        cifra = 1 palabra, escritos en letras = sus tokens; compuesto con
        guion = 2 palabras; la raya de apertura no añade tokens; muletillas
@@ -50,6 +58,14 @@ Qué valida (por clip):
      - Si el límite se excede, el resultado DEVUELVE EL TEXTO QUE EXCEDE
        (`exceso`: las palabras a partir de la límite+1) junto a
        `dialogo` (fragmentos contados) y el total.
+
+FUENTE DE VERDAD (Q5, documentado): el conteo de palabras habladas se
+hace SOLO sobre el campo estructurado `dialogue` cuando aporta texto; la
+heurística del `video_prompt` es un RESPALDO documentado para fichas que
+aún no lo traen. RECOMENDACIÓN: hacer `dialogue` OBLIGATORIO en la
+próxima versión del contrato (Production JSON / ficha Fase E) — no se
+implementa aquí para no romper fichas existentes; con `dialogue`
+obligatorio la heurística y este aviso quedarían como red de seguridad.
   5. `final_state` presente y no vacío (estado final a 9.9 s). La
      verificación de que ese estado está DESCRITO dentro del párrafo es
      heurística y NO se intenta aquí (QA humano + Fase F).
@@ -115,6 +131,14 @@ _RE_VERBO_HABLA = re.compile(
     r"\b(?:" + "|".join(_VERBOS_HABLA) + r")\s*:\s*([^.«»“\"\n]*)",
     re.IGNORECASE)
 _RE_ULTIMA_PALABRA = re.compile(r"([0-9A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)$")
+
+# Q5 · CUALQUIER «palabra:» + texto hasta fin de oración: detecta posible
+# habla sin comillas con un verbo FUERA de la lista cerrada («ladra:»…).
+# La primera letra es clase de palabra sin dígitos («9:16», «12:30» no
+# encajan). Se usa en _posible_habla_sin_comillas (aviso, no fallo).
+_RE_HABLA_GENERICA = re.compile(
+    r"\b([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)\s*:\s*([^.«»“”" + '"' + r"\n]*)",
+    re.IGNORECASE)
 
 # Claves aceptadas en el campo estructurado `dialogue` (Production JSON).
 _CLAVES_PERSONAJE = ("personaje", "speaker", "name", "nombre")
@@ -226,6 +250,36 @@ def _texto_que_excede(fragmentos: list[str], limite: int) -> str | None:
         if restantes - len(tokens) < 0:
             return " ".join(tokens[restantes:])
         restantes -= len(tokens)
+    return None
+
+
+def _posible_habla_sin_comillas(texto: str, limite: int) -> dict[str, str] | None:
+    """Q5 · Detecta posible diálogo SIN comillas con un verbo FUERA de la
+    lista cerrada de habla («ladra:», «confiesa:»…) cuyo texto tras «:»
+    supera el límite — la heurística (b) no lo cuenta y antes pasaba en
+    silencio. Devuelve el AVISO HABLA_SIN_COMILLAS_POSIBLE (primer
+    hallazgo, determinista) o None.
+
+    No duplica: se escanúa el texto con comillas «…» y pares de raya —…—
+    YA BLANQUEADOS (lo que contaron otras vías no vuelve a avisar), y los
+    verbos de la lista cerrada se saltan (la heurística ya los cuenta).
+    Es un AVISO: la fuente de verdad es el campo `dialogue` (ver
+    docstring del módulo)."""
+    if not isinstance(texto, str):
+        return None
+    residuo = _RE_DIALOGO.sub("«»", texto)
+    residuo = _RE_RAYA.sub("«»", residuo)
+    for m in _RE_HABLA_GENERICA.finditer(residuo):
+        if (m.group(1) or "").lower() in _VERBOS_HABLA:
+            continue                       # ya lo cuenta la heurística
+        n = len(_RE_PALABRA.findall(m.group(2) or ""))
+        if n > limite:
+            return _fallo(
+                "video_prompt", "HABLA_SIN_COMILLAS_POSIBLE",
+                f"texto tras «{m.group(1)}:» con {n} palabras > {limite}: "
+                "posible diálogo sin comillas con un verbo fuera de la "
+                "lista cerrada de habla; muévelo a comillas o al campo "
+                "`dialogue` (fuente de verdad)")
     return None
 
 
@@ -358,6 +412,14 @@ def validar_clip(
             "MAX_PALABRAS_HABLADAS",
             f"{palabras} palabras habladas > {max_palabras}; excede: "
             f"\"{exceso}\""))
+
+    # 4c · Q5 · posible habla sin comillas con verbo FUERA de la lista
+    # cerrada («ladra:»…) — AVISO, no fallo. Solo en la vía heurística:
+    # si `dialogue` es la fuente de verdad, el prompt no se escanea.
+    if fuente != "dialogue":
+        aviso_habla = _posible_habla_sin_comillas(prompt, max_palabras)
+        if aviso_habla:
+            avisos.append(aviso_habla)
 
     # 4b · Personaje del campo `dialogue` en MAYÚSCULAS (misma regla 3)
     if isinstance(clip.get("dialogue"), (list, tuple)):
