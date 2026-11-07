@@ -28,7 +28,13 @@ Qué valida (por clip):
      b) Si `dialogue` falta (o no contiene texto extraíble), heurística
         sobre `video_prompt` (DOCUMENTADA, determinista):
         - comillas ("...", “…” o «...») → hablado;
-        - segmentos entre RAYAS (—...—) sin comillas dentro → hablado;
+        - segmentos entre RAYAS (—…—) sin comillas dentro → hablado SOLO
+          si la raya de apertura cumple la REGLA DE LA RAYA: abre diálogo
+          si va (i) al inicio de línea (o del texto), (ii) tras verbo de
+          habla (dice, grita, susurra, responde, pregunta) o (iii) tras
+          «:». Un par de rayas usado como ACOTACIÓN dentro de una frase
+          narrativa (p. ej. «El sol —que ya caía— quemaba el camino»)
+          NO cuenta: es el falso positivo corregido (R6).
         - texto tras VERBO DE HABLA + ":" (dice, grita, susurra, responde,
           pregunta) hasta fin de oración (punto o salto) → hablado, SOLO
           si ese resto no empieza por comilla o raya (no se duplica lo ya
@@ -99,11 +105,16 @@ _RE_PALABRA = re.compile(r"[0-9A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+")
 _RE_DIALOGO = re.compile(r'«([^»]*?)»|"([^"]*?)"|“([^”]*?)”')
 
 # Heurística (fuente b, ver docstring): rayas —…— y verbo de habla + «:».
+# REGLA DE LA RAYA (R6): un par —…— solo abre diálogo si la raya de
+# apertura va tras verbo de habla, tras «:» o al inicio de línea; un par
+# usado como acotación narrativa («El sol —que ya caía— quemaba…») NO
+# cuenta. La condición se aplica en _raya_abre_dialogo.
 _RE_RAYA = re.compile(r"—([^—\n]+?)—")
 _VERBOS_HABLA = ("dice", "grita", "susurra", "responde", "pregunta")
 _RE_VERBO_HABLA = re.compile(
     r"\b(?:" + "|".join(_VERBOS_HABLA) + r")\s*:\s*([^.«»“\"\n]*)",
     re.IGNORECASE)
+_RE_ULTIMA_PALABRA = re.compile(r"([0-9A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)$")
 
 # Claves aceptadas en el campo estructurado `dialogue` (Production JSON).
 _CLAVES_PERSONAJE = ("personaje", "speaker", "name", "nombre")
@@ -160,8 +171,25 @@ def _dialogue_estructurado(dialogue: Any) -> tuple[list[str], list[str], bool]:
     return frags, avisos, bool(frags)
 
 
+def _raya_abre_dialogo(texto: str, inicio: int) -> bool:
+    """REGLA DE LA RAYA (R6, determinista): la raya que abre en `inicio`
+    solo abre diálogo si (i) va al inicio de línea (o del texto), (ii) va
+    tras verbo de habla (dice, grita, susurra, responde, pregunta) o
+    (iii) va tras «:». Pares de rayas como acotación dentro de una frase
+    narrativa («El sol —que ya caía— quemaba el camino») NO cuentan."""
+    linea_previa = texto[:inicio].rsplit("\n", 1)[-1]
+    if not linea_previa.strip():            # (i) inicio de línea / del texto
+        return True
+    previo = linea_previa.rstrip()
+    if previo.endswith(":"):                # (iii) tras dos puntos
+        return True
+    m = _RE_ULTIMA_PALABRA.search(previo)   # (ii) tras verbo de habla
+    return bool(m and m.group(1).lower() in _VERBOS_HABLA)
+
+
 def _fragmentos_heuristicos(texto: str) -> tuple[list[str], int]:
-    """Fuente (b), ver docstring: comillas + rayas —…— + verbo de habla.
+    """Fuente (b), ver docstring: comillas + rayas —…— (REGLA DE LA RAYA:
+    solo tras verbo de habla, «:» o inicio de línea) + verbo de habla.
     Devuelve (fragmentos, nº de fragmentos hallados FUERA de comillas).
     El texto tras verbo no se cuenta si empieza por comilla/raya (ya se
     cuenta por otra vía — nunca se duplica)."""
@@ -174,9 +202,12 @@ def _fragmentos_heuristicos(texto: str) -> tuple[list[str], int]:
     residuo = _RE_DIALOGO.sub("«»", texto)   # comillas ya contadas («» bloquea)
     for m in _RE_RAYA.finditer(residuo):
         frag = (m.group(1) or "").strip()
-        if frag:
-            frags.append(frag)
-            fuera += 1
+        if not frag:
+            continue
+        if not _raya_abre_dialogo(residuo, m.start()):
+            continue                         # acotación narrativa (R6)
+        frags.append(frag)
+        fuera += 1
     residuo = _RE_RAYA.sub("«»", residuo)    # rayas ya contadas («» bloquea)
     for m in _RE_VERBO_HABLA.finditer(residuo):
         frag = (m.group(1) or "").strip()

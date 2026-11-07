@@ -277,9 +277,11 @@ def _raya_de(n: int) -> str:
 
 
 def test_raya_con_20_palabras_falla_antes_valido():
-    """Caso de regresión 0.1: 20 palabras entre rayas pasaban como válidos."""
-    r = validar_clip(clip_bueno(video_prompt=f"Cocina nocturna. {_raya_de(20)}",
-                                casting=["MARÍA"]))
+    """Caso de regresión 0.1: 20 palabras entre rayas tras un verbo de
+    habla pasaban como válidos (REGLA DE LA RAYA: tras «grita:» cuenta)."""
+    r = validar_clip(clip_bueno(
+        video_prompt=f"MARÍA grita: {_raya_de(20)}",
+        casting=["MARÍA"]))
     assert not r["ok"]
     assert r["palabras_habladas"] == 20
     assert any(f["regla"] == "MAX_PALABRAS_HABLADAS" for f in r["fallos"])
@@ -299,7 +301,7 @@ def test_verbo_habla_14_palabras_falla_antes_valido():
 
 def test_habla_fuera_de_comillas_genera_aviso_sin_romper_ok():
     r = validar_clip(clip_bueno(
-        video_prompt="MARÍA limpia la cocina. —no puedo más— y sale.",
+        video_prompt="MARÍA limpia la cocina y dice: —no puedo más— y sale.",
         casting=["MARÍA"]))
     assert r["ok"], r["fallos"]          # 3 palabras: no excede
     assert any(a["regla"] == "DIALOGO_SIN_COMILLAS" for a in r["avisos"])
@@ -344,7 +346,7 @@ def test_dialogue_vacio_significa_sin_dialogo():
 
 def test_dialogue_malformado_cae_a_heuristica_con_aviso():
     veinte = " ".join(f"p{i}" for i in range(1, 21))
-    r = validar_clip(clip_bueno(video_prompt=f"Cocina. {_raya_de(20)}",
+    r = validar_clip(clip_bueno(video_prompt=f"MARÍA grita: —{veinte}—",
                                 casting=["MARÍA"],
                                 dialogue=[{"sin": "texto"}, 42]))
     assert not r["ok"]
@@ -365,6 +367,63 @@ def test_prompt_sin_habla_no_genera_avisos():
     r = validar_clip(clip_bueno())
     assert r["ok"] and r["avisos"] == []
     assert r["palabras_habladas"] == 5   # la cita del clip_bueno sigue contando
+
+
+# ── R6 · REGLA DE LA RAYA: acotación narrativa NO es diálogo ─────────
+
+def test_raya_acotacion_narrativa_no_cuenta():
+    """Caso R6 (falso positivo corregido): un par de rayas como acotación
+    dentro de una frase narrativa NO cuenta como palabras habladas."""
+    r = validar_clip(clip_bueno(
+        video_prompt="El sol —que ya caía— quemaba el huerto y MARÍA "
+                     "corrió a cubrirse.",
+        casting=["MARÍA"]))
+    assert r["ok"], r["fallos"]
+    assert r["palabras_habladas"] == 0
+    assert r["avisos"] == []             # sin DIALOGO_SIN_COMILLAS
+    assert r["fuente_conteo"] == "ninguna"
+
+
+def test_raya_tras_punto_y_seguido_no_cuenta():
+    """Raya tras una oración narrativa (punto y seguido) NO abre diálogo."""
+    r = validar_clip(clip_bueno(
+        video_prompt="MARÍA entró. —con calma— miró la mesa y respiró.",
+        casting=["MARÍA"]))
+    assert r["ok"], r["fallos"]
+    assert r["palabras_habladas"] == 0
+    assert r["avisos"] == []
+
+
+def test_raya_tras_verbo_de_habla_cuenta():
+    """Raya tras verbo de habla (sin «:») SÍ abre diálogo."""
+    r = validar_clip(clip_bueno(
+        video_prompt="MARÍA se detiene y grita —¡salid de ahí!— al aire "
+                     "libre del huerto.",
+        casting=["MARÍA"]))
+    assert r["ok"], r["fallos"]          # 3 palabras: no excede
+    assert r["palabras_habladas"] == 3
+    assert "¡salid de ahí!" in r["dialogo"]
+    assert any(a["regla"] == "DIALOGO_SIN_COMILLAS" for a in r["avisos"])
+
+
+def test_raya_tras_dos_puntos_cuenta():
+    """Raya tras «:» (sin verbo de habla delante) SÍ abre diálogo."""
+    r = validar_clip(clip_bueno(
+        video_prompt="El chef sirvió el plato: —por fin— y MARÍA sonrió.",
+        casting=["MARÍA"]))
+    assert r["ok"], r["fallos"]
+    assert r["palabras_habladas"] == 2
+    assert "por fin" in r["dialogo"]
+    assert any(a["regla"] == "DIALOGO_SIN_COMILLAS" for a in r["avisos"])
+
+
+def test_raya_al_inicio_de_linea_cuenta():
+    """Raya al inicio de línea (o del texto) SÍ abre diálogo."""
+    from services.minidrama_clip_validator import _fragmentos_heuristicos
+    frags, fuera = _fragmentos_heuristicos(
+        "Plano del huerto al atardecer.\n—Volví— dice MARÍA.")
+    assert frags == ["Volví"]
+    assert fuera == 1
 
 
 # ── robustez ──────────────────────────────────────────────────────────
