@@ -69,6 +69,24 @@ def test_sanea_sin_titulo_no_doble_separador():
 
 # ── 2.1 · registro por producción ─────────────────────────────────────
 
+def test_registro_path_seguridad_rechaza_traversal_y_separadores(aislado):
+    """R2 · Seguridad: rechaza ../, separadores, rutas absolutas, vacíos y largos."""
+    with pytest.raises(ValueError, match=r"no puede contener '\.\.'|separadores"):
+        rp.registro_path("../escape")
+    with pytest.raises(ValueError, match=r"no puede contener '\.\.'|separadores"):
+        rp.registro_path("sub/folder")
+    with pytest.raises(ValueError, match=r"no puede contener '\.\.'|separadores"):
+        rp.registro_path("sub\\folder")
+    with pytest.raises(ValueError, match="absoluta|separadores"):
+        rp.registro_path("/etc/passwd")
+    with pytest.raises(ValueError, match="absoluta|separadores"):
+        rp.registro_path("C:\\Windows\\System32")
+    with pytest.raises(ValueError, match="vacío"):
+        rp.registro_path("")
+    with pytest.raises(ValueError, match="demasiado largo"):
+        rp.registro_path("a" * 81)
+
+
 def test_crear_y_leer_roundtrip(aislado):
     rp.crear("P1", "frutinovelas", "La receta del caos",
              nicho_nombre="Frutinovelas")

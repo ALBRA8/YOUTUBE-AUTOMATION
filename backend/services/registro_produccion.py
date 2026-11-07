@@ -87,12 +87,40 @@ def nombre_produccion(nicho: str, numero: int, titulo: str,
 
 
 # ── rutas y helpers de disco ─────────────────────────────────────────────
+ID_PRODUCCION_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+LONGITUD_MAX_ID = 80
+
+
+def validar_production_id(production_id: str) -> str:
+    """Valida que production_id sea seguro y contenga solo [A-Za-z0-9._-].
+    Rechaza vacío, >80 chars, separadores / y \\, '..' y rutas absolutas."""
+    p = str(production_id or "").strip()
+    if not p:
+        raise ValueError("production_id no puede ser vacío")
+    if len(p) > LONGITUD_MAX_ID:
+        raise ValueError(f"production_id demasiado largo (> {LONGITUD_MAX_ID})")
+    if "/" in p or "\\" in p:
+        raise ValueError(f"production_id contiene separadores de ruta: {p!r}")
+    if ".." in p:
+        raise ValueError(f"production_id no puede contener '..': {p!r}")
+    if Path(p).is_absolute() or re.match(r"^[a-zA-Z]:", p):
+        raise ValueError(f"production_id no puede ser ruta absoluta: {p!r}")
+    if not ID_PRODUCCION_RE.fullmatch(p):
+        raise ValueError(f"production_id con caracteres inválidos: {p!r}")
+    return p
+
+
 def _output_dir() -> Path:
     return Path(config.OUTPUT_DIR)
 
 
 def registro_path(production_id: str) -> Path:
-    return _output_dir() / production_id / "registro.json"
+    pid = validar_production_id(production_id)
+    root = _output_dir().resolve()
+    target = (root / pid / "registro.json").resolve()
+    if root not in target.parents:
+        raise ValueError("ruta resuelta fuera de OUTPUT_DIR")
+    return target
 
 
 def _nichos_path() -> Path:
