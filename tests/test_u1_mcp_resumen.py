@@ -21,7 +21,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-BACKEND = Path(__file__).resolve().parents[1]
+BACKEND = Path(__file__).resolve().parents[1] / "backend"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
@@ -245,4 +245,22 @@ def test_endpoint_chrome_caido_siguiente_paso_claro(dobles, monkeypatch):
 
 
 if __name__ == "__main__":
-    sys.exit(pytest.main([__file__, "-q"]))
+    # Batería standalone (tests/run_all.py): imprime el resumen "N OK ·
+    # M fallos" que el runner parsea, contado con un plugin de pytest.
+    import pytest as _pytest
+
+    class _Resumen:
+        def __init__(self) -> None:
+            self.ok = self.fallos = 0
+
+        def pytest_runtest_logreport(self, report):
+            if report.when == "call":
+                if report.passed:
+                    self.ok += 1
+                elif report.failed:
+                    self.fallos += 1
+
+    _res = _Resumen()
+    _code = _pytest.main([__file__, "-q"], plugins=[_res])
+    print(f"\n{_res.ok} OK · {_res.fallos} fallos")
+    sys.exit(int(_code))
