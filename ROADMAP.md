@@ -5,11 +5,14 @@
   intervención manual.
 - Start Frame de Flow (sujeto a captura real de red según checklist en PROJECT_STATE).
 ## SIGUIENTE
-- Minidramas NotebookLM+Flow: piloto mínimo de UN episodio corto —
-  ejecutar Gate 0/Gate 3 con Flow real (máquina del dueño; checklist y
-  observador listos) y resolver las decisiones marcadas PENDIENTE DEL
-  DUEÑO en la spec (fuente del diálogo A/B/C; duraciones reales de Flow
-  vía sonda). El validador Fase E ya está implementado y probado.
+- Minidramas NotebookLM+Flow: registro local listo (registro.json por
+  producción con ID estable, UN cuaderno por nicho, nombres
+  «FRUTINOVELAS · S003 · Título», GET /api/registro, sonda de
+  capacidades INT-093 y gate FLOW_REGISTRO_SYNC apagado). Pendiente del
+  dueño: correr la sonda en su máquina, decidir diálogo A/B/C y
+  duraciones (spec PENDIENTE DEL DUEÑO) y ejecutar el piloto mínimo
+  Gate 0/Gate 3 con Flow real (checklist y observador listos). El
+  validador Fase E está implementado y probado.
 - Google Flow Multi-Cuenta: balanceador de cuentas en mcp_manager para rotación
   automática de créditos Veo (inspirado en análisis Sloth v0.3.48).
 - Hoja de contacto visual (hoja de escenas con safe zones) para QA instantáneo.
