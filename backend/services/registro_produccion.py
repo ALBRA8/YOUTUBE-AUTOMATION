@@ -247,8 +247,17 @@ def registrar_flow_proyecto(production_id: str, crear_proyecto: Callable,
         return {"estado": "YA_VINCULADO",
                 "flow_project_id": reg["flow_project_id"]}
     res = crear_proyecto(reg["nombre_flow"]) or {}
-    reg["flow_project_id"] = (str(res.get("flow_project_id") or "").strip()
-                              or None)
+    flow_id = str(res.get("flow_project_id") or "").strip()
+    if not flow_id:
+        detalle = "crear_proyecto no entrego flow_project_id: no se vincula proyecto"
+        if detalle not in reg.setdefault("limitaciones", []):
+            reg["limitaciones"].append(detalle)
+        guardar(reg)
+        return {"estado": "ERROR",
+                "flow_project_id": None,
+                "detalle": detalle}
+
+    reg["flow_project_id"] = flow_id
     if nombres_soportados == "SOPORTADO":
         reg["flow_project_nombre_observado"] = (
             res.get("nombre_observado") or reg["nombre_flow"])

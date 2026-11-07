@@ -200,6 +200,17 @@ def test_nombre_observado_solo_si_sonda_soporta(aislado):
     assert any("NO_SOPORTADO" in x for x in limit)
 
 
+def test_registrar_flow_proyecto_sin_id_devuelve_error(aislado):
+    """R1 · Bug: si crear_proyecto no entrega id, devuelve ERROR y anota limitación."""
+    rp.crear("P1", "frutinovelas", "a")
+    res = rp.registrar_flow_proyecto("P1", lambda n: {})
+    assert res["estado"] == "ERROR"
+    assert res["flow_project_id"] is None
+    reg = rp.leer("P1")
+    assert reg["flow_project_id"] is None
+    assert any("no entrego flow_project_id" in x or "no entregó flow_project_id" in x for x in reg["limitaciones"])
+
+
 def test_vinculacion_sin_registro_falla(aislado):
     with pytest.raises(ValueError):
         rp.registrar_flow_proyecto("NO_EXISTE", lambda n: {})
