@@ -225,6 +225,9 @@ BATERIAS = [
     "test_u_panel_ecosistema.py", # U2-U5: tarjeta única con semáforo de U1,
                                  # Conectar todo, bloque Avanzado, cuaderno
                                  # por nicho y gate del Run Full Pipeline
+    "test_u6_catalogo_contrato.py", # U6/S2: contrato del paquete REAL
+                                 # notebooklm-mcp-server v0.1.15 + trinquete
+                                 # de tools del código vs catálogo real
 ]
 
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")

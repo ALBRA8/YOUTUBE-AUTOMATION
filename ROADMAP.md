@@ -43,7 +43,7 @@
   y guardia ANTES del POST (97ba839); U6 paquete real notebooklm-mcp-
   server v0.1.15 vs server_info 2.14.5=FastMCP corregido en panel/
   docstring/INT-093 + trinquete de catálogo (683d766). Baterías nuevas
-  (57 en run_all): test_u1_mcp_resumen (11) + test_u_panel_ecosistema
+  (58 en run_all): test_u1_mcp_resumen (11) + test_u_panel_ecosistema
   (20) + test_u6_catalogo_contrato (7). Lo visual en navegador real:
   NOT_DEMONSTRATED (sandbox sin Chrome de escritorio) — pendiente del
   dueño. La lógica de conexión (mcp_manager/GoogleFlowMCP) intacta.
