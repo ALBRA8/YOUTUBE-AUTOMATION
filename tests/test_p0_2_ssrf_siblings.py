@@ -145,6 +145,22 @@ async def test_broll_link_publico_sigue_funcionando(tmp_path, monkeypatch):
     # forzamos la clave vía monkeypatch de os.getenv dentro del módulo.
     monkeypatch.setattr(broll_overlay, "PEXELS_API_KEY", "clave-test")
     monkeypatch.setattr(broll_overlay.httpx, "AsyncClient", _Client)
+
+    # H1a · hermeticidad: el test NO puede depender de DNS real (fallaba sin
+    # internet porque security.validar_url resuelve videos.pexels.com en
+    # security.py:102). Se parchea SOLO la resolución dentro de este test y
+    # se devuelve una IP pública de mentira; la LÓGICA de validar_url NO se
+    # toca (sigue evaluando is_private/is_loopback sobre la IP resuelta y
+    # rechazando las prohibidas — la guardia no se debilita).
+    import socket as _sock
+
+    def _dns_hermetico(host, *a, **k):
+        if host == "videos.pexels.com":
+            return [(_sock.AF_INET, _sock.SOCK_STREAM, 6, "",
+                     ("93.184.216.34", 0))]  # IP pública ficticia
+        raise OSError(f"DNS bloqueado en test hermético: {host}")
+
+    monkeypatch.setattr(security.socket, "getaddrinfo", _dns_hermetico)
     destino = tmp_path / "broll_ok.mp4"
     ok = await broll_overlay.fetch_stock_video_pexels(
         "naturaleza", destino, orientation="portrait")

@@ -248,18 +248,105 @@ def pytest_configure(config):
     assert Path(_dbmod.DB_PATH) == Path(_cfgmod.DB_PATH), (
         "database.DB_PATH no quedó ligado a la SQLite de sesión")
 
-    # P1-1: Hermetización de resolución DNS para pruebas (evita llamadas de red en tests de viral_clipper)
-    import socket
-    _orig_getaddrinfo = socket.getaddrinfo
+    # H1c · GUARDIA DE RED DEL PROCESO PYTEST: ningún test puede depender
+    # de DNS ni de internet. Tres capas sobre el módulo socket del proceso:
+    #
+    #   1. getaddrinfo ESTRICTO: resuelve SIN red las IP literales y los
+    #      nombres de la lista blanca documentada (youtube/example.com con
+    #      IP ficticia, heredada del parche P1-1 de viral_clipper);
+    #      localhost/testserver → 127.0.0.1; CUALQUIER otro nombre levanta
+    #      OSError — el test que intente resolverlo FALLA.
+    #   2. connect/connect_ex de socket.socket: solo loopback (127.0.0.0/8,
+    #      ::1) y sockets AF_UNIX; todo lo demás levanta OSError.
+    #   3. gethostbyname(_ex): misma lista blanca, sin red.
+    #
+    # No se debilita security.validar_url: sigue recibiendo resoluciones
+    # (ficticias o literales) y aplicando SU lógica de rechazo. Los tests
+    # que necesitan un host concreto parchean getaddrinfo en SU scope
+    # (p.ej. test_p0_2_ssrf_siblings H1a) — monkeypatch restaura la guardia.
+    # Nota honesta: la guardia cubre el PROCESO pytest; los subprocess que
+    # algún test levante solo hablan loopback (el modo hermético de run_all
+    # aplica la misma guardia a las baterías y a SUS hijos vía sitecustomize).
+    import ipaddress as _ipaddr
+    import socket as _socket
 
-    def _hermetic_getaddrinfo(host, port, *args, **kwargs):
-        h = str(host or "").lower()
-        if h in ("www.youtube.com", "youtube.com", "m.youtube.com", "youtu.be",
-                 "example.com", "www.example.com"):
-            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("142.250.190.46", port or 0))]
-        return _orig_getaddrinfo(host, port, *args, **kwargs)
+    _HOSTS_FICTICIOS = {
+        "www.youtube.com": "142.250.190.46",
+        "youtube.com": "142.250.190.46",
+        "m.youtube.com": "142.250.190.46",
+        "youtu.be": "142.250.190.46",
+        "example.com": "142.250.190.46",
+        "www.example.com": "142.250.190.46",
+    }
+    _NOMBRES_LOCALES = {"localhost", "testserver", "127.0.0.1", "::1", "::"}
 
-    socket.getaddrinfo = _hermetic_getaddrinfo
+    def _resuelve_sin_red(host):
+        """Devuelve la IP de una resolución PERMITIDA, o None si el nombre
+        está prohibido (el llamador levanta OSError)."""
+        h = str(host or "").strip().lower().rstrip(".")
+        if h in _NOMBRES_LOCALES:
+            return "127.0.0.1" if ":" not in h and h != "::1" else "::1"
+        if h in _HOSTS_FICTICIOS:
+            return _HOSTS_FICTICIOS[h]
+        try:  # IP literal: no hay consulta DNS de por medio
+            _ipaddr.ip_address(h)
+            return h
+        except ValueError:
+            return None
+
+    def _guardia_getaddrinfo(host, port=None, *a, **k):
+        ip = _resuelve_sin_red(host)
+        if ip is None:
+            raise OSError(
+                f"H1c: red bloqueada en pytest — resolución de '{host}' "
+                "no permitida (los tests son herméticos)")
+        fam = _socket.AF_INET6 if ":" in ip else _socket.AF_INET
+        return [(fam, _socket.SOCK_STREAM, 6, "", (ip, port or 0))]
+
+    def _guardia_gethostbyname(host):
+        ip = _resuelve_sin_red(host)
+        if ip is None or ":" in ip:
+            raise OSError(f"H1c: gethostbyname bloqueado para '{host}'")
+        return ip
+
+    def _guardia_gethostbyname_ex(host):
+        ip = _guardia_gethostbyname(host)
+        return (str(host), [], [ip])
+
+    _orig_connect = _socket.socket.connect
+    _orig_connect_ex = _socket.socket.connect_ex
+
+    def _destino_permitido(address):
+        if not isinstance(address, tuple) or not address:
+            return True  # AF_UNIX / rutas: no es salida a internet
+        host = address[0]
+        if isinstance(host, str):
+            ip = _resuelve_sin_red(host)
+            if ip is None:
+                return False
+            try:
+                return _ipaddr.ip_address(ip).is_loopback
+            except ValueError:
+                return False
+        return True  # tuplas no-string (p.ej. v6 cruda): fuera de alcance
+
+    def _guardia_connect(self, address):
+        if not _destino_permitido(address):
+            raise OSError(
+                f"H1c: red bloqueada en pytest — connect a {address!r} "
+                "(solo loopback está permitido)")
+        return _orig_connect(self, address)
+
+    def _guardia_connect_ex(self, address):
+        if not _destino_permitido(address):
+            return _socket.EHOSTUNREACH  # código de error, sin excepción
+        return _orig_connect_ex(self, address)
+
+    _socket.getaddrinfo = _guardia_getaddrinfo
+    _socket.gethostbyname = _guardia_gethostbyname
+    _socket.gethostbyname_ex = _guardia_gethostbyname_ex
+    _socket.socket.connect = _guardia_connect
+    _socket.socket.connect_ex = _guardia_connect_ex
 
     config._p1work_session_tmp = str(session_tmp)
 
