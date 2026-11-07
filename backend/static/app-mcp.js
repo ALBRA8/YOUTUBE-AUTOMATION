@@ -396,6 +396,7 @@ async function gsessRefresh(silent) {
     S.eco = eco;
     gsessApply(eco, sso);
     pipeGateApply();      // U5 · habilita/deshabilita Run con motivo
+    mcpRefresh(true);
     return eco;
   } catch (e) { if (!silent) toast('Estado ecosistema: ' + e.message, 'err'); return null; }
 }
@@ -597,12 +598,14 @@ async function mcpConnect(svc) {
       mcpListNotebooks({ silent: true });
   } catch (e) { toast('Conexión: ' + e.message, 'err'); }
   mcpRefresh(true);
+  gsessRefresh(true);
 }
 
 async function mcpDisconnect(svc) {
   try { await api('/mcp/disconnect', { method: 'POST', body: { service: svc } }); toast('Desconectado'); }
   catch (e) { toast('Desconexión: ' + e.message, 'err'); }
   mcpRefresh(true);
+  gsessRefresh(true);
 }
 
 async function mcpTest(svc) {
