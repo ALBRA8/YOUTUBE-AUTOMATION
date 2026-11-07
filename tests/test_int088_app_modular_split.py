@@ -43,7 +43,9 @@ MODULES = ("app-core.js", "app-projects.js", "app-mcp.js", "app-wizard.js", "app
 # U2 (2026-11-07): 189 → 188 — salen gsessDisconnectedHTML/gsessWaitingHTML/
 # gsessConnectedHTML (los 3 estados pintados a mano del Hub, sustituidos por el
 # semáforo REAL de U1); entra ecoRowHTML + gsessConnectAll (Conectar todo).
-N_FUNCS_REAL = 188
+# U3 (2026-11-07): 188 → 189 — entra avisoHumanoDe (línea humana de avisos
+# conocidos de la consola, p. ej. FastMCP; el volcado crudo queda en Avanzado).
+N_FUNCS_REAL = 189
 
 # funciones estrella por módulo (cohesión; suficientes para cazar desvíos)
 STAR = {

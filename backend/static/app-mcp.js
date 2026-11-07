@@ -107,11 +107,31 @@ function renderMCP() {
       <div id="pipe-progress"></div>
       <pre class="mcp-log" id="pipe-log" style="display:none"></pre>
     </div>
-    <div class="mcp-row btns" style="margin-top:14px">
-      <button class="btn" onclick="mcpTest('')">🧪 Test Pipeline (ambos)</button>
-      <button class="btn ghost" onclick="mcpRefresh()">🔄 Refrescar estado</button>
-    </div>
-    <pre class="mcp-log" id="mcp-log">Estado en vivo…</pre>
+    <details class="mcp-adv" id="mcp-advanced">
+      <summary>⚙️ Avanzado — tarjetas por servicio, reparar, pruebas y consola</summary>
+      <p class="hintline">Todo lo de aquí es de diagnóstico: no hace falta
+        abrirlo para usar el ecosistema. El volcado crudo de la consola
+        vive SOLO aquí dentro.</p>
+      ${mcpSvcHTML('google-flow', '🎬 Google Flow MCP',
+        'Servidor tools/GoogleFlowMCP (Node). Con el login unificado se engancha POR CDP al Chrome del perfil ' +
+        'compartido (<code>GOOGLE_PROFILE_GLOBAL</code>, puerto <code>FLOW_CDP_PORT</code>) y hereda la sesión — ' +
+        'sin login separado. Sin el login global, usa su Chrome dedicado de siempre. Requiere ' +
+        '<code>FLOW_MCP_ENABLED=1</code> en backend/.env.')}
+      ${mcpSvcHTML('notebooklm', '📚 NotebookLM MCP',
+        'Servidor <code>notebooklm-mcp-server</code> v0.1.15 (comandos <code>notebooklm-mcp</code> y ' +
+        '<code>notebooklm-mcp-auth</code>; <code>uv tool list</code> lo confirma). Autenticación: ' +
+        '«🔑 Login Google» + «📥 Capturar sesión» escribe el <code>storage_state.json</code> desde el ' +
+        'MISMO login. El notebook se elige del DROPDOWN (se rellena solo al conectar y se ' +
+        'recuerda por nicho); si lo dejas vacío, el pre-flight [0/3] intenta auto-descubrirlo y, si no puede, ' +
+        'aborta con <code>PRE_FLIGHT_MISSING_NOTEBOOK_ID</code>.')}
+      <div class="mcp-row btns" style="margin-top:14px">
+        <button class="btn" onclick="mcpTest('')">🧪 Test Pipeline (ambos)</button>
+        <button class="btn ghost" onclick="mcpRefresh()">🔄 Refrescar estado</button>
+        <button class="btn ghost" onclick="gsessOpenWindow()">🪟 Abrir ventana de Chrome</button>
+        <button class="btn ghost" onclick="gsessRepairProfile()">🔧 Reparar perfil</button>
+      </div>
+      <pre class="mcp-log" id="mcp-log">Estado en vivo…</pre>
+    </details>
   </div>`;
   mcpRefresh();
   gsessRefresh(true);   // INT-025 · estado de la sesión unificada sin ruido
@@ -150,6 +170,7 @@ function mcpGsessHTML() {
       <button class="btn ghost" onclick="gsessRefresh()">🔄 Refrescar estado</button>
     </div>
     <p class="hintline" id="gsess-connectall-nota" style="display:none"></p>
+    <p class="hintline" id="eco-aviso" style="display:none"></p>
   </div>`;
 }
 
@@ -399,6 +420,19 @@ function mcpPickNotebook(id) {
   toast('Notebook fijado ✅ ' + id.slice(0, 8) + '… — ya puedes lanzar el pipeline');
 }
 
+/* U3 · traducción HUMANA de avisos conocidos de la consola (p. ej.
+   «fastmcp desactualizado»): una línea que dice que NO afecta. El
+   volcado crudo sigue SOLO en Avanzado. */
+function avisoHumanoDe(services) {
+  const joined = Object.values(services || {})
+    .map(v => ((v && v.stderr_tail) || []).join('\n')).join('\n');
+  if (/fastmcp/i.test(joined))
+    return 'ℹ Aviso conocido de FastMCP (framework interno del servidor MCP): ' +
+           'aunque la consola lo marque desactualizado, NO afecta a tus ' +
+           'herramientas ni al pipeline.';
+  return '';
+}
+
 function mcpZoneHTML(st) {
   let h = '';
   if (st.auth_detail) h += `<p class="hintline">🔐 ${esc(st.auth_detail)}</p>`;
@@ -415,8 +449,12 @@ function mcpZoneHTML(st) {
     h += `<p class="hintline">Chrome CDP (${st.cdp_port || ''}): ${st.browser_up ? '✅ arriba' : '❌ no responde — abre el Chrome dedicado'}</p>`;
   if (st.notebook_id_valid !== undefined && st.notebook_id)
     h += `<p class="hintline">notebookId «${esc(st.notebook_id)}»: ${st.notebook_id_valid ? '✅ válido' : '❌ inválido'}</p>`;
-  if (st.stderr_tail && st.stderr_tail.length)
+  if (st.stderr_tail && st.stderr_tail.length) {
+    const humano = avisoHumanoDe({ solo: st });
+    if (humano) h += `<p class="hintline">${esc(humano)}</p>`;
+    // volcado crudo: SOLO visible aquí (la zona vive dentro de «Avanzado»)
     h += `<pre class="mcp-log">${esc(st.stderr_tail.join('\n'))}</pre>`;
+  }
   return h || '<p class="hintline">Sin información adicional.</p>';
 }
 
@@ -432,6 +470,11 @@ function mcpApplyStatus(services) {
     if (btnC) { btnC.disabled = st.state === 'connecting'; btnC.textContent = st.state === 'connecting' ? '⏳ Conectando…' : '🔌 Conectar'; }
     if (btnD) btnD.disabled = st.state === 'connecting' || st.state === 'disconnected';
   });
+  // U3 · aviso conocido (p. ej. FastMCP) como línea humana en la tarjeta
+  // principal — NUNCA el volcado crudo fuera de «Avanzado».
+  const aviso = avisoHumanoDe(services);
+  const elAviso = $('#eco-aviso');
+  if (elAviso) { elAviso.style.display = aviso ? '' : 'none'; if (aviso) elAviso.textContent = aviso; }
   updatePills();
 }
 

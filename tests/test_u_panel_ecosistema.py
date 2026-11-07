@@ -131,5 +131,79 @@ def test_u2_n_funcs_real_actualizado():
     assert total == declarado, f"{total} funciones reales != {declarado} declaradas"
 
 
+# ══ U3 · bloque plegado «Avanzado» ════════════════════════════════════════
+
+def _entre(s: str, a: str, b: str) -> str:
+    """Contenido entre el ancla a y el ancla b (una ocurrencia cada uno)."""
+    assert s.count(a) == 1 and s.count(b) == 1, f"anclas: {a!r} {b!r}"
+    return s.split(a, 1)[1].split(b, 1)[0]
+
+
+def test_u3_tarjetas_y_consola_viven_en_avanzado():
+    """Las tarjetas por servicio, Test Pipeline, Refrescar, Reparar perfil,
+    Abrir ventana y el #mcp-log quedan DENTRO del <details> «Avanzado»;
+    la tarjeta del ecosistema y la del pipeline quedan FUERA (cuerpo)."""
+    dentro = _entre(MCP_JS, '<details class="mcp-adv" id="mcp-advanced">',
+                    '</details>\n  </div>`;'.replace("\n  ", "\n\n  "))
+    fuera = MCP_JS.split('<details class="mcp-adv" id="mcp-advanced">', 1)[0]
+    for contenido in ("mcpSvcHTML('google-flow'", "mcpSvcHTML('notebooklm'",
+                      "mcpTest('')", 'id="mcp-log"', "gsessRepairProfile()",
+                      "gsessOpenWindow()", "Avanzado"):
+        assert contenido in dentro, f"debe vivir en Avanzado: {contenido!r}"
+    for contenido in ("mcpGsessHTML()", 'id="pipe-card"'):
+        assert contenido in fuera, f"debe seguir en el cuerpo: {contenido!r}"
+    assert "<details" in STYLE.replace('details.mcp-adv', '<details') or \
+        ".mcp-adv" in STYLE  # CSS del plegado
+
+
+def test_u3_stderr_crudo_solo_en_avanzado():
+    """El único sitio que RENDERIZA stderr_tail crudo es la zona de
+    servicio (que vive dentro de Avanzado); avisoHumanoDe solo lo LEE
+    (no lo pinta) y la tarjeta principal nunca muestra el volcado."""
+    import re
+    zona = MCP_JS.index("function mcpZoneHTML(")
+    renders = [m.start() for m in re.finditer(r"st\.stderr_tail", MCP_JS)]
+    assert renders, "el volcado crudo debe seguir existiendo en la zona"
+    assert all(zona < p for p in renders), \
+        "el volcado crudo solo puede pintarse dentro de mcpZoneHTML"
+    # avisoHumanoDe LO LEE (v.stderr_tail) pero no lo renderiza
+    aviso = MCP_JS.index("function avisoHumanoDe(")
+    lecturas = [m.start() for m in re.finditer(r"v\.stderr_tail", MCP_JS)]
+    assert lecturas and all(
+        aviso < p < MCP_JS.index("function mcpZoneHTML(") for p in lecturas)
+    assert "stderr_tail" not in MCP_JS.split("function mcpGsessHTML(")[1].split(
+        "function ecoRowHTML(")[0]
+
+
+def test_u3_aviso_conocido_humano():
+    """fastmcp en la consola → línea humana «NO afecta» arriba y en la
+    zona; sin fastmcp → sin aviso."""
+    assert "function avisoHumanoDe(" in MCP_JS
+    assert "/fastmcp/i" in MCP_JS and "NO afecta" in MCP_JS
+    assert "id=\"eco-aviso\"" in MCP_JS
+    # comportamiento verificado evaluando la función con node (sin DOM)
+    import subprocess, json
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node no disponible")
+    fn = MCP_JS[MCP_JS.index("function avisoHumanoDe("):]
+    fn = fn[:fn.index("}", fn.index("return ''")) + 1]
+    script = fn + """
+console.log(JSON.stringify([
+  avisoHumanoDe({a: {stderr_tail: ['FastMCP 2.14.5 is outdated']}}),
+  avisoHumanoDe({a: {stderr_tail: ['otro error cualquiera']}}),
+  avisoHumanoDe({}),
+]));"""
+    r = subprocess.run([node, "-e", script], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[:200]
+    con_aviso, sin_aviso, vacio = json.loads(r.stdout)
+    assert "NO afecta" in con_aviso and "FastMCP" in con_aviso
+    assert sin_aviso == "" and vacio == ""
+
+
+def test_u3_sintaxis_js():
+    _node_check()
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
