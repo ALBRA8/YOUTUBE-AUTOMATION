@@ -1080,8 +1080,11 @@ def _post_create_init(project: dict, tpl: dict | None,
             )
             try:
                 registro_produccion.propaga_notebook(pid)
-            except Exception:
-                pass
+            except (ValueError, OSError) as exc:
+                # Q4 · propaga_notebook DEJA DE CALLAR: el aviso queda en el
+                # log (antes «except Exception: pass» — silencio total).
+                log.warning("propaga_notebook falló para %s (aviso, no "
+                            "fatal): %s: %s", pid, type(exc).__name__, exc)
             project["registro"] = reg
     except Exception:  # noqa: BLE001
         log.warning("registro_produccion.crear falló para %s (no fatal)",

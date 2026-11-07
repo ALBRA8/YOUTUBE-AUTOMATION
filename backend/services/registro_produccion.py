@@ -296,6 +296,30 @@ def propaga_notebook(production_id: str) -> dict:
     return guardar(reg)
 
 
+def propagar_nicho(nicho_id: str) -> dict:
+    """Q4 · Propaga el cuaderno del nicho a TODAS las producciones del
+    nicho (un cuaderno por nicho, NUNCA por historia). Best-effort por
+    producción: la que falle (sin registro, I/O) se avisa en el log y no
+    corta a las demás. Devuelve {"propagadas", "omitidas"}."""
+    validar_production_id(nicho_id)
+    if not registro_nicho(nicho_id):
+        return {"propagadas": 0, "omitidas": 0}
+    propagadas = omitidas = 0
+    for reg in listar_producciones():
+        pid = str(reg.get("production_id") or "")
+        if reg.get("nicho_id") != nicho_id or not pid:
+            continue
+        try:
+            propaga_notebook(pid)
+            propagadas += 1
+        except (ValueError, OSError) as exc:
+            logger.warning("propagar_nicho(%s): producción %s sin propagar "
+                           "(%s: %s)", nicho_id, pid,
+                           type(exc).__name__, exc)
+            omitidas += 1
+    return {"propagadas": propagadas, "omitidas": omitidas}
+
+
 # ── avatares (2.4) — SOLO Flow, sin cuaderno ─────────────────────────────
 def vincular_avatar_flow(lib_id: str, flow_project_id: str | None,
                          flow_character_id: str | None) -> dict:
