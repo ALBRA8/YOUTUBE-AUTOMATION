@@ -508,6 +508,32 @@ class MCPClientManager:
             out[svc].update(await self._availability(svc))
         return {"services": out}
 
+    async def tools_catalog(self, service: str) -> dict:
+        """SOLO LECTURA · catálogo de tools del servicio tal como lo devolvió
+        `tools/list` del handshake MCP: {service, server_info,
+        tools:[{name, description, inputSchema}]}. Conecta si no hay conexión
+        viva. NUNCA ejecuta ninguna tool (la sonda de capacidades es quien
+        decide qué hacer con el catálogo)."""
+        if service not in SERVICES:
+            raise MCPManagerError("servicio desconocido", "BAD_SERVICE")
+        conn = self._conns.get(service)
+        if not conn or conn.state != ST_CONNECTED:
+            await self.connect(service)
+            conn = self._conns.get(service)
+        if not conn or conn.state != ST_CONNECTED:
+            raise MCPManagerError(f"{service}: sin conexión activa",
+                                  "NOT_CONNECTED")
+        return {
+            "service": service,
+            "server_info": dict(conn.server_info or {}),
+            "tools": [
+                {"name": t.get("name"),
+                 "description": t.get("description", ""),
+                 "inputSchema": dict(t.get("inputSchema") or {})}
+                for t in (conn.tools or []) if isinstance(t, dict)
+            ],
+        }
+
     async def execute(self, service: str, tool: str, arguments: dict | None,
                       timeout: float | None = None,
                       notebook_id: str | None = None,
