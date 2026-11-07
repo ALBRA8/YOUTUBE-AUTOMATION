@@ -7,12 +7,21 @@ from pathlib import Path
 
 
 def test_estado_real_battery_count_and_table_format():
-    """P3-3: ESTADO_REAL.md debe declarar 53 baterías y tener la tabla de contratos íntegra."""
+    """P3-3: ESTADO_REAL.md debe declarar el NÚMERO REAL de baterías
+    canónicas (fuente de verdad: BATERIAS en tests/run_all.py) y tener la
+    tabla de contratos íntegra."""
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
+    import run_all as _runall
+    n = len(_runall.BATERIAS)
+
     path = Path("ESTADO_REAL.md")
     assert path.is_file()
     content = path.read_text(encoding="utf-8")
 
-    assert "53 baterías" in content, "ESTADO_REAL.md debe reportar 53 baterías canónicas"
+    assert f"{n} baterías" in content, (
+        f"ESTADO_REAL.md debe reportar {n} baterías canónicas "
+        "(el nº real de BATERIAS en tests/run_all.py)")
     assert "35 baterías" not in content, "35 baterías es obsoleto"
 
     # Verificar que las filas de EXECUTION CONTRACT tengan formato markdown válido (inicia y termina con |)
