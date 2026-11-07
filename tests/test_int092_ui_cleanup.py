@@ -260,8 +260,8 @@ def test_sintaxis_todos_los_js():
 
 
 def test_version():
-    check("APP_VERSION 2.46.0 (INT-080: bump por cambio funcional)",
-          config.APP_VERSION == "2.46.0")
+    check("APP_VERSION 2.47.0 (INT-080: bump por cambio funcional — U1 resumen)",
+          config.APP_VERSION == "2.47.0")
 
 
 if __name__ == "__main__":  # modo script directo

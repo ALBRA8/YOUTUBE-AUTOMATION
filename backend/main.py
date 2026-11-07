@@ -2694,6 +2694,39 @@ async def mcp_status():
     return await _mcpm.manager.status()
 
 
+@app.get("/api/mcp/resumen")
+async def mcp_resumen(nicho_id: str = "", notebook_id: str = ""):
+    """U1 · Agregador de estado SOLO LECTURA del «Ecosistema Google».
+
+    Calcula el semáforo humano por pieza (chrome CDP 9333, flow,
+    notebooklm, cuaderno seleccionado) con lo que YA devuelven
+    /api/mcp/status y google_login_status — NO conecta nada y no toca
+    mcp_manager (la conexión sigue siendo manual/del dueño).
+
+    «todo_conectado»/«listo_para_pipeline» solo son True si TODAS las
+    piezas requeridas están ok; «siguiente_paso» dice en español claro
+    qué hacer (p. ej. «Abre el Chrome de Flow: pulsa Conectar todo»).
+    Query opcionales: nicho_id (lee el cuaderno recordado del nicho en el
+    registro de nichos) y notebook_id (elección vigente de la UI)."""
+    from services import registro_produccion
+    from services.mcp_resumen import resumen_ecosistema
+    st = await _mcpm.manager.status()                 # solo lectura
+    gs = await _mcpm.manager.google_login_status()    # solo lectura
+    nicho_nb = None
+    nicho = (nicho_id or "").strip()
+    if nicho:
+        try:
+            entrada = registro_produccion.registro_nicho(nicho)
+            nicho_nb = (entrada or {}).get("notebook_id") or None
+        except ValueError:
+            nicho_nb = None          # ID inválido: se ignora, honesto
+    nid = ((notebook_id or "").strip() or nicho_nb
+           or str(getattr(config, "NOTEBOOKLM_NOTEBOOK_ID", "") or "").strip()
+           or None)
+    return resumen_ecosistema(st.get("services") or {}, gs,
+                              notebook_id=nid)
+
+
 @app.post("/api/mcp/execute")
 async def mcp_execute(body: dict):
     """Despacha una tool al servidor MCP activo (§1).

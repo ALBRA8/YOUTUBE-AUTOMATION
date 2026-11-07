@@ -233,7 +233,7 @@ SHORT_W, SHORT_H = 1080, 1920     # 9:16
 LONG_W, LONG_H = 1920, 1080       # 16:9
 
 # INT-080 · única fuente de verdad de versión (FastAPI + /api/health)
-APP_VERSION = "2.46.0"   # INT-093: coherencia de color oscuro/claro — tokens de estado con override claro
+APP_VERSION = "2.47.0"   # U1: GET /api/mcp/resumen — agregador de estado solo lectura del ecosistema Google
 MUSIC_VOLUME = 0.18
 MUSIC_DIR = DATA_DIR / "music"
 MUSIC_DIR.mkdir(exist_ok=True)
