@@ -26,7 +26,10 @@
   FLOW_REGISTRO_SYNC solo si la sonda demuestra q7 SOPORTADO, decidir
   diálogo A/B/C y duraciones (spec PENDIENTE DEL DUEÑO) y ejecutar el
   piloto mínimo Gate 0/Gate 3 con Flow real (checklist y observador
-  listos).
+  listos). La sonda INT-093 ahora lee por HTTP del backend en marcha
+  (Y2): correrla es `python tools/sonda_capacidades_nombres.py --salida
+  sonda_nombres.json` con el panel conectado (q1-q10 hoy
+  NOT_DEMONSTRATED).
 - Google Flow Multi-Cuenta: balanceador de cuentas en mcp_manager para rotación
   automática de créditos Veo (inspirado en análisis Sloth v0.3.48).
 - Hoja de contacto visual (hoja de escenas con safe zones) para QA instantáneo.
@@ -36,6 +39,27 @@
 ## EN RESERVA (no tocar)
 - HANDS (control manual del PC): dormido.
 ## HECHO
+- Catálogo por HTTP y sonda sin procesos duplicados (Y1-Y3, 2026-11-10):
+  Y1 `GET /api/mcp/catalogo/{service}` devuelve {service, server_info,
+  tools:[{name, description COMPLETA, inputSchema}]} LEYENDO la conexión
+  ya activa del backend (`tools_catalog(auto_connect=False)`); NO conecta,
+  NO lanza procesos y NUNCA ejecuta tools — sin conexión → 409 «conecta
+  primero desde el panel», desconocido → 404 (434b3f1; dobles conectado/
+  no conectado/desconocido). Y2 la sonda INT-093 usa ese endpoint por
+  DEFAULT (127.0.0.1:PORT de backend/.env, X-API-Key si hay
+  MASTER_API_KEY, timeout 10 s, mensaje claro si el backend no responde);
+  la vía antigua queda SOLO detrás de --modo-local con aviso de procesos
+  duplicados; --crear-prueba intacta; el informe guarda description
+  completa + inputSchema íntegro; q5 corregida por capacidad y esquema
+  (notebook_add_text con title opcional = SOPORTADO; source_add legacy
+  sigue valiendo) y 3 preguntas nuevas de Flow con veredicto por esquema
+  (q8 nombre solo-esquema, q9 qué devuelve id/URL/nada, q10 id de
+  proyecto en generate/upload) (40a802d). Y3 .gitattributes con
+  eol=crlf para .bat/.cmd/.vbs (repo normalizado, checkout CRLF;
+  contenido de lanzadores verificado byte a byte) y test X3 extendido
+  (CRLF simple permitido, \r\r\n prohibido) (6181b1e). Veredictos reales
+  de Flow/NotebookLM: NOT_DEMONSTRATED hasta que el dueño corra la sonda
+  con el backend en marcha.
 - Higiene CI, Chrome sano y detalle visible (X1-X4, 2026-11-10): X1
   ESTADO_REAL.md declara las 59 baterías reales de run_all — CI en rojo por
   «58» obsoleto (09c277f); X2 connect_all_google chequea salud ANTES de
