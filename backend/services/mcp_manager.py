@@ -510,16 +510,26 @@ class MCPClientManager:
             out[svc].update(await self._availability(svc))
         return {"services": out}
 
-    async def tools_catalog(self, service: str) -> dict:
+    async def tools_catalog(self, service: str, auto_connect: bool = True) -> dict:
         """SOLO LECTURA · catálogo de tools del servicio tal como lo devolvió
         `tools/list` del handshake MCP: {service, server_info,
-        tools:[{name, description, inputSchema}]}. Conecta si no hay conexión
-        viva. NUNCA ejecuta ninguna tool (la sonda de capacidades es quien
-        decide qué hacer con el catálogo)."""
+        tools:[{name, description, inputSchema}]}.
+
+        auto_connect=True (default, vía histórica de la sonda --modo-local):
+        conecta si no hay conexión viva.
+        auto_connect=False (Y1, endpoint GET /api/mcp/catalogo/{service}):
+        NUNCA conecta ni lanza procesos — si el servicio no está conectado
+        levanta MCPManagerError NOT_CONNECTED («conecta primero desde el
+        panel»). En ambos modos NUNCA ejecuta ninguna tool (la sonda de
+        capacidades es quien decide qué hacer con el catálogo)."""
         if service not in SERVICES:
             raise MCPManagerError("servicio desconocido", "BAD_SERVICE")
         conn = self._conns.get(service)
         if not conn or conn.state != ST_CONNECTED:
+            if not auto_connect:
+                raise MCPManagerError(
+                    f"{service}: sin conexión activa (se lee SOLO la conexión "
+                    "ya levantada por el backend)", "NOT_CONNECTED")
             await self.connect(service)
             conn = self._conns.get(service)
         if not conn or conn.state != ST_CONNECTED:

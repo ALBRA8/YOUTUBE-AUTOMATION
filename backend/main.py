@@ -2727,6 +2727,26 @@ async def mcp_resumen(nicho_id: str = "", notebook_id: str = ""):
                               notebook_id=nid)
 
 
+@app.get("/api/mcp/catalogo/{service}")
+async def mcp_catalogo(service: str):
+    """Y1 · Catálogo COMPLETO de tools del servicio: {service, server_info,
+    tools:[{name, description COMPLETA, inputSchema}]}.
+
+    SOLO LECTURA y sobre la conexión YA ACTIVA del backend (conn.tools del
+    handshake MCP): NO conecta, NO lanza procesos de servidores MCP
+    duplicados y NUNCA ejecuta ninguna tool. Si el servicio no está
+    conectado responde 409 con la acción siguiente («conecta primero
+    desde el panel»); servicio desconocido → 404.
+    Protegido como el resto de /api (hereda auth_guard/csrf_guard)."""
+    try:
+        return await _mcpm.manager.tools_catalog(service, auto_connect=False)
+    except _mcpm.MCPManagerError as e:
+        if e.code == "BAD_SERVICE":
+            raise HTTPException(404, str(e)) from e
+        raise HTTPException(
+            409, f"{e} — conecta primero desde el panel") from e
+
+
 @app.post("/api/mcp/execute")
 async def mcp_execute(body: dict):
     """Despacha una tool al servidor MCP activo (§1).
