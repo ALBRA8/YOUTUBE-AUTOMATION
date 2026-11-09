@@ -2,33 +2,53 @@
 # -*- coding: utf-8 -*-
 """PASO 1 · SONDA DE CAPACIDADES — nombres en Flow y NotebookLM (SOLO LECTURA).
 
-QUÉ HACE: se conecta a los dos MCP del repo vía `services.mcp_manager`
-(transporte stdio JSON-RPC ya implementado — NUNCA habla directo con Flow
-ni con NotebookLM), lista las herramientas con su `inputSchema` y responde
-con evidencia las 7 preguntas de la convención de nombres:
+QUÉ HACE: lee el catálogo de herramientas con su `inputSchema` de los dos
+MCP del repo y responde con evidencia las 10 preguntas de la convención
+de nombres (q1-q7) y de dirigibilidad de Flow (q8-q10, Y2):
 
   q1_flow_proyecto_nombre   ¿flow_new_project acepta nombre o hay
                             herramienta para renombrar proyecto?
   q2_flow_personaje_nombre  ¿se puede crear un personaje con nombre?
   q3_notebook_create_titulo ¿notebook_create acepta título?
   q4_notebook_renombrar     ¿existe herramienta para renombrar cuaderno?
-  q5_source_add_titulo      ¿source_add acepta título?
+  q5_source_add_titulo      ¿la herramienta de añadir texto
+                            (notebook_add_text en el paquete real v0.1.15;
+                            source_add era el nombre legacy) acepta título
+                            — incluso OPCIONAL — en su esquema? (Y2)
   q6_flow_generacion_destino  ¿flow_generate_image / flow_generate_video /
                             flow_upload_file aceptan un identificador de
                             proyecto o destino? (Q2, 2026-11-07)
   q7_flow_new_project_cambia_activo  ¿flow_new_project cambia el proyecto
                             ACTIVO sobre el que generan las demás
                             herramientas? (Q2, 2026-11-07)
+  q8_flow_new_project_nombre  ¿flow_new_project acepta un nombre, SOLO por
+                            esquema sin recurrir a renombrar? (Y2)
+  q9_flow_new_project_devuelve  ¿qué devuelve flow_new_project (id, URL o
+                            nada)? — outputSchema o descripción (Y2)
+  q10_flow_generacion_identificador_proyecto  ¿generate/upload aceptan un
+                            IDENTIFICADOR DE PROYECTO (no un destino
+                            genérico)? (Y2)
 
-VEREDICTO por pregunta: SOPORTADO (hay evidencia en el esquema) /
-NO_SOPORTADO (hay catálogo y NO está) / NOT_DEMONSTRATED (sin catálogo
-real: p. ej. sin la máquina del dueño). NUNCA CREA NADA: la sonda solo
-lee catálogos. El flag --crear-prueba (APAGADO por defecto) es el único
-que permite creaciones de prueba y exige --confirmo "SI CREAR".
+VEREDICTO por pregunta: SOPORTADO (hay evidencia en el esquema/outputSchema/
+descripción) / NO_SOPORTADO (hay catálogo y NO está) / NOT_DEMONSTRATED
+(sin catálogo real: p. ej. sin la máquina del dueño). NUNCA CREA NADA: la
+sonda solo lee catálogos. El flag --crear-prueba (APAGADO por defecto) es
+el único que permite creaciones de prueba y exige --confirmo "SI CREAR".
+
+DÓNDE LEE EL CATÁLOGO (Y2):
+  · DEFAULT — HTTP: GET /api/mcp/catalogo/{service} contra el backend YA en
+    marcha (127.0.0.1:PORT de backend/.env; X-API-Key si hay
+    MASTER_API_KEY). Solo lectura pura: NO lanza procesos de servidores
+    MCP — evita el «timeout de 30 s en initialize» y los procesos
+    duplicados que daban problemas en la máquina del dueño.
+  · --modo-local — vía antigua: importa services.mcp_manager en ESTE
+    proceso y puede lanzar servidores MCP DUPLICADOS (advertencia
+    explícita). Solo para cuando el backend no está en marcha.
 
 USO (máquina del dueño):
-  python tools/sonda_capacidades_nombres.py                 # solo lectura
+  python tools/sonda_capacidades_nombres.py                 # HTTP al backend en marcha
   python tools/sonda_capacidades_nombres.py --salida rep.json
+  python tools/sonda_capacidades_nombres.py --modo-local    # proceso propio (aviso)
   python tools/sonda_capacidades_nombres.py --crear-prueba --confirmo "SI CREAR"
 
 Documentación: CONTEXTO YOUTUBE/06_INTEGRATIONS/INT-093_SONDA_CAPACIDADES_NOMBRES.md
@@ -60,13 +80,22 @@ PREGUNTAS = (
     ("q4_notebook_renombrar",
      "¿existe herramienta para renombrar cuaderno?"),
     ("q5_source_add_titulo",
-     "¿source_add acepta título?"),
+     "¿la herramienta de añadir texto (notebook_add_text / source_add) "
+     "acepta título — incluso opcional — en su esquema?"),
     ("q6_flow_generacion_destino",
      "¿flow_generate_image / flow_generate_video / flow_upload_file aceptan "
      "un identificador de proyecto o destino?"),
     ("q7_flow_new_project_cambia_activo",
      "¿flow_new_project cambia el proyecto activo sobre el que generan "
      "las demás herramientas?"),
+    ("q8_flow_new_project_nombre",
+     "¿flow_new_project acepta un nombre (solo por esquema, sin recurrir "
+     "a renombrar)?"),
+    ("q9_flow_new_project_devuelve",
+     "¿qué devuelve flow_new_project (id, URL o nada)?"),
+    ("q10_flow_generacion_identificador_proyecto",
+     "¿flow_generate_image / flow_generate_video / flow_upload_file "
+     "aceptan un IDENTIFICADOR DE PROYECTO (no un destino genérico)?"),
 )
 
 CONFIRMACION_REQUERIDA = "SI CREAR"
@@ -94,6 +123,26 @@ _RE_DESTINO = re.compile(
     r"^(project_id|project|project_name|proyecto|proyecto_id|destino|"
     r"destination|target|target_project|folder|folder_id|workspace|"
     r"workspace_id|parent|parent_id)$", re.IGNORECASE)
+# q10 (Y2): IDENTIFICADOR DE PROYECTO explícito — más estricto que el
+# destino genérico de q6 (un folder/workspace no es un id de proyecto).
+_RE_ID_PROYECTO = re.compile(
+    r"^(project_id|project|project_name|proyecto|proyecto_id|"
+    r"target_project|destination_project|destination_project_id)$",
+    re.IGNORECASE)
+# q5 (Y2): capacidad «añadir texto» — notebook_add_text en el paquete real
+# v0.1.15; source_add era el nombre legacy de nlm_studio.
+_RE_ANADIR_TEXTO = re.compile(
+    r"^(notebook_add_text|source_add)$", re.IGNORECASE)
+# q9 (Y2): qué devuelve flow_new_project — outputSchema o descripción.
+_RE_DEVUELVE_SI = re.compile(
+    r"(devuelve|returns?|retorna|emite)[^.\n]{0,80}\b"
+    r"(id|identificador|url|enlace|link|project_id|proyecto_id)\b",
+    re.IGNORECASE)
+_RE_DEVUELVE_NO = re.compile(
+    r"(no devuelve|no retorna|returns nothing|no retorna nada|"
+    r"sin valor de retorno|does not return)", re.IGNORECASE)
+_RE_SCHEMA_RETORNO = re.compile(
+    r"^(id|project_id|proyecto_id|url|link|enlace)$", re.IGNORECASE)
 _RE_ACTIVO_SI = re.compile(
     r"(cambia|activa|selecciona|fija|establece|switch|activat|sets?|select)"
     r"[\w\s]*(proyecto activo|active project|current project|proyecto actual)",
@@ -217,13 +266,75 @@ def analizar_tools(service: str, tools: list[dict]) -> list[dict]:
                 v7, d7 = PEND, ("la descripción de flow_new_project no demuestra "
                                 "el comportamiento (conducta, no esquema); "
                                 "requiere demostración en la máquina del dueño")
+        # q8 (Y2) · ¿flow_new_project acepta un nombre? — SOLO esquema, sin
+        # el rescate de q1 vía herramienta de renombrar.
+        if not hay:
+            v8, d8 = PEND, "sin catálogo real del MCP (NOT_DEMONSTRATED)"
+        elif fnp is None:
+            v8, d8 = PEND, "flow_new_project no está en el catálogo observado"
+        elif _toma_nombre(props.get(fnp.get("name"), set())):
+            v8 = SOPORTADO
+            d8 = (f"flow_new_project acepta "
+                  f"'{_toma_nombre(props.get(fnp.get('name'), set()))}' en su esquema")
+        else:
+            v8 = NO_SOPORTADO
+            d8 = "flow_new_project existe pero su esquema no expone nombre"
+        # q9 (Y2) · ¿qué devuelve flow_new_project (id, URL o nada)? —
+        # evidencia en outputSchema o en la descripción; sin evidencia, el
+        # veredicto honesto es NOT_DEMONSTRATED (jamás se inventa).
+        if not hay or fnp is None:
+            v9, d9 = PEND, ("sin catálogo real del MCP (NOT_DEMONSTRATED)"
+                            if not hay else
+                            "flow_new_project no está en el catálogo observado")
+        else:
+            out_props = _props(fnp.get("outputSchema"))
+            ids_out = sorted(p for p in out_props if _RE_SCHEMA_RETORNO.match(p))
+            desc9 = str(fnp.get("description") or "")
+            m_si = _RE_DEVUELVE_SI.search(desc9)
+            if ids_out:
+                v9 = SOPORTADO
+                d9 = ("outputSchema expone: " + ", ".join(ids_out))
+            elif m_si:
+                v9 = SOPORTADO
+                d9 = "la descripción declara el retorno: «" + m_si.group(0) + "»"
+            elif _RE_DEVUELVE_NO.search(desc9):
+                v9 = NO_SOPORTADO
+                d9 = "la descripción declara que NO devuelve nada"
+            else:
+                v9, d9 = PEND, ("ni el outputSchema ni la descripción evidencian "
+                                "qué devuelve; requiere demostración en la "
+                                "máquina del dueño")
+        # q10 (Y2) · ¿generate/upload aceptan un IDENTIFICADOR DE PROYECTO?
+        # (más estricto que q6: un folder/workspace no es un id de proyecto)
+        gen10 = [(t, {p for p in props.get(t.get("name"), set())
+                      if _RE_ID_PROYECTO.match(p)})
+                 for t in tools if _RE_GENERACION.match(str(t.get("name") or ""))]
+        if not hay:
+            v10, d10 = PEND, "sin catálogo real del MCP (NOT_DEMONSTRATED)"
+        elif not gen10:
+            v10, d10 = PEND, ("no hay herramientas flow_generate_image/"
+                              "flow_generate_video/flow_upload_file en el "
+                              "catálogo observado")
+        elif all(con for _, con in gen10):
+            v10 = SOPORTADO
+            d10 = "aceptan id de proyecto: " + "; ".join(
+                f"{t.get('name')} acepta '{sorted(con)[0]}'"
+                for t, con in gen10 if con)
+        else:
+            v10 = NO_SOPORTADO
+            d10 = ("generación sin identificador de proyecto uniforme: " + "; ".join(
+                f"{t.get('name')} "
+                + (f"acepta '{sorted(con)[0]}'" if con
+                   else "sin propiedad de id de proyecto")
+                for t, con in gen10))
     else:
         if hay:
-            v1 = v2 = v6 = v7 = PEND
-            d1 = d2 = d6 = d7 = "pregunta de Flow; el catálogo es de " + service
+            v1 = v2 = v6 = v7 = v8 = v9 = v10 = PEND
+            d1 = d2 = d6 = d7 = d8 = d9 = d10 = ("pregunta de Flow; el catálogo es de "
+                                                 + service)
         else:
-            v1 = v2 = v6 = v7 = PEND
-            d1 = d2 = d6 = d7 = "sin catálogo real del MCP (NOT_DEMONSTRATED)"
+            v1 = v2 = v6 = v7 = v8 = v9 = v10 = PEND
+            d1 = d2 = d6 = d7 = d8 = d9 = d10 = "sin catálogo real del MCP (NOT_DEMONSTRATED)"
 
     if service == "notebooklm":
         # q3 · notebook_create con título — v0.8.5 nombra el parámetro
@@ -239,11 +350,14 @@ def analizar_tools(service: str, tools: list[dict]) -> list[dict]:
         rn = _tool(tools, _RE_RENOMBRAR_CUADERNO)
         v4, d4 = _veredicto(rn, hay, rn is not None,
                             f"tool '{rn.get('name')}'" if rn else "")
-        # q5 · source_add con título
-        sa = _tool(tools, re.compile(r"^source_add$", re.I))
-        acepta = sa is not None and "title" in props.get(sa.get("name"), set())
-        v5, d5 = _veredicto(sa, hay, bool(acepta),
-                            "source_add acepta 'title' en su esquema"
+        # q5 (Y2) · capacidad «añadir texto con título»: notebook_add_text
+        # en el paquete real v0.1.15; source_add era el nombre legacy de
+        # nlm_studio. Basta con que 'title' ESTÉ en el esquema (opcional vale:
+        # la pregunta es si lo ACEPTA, no si lo exige).
+        at = _tool(tools, _RE_ANADIR_TEXTO)
+        acepta = at is not None and "title" in props.get(at.get("name"), set())
+        v5, d5 = _veredicto(at, hay, bool(acepta),
+                            f"{at.get('name')} acepta 'title' (opcional) en su esquema"
                             if acepta else "")
     else:
         if not hay:
@@ -259,22 +373,89 @@ def analizar_tools(service: str, tools: list[dict]) -> list[dict]:
                "q4_notebook_renombrar": (v4, d4),
                "q5_source_add_titulo": (v5, d5),
                "q6_flow_generacion_destino": (v6, d6),
-               "q7_flow_new_project_cambia_activo": (v7, d7)}
+               "q7_flow_new_project_cambia_activo": (v7, d7),
+               "q8_flow_new_project_nombre": (v8, d8),
+               "q9_flow_new_project_devuelve": (v9, d9),
+               "q10_flow_generacion_identificador_proyecto": (v10, d10)}
     return [{"id": pid, "pregunta": texto, "veredicto": salidas[pid][0],
              "detalle": salidas[pid][1]}
             for pid, texto in PREGUNTAS]
 
 
-# ── conexión con el MCP (la ÚNICA vía: services.mcp_manager) ──────────────
-async def sondar_mcp(service: str, catalogo_fn=None) -> dict:
-    """Lee el catálogo de tools de un servicio. `catalogo_fn` permite doble
-    de prueba (tests). Cualquier error de conexión → NOT_DEMONSTRATED."""
-    if catalogo_fn is None:
-        from services.mcp_manager import manager
-        catalogo_fn = manager.tools_catalog
+# ── lectura del catálogo (Y2) ─────────────────────────────────────────────
+def _leer_env_backend(ruta: Path | None = None) -> tuple[int, str]:
+    """(PORT, MASTER_API_KEY) leídos de backend/.env SIN levantar el backend.
+    Ignora comentarios y valores vacíos; default 8000 / ""."""
+    ruta = ruta or (BACKEND / ".env")
+    port, key = 8000, ""
+    if ruta.is_file():
+        for linea in ruta.read_text(encoding="utf-8", errors="replace").splitlines():
+            s = linea.strip()
+            if not s or s.startswith("#") or "=" not in s:
+                continue
+            k, _, v = s.partition("=")
+            k, v = k.strip(), v.strip().strip('"').strip("'")
+            if k == "PORT" and v.isdigit():
+                port = int(v)
+            elif k == "MASTER_API_KEY" and v:
+                key = v
+    return port, key
+
+
+def _catalogo_via_http(service: str) -> dict:
+    """Lee GET /api/mcp/catalogo/{service} del backend YA en marcha
+    (127.0.0.1:PORT de backend/.env; X-API-Key si hay MASTER_API_KEY).
+    SOLO LECTURA: el backend sirve su conexión viva — aquí no se lanza
+    ningún proceso de servidores MCP. Lanza RuntimeError con mensaje
+    claro (y la acción siguiente) si el backend no responde."""
+    import urllib.error
+    import urllib.request
+
+    port, key = _leer_env_backend()
+    url = f"http://127.0.0.1:{port}/api/mcp/catalogo/{service}"
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    if key:
+        req.add_header("X-API-Key", key)
     try:
-        cat = await catalogo_fn(service)
-    except Exception as exc:  # noqa: BLE001 — sin MCP real: pendiente, honesto
+        with urllib.request.urlopen(req, timeout=10.0) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detalle = ""
+        try:
+            cuerpo = e.read().decode("utf-8")
+            detalle = str(json.loads(cuerpo).get("detail") or "")
+        except Exception:  # noqa: BLE001 — el detalle es best-effort
+            pass
+        raise RuntimeError(
+            f"HTTP {e.code} del backend en {url}: {detalle or 'sin detalle'}") from e
+    except Exception as exc:  # noqa: BLE001 — el mensaje ES el dato
+        raise RuntimeError(
+            f"el backend no respondió en {url} (¿está en marcha? arranca el "
+            f"panel, o usa --modo-local sabiendo que puede lanzar procesos "
+            f"duplicados): {type(exc).__name__}: {exc}") from exc
+
+
+async def sondar_mcp(service: str, catalogo_fn=None, modo: str = "http") -> dict:
+    """Lee el catálogo de tools de un servicio.
+
+    modo "http" (DEFAULT): GET /api/mcp/catalogo/{service} contra el backend
+      ya en marcha — solo lectura, NO lanza procesos (Y2).
+    modo "local" (--modo-local): vía antigua; importa services.mcp_manager
+      en ESTE proceso y puede lanzar servidores MCP DUPLICADOS aunque el
+      backend ya los tenga conectados.
+    `catalogo_fn` sigue admitiéndose como doble de prueba (tests). Cualquier
+    error → NOT_DEMONSTRATED (jamás un SOPORTADO inventado)."""
+    if catalogo_fn is None:
+        if modo == "local":
+            from services.mcp_manager import manager
+            catalogo_fn = manager.tools_catalog
+        else:
+            catalogo_fn = _catalogo_via_http
+    try:
+        cat = catalogo_fn(service)
+        if asyncio.iscoroutine(cat):
+            cat = await cat   # la vía local (manager.tools_catalog) es async
+    except Exception as exc:  # noqa: BLE001 — sin catálogo real: pendiente, honesto
         return {"service": service, "server_info": {}, "tools": [],
                 "error": f"{type(exc).__name__}: {exc}"}
     return {"service": service, "server_info": cat.get("server_info", {}),
@@ -285,8 +466,11 @@ def _resumen(service: str, sondado: dict) -> dict:
     return {"service": service, "version": sondado["server_info"],
             "error": sondado["error"],
             "preguntas": analizar_tools(service, sondado["tools"]),
+            # Y2: description COMPLETA e inputSchema COMPLETO en el JSON
+            # (antes se recortaba a 140 y se perdía el esquema).
             "tools": [{"name": t.get("name"),
-                       "description": str(t.get("description") or "")[:140]}
+                       "description": str(t.get("description") or ""),
+                       "inputSchema": dict(t.get("inputSchema") or {})}
                       for t in sondado["tools"]]}
 
 
@@ -318,9 +502,16 @@ async def crear_pruebas(ejecutar_fn) -> list[dict]:
 async def _correr(args) -> int:
     servicios = (["google-flow", "notebooklm"] if args.servicio == "ambos"
                  else [args.servicio])
+    modo = "local" if args.modo_local else "http"
+    if modo == "local":
+        print("AVISO: --modo-local importa el gestor MCP en ESTE proceso y puede "
+              "lanzar servidores MCP DUPLICADOS aunque el backend ya los tenga "
+              "conectados (en la máquina del dueño ambos dieron «timeout de 30 s "
+              "en initialize»). El modo normal lee el catálogo por HTTP del "
+              "backend en marcha (GET /api/mcp/catalogo).", file=sys.stderr)
     bloque = {}
     for svc in servicios:
-        sondado = await sondar_mcp(svc)
+        sondado = await sondar_mcp(svc, modo=modo)
         bloque[svc] = _resumen(svc, sondado)
 
     informe = {
@@ -352,6 +543,10 @@ def main(argv: list[str] | None = None) -> int:
                     default="ambos")
     ap.add_argument("--salida", default=None,
                     help="ruta JSON donde guardar el informe")
+    ap.add_argument("--modo-local", action="store_true",
+                    help="vía antigua: importa mcp_manager en ESTE proceso y "
+                         "puede lanzar servidores MCP DUPLICADOS; el default "
+                         "lee el catálogo por HTTP del backend en marcha")
     ap.add_argument("--crear-prueba", action="store_true",
                     help="APAGADO por defecto: permite creaciones de prueba")
     ap.add_argument("--confirmo", default=None,

@@ -25,6 +25,8 @@ from sonda_capacidades_nombres import (  # noqa: E402
     NO_SOPORTADO,
     PEND,
     SOPORTADO,
+    _catalogo_via_http,
+    _leer_env_backend,
     analizar_tools,
     crear_pruebas,
     main,
@@ -191,7 +193,7 @@ def test_crear_prueba_sin_confirmacion_refusa(monkeypatch, capsys):
         llamadas.append(a)
         return []
 
-    async def doble_sondar(service, catalogo_fn=None):
+    async def doble_sondar(service, catalogo_fn=None, modo="http"):
         return {"service": service, "server_info": {}, "tools": [],
                 "error": "sin MCP en pruebas"}
 
@@ -210,7 +212,7 @@ def test_crear_prueba_con_confirmacion_llama_una_vez(monkeypatch):
         llamadas.append(ejecutar_fn)
         return [{"prueba": "x", "resultado": "FALLO", "detalle": "sin MCP"}]
 
-    async def doble_sondar(service, catalogo_fn=None):
+    async def doble_sondar(service, catalogo_fn=None, modo="http"):
         return {"service": service, "server_info": {}, "tools": [],
                 "error": "sin MCP en pruebas"}
 
@@ -245,6 +247,201 @@ def test_tools_catalog_servicio_desconocido():
     from services.mcp_manager import manager, MCPManagerError
     with pytest.raises(Exception):
         asyncio.run(manager.tools_catalog("desconocido"))
+
+
+# ── Y2 · q5 corregida por capacidad y esquema; q8-q10 sobre Flow ──────
+
+NLM_ADD_TEXT = [
+    {"name": "notebook_add_text", "description": "añade nota de texto",
+     "inputSchema": {"type": "object",
+                     "properties": {"notebook_id": {"type": "string"},
+                                    "text": {"type": "string"},
+                                    "title": {"type": "string"}}}},
+]   # 'title' NO está en required: OPCIONAL — y basta para SOPORTADO
+
+NLM_ADD_TEXT_SIN_TITULO = [
+    {"name": "notebook_add_text", "description": "añade nota de texto",
+     "inputSchema": {"type": "object",
+                     "properties": {"notebook_id": {"type": "string"},
+                                    "text": {"type": "string"}}}},
+]
+
+FLOW_Q10_OK = [
+    {"name": "flow_generate_image",
+     "inputSchema": {"properties": {"prompt": {}, "project_id": {}}}},
+    {"name": "flow_generate_video",
+     "inputSchema": {"properties": {"prompt": {}, "project_id": {}}}},
+    {"name": "flow_upload_file",
+     "inputSchema": {"properties": {"file": {}, "project_id": {}}}},
+]
+
+
+def test_q5_notebook_add_text_con_titulo_opcional_es_soportado():
+    """q5 corregida (Y2): capacidad «añadir texto» (notebook_add_text en el
+    paquete real v0.1.15; source_add legacy) y basta 'title' en el esquema
+    aunque sea OPCIONAL."""
+    r = _por_id(analizar_tools("notebooklm", NLM_ADD_TEXT))
+    q5 = r["q5_source_add_titulo"]
+    assert q5["veredicto"] == SOPORTADO
+    assert "notebook_add_text" in q5["detalle"] and "title" in q5["detalle"]
+
+
+def test_q5_source_add_legacy_sigue_reconocido():
+    """El nombre legacy de nlm_studio (source_add) sigue valiendo."""
+    r = _por_id(analizar_tools("notebooklm", NLM_OK))
+    assert r["q5_source_add_titulo"]["veredicto"] == SOPORTADO
+
+
+def test_q5_sin_title_es_no_soportado():
+    r = _por_id(analizar_tools("notebooklm", NLM_ADD_TEXT_SIN_TITULO))
+    assert r["q5_source_add_titulo"]["veredicto"] == NO_SOPORTADO
+
+
+def test_q8_nombre_solo_por_esquema():
+    """q8 (Y2): ¿flow_new_project acepta un nombre? — sin el rescate de q1
+    vía renombrar: sin nombre en el esquema es NO_SOPORTADO aunque exista
+    una tool de renombrar."""
+    r = _por_id(analizar_tools("google-flow", FLOW_OK))
+    assert r["q8_flow_new_project_nombre"]["veredicto"] == SOPORTADO
+    r2 = _por_id(analizar_tools("google-flow", FLOW_SIN_NOMBRE))
+    assert r2["q8_flow_new_project_nombre"]["veredicto"] == NO_SOPORTADO
+    # cruces honestos: catálogo vacío o ajeno → NOT_DEMONSTRATED
+    assert _por_id(analizar_tools("google-flow", []))[
+        "q8_flow_new_project_nombre"]["veredicto"] == PEND
+    assert _por_id(analizar_tools("notebooklm", NLM_OK))[
+        "q8_flow_new_project_nombre"]["veredicto"] == PEND
+
+
+def test_q9_retorno_por_outputschema():
+    tools = [{"name": "flow_new_project", "description": "Crea un proyecto",
+              "inputSchema": {"properties": {}},
+              "outputSchema": {"type": "object",
+                               "properties": {"project_id": {"type": "string"}}}}]
+    r = _por_id(analizar_tools("google-flow", tools))
+    q9 = r["q9_flow_new_project_devuelve"]
+    assert q9["veredicto"] == SOPORTADO and "project_id" in q9["detalle"]
+
+
+def test_q9_retorno_por_descripcion():
+    tools = [{"name": "flow_new_project",
+              "description": "Crea un proyecto. Devuelve el id del proyecto creado.",
+              "inputSchema": {"properties": {}}}]
+    r = _por_id(analizar_tools("google-flow", tools))
+    assert r["q9_flow_new_project_devuelve"]["veredicto"] == SOPORTADO
+
+
+def test_q9_descripcion_declara_que_no_devuelve():
+    tools = [{"name": "flow_new_project",
+              "description": "Crea un proyecto. No devuelve ningún valor.",
+              "inputSchema": {"properties": {}}}]
+    r = _por_id(analizar_tools("google-flow", tools))
+    assert r["q9_flow_new_project_devuelve"]["veredicto"] == NO_SOPORTADO
+
+
+def test_q9_sin_evidencia_es_not_demonstrated():
+    """Sin outputSchema ni descripción que evidencie el retorno → honesto
+    NOT_DEMONSTRATED (jamás se inventa qué devuelve)."""
+    r = _por_id(analizar_tools("google-flow", FLOW_Q7_MUDA))
+    assert r["q9_flow_new_project_devuelve"]["veredicto"] == PEND
+
+
+def test_q10_id_proyecto_uniforme_es_soportado():
+    r = _por_id(analizar_tools("google-flow", FLOW_Q10_OK))
+    assert r["q10_flow_generacion_identificador_proyecto"]["veredicto"] == SOPORTADO
+
+
+def test_q10_destino_generico_no_cuenta_como_id_proyecto():
+    """q10 es más estricta que q6: 'destino' genérico (upload_file en
+    FLOW_Q6_OK) NO es un identificador de proyecto → NO_SOPORTADO."""
+    r = _por_id(analizar_tools("google-flow", FLOW_Q6_OK))
+    q10 = r["q10_flow_generacion_identificador_proyecto"]
+    assert q10["veredicto"] == NO_SOPORTADO
+    assert "flow_upload_file" in q10["detalle"]
+
+
+def test_q10_sin_generacion_es_not_demonstrated():
+    r = _por_id(analizar_tools("google-flow", FLOW_Q7_MUDA))
+    assert r["q10_flow_generacion_identificador_proyecto"]["veredicto"] == PEND
+
+
+# ── Y2 · la sonda lee por HTTP del backend (default) ─────────────────
+
+def test_sondar_mcp_http_es_el_default(monkeypatch):
+    """Sin catalogo_fn, la sonda usa el endpoint HTTP del backend (Y1) y NO
+    importa el gestor en su propio proceso (nada de procesos duplicados)."""
+    llamadas = []
+
+    def doble_http(service):
+        llamadas.append(service)
+        return {"server_info": {"name": "vía-http"},
+                "tools": NLM_ADD_TEXT}
+
+    monkeypatch.setattr("sonda_capacidades_nombres._catalogo_via_http", doble_http)
+    out = asyncio.run(sondar_mcp("notebooklm"))
+    assert out["error"] == "" and llamadas == ["notebooklm"]
+    assert out["tools"][0]["name"] == "notebook_add_text"
+
+
+def test_backend_no_responde_da_mensaje_claro(monkeypatch):
+    """Si el backend no está en marcha, el error dice la URL y la acción
+    siguiente (arrancar el panel o --modo-local), y el análisis cae
+    NOT_DEMONSTRATED — jamás un SOPORTADO inventado."""
+    import urllib.request as _ur
+
+    def urlopen_roto(req, timeout):
+        raise _ur.URLError("connection refused")
+
+    monkeypatch.setattr(_ur, "urlopen", urlopen_roto)
+    out = asyncio.run(sondar_mcp("google-flow"))   # default: modo http
+    assert "no respondió" in out["error"] and "--modo-local" in out["error"]
+    assert out["tools"] == []
+    r = _por_id(analizar_tools("google-flow", out["tools"]))
+    assert all(x["veredicto"] == PEND for x in r.values())
+
+
+def test_leer_env_backend_puerto_y_apikey(tmp_path):
+    """(PORT, MASTER_API_KEY) se leen de backend/.env sin levantar nada;
+    comentarios y ausencias → defaults 8000 / \"\"."""
+    env = tmp_path / ".env"
+    env.write_text('PORT=8123\n'
+                   '#MASTER_API_KEY=comentada-no-cuenta\n'
+                   'MASTER_API_KEY="abc123"\n', encoding="utf-8")
+    assert _leer_env_backend(env) == (8123, "abc123")
+    assert _leer_env_backend(tmp_path / "noexiste.env") == (8000, "")
+
+
+def test_main_default_usa_http_y_modo_local_avisa(monkeypatch, capsys):
+    """main() sin flags sondea por HTTP (modo http); con --modo-local pasa
+    modo local Y advierte del proceso duplicado en stderr."""
+    vistos = []
+
+    async def doble_sondar(service, catalogo_fn=None, modo="http"):
+        vistos.append((service, modo))
+        return {"service": service, "server_info": {}, "tools": [],
+                "error": "sin backend en pruebas"}
+
+    monkeypatch.setattr("sonda_capacidades_nombres.sondar_mcp", doble_sondar)
+    assert main([]) == 0
+    assert vistos == [("google-flow", "http"), ("notebooklm", "http")]
+    vistos.clear()
+    assert main(["--modo-local"]) == 0
+    assert ("google-flow", "local") in vistos
+    assert "DUPLICADOS" in capsys.readouterr().err.upper()
+
+
+def test_informe_guarda_inputschema_completo():
+    """Y2: el resumen del informe lleva la description COMPLETA y el
+    inputSchema ÍNTEGRO de cada tool (antes: 140 chars y sin esquema)."""
+    desc = ("Añade una nota de texto al cuaderno indicado. " * 6).strip()
+    schema = {"type": "object",
+              "properties": {"notebook_id": {}, "text": {}, "title": {}}}
+    from sonda_capacidades_nombres import _resumen
+    res = _resumen("notebooklm", {
+        "server_info": {}, "error": "",
+        "tools": [{"name": "notebook_add_text", "description": desc,
+                   "inputSchema": schema}]})
+    (tool,) = res["tools"]
+    assert tool["description"] == desc and tool["inputSchema"] == schema
 
 
 if __name__ == "__main__":

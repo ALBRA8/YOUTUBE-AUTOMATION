@@ -117,3 +117,49 @@ si el código empieza a llamar otra tool ausente del catálogo, el test
 falla y obliga a documentarla aquí. La recomendación de migración de
 `chat_ask → notebook_query` y de las tools de nlm_studio queda como
 decisión del dueño (SIGUIENTE), no se cambia comportamiento en U6.
+
+## ACTUALIZACIÓN Y1-Y2 (2026-11-10) · catálogo por HTTP y 10 preguntas
+
+**Problema que motiva (máquina del dueño):** la sonda importaba
+`services.mcp_manager` en su PROPIO proceso; ese gestor nuevo no tiene
+conexiones, así que `tools_catalog()` hacía `connect()` y lanzaba
+servidores MCP NUEVOS — ambos dieron «timeout de 30 s en initialize»
+aunque el backend ya los tenía conectados (panel en verde), y duplicar
+procesos puede molestar a los que funcionan.
+
+**Solución:**
+
+1. **Y1 · endpoint de solo lectura** `GET /api/mcp/catalogo/{service}`
+   (protegido como el resto de /api): devuelve
+   `{service, server_info, tools:[{name, description COMPLETA,
+   inputSchema}]}` LEYENDO la conexión ya activa del backend
+   (`tools_catalog(service, auto_connect=False)`). NO conecta, NO lanza
+   procesos y NUNCA ejecuta una tool. Sin conexión → 409 «conecta
+   primero desde el panel»; servicio desconocido → 404.
+
+2. **Y2 · la sonda usa HTTP por defecto**: lee ese endpoint del backend
+   YA en marcha (127.0.0.1:PORT de backend/.env; X-API-Key si hay
+   MASTER_API_KEY; timeout 10 s). Si el backend no responde, el error
+   dice la URL y la acción siguiente. La vía antigua queda SOLO detrás
+   de `--modo-local`, con advertencia explícita de que puede lanzar
+   procesos duplicados. `--crear-prueba` con su doble confirmación no
+   cambia. El informe JSON ahora guarda la **description completa y el
+   inputSchema íntegro** de cada tool (antes: 140 caracteres y sin
+   esquema).
+
+3. **q5 corregida por capacidad y esquema**: la capacidad es «añadir
+   texto con título» — `notebook_add_text` en el paquete real v0.1.15
+   (`source_add` era el nombre legacy de nlm_studio). Basta con que
+   `title` ESTÉ en el esquema aunque sea OPCIONAL → SOPORTADO.
+
+4. **Tres preguntas nuevas sobre Flow (veredicto por esquema):**
+
+| id | pregunta | veredicto |
+|---|---|---|
+| q8_flow_new_project_nombre (Y2) | ¿flow_new_project acepta un nombre, SOLO por esquema (sin el rescate de q1 vía renombrar)? | **NOT_DEMONSTRATED** |
+| q9_flow_new_project_devuelve (Y2) | ¿qué devuelve flow_new_project (id, URL o nada)? — outputSchema o descripción; sin evidencia → NOT_DEMONSTRATED | **NOT_DEMONSTRATED** |
+| q10_flow_generacion_identificador_proyecto (Y2) | ¿generate/upload aceptan un IDENTIFICADOR DE PROYECTO (más estricto que q6: un destino genérico no cuenta)? | **NOT_DEMONSTRATED** |
+
+La sonda es de solo lectura en TODOS sus modos; cerrar estos veredictos
+sigue requiriendo la máquina del dueño (correr la sonda con el backend
+en marcha y el panel conectado).
