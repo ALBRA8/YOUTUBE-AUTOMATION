@@ -29,6 +29,10 @@ BINARIOS = {
 EOL_LF_REQUERIDOS = ("*.py", "*.js", "*.html", "*.css", "*.md",
                      "*.json", "*.txt", "*.yml", "*.sh")
 
+# Y3: lanzadores de Windows — CRLF SIMPLE permitido (eol=crlf), nunca \r\r\n
+EOL_CRLF_REQUERIDOS = ("*.bat", "*.cmd", "*.vbs")
+EXT_CRLF = {".bat", ".cmd", ".vbs"}
+
 # Binarios que .gitattributes debe marcar como binary
 BINARY_REQUERIDOS = ("*.ttf", "*.png", "*.jpg", "*.mp3", "*.mp4")
 
@@ -66,14 +70,36 @@ def test_x3_app_mcp_js_es_lf_puro():
 
 
 def test_x3_gitattributes_fija_lf_y_marca_binarios():
-    """.gitattributes debe fijar eol=lf en el texto versionado y marcar binarios."""
+    """.gitattributes debe fijar eol=lf en el texto versionado, eol=crlf en
+    los lanzadores de Windows (Y3: CRLF SIMPLE permitido) y marcar binarios."""
     ga = REPO / ".gitattributes"
     assert ga.is_file(), "Falta .gitattributes"
     contenido = ga.read_text(encoding="utf-8")
     for patron in EOL_LF_REQUERIDOS:
         assert patron in contenido, f".gitattributes no fija {patron} con eol=lf"
+    for patron in EOL_CRLF_REQUERIDOS:
+        assert f"{patron} text eol=crlf" in contenido, (
+            f".gitattributes no fija {patron} con eol=crlf")
     for patron in BINARY_REQUERIDOS:
         assert patron in contenido, f".gitattributes no marca {patron} como binario"
+
+
+def test_x3_lanzadores_windows_crlf_simple_sin_crcrlf():
+    """Y3: los .bat/.cmd/.vbs versionados pueden llevar CRLF SIMPLE (cmd y el
+    host de VBScript lo necesitan) pero JAMÁS \\r\\r\\n (CR doblado)."""
+    ofensores = []
+    for rel in _archivos_versionados():
+        p = REPO / rel
+        if not p.is_file() or p.suffix.lower() not in EXT_CRLF:
+            continue
+        data = p.read_bytes()
+        assert b"\r\r\n" not in data, (
+            f"{rel} tiene CR doblado (\\r\\r\\n) — normalizar a CRLF simple")
+        # CRLF simple permitido: sin aserción; solo se reporta si fuera todo LF
+        if b"\r\n" not in data and data:
+            ofensores.append(rel)
+    if ofensores:
+        print(f"aviso (permitido, revisar): lanzadores 100% LF: {ofensores}")
 
 
 if __name__ == "__main__":

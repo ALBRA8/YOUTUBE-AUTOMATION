@@ -1,6 +1,7 @@
 # X3 · Higiene de finales de línea (ver tests/test_x3_saltos_linea.py)
 # Texto versionado: SIEMPRE LF (evita \r\r\n de editores Windows que doblan CR).
-# Ojo: .bat/.vbs de launchers/ se quedan FUERA a propósito (los necesita CRLF Windows).
+# Excepción Y3: los lanzadores de Windows (.bat/.cmd/.vbs) van con eol=crlf
+# porque cmd y el host de VBScript los necesitan así — CRLF SIMPLE, nunca \r\r\n.
 
 *.py   text eol=lf
 *.js   text eol=lf
@@ -11,6 +12,13 @@
 *.txt  text eol=lf
 *.yml  text eol=lf
 *.sh   text eol=lf
+
+# Lanzadores de Windows (Y3): cmd y el host de VBScript los necesitan CRLF.
+# El repo los guarda normalizados (LF) y el checkout los materializa CRLF:
+# el contenido útil de los lanzadores no cambia.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.vbs text eol=crlf
 
 # Fuentes binarias
 *.ttf   binary
