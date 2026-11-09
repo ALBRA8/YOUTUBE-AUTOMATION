@@ -48,11 +48,15 @@ def test_launch_google_login_includes_new_window_and_geometry():
 
 
 def test_connect_all_google_orchestration():
-    """Verifica el flujo integral de connect_all_google."""
+    """Verifica el flujo integral de connect_all_google con Chrome SANO (X2):
+    arriba + ventana visible → se conecta todo SIN purgar ni relanzar
+    (un Chrome sano NUNCA se mata; el purge solo aplica a caído/zombi,
+    ver tests/test_x2_connect_all_no_mata_sano.py)."""
     mgr = mcpm.MCPClientManager()
     mgr.kill_profile_processes = MagicMock(return_value=[111, 222])
     mgr.heal_chrome_profile = MagicMock(return_value={"ok": True, "actions": ["repaired"]})
     mgr._cdp_up = AsyncMock(return_value=True)
+    mgr._windows_visible_state = MagicMock(return_value=True)
     mgr.nb_storage_state = MagicMock(return_value={"exists": True, "size_bytes": 15000})
     mgr.connect = AsyncMock(side_effect=lambda svc, **kw: {
         "service": svc,
@@ -66,7 +70,10 @@ def test_connect_all_google_orchestration():
         assert res["chrome_up"] is True
         assert res["flow"]["state"] == mcpm.ST_CONNECTED
         assert res["notebooklm"]["state"] == mcpm.ST_CONNECTED
-        assert any("zombis" in a for a in res["heal_actions"])
+        # X2: Chrome sano y visible → sin purga, sin heal, sin relanzamiento
+        assert res["heal_actions"] == []
+        mgr.kill_profile_processes.assert_not_called()
+        mgr.heal_chrome_profile.assert_not_called()
 
 
 def test_api_connect_all_google():

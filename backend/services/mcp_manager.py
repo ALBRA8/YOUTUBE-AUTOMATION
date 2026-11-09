@@ -1131,11 +1131,14 @@ class MCPClientManager:
         return out
 
     async def connect_all_google(self, cdp_timeout_s: float | None = None) -> dict:
-        """🚀 Conexión Google en 1 solo clic (W1):
-        1. Purga defensiva y auto-heal.
-        2. Si Chrome no está activo en puerto 9333 o es zombi sin ventana visible:
-           relanza con force_window=True (misma ruta robusta que «Abrir ventana de Chrome»)
-           y espera hasta cdp_timeout_s segundos (por defecto 30) sondeando cada 0.5 s.
+        """🚀 Conexión Google en 1 solo clic (W1 + X2):
+        1. Primero comprueba si Chrome ya está SANO: puerto CDP arriba Y con
+           ventana visible (X2: un Chrome sano NUNCA se mata ni se relanza).
+        2. SOLO si está caído o es zombi (puerto abierto sin ventana visible):
+           purga procesos del perfil (kill_profile_processes), auto-heal del
+           perfil y relanza con force_window=True (misma ruta robusta que
+           «Abrir ventana de Chrome»), esperando hasta cdp_timeout_s segundos
+           (por defecto 30) sondeando cada 0.5 s.
         3. Si Chrome no sube: no disimular con ok; devolver chrome_up=False y motivo explícito.
         4. Si Chrome está activo: captura preventiva de storage_state si falta,
            y conectar servidores MCP.
@@ -1145,13 +1148,9 @@ class MCPClientManager:
         timeout_s = float(cdp_timeout_s if cdp_timeout_s is not None
                           else _cfg("MCP_CONNECT_ALL_CDP_TIMEOUT_S", 30.0))
 
-        # 1. Purga defensiva y auto-heal
-        killed = self.kill_profile_processes(profile)
-        heal_res = self.heal_chrome_profile(profile)
-        if killed:
-            heal_res.setdefault("actions", []).insert(0, f"{len(killed)} procesos zombis terminados")
+        heal_actions: list[str] = []
 
-        # 2. Comprobar si ya está arriba Y tiene ventana visible (no zombie)
+        # 1. Comprobar si ya está arriba Y tiene ventana visible (Chrome sano)
         is_up = await self._cdp_up(port)
         is_zombie = False
         if is_up:
@@ -1159,11 +1158,19 @@ class MCPClientManager:
             if w_state is False:
                 is_zombie = True
                 log.warning("[connect_all_google] Puerto CDP %s abierto pero sin ventana visible "
-                            "(zombie) → forzando relanzamiento", port)
+                            "(zombie) → purga, saneo y relanzamiento forzado", port)
 
         launch_res = {}
         chrome_error = None
         if not is_up or is_zombie:
+            # 2. SOLO Chrome caído o zombi: purga defensiva y auto-heal (X2).
+            #    Un Chrome sano y visible jamás llega aquí: no se mata ni se relanza.
+            killed = self.kill_profile_processes(profile)
+            heal_res = self.heal_chrome_profile(profile)
+            heal_actions = list(heal_res.get("actions", []))
+            if killed:
+                heal_actions.insert(0, f"{len(killed)} procesos zombis terminados")
+
             pages = [
                 "https://labs.google/fx/tools/flow",
                 "https://notebooklm.google.com/"
@@ -1227,7 +1234,7 @@ class MCPClientManager:
             "notebooklm": nb_st,
             "flow_error": flow_err,
             "notebooklm_error": nb_err,
-            "heal_actions": heal_res.get("actions", []),
+            "heal_actions": heal_actions,
             "launch_result": launch_res,
         }
 
