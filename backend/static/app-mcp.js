@@ -271,7 +271,9 @@ async function gsessConnectAll() {
       const errDetalle = (res && res.chrome_error) ? (' (' + res.chrome_error + ')') : '';
       if (nota) {
         nota.style.display = '';
-        nota.textContent = 'Chrome no abrió: pulsa «Abrir ventana de Chrome» en Avanzado.';
+        // X4: el detalle del error va en el texto VISIBLE, no solo en el toast:
+        // «Chrome no abrió (no respondió en el puerto CDP 9333 tras 30 s): pulsa …»
+        nota.textContent = 'Chrome no abrió' + errDetalle + ': pulsa «Abrir ventana de Chrome» en Avanzado.';
       }
       toast('Chrome no abrió: pulsa «Abrir ventana de Chrome» en Avanzado' + errDetalle, 'err');
     } else {
@@ -290,7 +292,15 @@ async function gsessConnectAll() {
           'Chrome se abrió: si te pide login, INICIA SESIÓN en esa ventana y pulsa «Refrescar estado».', 'info');
       }
     }
-  } catch (e) { toast('Conectar todo: ' + e.message, 'err'); }
+  } catch (e) {
+    // X4: si la llamada misma falla (red/backend), el detalle también queda visible
+    const nota = $('#gsess-connectall-nota');
+    if (nota) {
+      nota.style.display = '';
+      nota.textContent = 'Conectar todo falló (' + e.message + '). Revisa el backend y pulsa «Refrescar estado».';
+    }
+    toast('Conectar todo: ' + e.message, 'err');
+  }
   finally { if (btn) { btn.disabled = false; btn.textContent = '🚀 Conectar todo'; } }
   await gsessRefresh(true);
   await mcpRefresh(true);

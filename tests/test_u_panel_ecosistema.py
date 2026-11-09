@@ -100,12 +100,19 @@ def test_u2_boton_conectar_todo_con_login_claro():
 
 def test_w2_conectar_todo_muestra_resultado_real():
     """W2 · «Conectar todo» muestra el resultado REAL de la respuesta.
-    Si chrome_up es false, mensaje de error con la acción siguiente
-    («Chrome no abrió: pulsa «Abrir ventana de Chrome» en Avanzado»);
-    nunca un «listo» genérico."""
+    Si chrome_up es false, mensaje de error con la acción siguiente Y el
+    DETALLE del error en el texto visible (X4), no solo en el toast:
+    «Chrome no abrió (no respondió en el puerto CDP 9333 tras 30 s):
+    pulsa «Abrir ventana de Chrome» en Avanzado». Nunca un «listo» genérico."""
     fn = _entre(MCP_JS, "async function gsessConnectAll() {", "async function gsessRepairProfile() {")
     assert "res.chrome_up === false" in fn
-    assert "Chrome no abrió: pulsa «Abrir ventana de Chrome» en Avanzado" in fn
+    # X4: el detalle REAL (chrome_error) entra en la nota VISIBLE
+    assert ("nota.textContent = 'Chrome no abrió' + errDetalle + "
+            "': pulsa «Abrir ventana de Chrome» en Avanzado.'") in fn
+    assert "res.chrome_error" in fn          # el detalle viene de la respuesta real
+    assert "errDetalle" in fn                # y se interpola en el mensaje
+    # X4: si la llamada misma falla, el detalle del fallo también queda visible
+    assert "'Conectar todo falló (' + e.message + " in fn
     assert "'Conectar todo: ' + (acts || 'listo')" not in fn
 
 
