@@ -154,8 +154,10 @@ def test_u3_tarjetas_y_consola_viven_en_avanzado():
     """Las tarjetas por servicio, Test Pipeline, Refrescar, Reparar perfil,
     Abrir ventana y el #mcp-log quedan DENTRO del <details> «Avanzado»;
     la tarjeta del ecosistema y la del pipeline quedan FUERA (cuerpo)."""
+    # X3: app-mcp.js está en LF puro; el ancla real ya no lleva la línea
+    # fantasma que simulaba el "\r\r\n" (read_text traducía cada CRCRLF a \n\n).
     dentro = _entre(MCP_JS, '<details class="mcp-adv" id="mcp-advanced">',
-                    '</details>\n  </div>`;'.replace("\n  ", "\n\n  "))
+                    '</details>\n  </div>`;')
     fuera = MCP_JS.split('<details class="mcp-adv" id="mcp-advanced">', 1)[0]
     for contenido in ("mcpSvcHTML('google-flow'", "mcpSvcHTML('notebooklm'",
                       "mcpTest('')", 'id="mcp-log"', "gsessRepairProfile()",
