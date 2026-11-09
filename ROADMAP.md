@@ -5,6 +5,10 @@
   intervención manual.
 - Start Frame de Flow (sujeto a captura real de red según checklist en PROJECT_STATE).
 ## SIGUIENTE
+- Validación del dueño con Chrome real (X2/X4): en su PC, «Conectar todo» con
+  Chrome ya abierto y visible NO debe cerrarlo ni relanzarlo; caído o zombi
+  debe purgar y reabrir con ventana forzada; el detalle del error («Chrome no
+  abrió (…)») debe verse en el panel. En sandbox: NOT_DEMONSTRATED.
 - «Conectar todo» y rutas verificadas (W1-W4): connect_all_google robusto
   con relanzamiento forzado, timeout 30s configurable y reporte de
   chrome_up honesto (W1-W2); catálogo de rutas críticas comprobadas por el
@@ -32,6 +36,22 @@
 ## EN RESERVA (no tocar)
 - HANDS (control manual del PC): dormido.
 ## HECHO
+- Higiene CI, Chrome sano y detalle visible (X1-X4, 2026-11-10): X1
+  ESTADO_REAL.md declara las 59 baterías reales de run_all — CI en rojo por
+  «58» obsoleto (09c277f); X2 connect_all_google chequea salud ANTES de
+  purgar: Chrome sano (CDP arriba + ventana visible) NUNCA se mata ni se
+  relanza; solo caído o zombi se purga con kill_profile_processes + heal y
+  relanza con force_window=True con sondeo de 30 s (c9eb0b9; dobles en
+  test_x2_connect_all_no_mata_sano.py; INT-043 recalibrado al contrato
+  nuevo); X3 app-mcp.js a LF puro (874 líneas CRCRLF) + .gitattributes
+  (eol=lf en .py/.js/.html/.css/.md/.json/.txt/.yml/.sh, binarios marcados,
+  .bat/.vbs excluidos a propósito) + test en modo binario anti \r\r\n, sin
+  grep línea a línea (544e166; ancla U3 recalibrada: el CRCRLF simulaba una
+  línea en blanco bajo read_text); X4 el panel «Conectar todo» muestra el
+  detalle del error en el TEXTO visible («Chrome no abrió (…): pulsa «Abrir
+  ventana de Chrome» en Avanzado») y si la llamada misma falla el detalle
+  también queda visible (104e1ee). Con Chrome real en la PC del dueño:
+  NOT_DEMONSTRATED (pendiente de su validación).
 - Robustez «Conectar todo» y salvaguarda de rutas verificadas (W1-W4, 2026-11-07):
   W1 `connect_all_google` relanza con `force_window=True` cuando el puerto CDP
   no responde o detecta un zombi sin ventana visible, sondea cada 0.5s hasta
