@@ -238,7 +238,7 @@ echo.
 echo        Logs en vivo abajo. Guarda un archivo y se recarga solo.
 echo        Para DETENER: Ctrl+C aqui  -  o doble click en DETENER-con-ventana.bat
 echo ============================================================
-"%VPY%" -m uvicorn main:app --host %HOST% --port %PORT% --reload
+"%VPY%" -m uvicorn main:app --host %HOST% --port %PORT% --reload --loop asyncio:ProactorEventLoop
 if errorlevel 1 (
     echo.
     echo [ERROR] El servidor se detuvo con error. Revisa el log de arriba.
