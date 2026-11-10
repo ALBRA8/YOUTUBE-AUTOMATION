@@ -39,6 +39,20 @@
 ## EN RESERVA (no tocar)
 - HANDS (control manual del PC): dormido.
 ## HECHO
+- Remediación estática y linting CI (Z1-Z4, 2026-11-10):
+  Z1 import subprocess a nivel de módulo en main.py para evitar NameError en
+  lipsync-musetalk (f13a2b5; test AST y de atributo en test_z1_main_subprocess.py).
+  Z2 test hermético del endpoint POST /api/avatars/{avatar_id}/lipsync-musetalk
+  con dobles (edge_tts, ffmpeg/subprocess.run y render_avatar_animation),
+  verificando camino exitoso 200 y fallo claro ante error de ffmpeg (9fef4f9;
+  test_z2_lipsync_musetalk.py).
+  Z3 eliminación de _probe_nvenc duplicada y referencia huérfana a ENABLE_NVENC
+  en pipeline/video.py, re-exportando la versión canónica de video_encode (8b7c8a1;
+  test_z3_video_probe_nvenc.py).
+  Z4 paso ruff en CI (.github/workflows/ci.yml) verificando reglas críticas
+  F821, E9, F63, F7 y F82 sobre backend y tools con 0 hallazgos; corrección de
+  F821 en qa_forensics_checker.py (import Any) y redefiniciones redundantes
+  de sys en mcp_manager.py (97163cf; test_z4_ruff_ci.py).
 - Catálogo por HTTP y sonda sin procesos duplicados (Y1-Y3, 2026-11-10):
   Y1 `GET /api/mcp/catalogo/{service}` devuelve {service, server_info,
   tools:[{name, description COMPLETA, inputSchema}]} LEYENDO la conexión
