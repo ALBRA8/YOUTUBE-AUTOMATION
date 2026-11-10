@@ -10,6 +10,7 @@ import json
 import logging
 import re
 import shutil
+import subprocess
 import zipfile
 from pathlib import Path
 from typing import Optional
