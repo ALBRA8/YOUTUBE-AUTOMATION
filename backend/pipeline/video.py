@@ -48,29 +48,6 @@ TRANSITION_DUR = 0.5  # segundos de crossfade entre escenas (compensado en el pa
 # fuentes mono como el TTS). Un único filtro para ambas ramas del mux.
 BROADCAST_LOUDNORM = "loudnorm=I=-14:LRA=11:TP=-1.0:dual_mono=true"
 
-# P2-2: Control de codificación y evaluación de aceleración por hardware (NVENC)
-_NVENC_AVAILABLE = None
-
-def _probe_nvenc() -> bool:
-    """Evalúa si el encoder por hardware NVENC (h264_nvenc) está activo y funcional."""
-    global _NVENC_AVAILABLE
-    if _NVENC_AVAILABLE is not None:
-        return _NVENC_AVAILABLE
-    if not ENABLE_NVENC:
-        _NVENC_AVAILABLE = False
-        return False
-    try:
-        p = subprocess.run(
-            ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=0.1:size=64x64:rate=10",
-             "-c:v", "h264_nvenc", "-f", "null", "-"],
-            capture_output=True, timeout=5
-        )
-        _NVENC_AVAILABLE = (p.returncode == 0)
-    except Exception:
-        _NVENC_AVAILABLE = False
-    return _NVENC_AVAILABLE
-
-
 # P1-2: el helper vive en el módulo NEUTRAL video_encode (pipeline y
 # services sin dependencias cruzadas). Re-export por compatibilidad.
 from video_encode import get_video_encoder, _probe_nvenc  # noqa: E402,F401
