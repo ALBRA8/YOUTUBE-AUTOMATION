@@ -804,7 +804,6 @@ class MCPClientManager:
     def kill_profile_processes(profile_path: Path | str | None = None) -> list[int]:
         """Busca y termina cualquier proceso Chrome huérfano/zombi que esté bloqueando
         profile_path para permitir que el nuevo Chrome con CDP se enlace sin conflictos."""
-        import sys
         p_str = str(profile_path if profile_path else _cfg("GOOGLE_PROFILE_GLOBAL", ""))
         p_name = Path(p_str).name
         killed = []
@@ -887,7 +886,6 @@ class MCPClientManager:
         start_new_session → sobrevive al reinicio de uvicorn; el perfil
         compartido hace el resto (Chrome singleton reenvía a la instancia
         viva si ya existía). Devuelve el pid."""
-        import sys
         # Auto-heal profile si --user-data-dir está en argv
         for a in argv:
             if a.startswith("--user-data-dir="):
@@ -942,7 +940,6 @@ class MCPClientManager:
         o PowerShell falló → estado desconocido: el llamador NUNCA mata nada).
         Una sola pasada PowerShell: Win32_Process (CommandLine = perfil) +
         Get-Process (MainWindowHandle del top-level). $0.00, sin dependencias."""
-        import sys
         if sys.platform != "win32":
             return None
         p_name = Path(str(profile_path if profile_path
@@ -1042,8 +1039,7 @@ class MCPClientManager:
             #   MainWindowHandle==0) o None EN WINDOWS (PowerShell colgado/error →
             #   se asume SIN ventana visible, nunca se confía en un fantasma).
             #   En no-Windows None es estructural (no hay comprobación) y no purga.
-            import sys as _sys
-            on_windows = _sys.platform == "win32"
+            on_windows = sys.platform == "win32"
             if force_window:
                 killed_pids = self.kill_profile_processes(profile)
                 heal_res = self.heal_chrome_profile(profile)  # borra Singleton* + repara

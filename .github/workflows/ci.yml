@@ -22,6 +22,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt -r backend/requirements-dev.txt
           pip install opencv-python-headless
+      - name: Lint critico con ruff (F821, E9, F63, F7, F82)
+        run: python -m ruff check --select F821,E9,F63,F7,F82 backend tools
       - name: ffmpeg (exigido en recolección por test_int077_ugc_pacing)
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Suite pytest (aislada de .env y con fixes 658740b)

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import struct
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 FIRMA_PNG = b"\x89PNG\r\n\x1a\n"
 FIRMA_JPEG = b"\xff\xd8\xff"
