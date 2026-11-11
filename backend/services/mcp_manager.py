@@ -256,11 +256,22 @@ class _Conn:
 
     async def _read_loop(self) -> None:
         assert self.proc and self.proc.stdout
-        while True:
-            line = await self.proc.stdout.readline()
-            if not line:
-                break
-            self._on_line(line.decode("utf-8", errors="replace").strip())
+        try:
+            while True:
+                line = await self.proc.stdout.readline()
+                if not line:
+                    break
+                self._on_line(line.decode("utf-8", errors="replace").strip())
+        finally:
+            # Resiliencia: si el proceso cierra stdout (EOF) o cae, despertar inmediatamente
+            # a todos los futures pendientes con PROCESS_DEAD en vez de esperar el timeout completo de 30s/60s.
+            tail = " · ".join(list(self.stderr_tail)[-3:]) if self.stderr_tail else ""
+            err_msg = f"el proceso MCP de {self.service} cerró la conexión (EOF)"
+            if tail:
+                err_msg += f": {tail}"
+            for rid, fut in list(self._pending.items()):
+                if not fut.done():
+                    fut.set_exception(MCPManagerError(err_msg, "PROCESS_DEAD"))
 
     async def _stderr_loop(self) -> None:
         assert self.proc and self.proc.stderr
@@ -582,39 +593,55 @@ class MCPClientManager:
                     f"si la sesión Google no es válida usa «🔑 Vincular Sesión "
                     f"Google (Login Único)» + «📥 Capturar sesión».",
                     "MISSING_NOTEBOOK_ID")
-        conn = self._conns.get(service)
-        if not conn or conn.state != ST_CONNECTED or not conn.proc or conn.proc.returncode is not None:
-            if not auto_connect:
-                raise MCPManagerError(f"{service} no está conectado", "DISCONNECTED")
-            await self.connect(service)
-            conn = self._conns.get(service)
-            if not conn or conn.state != ST_CONNECTED:
-                raise MCPManagerError(f"{service} no se pudo conectar", "DISCONNECTED")
-        names = {t.get("name") for t in conn.tools}
-        if names and tool not in names:
-            raise MCPManagerError(
-                f"el servidor no expone '{tool}' (tools: {', '.join(sorted(n for n in names if n))})",
-                "TOOL_UNKNOWN")
-        if service == "notebooklm":
-            # INT-069/069.1: v0.8.5 nombra los parámetros `notebook` (antes
-            # notebook_id) y `question` (antes query en la tool de contexto del
-            # orquestador); espejar claves legacy según el inputSchema REAL
-            # (ver _mirror_notebook_arg / _mirror_query_arg).
-            self._mirror_notebook_arg(conn, tool, arguments)
-            self._mirror_query_arg(conn, tool, arguments)
         t0 = time.time()
-        try:
-            text = await conn.call(tool, arguments, float(
-                timeout if timeout is not None else
-                (_cfg("NOTEBOOKLM_MCP_TIMEOUT", 60.0) if service == "notebooklm"
-                 else _cfg("FLOW_MCP_TIMEOUT", 120.0))))
-        except MCPManagerError as e:
-            if e.code in ("TIMEOUT", "PROCESS_DEAD"):
-                conn.state = ST_ERROR
-                conn.last_error = str(e)
-                await conn.close()
-                self._conns.pop(service, None)
-            raise
+        call_timeout = float(
+            timeout if timeout is not None else
+            (_cfg("NOTEBOOKLM_MCP_TIMEOUT", 60.0) if service == "notebooklm"
+             else _cfg("FLOW_MCP_TIMEOUT", 120.0)))
+
+        max_attempts = 2 if auto_connect else 1
+        last_exc: Exception | None = None
+        text: str = ""
+
+        for attempt in range(1, max_attempts + 1):
+            conn = self._conns.get(service)
+            if not conn or conn.state != ST_CONNECTED or not conn.proc or conn.proc.returncode is not None:
+                if not auto_connect:
+                    raise MCPManagerError(f"{service} no está conectado", "DISCONNECTED")
+                await self.connect(service)
+                conn = self._conns.get(service)
+                if not conn or conn.state != ST_CONNECTED:
+                    raise MCPManagerError(f"{service} no se pudo conectar", "DISCONNECTED")
+            names = {t.get("name") for t in conn.tools}
+            if names and tool not in names:
+                raise MCPManagerError(
+                    f"el servidor no expone '{tool}' (tools: {', '.join(sorted(n for n in names if n))})",
+                    "TOOL_UNKNOWN")
+            if service == "notebooklm":
+                # INT-069/069.1: v0.8.5 nombra los parámetros `notebook` (antes
+                # notebook_id) y `question` (antes query en la tool de contexto del
+                # orquestador); espejar claves legacy según el inputSchema REAL
+                # (ver _mirror_notebook_arg / _mirror_query_arg).
+                self._mirror_notebook_arg(conn, tool, arguments)
+                self._mirror_query_arg(conn, tool, arguments)
+            try:
+                text = await conn.call(tool, arguments, call_timeout)
+                last_exc = None
+                break
+            except MCPManagerError as e:
+                last_exc = e
+                if e.code in ("TIMEOUT", "PROCESS_DEAD"):
+                    conn.state = ST_ERROR
+                    conn.last_error = str(e)
+                    await conn.close()
+                    self._conns.pop(service, None)
+                    if attempt < max_attempts and e.code == "PROCESS_DEAD":
+                        log.warning("[%s] proceso cerró la conexión durante call(); reintentando una vez...", service)
+                        continue
+                raise
+
+        if last_exc:
+            raise last_exc
         log.info("[mcp-exec] %s::%s ok en %.1fs", service, tool, time.time() - t0)
         return {"ok": True, "service": service, "tool": tool, "text": text,
                 "elapsed_s": round(time.time() - t0, 2),
