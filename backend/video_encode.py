@@ -73,10 +73,13 @@ def get_video_encoder(final: bool = True) -> list[str]:
     """Devuelve los parámetros ffmpeg de codificación de video.
 
     Intermedios (final=False): casi sin pérdida con INTERMEDIATE_CRF (default 10)
-    y preset ultrafast. Final (final=True): codificación única de calidad con
-    VIDEO_PRESET y VIDEO_CRF (o NVENC), añadiendo -movflags +faststart para
+    y preset ultrafast (o NVENC p1 si está disponible). Final (final=True): codificación única de calidad con
+    VIDEO_PRESET y VIDEO_CRF (o NVENC p4), añadiendo -movflags +faststart para
     streaming inmediato (P2-5). Lectura DINÁMICA de config (tests y .env)."""
     if not final:
+        if _probe_nvenc():
+            return ["-c:v", "h264_nvenc", "-preset", "p1",
+                    "-cq", str(INTERMEDIATE_CRF)]
         return ["-c:v", "libx264",
                 "-preset", str(INTERMEDIATE_PRESET),
                 "-crf", str(INTERMEDIATE_CRF)]
