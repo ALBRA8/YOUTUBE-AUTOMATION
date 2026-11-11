@@ -39,6 +39,13 @@
 ## EN RESERVA (no tocar)
 - HANDS (control manual del PC): dormido.
 ## HECHO
+- Optimización del Pipeline de Render FFmpeg (EGM, 2026-11-11):
+  Fase 1: Habilitación de NVENC p1 (por GPU) para renders intermedios en video_encode.py
+  evitando cuellos de botella de CPU con libx264 (7b6ae47; test_opt_nvenc_intermediates.py).
+  Fase 2: Unificación de posproducción en pipeline/video.py (burn_subtitles):
+  subtítulos ASS, badge E-commerce y avatar PiP encadenados en un único
+  filter_complex de FFmpeg, eliminando 2-3 pasadas redundantes a disco (3347179;
+  test_opt_single_pass_render.py).
 - Remediación estática y linting CI (Z1-Z4, 2026-11-10):
   Z1 import subprocess a nivel de módulo en main.py para evitar NameError en
   lipsync-musetalk (f13a2b5; test AST y de atributo en test_z1_main_subprocess.py).
