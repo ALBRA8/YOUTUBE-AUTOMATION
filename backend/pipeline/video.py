@@ -563,19 +563,76 @@ async def burn_subtitles(project: dict, video_raw: Path, words_path: Path) -> Pa
     if typo_mod.FONT_DIR.is_dir():
         sub_filter += (f":fontsdir="
                        f"{typo_mod.FONT_DIR.as_posix().replace(':', '\\\\:')}")
-    # INT-012 / P2-2: Una única codificación final de calidad (o intermedia casi sin pérdida
-    # si downstream hay overlays que re-codificarían).
+    # INT-012 / P2-2 / OPT-UNIFIED: Ensamblado unificado de overlays en una sola pasada.
+    # En lugar de 3 ejecuciones secuenciales de ffmpeg (subtítulos -> badge -> avatar PiP)
+    # que re-codificaban el video entero 3 veces a disco, se preparan los assets y se
+    # encadenan en un único filter_complex reduciendo el tiempo de render en 60-70%.
+    extra_inputs: list[tuple[Path, str]] = []
+
+    # INT-055: Preparar Badge de Conversión E-Commerce si aplica
     badge_cfg = (project.get("meta") or {}).get("ecommerce_badge")
-    will_badge = bool(project.get("mode") == "product" or badge_cfg)
+    if project.get("mode") == "product" or badge_cfg:
+        try:
+            from services.ecommerce_overlays import generate_ecommerce_badge, build_ecommerce_ffmpeg_filter
+            b_type = (badge_cfg.get("type") if isinstance(badge_cfg, dict) else badge_cfg) or "rating"
+            badge_png = proj_dir / f"badge_{b_type}.png"
+            generate_ecommerce_badge(badge_type=b_type, out_path=badge_png)
+            if badge_png.is_file():
+                overlay_badge = build_ecommerce_ffmpeg_filter(badge_png, start_sec=0.5, duration_sec=6.0, position="top")
+                extra_inputs.append((badge_png, overlay_badge))
+        except Exception as e_badge:
+            log.warning("ecommerce badge overlay falló: %s", e_badge)
+
+    # INT-058: Preparar Presentador Flotante (Circle PiP Avatar) si aplica
     meta = project.get("meta") or {}
     avatar_id = project.get("avatar_id") or meta.get("avatar_id")
     pip_cfg = meta.get("circle_avatar_pip")
-    will_pip = bool(avatar_id and pip_cfg)
-    is_last_step = not (will_badge or will_pip)
+    if avatar_id and pip_cfg:
+        try:
+            import database as db
+            from services.avatar_pip import create_circle_avatar, build_pip_overlay_filter
+            av = db.get_avatar(avatar_id)
+            if av and av.get("image_path") and Path(av["image_path"]).is_file():
+                b_color = "cyan"
+                pos = "bottom_right"
+                if isinstance(pip_cfg, dict):
+                    b_color = pip_cfg.get("border_color", "cyan")
+                    pos = pip_cfg.get("position", "bottom_right")
+                elif isinstance(pip_cfg, str) and pip_cfg in ("cyan", "gold", "emerald", "purple", "white"):
+                    b_color = pip_cfg
 
-    cmd = ["ffmpeg", "-y", "-i", str(video_raw), "-vf", sub_filter,
-           *get_video_encoder(final=is_last_step),
-           "-c:a", "copy", str(final)]
+                pip_png = proj_dir / f"avatar_{avatar_id}_circle.png"
+                create_circle_avatar(Path(av["image_path"]), diameter=320, border_color=b_color, output_path=pip_png)
+                if pip_png.is_file():
+                    pip_filter = build_pip_overlay_filter(pip_png, position=pos)
+                    extra_inputs.append((pip_png, pip_filter))
+        except Exception as e_pip:
+            log.warning("circle avatar pip overlay falló: %s", e_pip)
+
+    # Construir comando FFmpeg: simple (-vf) si no hay capas extra, o unificado (-filter_complex)
+    if not extra_inputs:
+        cmd = ["ffmpeg", "-y", "-i", str(video_raw), "-vf", sub_filter,
+               *get_video_encoder(final=True),
+               "-c:a", "copy", str(final)]
+    else:
+        input_args = ["-i", str(video_raw)]
+        filter_steps = [f"[0:v]{sub_filter}[v0]"]
+        curr_v = "[v0]"
+        for idx, (asset_path, filt_expr) in enumerate(extra_inputs, start=1):
+            input_args.extend(["-i", str(asset_path)])
+            next_v = f"[v{idx}]"
+            filter_steps.append(f"{curr_v}[{idx}:v]{filt_expr}{next_v}")
+            curr_v = next_v
+
+        complex_filter_str = ";".join(filter_steps)
+        cmd = [
+            "ffmpeg", "-y", *input_args,
+            "-filter_complex", complex_filter_str,
+            "-map", curr_v, "-map", "0:a?",
+            *get_video_encoder(final=True),
+            "-c:a", "copy", str(final)
+        ]
+
     try:
         p = await asyncio.to_thread(lambda: _run_ffmpeg(cmd, timeout=900))
     except subprocess.TimeoutExpired:
@@ -597,71 +654,8 @@ async def burn_subtitles(project: dict, video_raw: Path, words_path: Path) -> Pa
             ensure_ascii=False), encoding="utf8")
     else:
         (proj_dir / "subs_status.json").write_text(json.dumps(
-            {"burned": True, "reason": "ok"},
+            {"burned": True, "reason": "ok", "single_pass": True},
             ensure_ascii=False), encoding="utf8")
-
-    # INT-055: Overlay de Badge de Conversión E-Commerce (Rating, Descuento, Envío)
-    badge_cfg = (project.get("meta") or {}).get("ecommerce_badge")
-    if project.get("mode") == "product" or badge_cfg:
-        try:
-            from services.ecommerce_overlays import generate_ecommerce_badge, build_ecommerce_ffmpeg_filter
-            b_type = (badge_cfg.get("type") if isinstance(badge_cfg, dict) else badge_cfg) or "rating"
-            badge_png = proj_dir / f"badge_{b_type}.png"
-            generate_ecommerce_badge(badge_type=b_type, out_path=badge_png)
-
-            overlay_filter = build_ecommerce_ffmpeg_filter(badge_png, start_sec=0.5, duration_sec=6.0, position="top")
-            badged_video = proj_dir / f"{project['id']}_badged.mp4"
-            badge_is_last = not will_pip
-            badge_cmd = [
-                "ffmpeg", "-y", "-i", str(final), "-i", str(badge_png),
-                "-filter_complex", f"[0:v][1:v]{overlay_filter}[v]",
-                "-map", "[v]", "-map", "0:a?",
-                *get_video_encoder(final=badge_is_last),
-                "-c:a", "copy", str(badged_video)
-            ]
-            pb = await asyncio.to_thread(lambda: _run_ffmpeg(badge_cmd, timeout=300))
-            if pb.returncode == 0 and badged_video.is_file():
-                import shutil
-                shutil.move(badged_video, final)
-        except Exception as e_badge:
-            log.warning("ecommerce badge overlay falló: %s", e_badge)
-
-    # INT-058: Overlay de Presentador Flotante (Circle PiP Avatar estilo HeyGen / Synthesia)
-    meta = project.get("meta") or {}
-    avatar_id = project.get("avatar_id") or meta.get("avatar_id")
-    pip_cfg = meta.get("circle_avatar_pip")
-    if avatar_id and pip_cfg:
-        try:
-            import database as db
-            from services.avatar_pip import create_circle_avatar, build_pip_overlay_filter
-            av = db.get_avatar(avatar_id)
-            if av and av.get("image_path") and Path(av["image_path"]).is_file():
-                b_color = "cyan"
-                pos = "bottom_right"
-                if isinstance(pip_cfg, dict):
-                    b_color = pip_cfg.get("border_color", "cyan")
-                    pos = pip_cfg.get("position", "bottom_right")
-                elif isinstance(pip_cfg, str) and pip_cfg in ("cyan", "gold", "emerald", "purple", "white"):
-                    b_color = pip_cfg
-
-                pip_png = proj_dir / f"avatar_{avatar_id}_circle.png"
-                create_circle_avatar(Path(av["image_path"]), diameter=320, border_color=b_color, output_path=pip_png)
-
-                pip_filter = build_pip_overlay_filter(pip_png, position=pos)
-                pip_video = proj_dir / f"{project['id']}_pip.mp4"
-                pip_cmd = [
-                    "ffmpeg", "-y", "-i", str(final), "-i", str(pip_png),
-                    "-filter_complex", f"[0:v][1:v]{pip_filter}[v]",
-                    "-map", "[v]", "-map", "0:a?",
-                    *get_video_encoder(final=True),
-                    "-c:a", "copy", str(pip_video)
-                ]
-                pb_pip = await asyncio.to_thread(lambda: _run_ffmpeg(pip_cmd, timeout=300))
-                if pb_pip.returncode == 0 and pip_video.is_file():
-                    import shutil
-                    shutil.move(pip_video, final)
-        except Exception as e_pip:
-            log.warning("circle avatar pip overlay falló: %s", e_pip)
 
     return final
 
