@@ -39,6 +39,11 @@
 ## EN RESERVA (no tocar)
 - HANDS (control manual del PC): dormido.
 ## HECHO
+- Maduración y Resiliencia MCP Client Manager (EGM, 2026-11-11):
+  Detección instantánea de caída de procesos MCP/EOF en _read_loop (despierta futures
+  pendientes de inmediato con PROCESS_DEAD y detalle de stderr, evitando congelamientos
+  de 30s/60s); auto-reconexión y reintento transparente en execute() ante desconexión
+  transitoria del subproceso (77edf70; test_opt_mcp_resilience.py).
 - Optimización del Pipeline de Render FFmpeg (EGM, 2026-11-11):
   Fase 1: Habilitación de NVENC p1 (por GPU) para renders intermedios en video_encode.py
   evitando cuellos de botella de CPU con libx264 (7b6ae47; test_opt_nvenc_intermediates.py).
