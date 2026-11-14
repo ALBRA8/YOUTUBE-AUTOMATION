@@ -213,6 +213,7 @@ async function mcpNichoChange(nicho, silencioso) {
       if (el) el.style.display = (sel.value === '__manual__') ? '' : 'none';
     }
     if (!silencioso) toast('Cuaderno del nicho cargado: ' + (js.nombre_cuaderno || nid), 'ok');
+    gsessRefresh(true);
   } catch (e) { /* nicho sin cuaderno todavía — se elige al listar */ }
 }
 
@@ -399,8 +400,14 @@ function gsessStopPoll() {
    solo el perfil (cuenta) y la fase de vigilancia del login. */
 async function gsessRefresh(silent) {
   try {
+    const nid = mcpNid();
+    const nicho = (localStorage.getItem(NICHOS_KEY) || '').trim();
+    const q = new URLSearchParams();
+    if (nicho) q.set('nicho_id', nicho);
+    if (nid) q.set('notebook_id', nid);
+    const qs = q.toString() ? ('?' + q.toString()) : '';
     const [eco, sso] = await Promise.all([
-      api('/mcp/resumen'),
+      qs ? api('/mcp/resumen' + qs) : api('/mcp/resumen'),
       api('/mcp/google-sso/status').catch(() => ({})),
     ]);
     S.eco = eco;
@@ -497,10 +504,17 @@ function mcpPickNotebook(id) {
     api('/registro/nicho', { method: 'POST', body: {
       nicho_id: nicho, notebook_id: id,
       nombre_cuaderno: titulo || ('Cuaderno del nicho ' + nicho) } })
-      .then(() => toast('Notebook fijado ✅ y recordado para el nicho «' + nicho + '» — ya puedes lanzar el pipeline', 'ok'))
-      .catch(e => toast('Notebook fijado ✅ (no se pudo recordar por nicho: ' + e.message + ')', 'info'));
+      .then(() => {
+        toast('Notebook fijado ✅ y recordado para el nicho «' + nicho + '» — ya puedes lanzar el pipeline', 'ok');
+        gsessRefresh(true);
+      })
+      .catch(e => {
+        toast('Notebook fijado ✅ (no se pudo recordar por nicho: ' + e.message + ')', 'info');
+        gsessRefresh(true);
+      });
   } else {
     toast('Notebook fijado ✅ ' + id.slice(0, 8) + '… — elige un nicho arriba para que se recuerde');
+    gsessRefresh(true);
   }
 }
 
