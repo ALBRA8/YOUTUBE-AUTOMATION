@@ -230,6 +230,8 @@ BATERIAS = [
                                  # de tools del código vs catálogo real
     "test_w3_rutas_verificadas.py", # W3: guardia estática de rutas verificadas
                                  # por el dueño en su máquina (4)
+    "test_bb_stage1_notebook_query.py", # BB1-BB2: default notebook_query, fallback
+                                 # y parsing status/answer (7)
 ]
 
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")

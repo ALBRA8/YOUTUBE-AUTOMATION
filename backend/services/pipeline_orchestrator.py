@@ -521,13 +521,34 @@ class PipelineOrchestrator:
             # ── Stage 1: contexto de NotebookLM (solo-lectura) ──
             self._set_step(run, ST_STAGE1, "running")
             run["progress_pct"] = 25
-            tool = str(_cfg("NOTEBOOKLM_CONTEXT_TOOL", "chat_ask") or "").strip()
+            tool = str(_cfg("NOTEBOOKLM_CONTEXT_TOOL", "notebook_query") or "").strip()
             query = str(_cfg(
                 "NOTEBOOKLM_CONTEXT_QUERY",
                 "Extrae del notebook la biblia de investigación para producir un "
                 "video: puntos clave y datos verificables, arco narrativo sugerido, "
                 "y una descripción física CONSISTENTE del personaje principal "
                 "(look, ropa, rasgos) reutilizable en todas las escenas.") or "").strip()
+
+            # BB1: si el servidor no expone la tool configurada pero sí notebook_query, usar notebook_query y loguear aviso
+            if tool != "notebook_query":
+                exposed_tools: set[str] = set()
+                if hasattr(self.manager, "tools_catalog"):
+                    try:
+                        cat = await self.manager.tools_catalog("notebooklm", auto_connect=True)
+                        exposed_tools = {t.get("name") for t in (cat.get("tools") or []) if t.get("name")}
+                    except Exception as e:  # noqa: BLE001
+                        log.debug(f"[pipeline {run['run_id']}] tools_catalog no disponible: {e}")
+                elif hasattr(self.manager, "_conns"):
+                    conn = getattr(self.manager, "_conns", {}).get("notebooklm")
+                    if conn and getattr(conn, "tools", None):
+                        exposed_tools = {t.get("name") for t in conn.tools if t.get("name")}
+                if exposed_tools and tool not in exposed_tools and "notebook_query" in exposed_tools:
+                    log.warning(
+                        f"[pipeline {run['run_id']}] El servidor NotebookLM no expone '{tool}' "
+                        f"pero sí 'notebook_query' — usando 'notebook_query'"
+                    )
+                    tool = "notebook_query"
+
             try:
                 # HOTFIX INT-023.4: inyección EXPLÍCITA del id resuelto en los
                 # arguments (defensa en profundidad; mcp_manager re-valida/inyecta).
@@ -540,16 +561,76 @@ class PipelineOrchestrator:
                     timeout=float(_cfg("NOTEBOOKLM_MCP_TIMEOUT", 60.0)),
                     notebook_id=run["notebook_id"] or None)
             except mcpm.MCPManagerError as e:
-                code = ("PRE_FLIGHT_MISSING_NOTEBOOK_ID"
-                        if e.code == "MISSING_NOTEBOOK_ID" else "CONTEXT_EXTRACTION_FAILED")
-                self._fail(run, code, f"tool '{tool}': [{e.code}] {e}")
-                return
-            context = (res.get("text") or "").strip()
-            if not context:
-                self._fail(run, "CONTEXT_EMPTY",
-                           f"la tool '{tool}' devolvió texto vacío — revisa el "
-                           f"notebookId y NOTEBOOKLM_CONTEXT_TOOL")
-                return
+                if e.code == "TOOL_UNKNOWN" and tool != "notebook_query":
+                    exposed = set()
+                    if hasattr(self.manager, "tools_catalog"):
+                        try:
+                            cat = await self.manager.tools_catalog("notebooklm", auto_connect=True)
+                            exposed = {t.get("name") for t in (cat.get("tools") or []) if t.get("name")}
+                        except Exception as e_cat:  # noqa: BLE001
+                            log.debug(f"[pipeline {run['run_id']}] tools_catalog fallback no disponible: {e_cat}")
+                    elif hasattr(self.manager, "_conns"):
+                        conn = getattr(self.manager, "_conns", {}).get("notebooklm")
+                        if conn and getattr(conn, "tools", None):
+                            exposed = {t.get("name") for t in conn.tools if t.get("name")}
+                    if "notebook_query" in exposed or not exposed:
+                        log.warning(
+                            f"[pipeline {run['run_id']}] El servidor NotebookLM no expone '{tool}' "
+                            f"pero sí 'notebook_query' — fallback a 'notebook_query'"
+                        )
+                        tool = "notebook_query"
+                        try:
+                            res = await self.manager.execute(
+                                "notebooklm", tool, args,
+                                timeout=float(_cfg("NOTEBOOKLM_MCP_TIMEOUT", 60.0)),
+                                notebook_id=run["notebook_id"] or None)
+                        except mcpm.MCPManagerError as e2:
+                            code = ("PRE_FLIGHT_MISSING_NOTEBOOK_ID"
+                                    if e2.code == "MISSING_NOTEBOOK_ID" else "CONTEXT_EXTRACTION_FAILED")
+                            self._fail(run, code, f"tool '{tool}': [{e2.code}] {e2}")
+                            return
+                    else:
+                        self._fail(run, "CONTEXT_EXTRACTION_FAILED", f"tool '{tool}': [{e.code}] {e}")
+                        return
+                else:
+                    code = ("PRE_FLIGHT_MISSING_NOTEBOOK_ID"
+                            if e.code == "MISSING_NOTEBOOK_ID" else "CONTEXT_EXTRACTION_FAILED")
+                    self._fail(run, code, f"tool '{tool}': [{e.code}] {e}")
+                    return
+
+            raw_text = (res.get("text") or "").strip()
+            parsed_json = None
+            if raw_text:
+                try:
+                    loaded = json.loads(raw_text)
+                    if isinstance(loaded, dict):
+                        parsed_json = loaded
+                except (json.JSONDecodeError, ValueError):
+                    parsed_json = None
+
+            if parsed_json is not None:
+                # BB2: si "text" es JSON, usar solo el campo "answer".
+                # Si status != "success" o "answer" está vacío, fallar con CONTEXT_EMPTY
+                # y el mensaje: "el cuaderno no tiene fuentes o no respondió: sube fuentes en NotebookLM".
+                st = parsed_json.get("status")
+                ans = parsed_json.get("answer")
+                ans_str = str(ans or "").strip()
+                if st != "success" or not ans_str:
+                    self._fail(
+                        run, "CONTEXT_EMPTY",
+                        "el cuaderno no tiene fuentes o no respondió: sube fuentes en NotebookLM"
+                    )
+                    return
+                context = ans_str
+            else:
+                # Si el texto no es JSON, comportamiento actual
+                context = raw_text
+                if not context:
+                    self._fail(run, "CONTEXT_EMPTY",
+                               f"la tool '{tool}' devolvió texto vacío — revisa el "
+                               f"notebookId y NOTEBOOKLM_CONTEXT_TOOL")
+                    return
+
             rd = self._run_dir(run["run_id"])
             rd.mkdir(parents=True, exist_ok=True)
             (rd / "context.md").write_text(context, encoding="utf-8")

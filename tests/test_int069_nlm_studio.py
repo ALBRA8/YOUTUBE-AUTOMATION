@@ -271,13 +271,13 @@ def test_defaults_aligned_v085(monkeypatch):
     delenv; dotenv no sobreescribe vars preexistentes) y se re-importa config
     FRESCO, restaurando el módulo previo exactamente al salir (patrón FIX-C)."""
     monkeypatch.setenv("NOTEBOOKLM_PROBE_TOOL", "notebook_list")
-    monkeypatch.setenv("NOTEBOOKLM_CONTEXT_TOOL", "chat_ask")
+    monkeypatch.setenv("NOTEBOOKLM_CONTEXT_TOOL", "notebook_query")
     _saved = sys.modules.get("config")
     sys.modules.pop("config", None)
     try:
         import config as fresh_cfg  # noqa: F401 — re-import fresco sin .env
         assert fresh_cfg.NOTEBOOKLM_PROBE_TOOL == "notebook_list"
-        assert fresh_cfg.NOTEBOOKLM_CONTEXT_TOOL == "chat_ask"
+        assert fresh_cfg.NOTEBOOKLM_CONTEXT_TOOL == "notebook_query"
     finally:
         if _saved is not None:
             sys.modules["config"] = _saved
@@ -289,7 +289,7 @@ def test_defaults_aligned_v085(monkeypatch):
     assert '"notebook_list", "list_notebooks"' in mm_src  # legacy aceptado
     po_src = (backend / "services" / "pipeline_orchestrator.py").read_text(
         encoding="utf-8")
-    assert '_cfg("NOTEBOOKLM_CONTEXT_TOOL", "chat_ask")' in po_src
+    assert '_cfg("NOTEBOOKLM_CONTEXT_TOOL", "notebook_query")' in po_src
 
 
 @pytest.mark.asyncio

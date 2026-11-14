@@ -131,7 +131,7 @@ GOOGLE_SSO_TIMEOUT_S = int(os.getenv("GOOGLE_SSO_TIMEOUT_S", "900"))
 # Tool de solo-lectura del servidor notebooklm-mcp que extrae la bíblia de
 # investigación (Stage 1). Si el servidor no la expone, el error llega a la
 # UI con la lista real de tools disponibles (TOOL_UNKNOWN).
-NOTEBOOKLM_CONTEXT_TOOL = os.getenv("NOTEBOOKLM_CONTEXT_TOOL", "chat_ask").strip()
+NOTEBOOKLM_CONTEXT_TOOL = os.getenv("NOTEBOOKLM_CONTEXT_TOOL", "notebook_query").strip()
 # Consulta enviada junto al notebookId (plantilla editable por .env).
 NOTEBOOKLM_CONTEXT_QUERY = os.getenv(
     "NOTEBOOKLM_CONTEXT_QUERY",

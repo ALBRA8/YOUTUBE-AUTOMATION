@@ -121,14 +121,13 @@ def test_tools_del_codigo_contra_catalogo_real():
                 if n not in CATALOGO_REAL_V0115}
     presentes = {n: d for n, d in llamadas.items()
                  if n in CATALOGO_REAL_V0115}
-    assert {"notebook_list", "notebook_create", "studio_status"} <= set(presentes)
+    assert {"notebook_list", "notebook_create", "studio_status", "notebook_query"} <= set(presentes)
     # pin (U6, 2026-11-07, documentado en INT-093):
     assert ausentes == {
         "list_notebooks": "mcp_manager (_LIST_NOTEBOOK_TOOLS, alias)",
         "source_add": "nlm_studio (TOOL_SOURCE_ADD)",
         "studio_generate": "nlm_studio (TOOL_STUDIO_GENERATE)",
         "studio_download": "nlm_studio (TOOL_STUDIO_DOWNLOAD)",
-        "chat_ask": "pipeline_orchestrator (NOTEBOOKLM_CONTEXT_TOOL default)",
     }, f"cambió el conjunto de tools fuera de catálogo: {ausentes}"
 
 
