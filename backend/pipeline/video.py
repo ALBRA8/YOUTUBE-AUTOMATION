@@ -563,11 +563,23 @@ async def burn_subtitles(project: dict, video_raw: Path, words_path: Path) -> Pa
     if typo_mod.FONT_DIR.is_dir():
         sub_filter += (f":fontsdir="
                        f"{typo_mod.FONT_DIR.as_posix().replace(':', '\\\\:')}")
-    # INT-012 / P2-2 / OPT-UNIFIED: Ensamblado unificado de overlays en una sola pasada.
-    # En lugar de 3 ejecuciones secuenciales de ffmpeg (subtítulos -> badge -> avatar PiP)
-    # que re-codificaban el video entero 3 veces a disco, se preparan los assets y se
-    # encadenan en un único filter_complex reduciendo el tiempo de render en 60-70%.
+    # INT-012 / P2-2 / OPT-UNIFIED / AA2: Ensamblado unificado con validación de capas PNG
+    # y fallback resiliente. Valida cada PNG antes de armar el filter_complex (PIL.verify).
+    # Si una capa es inválida se omite registrándola en subs_status.json. Si ffmpeg falla (rc!=0),
+    # se reintenta una vez solo con subtítulos (-vf) antes de degradar a copia.
+    omitted_layers: list[str] = []
     extra_inputs: list[tuple[Path, str]] = []
+
+    def _is_valid_layer_png(path: Path) -> bool:
+        if not path.is_file():
+            return False
+        try:
+            from PIL import Image
+            with Image.open(path) as im:
+                im.verify()
+            return True
+        except Exception:
+            return False
 
     # INT-055: Preparar Badge de Conversión E-Commerce si aplica
     badge_cfg = (project.get("meta") or {}).get("ecommerce_badge")
@@ -577,11 +589,15 @@ async def burn_subtitles(project: dict, video_raw: Path, words_path: Path) -> Pa
             b_type = (badge_cfg.get("type") if isinstance(badge_cfg, dict) else badge_cfg) or "rating"
             badge_png = proj_dir / f"badge_{b_type}.png"
             generate_ecommerce_badge(badge_type=b_type, out_path=badge_png)
-            if badge_png.is_file():
+            if _is_valid_layer_png(badge_png):
                 overlay_badge = build_ecommerce_ffmpeg_filter(badge_png, start_sec=0.5, duration_sec=6.0, position="top")
                 extra_inputs.append((badge_png, overlay_badge))
+            else:
+                log.warning("ecommerce badge PNG inválido o corrupto: %s — omitiendo", badge_png)
+                omitted_layers.append(badge_png.name)
         except Exception as e_badge:
             log.warning("ecommerce badge overlay falló: %s", e_badge)
+            omitted_layers.append(f"badge_{e_badge}")
 
     # INT-058: Preparar Presentador Flotante (Circle PiP Avatar) si aplica
     meta = project.get("meta") or {}
@@ -603,17 +619,23 @@ async def burn_subtitles(project: dict, video_raw: Path, words_path: Path) -> Pa
 
                 pip_png = proj_dir / f"avatar_{avatar_id}_circle.png"
                 create_circle_avatar(Path(av["image_path"]), diameter=320, border_color=b_color, output_path=pip_png)
-                if pip_png.is_file():
+                if _is_valid_layer_png(pip_png):
                     pip_filter = build_pip_overlay_filter(pip_png, position=pos)
                     extra_inputs.append((pip_png, pip_filter))
+                else:
+                    log.warning("avatar circle PNG inválido o corrupto: %s — omitiendo", pip_png)
+                    omitted_layers.append(pip_png.name)
         except Exception as e_pip:
             log.warning("circle avatar pip overlay falló: %s", e_pip)
+            omitted_layers.append(f"pip_{e_pip}")
+
+    cmd_subs_only = ["ffmpeg", "-y", "-i", str(video_raw), "-vf", sub_filter,
+                     *get_video_encoder(final=True),
+                     "-c:a", "copy", str(final)]
 
     # Construir comando FFmpeg: simple (-vf) si no hay capas extra, o unificado (-filter_complex)
     if not extra_inputs:
-        cmd = ["ffmpeg", "-y", "-i", str(video_raw), "-vf", sub_filter,
-               *get_video_encoder(final=True),
-               "-c:a", "copy", str(final)]
+        cmd = cmd_subs_only
     else:
         input_args = ["-i", str(video_raw)]
         filter_steps = [f"[0:v]{sub_filter}[v0]"]
@@ -636,25 +658,44 @@ async def burn_subtitles(project: dict, video_raw: Path, words_path: Path) -> Pa
     try:
         p = await asyncio.to_thread(lambda: _run_ffmpeg(cmd, timeout=900))
     except subprocess.TimeoutExpired:
+        log.error("subs burn: timeout 900s — intentando fallback de subtítulos solos")
+        p = None
+
+    # AA2: Si ffmpeg falló (rc!=0 o timeout) y había capas extra, reintentar una vez solo con subtítulos
+    if (p is None or p.returncode != 0) and extra_inputs:
+        log.warning("ffmpeg falló con filter_complex; reintentando una vez solo con subtítulos (-vf)...")
+        for asset_path, _ in extra_inputs:
+            if asset_path.name not in omitted_layers:
+                omitted_layers.append(asset_path.name)
+        try:
+            p = await asyncio.to_thread(lambda: _run_ffmpeg(cmd_subs_only, timeout=900))
+        except subprocess.TimeoutExpired:
+            p = None
+
+    if p is None:
         log.error("subs burn: timeout 900s — degradando a copia sin subtítulos")
         import shutil
         shutil.copy(video_raw, final)
         (proj_dir / "subs_status.json").write_text(json.dumps(
             {"burned": False,
-             "reason": "ffmpeg timeout 900s — copiado sin subtítulos"},
+             "reason": "ffmpeg timeout 900s — copiado sin subtítulos",
+             "omitted_layers": omitted_layers},
             ensure_ascii=False), encoding="utf8")
         return final
+
     if p.returncode != 0:
         log.error("subs burn: %s", p.stderr[-300:])
         import shutil
         shutil.copy(video_raw, final)
         (proj_dir / "subs_status.json").write_text(json.dumps(
             {"burned": False,
-             "reason": f"ffmpeg rc={p.returncode} — copiado sin subtítulos"},
+             "reason": f"ffmpeg rc={p.returncode} — copiado sin subtítulos",
+             "omitted_layers": omitted_layers},
             ensure_ascii=False), encoding="utf8")
     else:
         (proj_dir / "subs_status.json").write_text(json.dumps(
-            {"burned": True, "reason": "ok", "single_pass": True},
+            {"burned": True, "reason": "ok", "single_pass": True,
+             "omitted_layers": omitted_layers},
             ensure_ascii=False), encoding="utf8")
 
     return final
