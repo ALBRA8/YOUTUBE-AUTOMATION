@@ -461,6 +461,12 @@ class MCPClientManager:
             home = str(_cfg("NOTEBOOKLM_HOME", "") or "").strip()
             if home:
                 env["NOTEBOOKLM_HOME"] = home
+            base_url = str(_cfg("NOTEBOOKLM_BASE_URL", "https://notebook.google.com") or "").strip()
+            if base_url:
+                env["NOTEBOOKLM_BASE_URL"] = base_url
+            bl = str(_cfg("NOTEBOOKLM_BL", "boq_labs-tailwind-frontend_20261112.11_p0") or "").strip()
+            if bl:
+                env["NOTEBOOKLM_BL"] = bl
         try:
             proc = await asyncio.create_subprocess_exec(
                 *argv, cwd=cwd, env=env,

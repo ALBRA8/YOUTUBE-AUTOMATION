@@ -58,6 +58,9 @@ NOTEBOOKLM_HOME = os.getenv("NOTEBOOKLM_HOME", "").strip()
 # Perfil activo de notebooklm-py (vacío = "default"; estructura verificada:
 # <home>/profiles/<profile>/storage_state.json con fallback legacy <home>/).
 NOTEBOOKLM_PROFILE = os.getenv("NOTEBOOKLM_PROFILE", "").strip()
+# Host base y build label de Google Notebook
+NOTEBOOKLM_BASE_URL = os.getenv("NOTEBOOKLM_BASE_URL", "https://notebook.google.com").strip()
+NOTEBOOKLM_BL = os.getenv("NOTEBOOKLM_BL", "boq_labs-tailwind-frontend_20261112.11_p0").strip()
 
 # ── 🔐 INT-069 · session hardening — refresh automático de cookies ──────
 # Si el preflight del MCP de NotebookLM detecta AUTH_REQUIRED (cookies
