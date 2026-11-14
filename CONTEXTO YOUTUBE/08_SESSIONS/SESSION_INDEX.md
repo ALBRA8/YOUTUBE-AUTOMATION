@@ -36,3 +36,9 @@
 - **Hecho:** Remediación secuencial quirúrgica de los 17 puntos de la auditoría técnica (P0 a P3), rebase con `origin/main` (memoria viva `LEEME_PRIMERO.md`, `ROADMAP.md`, reubicación de lanzadores en `launchers/` y decisiones D-010/D-011) y sincronización con el repositorio remoto.
 - **Resultado:** 40/40 tests PASS en suites de auditoría y suite de lanzadores.
 - **Referencia:** `SES-2026-11-06-02_AUDITORIA_TECNICA_P0_P3_REMEDIACION_INTEGRAL.md`.
+
+## SES-2026-11-14-01 — Conectividad Google Flow y NotebookLM + Descubrimiento en Vivo (Sonda INT-093)
+- **Estado:** CLOSED / PASS.
+- **Hecho:** Conexión real en vivo de Chrome CDP 9333, Google Flow (5 tools operativas verificadas con `flow_list_assets` en 1.6 s) y NotebookLM (32 tools). Solución al fallo `[LIST_EMPTY]` mediante migración a `notebook.google.com` y build label activo (`boq_labs-tailwind-frontend_20261112.11_p0`). Ejecución de la sonda INT-093 (`sonda_nombres.json` con `q3`, `q4`, `q5` SOPORTADO). Recuperación y fijación de 10 cuadernos reales en el panel web. Sincronización reactiva del semáforo en `app-mcp.js` (Ecosistema 4/4 verde).
+- **Resultado:** 10 cuadernos listados en vivo; suites `test_notebooklm_base_url.py` (1/1), `test_u_panel_ecosistema.py` (21/21), `test_mcp_manager.py` (38/38) y `test_u1_mcp_resumen.py` (11/11) en verde.
+- **Referencia:** `SES-2026-11-14-01_CONECTIVIDAD_GOOGLE_FLOW_NOTEBOOKLM_DESCUBRIMIENTO.md`.

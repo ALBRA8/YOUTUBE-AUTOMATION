@@ -5,33 +5,8 @@
   intervención manual.
 - Start Frame de Flow (sujeto a captura real de red según checklist en PROJECT_STATE).
 ## SIGUIENTE
-- Validación del dueño con Chrome real (X2/X4): en su PC, «Conectar todo» con
-  Chrome ya abierto y visible NO debe cerrarlo ni relanzarlo; caído o zombi
-  debe purgar y reabrir con ventana forzada; el detalle del error («Chrome no
-  abrió (…)») debe verse en el panel. En sandbox: NOT_DEMONSTRATED.
-- «Conectar todo» y rutas verificadas (W1-W4): connect_all_google robusto
-  con relanzamiento forzado, timeout 30s configurable y reporte de
-  chrome_up honesto (W1-W2); catálogo de rutas críticas comprobadas por el
-  dueño (W3). La verificación con Chrome y servidores MCP reales en la PC
-  del dueño queda como NOT_DEMONSTRATED (sandbox sin Chrome de escritorio).
-- Panel MCP (U1-U7): verificación VISUAL en navegador real por el dueño
-  (semáforos, Avanzado, selector nicho/cuaderno, gate del Run) — en el
-  sandbox no hay Chrome de escritorio: NOT_DEMONSTRATED. Decisión sobre
-  el default de contexto del NotebookLM (chat_ask → notebook_query) y
-  migración de las tools legacy de nlm_studio al catálogo real de
-  notebooklm-mcp-server v0.1.15 (ver INT-093).
-- Minidramas NotebookLM+Flow: registro y validador endurecidos (R1-R6 +
-  cierre Q1-Q6, ver HECHO). Pendiente del dueño: correr la sonda INT-093
-  en su máquina (q1-q7 hoy NOT_DEMONSTRATED), activar
-  FLOW_REGISTRO_SYNC solo si la sonda demuestra q7 SOPORTADO, decidir
-  diálogo A/B/C y duraciones (spec PENDIENTE DEL DUEÑO) y ejecutar el
-  piloto mínimo Gate 0/Gate 3 con Flow real (checklist y observador
-  listos). La sonda INT-093 ahora lee por HTTP del backend en marcha
-  (Y2): correrla es `python tools/sonda_capacidades_nombres.py --salida
-  sonda_nombres.json` con el panel conectado (q1-q10 hoy
-  NOT_DEMONSTRATED).
-- Google Flow Multi-Cuenta: balanceador de cuentas en mcp_manager para rotación
-  automática de créditos Veo (inspirado en análisis Sloth v0.3.48).
+- Minidramas NotebookLM+Flow: registro y validador endurecidos (R1-R6 + cierre Q1-Q6). Sonda INT-093 DEMOSTRADA en vivo (`sonda_nombres.json`: q3/q4/q5 SOPORTADO). Pendiente del dueño: decidir diálogo A/B/C y duraciones (spec PENDIENTE DEL DUEÑO) y ejecutar el piloto mínimo Gate 0/Gate 3 con Flow real (checklist y observador listos).
+- Google Flow Multi-Cuenta: balanceador de cuentas en mcp_manager para rotación automática de créditos Veo (inspirado en análisis Sloth v0.3.48).
 - Hoja de contacto visual (hoja de escenas con safe zones) para QA instantáneo.
 ## DESPUÉS
 - Autopublicación y modo fábrica a escala.
@@ -39,6 +14,8 @@
 ## EN RESERVA (no tocar)
 - HANDS (control manual del PC): dormido.
 ## HECHO
+- Conectividad en Vivo Ecosistema Google y Sonda INT-093 (2026-11-14):
+  Chrome CDP 9333 verificado en vivo con perfil compartido. Google Flow autenticado con 5 tools operativas (test real de flow_list_assets en 1.6 s con 26 assets). Adaptación de NotebookLM MCP al dominio notebook.google.com y build label activo (boq_labs-tailwind-frontend_20261112.11_p0), recuperando 10 cuadernos reales en vivo (FRUTINOVELAS, Alex Hormozi, etc.; 49cce1f; test_notebooklm_base_url.py). Sonda INT-093 ejecutada contra el backend activo (sonda_nombres.json, confirmando q3, q4, q5 SOPORTADO). Sincronización reactiva de notebook_id y nicho_id en app-mcp.js (0778ae4), alcanzando el estado 4/4 completo (verde) en el panel web.
 - Resiliencia MCP y Fallbacks de Render (AA1-AA2, 2026-11-13):
   AA1: Auto-reintento tras PROCESS_DEAD restringido estrictamente a tools de lectura
   (flow_list_assets, notebook_query, notebook_list, notebook_get); bloqueo y aviso
