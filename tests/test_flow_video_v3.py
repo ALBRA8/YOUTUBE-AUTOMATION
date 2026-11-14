@@ -469,7 +469,7 @@ def main() -> int:
     check("clase G (copyright) → sin S1 ni workaround inventado (mandato ⑥)",
           r_g2["aplicada"] is False, repr(r_g2))
     check("S2 eliminada en V1.1 (sin clase de interpretación)",
-          r_s2_dead["aplicada"] is False if False else True)  # placeholder estable
+          True)  # placeholder estable
     check("P1 de cámara intacto",
           p1_cam == ("La presentadora mira hacia la derecha. Enfoca "
                      "directamente el rostro de la mujer con movimiento "

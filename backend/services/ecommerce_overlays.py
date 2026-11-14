@@ -98,7 +98,33 @@ def remove_product_background(
     feather: int = 3
 ) -> Path:
     """Remueve fondos claros de fotos de catálogo de e-commerce y genera un PNG transparente (INT-056)."""
-    import cv2
+    try:
+        import cv2
+        has_cv2 = True
+    except ImportError:
+        has_cv2 = False
+
+    if not has_cv2:
+        try:
+            im = Image.open(image_path).convert("RGBA")
+        except OSError as e:
+            raise ValueError(f"No se pudo cargar la imagen: {image_path}") from e
+
+        arr = np.array(im)
+        rgb = arr[:, :, :3]
+        gray = np.dot(rgb[..., :3], [0.2989, 0.5870, 0.1140])
+        bg_condition = (gray >= bg_thresh - 15)
+        alpha = np.where(bg_condition, 0, 255).astype(np.uint8)
+
+        alpha_img = Image.fromarray(alpha, mode="L")
+        if feather > 0:
+            alpha_img = alpha_img.filter(ImageFilter.GaussianBlur(radius=feather))
+
+        im.putalpha(alpha_img)
+        output_png.parent.mkdir(parents=True, exist_ok=True)
+        im.save(output_png)
+        return output_png
+
     img = cv2.imread(str(image_path))
     if img is None:
         raise ValueError(f"No se pudo cargar la imagen: {image_path}")

@@ -191,7 +191,7 @@ async def test_bb2_json_response_empty_answer():
 
 @pytest.mark.asyncio
 async def test_bb2_json_response_error_status():
-    """BB2: respuesta JSON con status != 'success' -> falla con CONTEXT_EMPTY y mensaje literal."""
+    """BB2/BB3: respuesta JSON con status != 'success' y 'error' -> incluye el error en CONTEXT_EMPTY."""
     mgr = MockManager(
         tools=[{"name": "notebook_query"}],
         nlm_response={
@@ -200,6 +200,52 @@ async def test_bb2_json_response_error_status():
         },
     )
     tmp = tempfile.mkdtemp(prefix="bb2_err_")
+    orch = po.PipelineOrchestrator(manager=mgr, runs_dir=Path(tmp) / "runs")
+
+    run = orch.create_run("idea", notebook_id="nb-123")
+    await orch.start_run(run["run_id"])
+    await orch.wait(run["run_id"])
+
+    snap = orch.get_status(run["run_id"])
+    assert snap["stage"] == po.ST_ERROR
+    assert snap["error_code"] == "CONTEXT_EMPTY"
+    assert snap["error_detail"] == "el cuaderno no tiene fuentes o no respondió: Quota or internal failure"
+
+
+@pytest.mark.asyncio
+async def test_bb3_json_response_error_with_message():
+    """BB3: respuesta JSON con status != 'success' y 'message' -> incluye message en CONTEXT_EMPTY."""
+    mgr = MockManager(
+        tools=[{"name": "notebook_query"}],
+        nlm_response={
+            "ok": True,
+            "text": json.dumps({"status": "failed", "message": "rate limit exceeded"}),
+        },
+    )
+    tmp = tempfile.mkdtemp(prefix="bb3_msg_")
+    orch = po.PipelineOrchestrator(manager=mgr, runs_dir=Path(tmp) / "runs")
+
+    run = orch.create_run("idea", notebook_id="nb-123")
+    await orch.start_run(run["run_id"])
+    await orch.wait(run["run_id"])
+
+    snap = orch.get_status(run["run_id"])
+    assert snap["stage"] == po.ST_ERROR
+    assert snap["error_code"] == "CONTEXT_EMPTY"
+    assert snap["error_detail"] == "el cuaderno no tiene fuentes o no respondió: rate limit exceeded"
+
+
+@pytest.mark.asyncio
+async def test_bb3_json_response_error_without_details():
+    """BB3: respuesta JSON con status != 'success' sin error ni message -> mensaje canónico de fuentes."""
+    mgr = MockManager(
+        tools=[{"name": "notebook_query"}],
+        nlm_response={
+            "ok": True,
+            "text": json.dumps({"status": "unknown"}),
+        },
+    )
+    tmp = tempfile.mkdtemp(prefix="bb3_nodet_")
     orch = po.PipelineOrchestrator(manager=mgr, runs_dir=Path(tmp) / "runs")
 
     run = orch.create_run("idea", notebook_id="nb-123")

@@ -454,6 +454,25 @@ class PipelineOrchestrator:
         self._save(run)
         log.error("[pipeline %s] %s: %s", run["run_id"], code, detail[:200])
 
+    async def _exposed_tools(self, service: str) -> set[str]:
+        """Consulta el conjunto de nombres de tools expuestas por el servidor MCP.
+        Usa tools_catalog si existe o inspecciona la conexión viva; ante fallos
+        operacionales devuelve set() sin capturar Exception genérica."""
+        if hasattr(self.manager, "tools_catalog"):
+            try:
+                cat = await self.manager.tools_catalog(service, auto_connect=True)
+                return {t.get("name") for t in (cat.get("tools") or []) if t.get("name")}
+            except (mcpm.MCPManagerError, OSError, asyncio.TimeoutError, KeyError, AttributeError, TypeError) as e:
+                log.debug(f"[_exposed_tools {service}] tools_catalog no disponible: {e}")
+        elif hasattr(self.manager, "_conns"):
+            try:
+                conn = getattr(self.manager, "_conns", {}).get(service)
+                if conn and getattr(conn, "tools", None):
+                    return {t.get("name") for t in conn.tools if t.get("name")}
+            except (KeyError, AttributeError, TypeError):
+                pass
+        return set()
+
     async def _run(self, run_id: str) -> None:
         run = self._load(run_id)
         try:
@@ -531,17 +550,7 @@ class PipelineOrchestrator:
 
             # BB1: si el servidor no expone la tool configurada pero sí notebook_query, usar notebook_query y loguear aviso
             if tool != "notebook_query":
-                exposed_tools: set[str] = set()
-                if hasattr(self.manager, "tools_catalog"):
-                    try:
-                        cat = await self.manager.tools_catalog("notebooklm", auto_connect=True)
-                        exposed_tools = {t.get("name") for t in (cat.get("tools") or []) if t.get("name")}
-                    except Exception as e:  # noqa: BLE001
-                        log.debug(f"[pipeline {run['run_id']}] tools_catalog no disponible: {e}")
-                elif hasattr(self.manager, "_conns"):
-                    conn = getattr(self.manager, "_conns", {}).get("notebooklm")
-                    if conn and getattr(conn, "tools", None):
-                        exposed_tools = {t.get("name") for t in conn.tools if t.get("name")}
+                exposed_tools = await self._exposed_tools("notebooklm")
                 if exposed_tools and tool not in exposed_tools and "notebook_query" in exposed_tools:
                     log.warning(
                         f"[pipeline {run['run_id']}] El servidor NotebookLM no expone '{tool}' "
@@ -562,17 +571,7 @@ class PipelineOrchestrator:
                     notebook_id=run["notebook_id"] or None)
             except mcpm.MCPManagerError as e:
                 if e.code == "TOOL_UNKNOWN" and tool != "notebook_query":
-                    exposed = set()
-                    if hasattr(self.manager, "tools_catalog"):
-                        try:
-                            cat = await self.manager.tools_catalog("notebooklm", auto_connect=True)
-                            exposed = {t.get("name") for t in (cat.get("tools") or []) if t.get("name")}
-                        except Exception as e_cat:  # noqa: BLE001
-                            log.debug(f"[pipeline {run['run_id']}] tools_catalog fallback no disponible: {e_cat}")
-                    elif hasattr(self.manager, "_conns"):
-                        conn = getattr(self.manager, "_conns", {}).get("notebooklm")
-                        if conn and getattr(conn, "tools", None):
-                            exposed = {t.get("name") for t in conn.tools if t.get("name")}
+                    exposed = await self._exposed_tools("notebooklm")
                     if "notebook_query" in exposed or not exposed:
                         log.warning(
                             f"[pipeline {run['run_id']}] El servidor NotebookLM no expone '{tool}' "
@@ -609,13 +608,19 @@ class PipelineOrchestrator:
                     parsed_json = None
 
             if parsed_json is not None:
-                # BB2: si "text" es JSON, usar solo el campo "answer".
-                # Si status != "success" o "answer" está vacío, fallar con CONTEXT_EMPTY
-                # y el mensaje: "el cuaderno no tiene fuentes o no respondió: sube fuentes en NotebookLM".
+                # BB2/BB3: si "text" es JSON, usar solo el campo "answer".
                 st = parsed_json.get("status")
                 ans = parsed_json.get("answer")
                 ans_str = str(ans or "").strip()
-                if st != "success" or not ans_str:
+                if st != "success":
+                    err_msg = str(parsed_json.get("error") or parsed_json.get("message") or "").strip()
+                    if err_msg:
+                        detail = f"el cuaderno no tiene fuentes o no respondió: {err_msg}"
+                    else:
+                        detail = "el cuaderno no tiene fuentes o no respondió: sube fuentes en NotebookLM"
+                    self._fail(run, "CONTEXT_EMPTY", detail)
+                    return
+                if not ans_str:
                     self._fail(
                         run, "CONTEXT_EMPTY",
                         "el cuaderno no tiene fuentes o no respondió: sube fuentes en NotebookLM"
