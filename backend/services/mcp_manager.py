@@ -71,9 +71,16 @@ _NOTEBOOK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{5,63}$")
 _AUTHISH_RE = re.compile(r"not signed in|auth|sign[- ]?in|login|cookie|credential|unauthor|401|403", re.I)
 _UUID_RE = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
-# Tools de listado del servidor NotebookLM MCP (HOTFIX INT-023.4): no requieren
-# notebook_id y son la fuente del auto-descubrimiento / dropdown del panel.
+# Tools de listado del servidor NotebookLM MCP (HOTFIX INT-023.4)
 _LIST_NOTEBOOK_TOOLS = ("notebook_list", "list_notebooks")
+# AA1 · Herramientas de solo lectura con reintento seguro tras PROCESS_DEAD
+RETRYABLE_READ_TOOLS = frozenset({
+    "flow_list_assets", "notebook_query", "notebook_list", "notebook_get"
+})
+# AA1 · Herramientas con mutación/generación que NUNCA deben auto-reintentarse
+NON_RETRYABLE_FLOW_TOOLS = frozenset({
+    "flow_generate_image", "flow_generate_video", "flow_new_project", "flow_upload_file"
+})
 # Tools que NO aceptan notebook/notebook_id en absoluto (v0.8.5:
 # notebook_create solo toma `title`; usada por el Studio Bridge INT-069).
 _NO_NOTEBOOK_TOOLS = frozenset({"notebook_create"})
@@ -635,8 +642,15 @@ class MCPClientManager:
                     conn.last_error = str(e)
                     await conn.close()
                     self._conns.pop(service, None)
-                    if attempt < max_attempts and e.code == "PROCESS_DEAD":
-                        log.warning("[%s] proceso cerró la conexión durante call(); reintentando una vez...", service)
+                    # AA1: NUNCA reintentar herramientas que generen o muten en Flow
+                    if e.code == "PROCESS_DEAD" and tool in NON_RETRYABLE_FLOW_TOOLS:
+                        raise MCPManagerError(
+                            "la herramienta pudo ejecutarse; verifica en Flow antes de reintentar",
+                            "PROCESS_DEAD",
+                        )
+                    # AA1: Auto-reintento SOLO para herramientas de lectura seguras
+                    if attempt < max_attempts and e.code == "PROCESS_DEAD" and tool in RETRYABLE_READ_TOOLS:
+                        log.warning("[%s] proceso cerró la conexión durante call() de lectura '%s'; reintentando una vez...", service, tool)
                         continue
                 raise
 
