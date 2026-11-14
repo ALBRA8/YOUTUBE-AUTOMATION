@@ -39,6 +39,16 @@
 ## EN RESERVA (no tocar)
 - HANDS (control manual del PC): dormido.
 ## HECHO
+- Resiliencia MCP y Fallbacks de Render (AA1-AA2, 2026-11-13):
+  AA1: Auto-reintento tras PROCESS_DEAD restringido estrictamente a tools de lectura
+  (flow_list_assets, notebook_query, notebook_list, notebook_get); bloqueo y aviso
+  explícito ("la herramienta pudo ejecutarse; verifica en Flow antes de reintentar")
+  para flow_generate_image, flow_generate_video, flow_new_project y flow_upload_file (3307606;
+  test_opt_mcp_resilience.py).
+  AA2: Validación de capas PNG previas al filter_complex con PIL.verify (omitiendo capas
+  corruptas y registrándolas en subs_status.json); fallback de reintento con subtítulos
+  solos (-vf) si ffmpeg falla con el filter_complex antes de copiar video_raw (a52d869;
+  test_opt_single_pass_render.py).
 - Maduración y Resiliencia MCP Client Manager (EGM, 2026-11-11):
   Detección instantánea de caída de procesos MCP/EOF en _read_loop (despierta futures
   pendientes de inmediato con PROCESS_DEAD y detalle de stderr, evitando congelamientos
