@@ -1457,11 +1457,40 @@ class MCPClientManager:
             except OSError:
                 pass
             written.append(str(p))
+        self._sync_auth_json(cookies)
         log.info("[google-login] storage_state capturado: %d cookies → %s",
                  len(cookies), ", ".join(written))
         return {"ok": True, "cookies": len(cookies),
                 "storage_paths": written,
                 "chrome_up": True, "cdp_port": port}
+
+    def _sync_auth_json(self, cookies: list[dict]) -> None:
+        """Sincroniza las cookies Google en ~/.notebooklm-mcp/auth.json
+        para que notebooklm-mcp-server comparta la sesión sin desincronización."""
+        try:
+            p_mcp = Path.home() / ".notebooklm-mcp" / "auth.json"
+            p_mcp.parent.mkdir(parents=True, exist_ok=True)
+            cookies_dict = {
+                c["name"]: c["value"]
+                for c in cookies
+                if isinstance(c, dict) and "name" in c and "value" in c
+            }
+            auth_payload = {
+                "cookies": cookies_dict,
+                "csrf_token": "",
+                "session_id": "",
+                "extracted_at": time.time(),
+            }
+            if p_mcp.is_file():
+                try:
+                    old_auth = json.loads(p_mcp.read_text(encoding="utf-8"))
+                    auth_payload["csrf_token"] = old_auth.get("csrf_token", "")
+                    auth_payload["session_id"] = old_auth.get("session_id", "")
+                except (json.JSONDecodeError, OSError):
+                    pass
+            p_mcp.write_text(json.dumps(auth_payload, indent=2), encoding="utf-8")
+        except OSError:
+            pass
 
     # ── INT-071 · Google One-Tap Hub — [G] Continuar con Google ────────
     async def google_sso_start(self, urls: list[str] | None = None) -> dict:

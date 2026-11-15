@@ -42,3 +42,9 @@
 - **Hecho:** Conexión real en vivo de Chrome CDP 9333, Google Flow (5 tools operativas verificadas con `flow_list_assets` en 1.6 s) y NotebookLM (32 tools). Solución al fallo `[LIST_EMPTY]` mediante migración a `notebook.google.com` y build label activo (`boq_labs-tailwind-frontend_20261112.11_p0`). Ejecución de la sonda INT-093 (`sonda_nombres.json` con `q3`, `q4`, `q5` SOPORTADO). Recuperación y fijación de 10 cuadernos reales en el panel web. Sincronización reactiva del semáforo en `app-mcp.js` (Ecosistema 4/4 verde).
 - **Resultado:** 10 cuadernos listados en vivo; suites `test_notebooklm_base_url.py` (1/1), `test_u_panel_ecosistema.py` (21/21), `test_mcp_manager.py` (38/38) y `test_u1_mcp_resumen.py` (11/11) en verde.
 - **Referencia:** `SES-2026-11-14-01_CONECTIVIDAD_GOOGLE_FLOW_NOTEBOOKLM_DESCUBRIMIENTO.md`.
+
+## SES-2026-11-14-02 — Cierre BB1-BB4 y Sincronización Dual de Credenciales en NotebookLM MCP
+- **Estado:** CLOSED / PASS.
+- **Hecho:** Ejecución y cierre de mandatos BB1-BB4 (default `NOTEBOOKLM_CONTEXT_TOOL=notebook_query`, parsing seguro de `answer`, helper `_exposed_tools` preservando trinquete 286, 60 baterías en `ESTADO_REAL.md`, fallback e-commerce con `ImportError` explícito y `opencv-python-headless` en requirements). Identificación y remediación de la desincronización de credenciales entre `storage_state.json` y `~/.notebooklm-mcp/auth.json` mediante `_sync_auth_json()`. Verificación en vivo de los 7 cuadernos (con *FRUTINOVELAS* como `first_id`) y semáforo 4/4 verde (`todo_conectado: true`, `listo_para_pipeline: true`).
+- **Resultado:** 811 passed, 1 skipped, 0 failed en pytest completo; 67 OK · 0 fallos en StartFrame F2; trinquete 286 intacto; ruff 0 hallazgos; compileall exit 0.
+- **Referencia:** `SES-2026-11-14-02_SINCRONIZACION_DUAL_AUTH_JSON_Y_CIERRE_BB1_BB4.md`.
