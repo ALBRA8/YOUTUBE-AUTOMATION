@@ -47,6 +47,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from collections import deque
 from pathlib import Path
@@ -1464,17 +1465,35 @@ class MCPClientManager:
                 "storage_paths": written,
                 "chrome_up": True, "cdp_port": port}
 
-    def _sync_auth_json(self, cookies: list[dict]) -> None:
+    def _sync_auth_json(self, cookies: list[dict], target_path: Path | None = None) -> bool:
         """Sincroniza las cookies Google en ~/.notebooklm-mcp/auth.json
-        para que notebooklm-mcp-server comparta la sesión sin desincronización."""
+        para que notebooklm-mcp-server comparta la sesión sin desincronización.
+
+        BB5:
+          · No escribe si cookies está vacío o no trae cookie de sesión de Google (SID o __Secure-1PSID).
+          · Escritura atómica (archivo temporal + os.replace).
+          · chmod 600 donde aplique (POSIX).
+          · log.warning en lugar del pass silencioso ante errores.
+        """
+        if not cookies:
+            log.warning("[_sync_auth_json] cookies está vacío — no se escribe auth.json")
+            return False
+
+        cookies_dict = {
+            c["name"]: c["value"]
+            for c in cookies
+            if isinstance(c, dict) and "name" in c and "value" in c
+        }
+        if not ("SID" in cookies_dict or "__Secure-1PSID" in cookies_dict):
+            log.warning(
+                "[_sync_auth_json] cookies no trae cookie de sesión de Google "
+                "(SID o __Secure-1PSID) — no se escribe auth.json"
+            )
+            return False
+
+        p_mcp = target_path if target_path is not None else (Path.home() / ".notebooklm-mcp" / "auth.json")
         try:
-            p_mcp = Path.home() / ".notebooklm-mcp" / "auth.json"
             p_mcp.parent.mkdir(parents=True, exist_ok=True)
-            cookies_dict = {
-                c["name"]: c["value"]
-                for c in cookies
-                if isinstance(c, dict) and "name" in c and "value" in c
-            }
             auth_payload = {
                 "cookies": cookies_dict,
                 "csrf_token": "",
@@ -1486,11 +1505,34 @@ class MCPClientManager:
                     old_auth = json.loads(p_mcp.read_text(encoding="utf-8"))
                     auth_payload["csrf_token"] = old_auth.get("csrf_token", "")
                     auth_payload["session_id"] = old_auth.get("session_id", "")
-                except (json.JSONDecodeError, OSError):
-                    pass
-            p_mcp.write_text(json.dumps(auth_payload, indent=2), encoding="utf-8")
-        except OSError:
-            pass
+                except (json.JSONDecodeError, OSError) as e:
+                    log.warning("[_sync_auth_json] error leyendo auth.json previo (%s) — se sobreescribirá", e)
+
+            fd, tmp_path_str = tempfile.mkstemp(
+                prefix="auth_", suffix=".tmp", dir=str(p_mcp.parent)
+            )
+            tmp_path = Path(tmp_path_str)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(auth_payload, f, indent=2)
+                if hasattr(os, "chmod"):
+                    try:
+                        os.chmod(tmp_path, 0o600)
+                    except OSError as ce:
+                        log.debug("[_sync_auth_json] os.chmod no soportado o falló: %s", ce)
+                os.replace(tmp_path, p_mcp)
+                return True
+            except OSError as e:
+                log.warning("[_sync_auth_json] error en escritura atómica de auth.json: %s", e)
+                if tmp_path.is_file():
+                    try:
+                        tmp_path.unlink()
+                    except OSError:
+                        pass
+                return False
+        except OSError as e:
+            log.warning("[_sync_auth_json] error preparando directorio/archivo auth.json: %s", e)
+            return False
 
     # ── INT-071 · Google One-Tap Hub — [G] Continuar con Google ────────
     async def google_sso_start(self, urls: list[str] | None = None) -> dict:

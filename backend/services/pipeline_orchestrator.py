@@ -143,7 +143,8 @@ class PipelineOrchestrator:
 
     # ──────────────────────────────── API pública ──
     def create_run(self, idea: str, notebook_id: str | None = None,
-                   fmt: str = "short", style: str = "auto") -> dict:
+                   fmt: str = "short", style: str = "auto",
+                   max_scenes: int | None = None) -> dict:
         idea = (idea or "").strip()
         if not idea:
             raise PipelineError("idea requerida para el pipeline", "IDEA_REQUIRED")
@@ -151,6 +152,13 @@ class PipelineOrchestrator:
             raise PipelineError(
                 f"ya hay un pipeline en marcha ({self._busy}) — espera su fin "
                 f"o usa retry-scenes", "PIPELINE_BUSY")
+        if max_scenes is not None:
+            try:
+                max_scenes = int(max_scenes)
+            except (ValueError, TypeError) as e:
+                raise PipelineError("max_scenes debe ser un entero entre 1 y 12", "INVALID_MAX_SCENES") from e
+            if not (1 <= max_scenes <= 12):
+                raise PipelineError("max_scenes debe ser un entero entre 1 y 12", "INVALID_MAX_SCENES")
         now = time.strftime("%Y%m%d_%H%M%S")
         run_id = f"run_{now}_{uuid.uuid4().hex[:6]}"
         run = {
@@ -160,6 +168,7 @@ class PipelineOrchestrator:
             "notebook_id": (notebook_id or "").strip(),
             "format": fmt if fmt in ("short", "long") else "short",
             "style": (style or "auto").strip()[:40] or "auto",
+            "max_scenes": max_scenes,
             "stage": ST_QUEUED,
             "error_code": "",
             "error_detail": "",
@@ -659,6 +668,13 @@ class PipelineOrchestrator:
             except Exception as e:  # noqa: BLE001 — surfaced, no tumba el backend
                 self._fail(run, "BLUEPRINT_FAILED", str(e)[:300])
                 return
+
+            if res2.get("engine") == "local-demo" and os.environ.get("PIPELINE_ALLOW_DEMO") != "1":
+                self._fail(run, "BLUEPRINT_DEMO",
+                           "Gemini no respondió (¿GEMINI_API_KEY inválida?): "
+                           "el guion salió del generador demo y no se despacha a Flow")
+                return
+
             scenes = []
             for i, sc in enumerate(res2.get("scenes") or []):
                 scenes.append({
@@ -676,6 +692,12 @@ class PipelineOrchestrator:
                            "el generador no devolvió escenas — revisa GEMINI_API_KEY "
                            "o el contenido del notebook")
                 return
+
+            ms = run.get("max_scenes")
+            if ms and len(scenes) > ms:
+                scenes = (scenes[:ms - 1] + [scenes[-1]]) if ms > 1 else [scenes[-1]]
+                for idx, sc in enumerate(scenes):
+                    sc["scene_id"] = f"s{idx + 1}"
             blueprint = {"title": res2.get("title") or run["idea"][:60],
                          "hook": res2.get("hook", ""), "cta": res2.get("cta", ""),
                          "engine": res2.get("engine", ""),

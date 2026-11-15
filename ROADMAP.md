@@ -189,3 +189,7 @@
 - Auditoría Técnica Fase 3 (P3-1 a P3-3): router niches.py APIRouter (Fase 1),
   migración a lifespan y logging estructurado de excepciones, corrección ESTADO_REAL 53
   baterías y registro AUDIT-006 en FAILURE_INDEX (2026-11-06).
+- BB5 Pipeline Guards & Auth Sync (2026-11-14): aborto con BLUEPRINT_DEMO si el motor
+  es local-demo sin PIPELINE_ALLOW_DEMO=1 (evita despachos espurios a Flow), parámetro
+  max_scenes (1-12) en /api/pipeline/run para recortar escenas preservando el cierre,
+  y validación/escritura atómica con chmod 600 en _sync_auth_json. 61 baterías canónicas.

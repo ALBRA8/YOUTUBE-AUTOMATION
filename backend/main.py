@@ -3494,12 +3494,22 @@ async def pipeline_run(body: dict):
     idea = (body.get("idea") or "").strip()
     if not idea:
         raise HTTPException(400, "idea requerida (¿qué video produce el pipeline?)")
+    raw_ms = body.get("max_scenes")
+    max_scenes = None
+    if raw_ms is not None:
+        try:
+            max_scenes = int(raw_ms)
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, "max_scenes debe ser un entero entre 1 y 12") from e
+        if not (1 <= max_scenes <= 12):
+            raise HTTPException(400, "max_scenes debe ser un entero entre 1 y 12")
     try:
         run = _pipe.orchestrator.create_run(
             idea=idea,
             notebook_id=(body.get("notebook_id") or "").strip() or None,
             fmt=body.get("format") if body.get("format") in ("short", "long") else "short",
-            style=(body.get("style") or "auto").strip())
+            style=(body.get("style") or "auto").strip(),
+            max_scenes=max_scenes)
         _pipe.orchestrator.start_run(run["run_id"])
     except _pipe.PipelineError as e:
         status = 409 if e.code == "PIPELINE_BUSY" else 400

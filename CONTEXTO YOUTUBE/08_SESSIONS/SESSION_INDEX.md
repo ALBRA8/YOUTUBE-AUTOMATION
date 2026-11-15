@@ -48,3 +48,9 @@
 - **Hecho:** Ejecución y cierre de mandatos BB1-BB4 (default `NOTEBOOKLM_CONTEXT_TOOL=notebook_query`, parsing seguro de `answer`, helper `_exposed_tools` preservando trinquete 286, 60 baterías en `ESTADO_REAL.md`, fallback e-commerce con `ImportError` explícito y `opencv-python-headless` en requirements). Identificación y remediación de la desincronización de credenciales entre `storage_state.json` y `~/.notebooklm-mcp/auth.json` mediante `_sync_auth_json()`. Verificación en vivo de los 7 cuadernos (con *FRUTINOVELAS* como `first_id`) y semáforo 4/4 verde (`todo_conectado: true`, `listo_para_pipeline: true`).
 - **Resultado:** 811 passed, 1 skipped, 0 failed en pytest completo; 67 OK · 0 fallos en StartFrame F2; trinquete 286 intacto; ruff 0 hallazgos; compileall exit 0.
 - **Referencia:** `SES-2026-11-14-02_SINCRONIZACION_DUAL_AUTH_JSON_Y_CIERRE_BB1_BB4.md`.
+
+## SES-2026-11-14-03 — Diagnóstico Chrome/Flow/Gemini + Implementación BB5 (Pipeline Guards & Auth Sync)
+- **Estado:** CLOSED / PASS.
+- **Hecho:** Diagnóstico en profundidad de conectividad CDP, procesos Chrome 9333, Flow MCP y validez de `GEMINI_API_KEY` (A.a a A.e). Implementación de BB5: aborto de pipeline con código `BLUEPRINT_DEMO` si el motor es `local-demo` sin `PIPELINE_ALLOW_DEMO=1`, recorte de escenas opcional `max_scenes` (1-12) en `POST /api/pipeline/run` preservando la última escena de cierre, y validación y escritura atómica con `chmod 600` en `_sync_auth_json`. Creación de batería hermética `tests/test_bb5_pipeline_guards.py` (5 tests) e integración en `tests/run_all.py` (61 baterías canónicas). Actualización de `ESTADO_REAL.md` y `ROADMAP.md`.
+- **Resultado:** 5/5 tests BB5 passed; trinquete 286 intacto; integridad documental 3/3 passed; verificación completa C en verde. Piloto Parte D saltado por no cumplirse precondición A(b) y A(e).
+- **Referencia:** `SES-2026-11-14-03_BB5_PIPELINE_GUARDS_Y_DIAGNOSTICO_FLOW_GEMINI.md`.

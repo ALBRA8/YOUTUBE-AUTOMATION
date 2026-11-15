@@ -232,6 +232,8 @@ BATERIAS = [
                                  # por el dueño en su máquina (4)
     "test_bb_stage1_notebook_query.py", # BB1-BB2: default notebook_query, fallback
                                  # y parsing status/answer (7)
+    "test_bb5_pipeline_guards.py", # BB5: aborto BLUEPRINT_DEMO, max_scenes trimming
+                                 # y validación/escritura atómica de _sync_auth_json (5)
 ]
 
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")
