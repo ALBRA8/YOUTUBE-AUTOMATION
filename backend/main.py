@@ -2784,11 +2784,12 @@ async def mcp_test_pipeline(body: dict):
 
 
 @app.post("/api/mcp/list-notebooks")
-async def mcp_list_notebooks(body: dict):
+async def mcp_list_notebooks(body: dict = None):
     """Lista los notebooks de la cuenta vía la tool de listado del MCP de
     NotebookLM (notebook_list / list_notebooks). Alimenta el dropdown
     «📋 Listar mis Notebooks» del panel para fijar el notebook activo con
     1 click (HOTFIX INT-023.4: fin de copiar UUIDs desde la URL)."""
+    body = body or {}
     try:
         return await _mcpm.manager.list_notebooks(
             notebook_id=(body.get("notebook_id") or "").strip() or None)

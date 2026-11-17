@@ -18,6 +18,13 @@ for d in (DATA_DIR, OUTPUT_DIR, PROJECTS_DIR, TMP_DIR):
 DB_PATH = DATA_DIR / "yt_automation.db"
 ENV_PATH = BASE_DIR / ".env"
 load_dotenv(ENV_PATH)
+# En runtime (no en tests herméticos), la clave explícita de .env tiene
+# prioridad sobre variables residuales del entorno de usuario de Windows:
+if ENV_PATH.exists() and "PYTEST_CURRENT_TEST" not in os.environ:
+    from dotenv import dotenv_values
+    _env_vals = dotenv_values(ENV_PATH)
+    if _env_vals.get("GEMINI_API_KEY"):
+        os.environ["GEMINI_API_KEY"] = _env_vals["GEMINI_API_KEY"]
 
 # ── Claves API (todas opcionales: el sistema degrada con gracia) ──────────
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
