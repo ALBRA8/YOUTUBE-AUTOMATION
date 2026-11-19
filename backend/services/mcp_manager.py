@@ -706,6 +706,16 @@ class MCPClientManager:
                 break
             except MCPManagerError as e:
                 last_exc = e
+                # D3: Excepción acotada a regla AA1: si flow_generate_image, flow_generate_video,
+                # flow_new_project o flow_upload_file fallan con error conteniendo "connectOverCDP: Timeout",
+                # permitir UN reintento precedido de calentamiento con log.warning. Cualquier otro error no se reintenta.
+                if attempt < max_attempts and service == "google-flow" and tool in NON_RETRYABLE_FLOW_TOOLS and "connectOverCDP: Timeout" in str(e):
+                    log.warning("[%s] connectOverCDP: Timeout en '%s'; calentando CDP y reintentando una vez...", service, tool)
+                    try:
+                        await conn.call("flow_list_assets", {}, 15.0)
+                    except MCPManagerError:
+                        pass
+                    continue
                 if e.code in ("TIMEOUT", "PROCESS_DEAD"):
                     conn.state = ST_ERROR
                     conn.last_error = str(e)
@@ -1204,7 +1214,10 @@ class MCPClientManager:
                     "--disable-session-crashed-bubble",
                     "--hide-crash-restore-bubble",
                     "--disable-features=SessionCrashedBubble",
-                    "--disable-blink-features=AutomationControlled"]
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-background-timer-throttling",
+                    "--disable-renderer-backgrounding",
+                    "--disable-backgrounding-occluded-windows"]
             if cdp:
                 argv.insert(2, f"--remote-debugging-port={port}")
             argv += pages

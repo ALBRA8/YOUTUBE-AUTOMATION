@@ -73,3 +73,9 @@
 - **Resultado:** 6/6 tests PASS en `test_bd_gemini_models_and_bl.py`; 63 baterías canónicas registradas en `run_all.py` y `ESTADO_REAL.md`; trinquete 286 intacto; integridad documental 3/3 en verde.
 - **Referencia:** `SES-2026-11-19-02_GEMINI_MODEL_FALLBACK_Y_BUILD_LABEL_VIVO.md`.
 
+## SES-2026-11-19-03 — Estabilidad Flow/CDP, Flags de Fondo, Calentamiento y Reintento Acotado (BE)
+- **Estado:** CLOSED / PASS.
+- **Hecho:** Diagnóstico de fallos por `connectOverCDP: Timeout 30000ms exceeded` debido al estrangulamiento de fondo en Chrome (CDP port 9333). Implementación de D1 (flags `--disable-background-timer-throttling`, `--disable-renderer-backgrounding`, `--disable-backgrounding-occluded-windows`), D2 (calentamiento previo a Stage 3 con `flow_list_assets` hasta 2 intentos, abortando con `FLOW_CDP_SLOW`) y D3 (excepción acotada a regla AA1 permitiendo UN único reintento precedido de calentamiento ante `connectOverCDP: Timeout`).
+- **Resultado:** 5/5 tests PASS en `test_be_flow_cdp_stability.py`; 64 baterías canónicas en `run_all.py` y `ESTADO_REAL.md`; trinquete 286 intacto.
+- **Referencia:** `SES-2026-11-19-03_FLOW_CDP_ESTABILIDAD_Y_REINTENTO_ACOTADO.md`.
+

@@ -200,3 +200,7 @@
   es local-demo sin PIPELINE_ALLOW_DEMO=1 (evita despachos espurios a Flow), parámetro
   max_scenes (1-12) en /api/pipeline/run para recortar escenas preservando el cierre,
   y validación/escritura atómica con chmod 600 en _sync_auth_json. 61 baterías canónicas.
+- Estabilidad Flow/CDP, Flags de Fondo y Reintento Acotado BE (2026-11-19): flags de
+  Chrome contra estrangulamiento de fondo en CDP 9333, calentamiento previo a Stage 3 con
+  flow_list_assets (hasta 2 intentos con FLOW_CDP_SLOW), y excepción acotada a regla AA1
+  permitiendo 1 reintento con warmup ante connectOverCDP: Timeout. 64 baterías canónicas.

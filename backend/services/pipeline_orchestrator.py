@@ -938,6 +938,30 @@ class PipelineOrchestrator:
                     if s["scene_id"] not in run["failed_scene_ids"]:
                         run["failed_scene_ids"].append(s["scene_id"])
             raise PipelineError(detail, "FLOW_NOT_CONNECTED")
+
+        # D2: Calentamiento previo a Stage 3: llamada real a flow_list_assets (hasta 2 intentos)
+        warm_ok = False
+        last_warm_err = ""
+        for attempt in range(1, 3):
+            try:
+                res = await self.manager.execute(
+                    "google-flow", "flow_list_assets", {}, timeout=30.0)
+                if res.get("ok"):
+                    warm_ok = True
+                    break
+            except (mcpm.MCPManagerError, RuntimeError, OSError, TimeoutError, asyncio.TimeoutError) as e:
+                last_warm_err = str(e)
+                log.warning("[pipeline %s] Calentamiento Flow CDP intento %d falló: %s",
+                            run.get("run_id"), attempt, e)
+        if not warm_ok:
+            detail = f"Flow CDP no responde tras 2 intentos de calentamiento (FLOW_CDP_SLOW): {last_warm_err[:200]}"
+            for s in run["scenes"]:
+                if s["status"] in ("pending", "dispatched") and (
+                        not only_scene_ids or s["scene_id"] in only_scene_ids):
+                    s["status"], s["detail"] = "failed", detail[:200]
+                    if s["scene_id"] not in run["failed_scene_ids"]:
+                        run["failed_scene_ids"].append(s["scene_id"])
+            raise PipelineError(detail, "FLOW_CDP_SLOW")
         ref = await self._ensure_reference(run)
         aspect = "9:16" if run["format"] == "short" else "16:9"
         model = str(_cfg("FLOW_MCP_MODEL", "2") or "2")

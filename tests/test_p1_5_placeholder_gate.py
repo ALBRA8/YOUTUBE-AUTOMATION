@@ -37,6 +37,9 @@ def test_sin_os_getenv_dispersos_del_umbral():
     for path in sorted(BACKEND.rglob("*.py")):
         if path.name == "config.py":  # la definición legítima vive aquí
             continue
+        rel = path.relative_to(BACKEND).as_posix()
+        if rel.startswith(('.venv', '.env', '__pycache__', 'data/')):
+            continue
         arbol = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for n in ast.walk(arbol):
             if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)

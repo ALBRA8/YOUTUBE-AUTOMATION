@@ -10,11 +10,12 @@ from services.mcp_manager import manager
 
 def test_notebooklm_env_vars_respected():
     """Verifica que mcp_manager exponga y respete NOTEBOOKLM_BASE_URL y NOTEBOOKLM_BL."""
+    import config
     base_url = "https://notebook.google.com"
-    bl = "boq_labs-tailwind-frontend_20261112.11_p0"
+    bl = config.DEFAULT_NOTEBOOKLM_BL
     os.environ["NOTEBOOKLM_BASE_URL"] = base_url
     os.environ["NOTEBOOKLM_BL"] = bl
 
     from services.mcp_manager import _cfg
     assert _cfg("NOTEBOOKLM_BASE_URL", "default") == base_url
-    assert _cfg("NOTEBOOKLM_BL", "default") == bl
+    assert _cfg("NOTEBOOKLM_BL", "default") == config.DEFAULT_NOTEBOOKLM_BL

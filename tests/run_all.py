@@ -238,6 +238,8 @@ BATERIAS = [
                                  # fallback de auth error y PIPELINE_CONTEXT_SOURCE=local (5)
     "test_bd_gemini_models_and_bl.py", # BD: Filtrado de cookies BASE_URL, build label
                                  # vivo y cadena de modelos Gemini con fallback ante 404 (6)
+    "test_be_flow_cdp_stability.py",   # BE: Flags CDP de fondo, calentamiento de Stage 3
+                                 # y reintento acotado ante connectOverCDP: Timeout (5)
 ]
 
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")
