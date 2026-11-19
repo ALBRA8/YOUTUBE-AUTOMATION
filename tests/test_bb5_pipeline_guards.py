@@ -15,6 +15,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 import pytest
 
 BACKEND = Path(__file__).resolve().parent.parent / "backend"
@@ -252,6 +253,58 @@ def test_bb5_sync_auth_json_validation_and_atomicity():
         data2 = json.loads(auth_file.read_text(encoding="utf-8"))
         assert data2["cookies"]["__Secure-1PSID"] == "mock_secure_sid"
         assert data2["csrf_token"] == "token_previo_123"
+
+        # 5. Tercera escritura con tokens explícitos (SNlM0e / FdrFJe) actualizando csrf_token
+        tokens = {
+            "csrf_token": "fresh_csrf_999",
+            "session_id": "fresh_session_888",
+        }
+        res3 = client_mgr._sync_auth_json(new_cookies, target_path=auth_file, tokens=tokens)
+        assert res3 is True
+        data3 = json.loads(auth_file.read_text(encoding="utf-8"))
+        assert data3["csrf_token"] == "fresh_csrf_999"
+        assert data3["session_id"] == "fresh_session_888"
+
+
+def test_bb5_parse_notebook_list_batchexecute():
+    """Verifica que parse_notebook_list extrae cuadernos de payloads nativos de batchexecute."""
+    raw_rpc = (
+        ")]}'\n\n150\n"
+        '[["wrb.fr","wXbhsf","[[[\\"FRUTINOVELAS\\",[],\\"5b7728cb-3e1e-480f-ae82-786f61c0179b\\"],'
+        '[\\"CUADERNO B\\",[],\\"a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d\\"]]]",null,null,null,1]]'
+    )
+    res = mcpm.parse_notebook_list(raw_rpc)
+    assert len(res) == 2
+    assert res[0]["title"] == "FRUTINOVELAS"
+    assert res[0]["id"] == "5b7728cb-3e1e-480f-ae82-786f61c0179b"
+    assert res[1]["title"] == "CUADERNO B"
+    assert res[1]["id"] == "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d"
+
+
+@pytest.mark.asyncio
+async def test_bb5_list_notebooks_cdp_fallback():
+    """Verifica que list_notebooks activa el fallback resiliente CDP si FastMCP falla o retorna vacío."""
+    client_mgr = mcpm.MCPClientManager()
+    mock_conn = AsyncMock()
+    mock_conn.tools = [{"name": "notebook_list"}]
+    mock_conn.state = mcpm.ST_CONNECTED
+    mock_conn.proc = AsyncMock()
+    mock_conn.proc.returncode = None
+    mock_conn.call = AsyncMock(return_value="[]")
+
+    client_mgr._conns["notebooklm"] = mock_conn
+
+    mock_cdp_nbs = [
+        {"id": "5b7728cb-3e1e-480f-ae82-786f61c0179b", "title": "FRUTINOVELAS"}
+    ]
+    with patch.object(client_mgr, "_cdp_list_notebooks_direct", AsyncMock(return_value=mock_cdp_nbs)):
+        with patch.object(client_mgr, "_cdp_fetch_notebooklm_tokens", AsyncMock(return_value={})):
+            with patch.object(client_mgr, "_cdp_fetch_cookies_raw", AsyncMock(return_value=[])):
+                res = await client_mgr.list_notebooks()
+                assert res["ok"] is True
+                assert res["tool"] == "cdp_direct"
+                assert len(res["notebooks"]) == 1
+                assert res["notebooks"][0]["id"] == "5b7728cb-3e1e-480f-ae82-786f61c0179b"
 
 
 if __name__ == "__main__":

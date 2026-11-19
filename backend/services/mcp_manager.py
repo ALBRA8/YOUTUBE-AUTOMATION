@@ -107,6 +107,44 @@ def parse_notebook_list(text: str) -> list[dict]:
                         "title": re.sub(r"[\s\-—–|,;:]+$", "",
                                         (title or "").strip())[:120]})
 
+    if raw.startswith(")]}'"):
+        try:
+            chunks = []
+            for chunk_line in raw[4:].strip().split("\n"):
+                chunk_line = chunk_line.strip()
+                if not chunk_line:
+                    continue
+                try:
+                    int(chunk_line)
+                    continue
+                except ValueError:
+                    pass
+                try:
+                    chunks.append(json.loads(chunk_line))
+                except (json.JSONDecodeError, ValueError):
+                    pass
+            for chunk in chunks:
+                if isinstance(chunk, list):
+                    for item in chunk:
+                        if isinstance(item, list) and len(item) >= 3 and item[0] == "wrb.fr" and item[1] == "wXbhsf":
+                            payload = item[2]
+                            if isinstance(payload, str):
+                                try:
+                                    payload = json.loads(payload)
+                                except (json.JSONDecodeError, ValueError):
+                                    pass
+                            nb_list = payload[0] if (isinstance(payload, list) and len(payload) > 0 and isinstance(payload[0], list)) else payload
+                            if isinstance(nb_list, list):
+                                for nb in nb_list:
+                                    if isinstance(nb, list) and len(nb) >= 3:
+                                        t_title = nb[0] if isinstance(nb[0], str) else "Untitled"
+                                        t_id = nb[2] if isinstance(nb[2], str) else ""
+                                        _add(t_id, t_title)
+            if out:
+                return out
+        except (KeyError, TypeError, IndexError, ValueError):
+            pass
+
     try:
         data = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
@@ -465,7 +503,7 @@ class MCPClientManager:
             base_url = str(_cfg("NOTEBOOKLM_BASE_URL", "https://notebook.google.com") or "").strip()
             if base_url:
                 env["NOTEBOOKLM_BASE_URL"] = base_url
-            bl = str(_cfg("NOTEBOOKLM_BL", "boq_labs-tailwind-frontend_20261112.11_p0") or "").strip()
+            bl = str(_cfg("NOTEBOOKLM_BL", "boq_labs-tailwind-frontend_20261117.07_p0") or "").strip()
             if bl:
                 env["NOTEBOOKLM_BL"] = bl
         try:
@@ -494,6 +532,16 @@ class MCPClientManager:
             if old:
                 await old.close()
                 self._conns.pop(service, None)
+            if service == "notebooklm":
+                try:
+                    port = int(_cfg("GOOGLE_LOGIN_CDP_PORT", 9333))
+                    if await self._cdp_up(port):
+                        tokens = await self._cdp_fetch_notebooklm_tokens(port)
+                        cookies = await self._cdp_fetch_cookies_raw(port)
+                        if cookies:
+                            self._sync_auth_json(cookies, tokens=tokens)
+                except (OSError, asyncio.TimeoutError):
+                    pass
             conn = await self._spawn(service)
             self._conns[service] = conn
             try:
@@ -726,6 +774,11 @@ class MCPClientManager:
                 text = await conn.call(t, {}, timeout=25.0)
             except MCPManagerError as e:
                 if _AUTHISH_RE.search(str(e)):
+                    port = int(_cfg("GOOGLE_LOGIN_CDP_PORT", 9333))
+                    cdp_nbs = await self._cdp_list_notebooks_direct(port)
+                    if cdp_nbs:
+                        return {"ok": True, "tool": "cdp_direct", "notebooks": cdp_nbs,
+                                "first_id": cdp_nbs[0]["id"]}
                     raise MCPManagerError(
                         f"sesión Google no válida al listar notebooks: {e}",
                         "AUTH_REQUIRED") from e
@@ -735,6 +788,23 @@ class MCPClientManager:
             if nbs:
                 return {"ok": True, "tool": t, "notebooks": nbs,
                         "first_id": nbs[0]["id"]}
+
+        # ── Resilient Fallback: CDP Direct ──
+        # Si la tool de FastMCP falló o retornó lista vacía, consultamos
+        # directamente la pestaña activa de Chrome vía CDP:
+        port = int(_cfg("GOOGLE_LOGIN_CDP_PORT", 9333))
+        cdp_nbs = await self._cdp_list_notebooks_direct(port)
+        if cdp_nbs:
+            try:
+                tokens = await self._cdp_fetch_notebooklm_tokens(port)
+                cookies = await self._cdp_fetch_cookies_raw(port)
+                if cookies:
+                    self._sync_auth_json(cookies, tokens=tokens)
+            except (OSError, asyncio.TimeoutError):
+                pass
+            return {"ok": True, "tool": "cdp_direct", "notebooks": cdp_nbs,
+                    "first_id": cdp_nbs[0]["id"]}
+
         raise MCPManagerError(
             "listado de notebooks vacío o ilegible"
             + (f" ({last_err})" if last_err else ""), "LIST_EMPTY")
@@ -1359,6 +1429,97 @@ class MCPClientManager:
             return True, "Sesión activa (cookies Google válidas en CDP)"
         return False, "Sesión no iniciada: falta cookie __Secure-1PSID / SID en FlowImageChrome"
 
+    async def _cdp_fetch_notebooklm_tokens(self, port: int = 9333, timeout: float = 4.0) -> dict:
+        """Extrae tokens activos de NotebookLM (SNlM0e CSRF, FdrFJe session_id, cfb2h build_label)
+        directamente de window.WIZ_global_data en la pestaña notebook.google.com de Chrome."""
+        if not await self._cdp_up(port):
+            return {}
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"http://127.0.0.1:{port}/json",
+                                       timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+                    if resp.status != 200:
+                        return {}
+                    tabs = await resp.json()
+
+            nb_tab = next((t for t in tabs if "notebook" in t.get("url", "") and t.get("type") == "page"), None)
+            if not nb_tab or not nb_tab.get("webSocketDebuggerUrl"):
+                return {}
+
+            ws_url = nb_tab["webSocketDebuggerUrl"]
+            async with aiohttp.ClientSession() as session:
+                async with session.ws_connect(ws_url, timeout=timeout) as ws:
+                    expr = (
+                        "(() => {"
+                        "  const wiz = window.WIZ_global_data || {};"
+                        "  return {"
+                        "    csrf_token: wiz.SNlM0e || '',"
+                        "    session_id: wiz.FdrFJe || '',"
+                        "    build_label: wiz.cfb2h || wiz.KjTSIf || ''"
+                        "  };"
+                        "})()"
+                    )
+                    await ws.send_json({"id": 1, "method": "Runtime.evaluate",
+                                        "params": {"expression": expr, "returnByValue": True}})
+                    msg = await ws.receive_json(timeout=timeout)
+                    val = msg.get("result", {}).get("result", {}).get("value", {})
+                    if isinstance(val, dict) and val.get("build_label"):
+                        os.environ["NOTEBOOKLM_BL"] = val["build_label"]
+                    return val if isinstance(val, dict) else {}
+        except (OSError, json.JSONDecodeError, asyncio.TimeoutError,
+                TypeError, KeyError, ValueError) as e:
+            log.debug("[mcp] _cdp_fetch_notebooklm_tokens falló: %s", e)
+            return {}
+
+    async def _cdp_list_notebooks_direct(self, port: int = 9333, timeout: float = 8.0) -> list[dict]:
+        """Consulta directamente la lista de cuadernos desde la pestaña activa de
+        notebook.google.com en Chrome vía CDP si el MCP falló o no tiene tokens frescos."""
+        if not await self._cdp_up(port):
+            return []
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"http://127.0.0.1:{port}/json",
+                                       timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+                    if resp.status != 200:
+                        return []
+                    tabs = await resp.json()
+
+            nb_tab = next((t for t in tabs if "notebook" in t.get("url", "") and t.get("type") == "page"), None)
+            if not nb_tab or not nb_tab.get("webSocketDebuggerUrl"):
+                return []
+
+            ws_url = nb_tab["webSocketDebuggerUrl"]
+            async with aiohttp.ClientSession() as session:
+                async with session.ws_connect(ws_url, timeout=timeout) as ws:
+                    expr = (
+                        "(async () => {"
+                        "  const wiz = window.WIZ_global_data || {};"
+                        "  const bl = wiz.cfb2h || wiz.KjTSIf || 'boq_labs-tailwind-frontend_20261117.07_p0';"
+                        "  const sid = wiz.FdrFJe || '';"
+                        "  const at = wiz.SNlM0e || '';"
+                        "  const url = `/_/LabsTailwindUi/data/batchexecute?rpcids=wXbhsf&source-path=%2F&bl=${bl}&hl=en&rt=c&f.sid=${sid}`;"
+                        "  const reqPayload = JSON.stringify([[[\"wXbhsf\", JSON.stringify([null, 1, null, [2]]), null, \"generic\"]]]);"
+                        "  const res = await fetch(url, {"
+                        "    method: 'POST',"
+                        "    headers: {'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8', 'X-Same-Domain': '1'},"
+                        "    body: new URLSearchParams({'f.req': reqPayload, 'at': at})"
+                        "  });"
+                        "  return await res.text();"
+                        "})()"
+                    )
+                    await ws.send_json({"id": 1, "method": "Runtime.evaluate",
+                                        "params": {"expression": expr, "awaitPromise": True, "returnByValue": True}})
+                    msg = await ws.receive_json(timeout=timeout)
+                    text = msg.get("result", {}).get("result", {}).get("value", "")
+                    if text:
+                        return parse_notebook_list(text)
+        except (OSError, json.JSONDecodeError, asyncio.TimeoutError,
+                TypeError, KeyError, ValueError) as e:
+            log.debug("[mcp] _cdp_list_notebooks_direct falló: %s", e)
+        return []
+
     async def _cdp_fetch_google_cookies_impl(self, port: int) -> list[dict]:
         """Extrae cookies de dominios Google del Chrome de login vía
         Playwright connectOverCDP (import diferido: solo existe en máquinas
@@ -1458,14 +1619,16 @@ class MCPClientManager:
             except OSError:
                 pass
             written.append(str(p))
-        self._sync_auth_json(cookies)
+        tokens = await self._cdp_fetch_notebooklm_tokens(port)
+        self._sync_auth_json(cookies, tokens=tokens)
         log.info("[google-login] storage_state capturado: %d cookies → %s",
                  len(cookies), ", ".join(written))
         return {"ok": True, "cookies": len(cookies),
                 "storage_paths": written,
                 "chrome_up": True, "cdp_port": port}
 
-    def _sync_auth_json(self, cookies: list[dict], target_path: Path | None = None) -> bool:
+    def _sync_auth_json(self, cookies: list[dict], target_path: Path | None = None,
+                        tokens: dict | None = None) -> bool:
         """Sincroniza las cookies Google en ~/.notebooklm-mcp/auth.json
         para que notebooklm-mcp-server comparta la sesión sin desincronización.
 
@@ -1494,17 +1657,20 @@ class MCPClientManager:
         p_mcp = target_path if target_path is not None else (Path.home() / ".notebooklm-mcp" / "auth.json")
         try:
             p_mcp.parent.mkdir(parents=True, exist_ok=True)
+            tok = tokens or {}
             auth_payload = {
                 "cookies": cookies_dict,
-                "csrf_token": "",
-                "session_id": "",
+                "csrf_token": tok.get("csrf_token") or "",
+                "session_id": tok.get("session_id") or "",
                 "extracted_at": time.time(),
             }
             if p_mcp.is_file():
                 try:
                     old_auth = json.loads(p_mcp.read_text(encoding="utf-8"))
-                    auth_payload["csrf_token"] = old_auth.get("csrf_token", "")
-                    auth_payload["session_id"] = old_auth.get("session_id", "")
+                    if not auth_payload["csrf_token"]:
+                        auth_payload["csrf_token"] = old_auth.get("csrf_token", "")
+                    if not auth_payload["session_id"]:
+                        auth_payload["session_id"] = old_auth.get("session_id", "")
                 except (json.JSONDecodeError, OSError) as e:
                     log.warning("[_sync_auth_json] error leyendo auth.json previo (%s) — se sobreescribirá", e)
 

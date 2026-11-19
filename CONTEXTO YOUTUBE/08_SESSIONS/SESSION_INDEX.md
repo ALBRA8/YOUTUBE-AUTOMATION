@@ -54,3 +54,9 @@
 - **Hecho:** Diagnóstico en profundidad de conectividad CDP, procesos Chrome 9333, Flow MCP y validez de `GEMINI_API_KEY` (A.a a A.e). Implementación de BB5: aborto de pipeline con código `BLUEPRINT_DEMO` si el motor es `local-demo` sin `PIPELINE_ALLOW_DEMO=1`, recorte de escenas opcional `max_scenes` (1-12) en `POST /api/pipeline/run` preservando la última escena de cierre, y validación y escritura atómica con `chmod 600` en `_sync_auth_json`. Creación de batería hermética `tests/test_bb5_pipeline_guards.py` (5 tests) e integración en `tests/run_all.py` (61 baterías canónicas). Actualización de `ESTADO_REAL.md` y `ROADMAP.md`.
 - **Resultado:** 5/5 tests BB5 passed; trinquete 286 intacto; integridad documental 3/3 passed; verificación completa C en verde. Piloto Parte D saltado por no cumplirse precondición A(b) y A(e).
 - **Referencia:** `SES-2026-11-14-03_BB5_PIPELINE_GUARDS_Y_DIAGNOSTICO_FLOW_GEMINI.md`.
+
+## SES-2026-11-18-01 — Endurecimiento Definitivo de NotebookLM y Conectividad CDP Resiliente
+- **Estado:** CLOSED / PASS.
+- **Hecho:** Diagnóstico y remediación de la causa raíz de `[LIST_EMPTY]` (expiración de tokens CSRF `SNlM0e` / `FdrFJe` y build label desactualizado de Google). Implementación de parsing nativo `batchexecute`, extracción en vivo de tokens vía CDP 9333, inyección dinámica de `NOTEBOOKLM_BL`, sincronización atómica en `_sync_auth_json(..., tokens=...)` y fallback transparente con `_cdp_list_notebooks_direct`.
+- **Resultado:** 7/7 tests en `test_bb5_pipeline_guards.py`; trinquete 286 intacto; 7 cuadernos reales listados en vivo con `FRUTINOVELAS` identificado.
+- **Referencia:** `SES-2026-11-18-01_ENDURECIMIENTO_DEFINITIVO_NOTEBOOKLM_CDP.md`.
