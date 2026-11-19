@@ -679,7 +679,7 @@ class PipelineOrchestrator:
                                     timeout=float(_cfg("NOTEBOOKLM_MCP_TIMEOUT", 60.0)),
                                     notebook_id=run["notebook_id"] or None)
                             except mcpm.MCPManagerError as e2:
-                                if e2.code in ("AUTH_REQUIRED", "SESSION_INVALID") or "auth" in str(e2).lower() or "expired" in str(e2).lower():
+                                if e2.code in ("AUTH_REQUIRED", "SESSION_INVALID", "TIMEOUT") or any(k in str(e2).lower() for k in ("auth", "expired", "400", "bad request", "forbidden", "403", "timeout")):
                                     auth_error_detected = True
                                     auth_error_msg = str(e2)
                                 else:
@@ -690,7 +690,7 @@ class PipelineOrchestrator:
                         else:
                             self._fail(run, "CONTEXT_EXTRACTION_FAILED", f"tool '{tool}': [{e.code}] {e}")
                             return
-                    elif e.code in ("AUTH_REQUIRED", "SESSION_INVALID") or "auth" in str(e).lower() or "expired" in str(e).lower():
+                    elif e.code in ("AUTH_REQUIRED", "SESSION_INVALID", "TIMEOUT") or any(k in str(e).lower() for k in ("auth", "expired", "400", "bad request", "forbidden", "403", "timeout")):
                         auth_error_detected = True
                         auth_error_msg = str(e)
                     else:
@@ -718,7 +718,7 @@ class PipelineOrchestrator:
                         err_msg = str(parsed_json.get("error") or parsed_json.get("message") or "").strip()
 
                         if st != "success":
-                            if "authentication expired" in err_msg.lower() or "re-authenticate" in err_msg.lower() or "auth" in err_msg.lower():
+                            if any(k in err_msg.lower() for k in ("authentication expired", "re-authenticate", "auth", "400", "bad request", "forbidden", "403")):
                                 auth_error_detected = True
                                 auth_error_msg = err_msg
                             else:
