@@ -70,6 +70,13 @@ ST_ERROR = "error"                    # rojo (fallo técnico)
 _PROTO = "2024-11-05"
 _NOTEBOOK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{5,63}$")
 _AUTHISH_RE = re.compile(r"not signed in|auth|sign[- ]?in|login|cookie|credential|unauthor|401|403", re.I)
+_BL_RE = re.compile(r"boq_labs-tailwind-frontend_\d{8}\.\d+_p\d+")
+
+
+def extract_build_label(html_or_text: str) -> str | None:
+    """Extrae el build label de NotebookLM del HTML o texto (ej: boq_labs-tailwind-frontend_20261117.07_p0)."""
+    m = _BL_RE.search(html_or_text or "")
+    return m.group(0) if m else None
 _UUID_RE = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 # Tools de listado del servidor NotebookLM MCP (HOTFIX INT-023.4)
@@ -436,6 +443,7 @@ class MCPClientManager:
     def __init__(self) -> None:
         self._conns: dict[str, _Conn] = {}
         self._lifecycle = asyncio.Lock()  # serializa connect/disconnect entre requests
+        self._live_bl: str | None = None
         # INT-071 · Google One-Tap Hub: estado del watcher de login SSO.
         # "task" guarda la referencia fuerte al asyncio task del watchdog
         # (nunca se serializa hacia la UI: los endpoints la omiten).
@@ -503,9 +511,15 @@ class MCPClientManager:
             base_url = str(_cfg("NOTEBOOKLM_BASE_URL", "https://notebook.google.com") or "").strip()
             if base_url:
                 env["NOTEBOOKLM_BASE_URL"] = base_url
-            bl = str(_cfg("NOTEBOOKLM_BL", "boq_labs-tailwind-frontend_20261117.07_p0") or "").strip()
+            bl = (
+                self._live_bl
+                or os.environ.get("NOTEBOOKLM_BL")
+                or getattr(config, "NOTEBOOKLM_BL", "")
+                or getattr(config, "DEFAULT_NOTEBOOKLM_BL", "boq_labs-tailwind-frontend_20261117.07_p0")
+            ).strip()
             if bl:
                 env["NOTEBOOKLM_BL"] = bl
+                log.info("[notebooklm] usando build label: %s", bl)
         try:
             proc = await asyncio.create_subprocess_exec(
                 *argv, cwd=cwd, env=env,
@@ -1362,52 +1376,60 @@ class MCPClientManager:
             "launch_result": launch_res,
         }
 
-    async def _cdp_fetch_cookies_raw(self, port: int, timeout: float = 4.0) -> list[dict]:
-        """Consulta cookies reales del Chrome vía CDP WebSocket (Storage.getCookies o Network.getAllCookies).
-        Usa aiohttp nativo si está disponible, o fallback a Playwright sync en thread."""
+    async def _cdp_fetch_cookies_raw(self, port: int, timeout: float = 4.0, target_url: str | None = None) -> list[dict]:
+        """Consulta cookies reales del Chrome vía CDP WebSocket usando Network.getCookies con urls=[BASE_URL].
+        Solo obtiene cookies aplicables a BASE_URL (NOTEBOOKLM_BASE_URL)."""
+        base_url = (target_url or str(_cfg("NOTEBOOKLM_BASE_URL", "https://notebook.google.com") or "https://notebook.google.com")).strip()
         try:
             import aiohttp
             async with aiohttp.ClientSession() as session:
                 ws_url = None
                 try:
-                    async with session.get(f"http://127.0.0.1:{port}/json/version",
+                    async with session.get(f"http://127.0.0.1:{port}/json",
                                            timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
                         if resp.status == 200:
-                            data = await resp.json()
-                            ws_url = data.get("webSocketDebuggerUrl")
-                except Exception:
+                            targets = await resp.json()
+                            nb_tab = next((t for t in targets if "notebook" in t.get("url", "") and t.get("type") == "page"), None)
+                            if nb_tab and nb_tab.get("webSocketDebuggerUrl"):
+                                ws_url = nb_tab["webSocketDebuggerUrl"]
+                            elif targets:
+                                ws_url = next((t["webSocketDebuggerUrl"] for t in targets if t.get("webSocketDebuggerUrl")), None)
+                except (aiohttp.ClientError, OSError, asyncio.TimeoutError):
                     pass
 
                 if not ws_url:
                     try:
-                        async with session.get(f"http://127.0.0.1:{port}/json/list",
+                        async with session.get(f"http://127.0.0.1:{port}/json/version",
                                                timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
                             if resp.status == 200:
-                                targets = await resp.json()
-                                for t in targets:
-                                    if t.get("webSocketDebuggerUrl"):
-                                        ws_url = t["webSocketDebuggerUrl"]
-                                        break
-                    except Exception:
+                                data = await resp.json()
+                                ws_url = data.get("webSocketDebuggerUrl")
+                    except (aiohttp.ClientError, OSError, asyncio.TimeoutError):
                         pass
 
                 if ws_url:
                     async with session.ws_connect(ws_url, timeout=timeout) as ws:
-                        await ws.send_json({"id": 1, "method": "Storage.getCookies"})
+                        # 2A: Network.getCookies con urls=[base_url]
+                        await ws.send_json({"id": 1, "method": "Network.getCookies", "params": {"urls": [base_url]}})
                         msg = await ws.receive_json(timeout=timeout)
                         cookies = msg.get("result", {}).get("cookies", [])
                         if cookies:
                             return cookies
-                        await ws.send_json({"id": 2, "method": "Network.getAllCookies"})
+                        await ws.send_json({"id": 2, "method": "Storage.getCookies"})
+                        msg = await ws.receive_json(timeout=timeout)
+                        cookies = msg.get("result", {}).get("cookies", [])
+                        if cookies:
+                            return cookies
+                        await ws.send_json({"id": 3, "method": "Network.getAllCookies"})
                         msg = await ws.receive_json(timeout=timeout)
                         return msg.get("result", {}).get("cookies", [])
-        except Exception as e:
+        except (aiohttp.ClientError, OSError, asyncio.TimeoutError) as e:
             log.debug("[mcp] _cdp_fetch_cookies_raw via aiohttp falló (%s)", e)
 
         # Fallback a Playwright si aiohttp no obtuvo cookies
         try:
             return await self._cdp_fetch_google_cookies_impl(port)
-        except Exception as e:
+        except (ImportError, RuntimeError, OSError) as e:
             log.debug("[mcp] fallback playwright falló: %s", e)
             return []
 
@@ -1453,10 +1475,12 @@ class MCPClientManager:
                     expr = (
                         "(() => {"
                         "  const wiz = window.WIZ_global_data || {};"
+                        "  const html = document.documentElement ? document.documentElement.outerHTML : '';"
+                        "  const m = html.match(/boq_labs-tailwind-frontend_\\d{8}\\.\\d+_p\\d+/);"
                         "  return {"
                         "    csrf_token: wiz.SNlM0e || '',"
                         "    session_id: wiz.FdrFJe || '',"
-                        "    build_label: wiz.cfb2h || wiz.KjTSIf || ''"
+                        "    build_label: (m ? m[0] : '') || wiz.cfb2h || wiz.KjTSIf || ''"
                         "  };"
                         "})()"
                     )
@@ -1465,7 +1489,11 @@ class MCPClientManager:
                     msg = await ws.receive_json(timeout=timeout)
                     val = msg.get("result", {}).get("result", {}).get("value", {})
                     if isinstance(val, dict) and val.get("build_label"):
-                        os.environ["NOTEBOOKLM_BL"] = val["build_label"]
+                        bl_extracted = str(val["build_label"]).strip()
+                        if _BL_RE.match(bl_extracted):
+                            self._live_bl = bl_extracted
+                            os.environ["NOTEBOOKLM_BL"] = bl_extracted
+                            log.info("[mcp] build label derivado en vivo: %s", bl_extracted)
                     return val if isinstance(val, dict) else {}
         except (OSError, json.JSONDecodeError, asyncio.TimeoutError,
                 TypeError, KeyError, ValueError) as e:
@@ -1490,13 +1518,14 @@ class MCPClientManager:
             if not nb_tab or not nb_tab.get("webSocketDebuggerUrl"):
                 return []
 
+            def_bl = getattr(config, "NOTEBOOKLM_BL", getattr(config, "DEFAULT_NOTEBOOKLM_BL", "boq_labs-tailwind-frontend_20261117.07_p0"))
             ws_url = nb_tab["webSocketDebuggerUrl"]
             async with aiohttp.ClientSession() as session:
                 async with session.ws_connect(ws_url, timeout=timeout) as ws:
                     expr = (
                         "(async () => {"
                         "  const wiz = window.WIZ_global_data || {};"
-                        "  const bl = wiz.cfb2h || wiz.KjTSIf || 'boq_labs-tailwind-frontend_20261117.07_p0';"
+                        f"  const bl = wiz.cfb2h || wiz.KjTSIf || '{def_bl}';"
                         "  const sid = wiz.FdrFJe || '';"
                         "  const at = wiz.SNlM0e || '';"
                         "  const url = `/_/LabsTailwindUi/data/batchexecute?rpcids=wXbhsf&source-path=%2F&bl=${bl}&hl=en&rt=c&f.sid=${sid}`;"
@@ -1627,13 +1656,52 @@ class MCPClientManager:
                 "storage_paths": written,
                 "chrome_up": True, "cdp_port": port}
 
+    @staticmethod
+    def _filter_and_dedupe_cookies(cookies: list[dict], base_url: str | None = None) -> dict[str, str]:
+        """Filtra y desduplica cookies para BASE_URL:
+        - Excluye dominios que no pertenezcan a google.com o gstatic.com.
+        - Excluye explícitamente 'accounts.google.com' y otros hosts no aplicables.
+        - Desduplica nombres de cookie dando prioridad al host más específico (ej: notebook.google.com > .google.com).
+        """
+        def _specificity(dom: str) -> tuple[int, int]:
+            clean = dom.lstrip(".")
+            return (len(clean.split(".")), len(clean))
+
+        selected: dict[str, tuple[str, str]] = {}  # name -> (value, domain)
+
+        for c in cookies or []:
+            if not isinstance(c, dict):
+                continue
+            name = c.get("name")
+            value = c.get("value")
+            if not name or value is None:
+                continue
+            raw_dom = c.get("domain")
+            domain = str(raw_dom).strip().lower() if raw_dom else ".google.com"
+
+            # 2A: sin cookies de accounts.google.com ni de otros hosts fuera de google
+            if "accounts.google.com" in domain:
+                continue
+            if not (domain.endswith("google.com") or domain.endswith("gstatic.com")):
+                continue
+
+            if name not in selected:
+                selected[name] = (value, domain)
+            else:
+                existing_dom = selected[name][1]
+                if _specificity(domain) > _specificity(existing_dom):
+                    selected[name] = (value, domain)
+
+        return {k: v[0] for k, v in selected.items()}
+
     def _sync_auth_json(self, cookies: list[dict], target_path: Path | None = None,
                         tokens: dict | None = None) -> bool:
         """Sincroniza las cookies Google en ~/.notebooklm-mcp/auth.json
         para que notebooklm-mcp-server comparta la sesión sin desincronización.
 
-        BB5:
+        BB5 / 2A:
           · No escribe si cookies está vacío o no trae cookie de sesión de Google (SID o __Secure-1PSID).
+          · Escribe solo cookies aplicables a BASE_URL (sin accounts.google.com ni duplicados, gana el host más específico).
           · Escritura atómica (archivo temporal + os.replace).
           · chmod 600 donde aplique (POSIX).
           · log.warning en lugar del pass silencioso ante errores.
@@ -1642,11 +1710,7 @@ class MCPClientManager:
             log.warning("[_sync_auth_json] cookies está vacío — no se escribe auth.json")
             return False
 
-        cookies_dict = {
-            c["name"]: c["value"]
-            for c in cookies
-            if isinstance(c, dict) and "name" in c and "value" in c
-        }
+        cookies_dict = self._filter_and_dedupe_cookies(cookies)
         if not ("SID" in cookies_dict or "__Secure-1PSID" in cookies_dict):
             log.warning(
                 "[_sync_auth_json] cookies no trae cookie de sesión de Google "

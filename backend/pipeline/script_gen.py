@@ -503,5 +503,5 @@ def build_result(raw: dict) -> dict:
         "selected_hook_id": raw.get("selected_hook_id") or "A",
         "cta": (raw.get("cta") or "").strip(),
         "scenes": scenes,
-        "engine": raw.get("engine") or "gemini",
+        "engine": raw.get("engine") or f"gemini ({gemini_client.get_active_text_model()})",
     }

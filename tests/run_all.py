@@ -236,6 +236,8 @@ BATERIAS = [
                                  # y validación/escritura atómica de _sync_auth_json (5)
     "test_bc_contexto_local.py",  # BC: Contexto local de respaldo por nicho,
                                  # fallback de auth error y PIPELINE_CONTEXT_SOURCE=local (5)
+    "test_bd_gemini_models_and_bl.py", # BD: Filtrado de cookies BASE_URL, build label
+                                 # vivo y cadena de modelos Gemini con fallback ante 404 (6)
 ]
 
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")

@@ -14,6 +14,11 @@
 ## EN RESERVA (no tocar)
 - HANDS (control manual del PC): dormido.
 ## HECHO
+- Modelos Gemini con Fallback y Build Label Vivo de NotebookLM (BD, 2026-11-19):
+  2A: Filtrado y desduplicación de cookies para BASE_URL (`urls=[BASE_URL]`) en `mcp_manager._cdp_fetch_cookies_raw`, descartando dominios ajenos (`accounts.google.com`) y desduplicando con prioridad por especificidad de host (`notebook.google.com` > `.google.com`).
+  2B: Derivación de build label en vivo desde el DOM/HTML de la pestaña activa en cada conexión de NotebookLM (`_live_bl`), alineando defaults únicos en `config.py` y `mcp_manager.py` con precedencia estricta (`_live_bl` > `os.environ["NOTEBOOKLM_BL"]` > `config.NOTEBOOKLM_BL`).
+  2C: Cadena de modelos de texto Gemini con configuración `GEMINI_TEXT_MODEL_FALLBACKS` (por defecto `gemini-flash-latest,gemini-3.8-flash,gemini-2.5-flash`), fallback ante 404/NOT_FOUND en `gemini_client` (sin reintentos espurios ante modelos inexistentes), persistencia del modelo recordado durante la vida del proceso y registro en `blueprint["engine"]` y `run["gemini_model"]`.
+  Batería hermética `test_bd_gemini_models_and_bl.py` (6 tests) integrada como batería canónica nº 63.
 - Contexto Local de Respaldo por Nicho y Fallback de Autenticación (BC, 2026-11-19):
   Fallback transparente a `backend/data/nichos/<nicho_id>/contexto.md` (validación regex `^[a-z0-9][a-z0-9_-]{0,40}$`, rechazo estricto de path traversal y symlinks, límite de 64 KB) cuando la consulta a NotebookLM devuelve expiración de sesión/error de autenticación. Soporte directo para `PIPELINE_CONTEXT_SOURCE=local` omitiendo llamadas remotas a NotebookLM y preflight gatekeeper adaptado. Registro de `context_source: "local" | "notebooklm"` en el estado del pipeline. Batería hermética `test_bc_contexto_local.py` (5 tests) integrada como batería canónica nº 62.
 - Conectividad en Vivo Ecosistema Google y Sonda INT-093 (2026-11-14):

@@ -57,6 +57,7 @@ backend/data/avatars/voz_narradora/*
 !backend/data/avatars/voz_narradora/descripcion.json
 # INT-086: workspaces de usuario (vista organizada) — runtime, nunca repo
 backend/data/projects/
+backend/data/pipeline_runs/
 backend/data/whisper/
 *.mp4
 *.mp3

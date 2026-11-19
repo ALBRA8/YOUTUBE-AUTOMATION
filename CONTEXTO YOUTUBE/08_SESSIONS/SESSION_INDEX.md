@@ -67,3 +67,9 @@
 - **Resultado:** 5/5 tests PASS en `test_bc_contexto_local.py`; 62 baterías canónicas registradas en `run_all.py` y `ESTADO_REAL.md`; integridad documental y trinquete de excepciones verificados.
 - **Referencia:** `SES-2026-11-19-01_CONTEXTO_LOCAL_RESPALDO_Y_EXPERIMENTO_COOKIES.md`.
 
+## SES-2026-11-19-02 — Cadena de Fallback Gemini, Build Label en Vivo y Filtrado Específico de Cookies
+- **Estado:** CLOSED / PASS.
+- **Hecho:** Sondas S1-S5 identificando deprecación de `gemini-2.5-flash` por Google y compatibilidad con `gemini-3.8-flash`. Implementación de cadena dinámica de fallback `GEMINI_TEXT_MODEL_FALLBACKS` en `gemini_client` ante 404, derivación de build label en vivo desde el DOM/HTML de NotebookLM (`_live_bl`), y filtrado de cookies por especificidad de host descartando dominios ajenos.
+- **Resultado:** 6/6 tests PASS en `test_bd_gemini_models_and_bl.py`; 63 baterías canónicas registradas en `run_all.py` y `ESTADO_REAL.md`; trinquete 286 intacto; integridad documental 3/3 en verde.
+- **Referencia:** `SES-2026-11-19-02_GEMINI_MODEL_FALLBACK_Y_BUILD_LABEL_VIVO.md`.
+

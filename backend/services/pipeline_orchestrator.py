@@ -232,6 +232,8 @@ class PipelineOrchestrator:
             "progress_pct": 0,
             "context_chars": 0,
             "blueprint_title": "",
+            "engine": "",
+            "gemini_model": "",
             "scenes": [],
             "dispatched": 0,
             "done_count": 0,
@@ -823,17 +825,23 @@ class PipelineOrchestrator:
                 scenes = (scenes[:ms - 1] + [scenes[-1]]) if ms > 1 else [scenes[-1]]
                 for idx, sc in enumerate(scenes):
                     sc["scene_id"] = f"s{idx + 1}"
+            from services import gemini_client
+            active_model = gemini_client.get_active_text_model()
             blueprint = {"title": res2.get("title") or run["idea"][:60],
                          "hook": res2.get("hook", ""), "cta": res2.get("cta", ""),
-                         "engine": res2.get("engine", ""),
+                         "engine": res2.get("engine", "") or f"gemini ({active_model})",
                          "notebook_id": run["notebook_id"],
                          "format": run["format"], "style": run["style"],
-                         "context_source": "notebooklm", "scenes": scenes}
+                         "context_source": run.get("context_source", "notebooklm"),
+                         "gemini_model": active_model,
+                         "scenes": scenes}
             (rd / "blueprint.json").write_text(
                 json.dumps(blueprint, ensure_ascii=False, indent=1),
                 encoding="utf-8")
             run["scenes"] = json.loads(json.dumps(blueprint["scenes"]))
             run["blueprint_title"] = blueprint["title"]
+            run["engine"] = blueprint["engine"]
+            run["gemini_model"] = active_model
             self._set_step(run, ST_STAGE2, "ok",
                            f"«{blueprint['title']}» — {len(scenes)} escenas "
                            f"(motor: {blueprint['engine']})")

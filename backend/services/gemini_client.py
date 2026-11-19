@@ -18,6 +18,36 @@ log = logging.getLogger("gemini")
 
 _client = None
 _client_key = None
+_remembered_text_model: str | None = None
+
+
+def get_active_text_model() -> str:
+    """Devuelve el modelo de texto activo o recordado en el proceso."""
+    global _remembered_text_model
+    if _remembered_text_model:
+        return _remembered_text_model
+    return getattr(config, "GEMINI_TEXT_MODEL", "gemini-3.8-flash")
+
+
+def set_remembered_text_model(model: str | None) -> None:
+    """Fija manualmente el modelo recordado (útil para tests)."""
+    global _remembered_text_model
+    _remembered_text_model = model
+
+
+def _get_text_model_candidates(model: str | None = None) -> list[str]:
+    """Genera la lista ordenada y desduplicada de candidatos de modelo de texto."""
+    if model:
+        return [model]
+    candidates: list[str] = []
+    primary = _remembered_text_model or getattr(config, "GEMINI_TEXT_MODEL", "gemini-3.8-flash")
+    if primary:
+        candidates.append(primary)
+    fallbacks = getattr(config, "GEMINI_TEXT_MODEL_FALLBACKS", [])
+    for fb in fallbacks:
+        if fb and fb not in candidates:
+            candidates.append(fb)
+    return candidates or ["gemini-3.8-flash"]
 
 
 def available() -> bool:
@@ -45,7 +75,15 @@ async def _retry(coro_factory, tries: int = 3, base: float = 2.0,
         try:
             return await asyncio.wait_for(coro_factory(), timeout=timeout)
         except Exception as e:  # noqa: BLE001
-            if attempt == tries - 1:
+            err_str = str(e).lower()
+            is_not_found = (
+                getattr(e, "code", None) == 404
+                or getattr(e, "status_code", None) == 404
+                or "404" in err_str
+                or "not_found" in err_str
+                or "no longer available" in err_str
+            )
+            if is_not_found or attempt == tries - 1:
                 raise
             wait = base ** attempt
             log.warning("Gemini intento %d falló (%s). Reintento en %.0fs", attempt + 1, e, wait)
@@ -56,50 +94,110 @@ async def _retry(coro_factory, tries: int = 3, base: float = 2.0,
 async def generate_json(prompt: str, schema: dict | None = None,
                         system: str | None = None, model: str | None = None) -> Any:
     """Genera contenido estructurado JSON. Lanza si no hay key.
-    `model` sobreescribe GEMINI_TEXT_MODEL (candidatos si el modelo fue retirado)."""
+    `model` sobreescribe GEMINI_TEXT_MODEL. Si falla con 404 NOT_FOUND,
+    prueba la cadena de GEMINI_TEXT_MODEL_FALLBACKS y recuerda el primero que funcione."""
+    global _remembered_text_model
     if not available():
         raise RuntimeError("GEMINI_API_KEY no configurada")
 
-    def _call():
-        from google.genai import types
-        cfg: dict[str, Any] = {
-            "response_mime_type": "application/json",
-            "temperature": 0.9,
-        }
-        if schema:
-            cfg["response_schema"] = schema
-        if system:
-            cfg["system_instruction"] = system
-        return client().models.generate_content(
-            model=model or config.GEMINI_TEXT_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(**cfg),
-        )
+    candidates = _get_text_model_candidates(model)
+    last_exc = None
 
-    def _parse():
-        txt = resp.text
-        return json.loads(txt)
+    for cand in candidates:
+        def _call():
+            from google.genai import types
+            cfg: dict[str, Any] = {
+                "response_mime_type": "application/json",
+                "temperature": 0.9,
+            }
+            if schema:
+                cfg["response_schema"] = schema
+            if system:
+                cfg["system_instruction"] = system
+            return client().models.generate_content(
+                model=cand,
+                contents=prompt,
+                config=types.GenerateContentConfig(**cfg),
+            )
 
-    resp = await _retry(lambda: asyncio.to_thread(_call))
-    return await asyncio.to_thread(_parse)
+        def _parse():
+            txt = resp.text
+            return json.loads(txt)
+
+        try:
+            resp = await _retry(lambda: asyncio.to_thread(_call))
+            parsed = await asyncio.to_thread(_parse)
+            if cand != _remembered_text_model:
+                _remembered_text_model = cand
+                log.info("[gemini_client] modelo de texto fijado a: %s", cand)
+            return parsed
+        except (Exception,) as e:  # noqa: BLE001
+            last_exc = e
+            err_str = str(e).lower()
+            is_not_found = (
+                getattr(e, "code", None) == 404
+                or getattr(e, "status_code", None) == 404
+                or "404" in err_str
+                or "not_found" in err_str
+                or "no longer available" in err_str
+            )
+            if is_not_found and cand != candidates[-1]:
+                log.warning(
+                    "[gemini_client] modelo '%s' no disponible (404/NOT_FOUND) — probando siguiente candidato...",
+                    cand
+                )
+                continue
+            raise
+
+    if last_exc:
+        raise last_exc
 
 
 async def generate_text(prompt: str, system: str | None = None,
                         model: str | None = None) -> str:
+    global _remembered_text_model
     if not available():
         raise RuntimeError("GEMINI_API_KEY no configurada")
 
-    def _call():
-        from google.genai import types
-        cfg = {"temperature": 0.9}
-        if system:
-            cfg["system_instruction"] = system
-        return client().models.generate_content(
-            model=model or config.GEMINI_TEXT_MODEL, contents=prompt,
-            config=types.GenerateContentConfig(**cfg))
+    candidates = _get_text_model_candidates(model)
+    last_exc = None
 
-    resp = await _retry(lambda: asyncio.to_thread(_call))
-    return resp.text
+    for cand in candidates:
+        def _call():
+            from google.genai import types
+            cfg = {"temperature": 0.9}
+            if system:
+                cfg["system_instruction"] = system
+            return client().models.generate_content(
+                model=cand, contents=prompt,
+                config=types.GenerateContentConfig(**cfg))
+
+        try:
+            resp = await _retry(lambda: asyncio.to_thread(_call))
+            if cand != _remembered_text_model:
+                _remembered_text_model = cand
+                log.info("[gemini_client] modelo de texto fijado a: %s", cand)
+            return resp.text
+        except (Exception,) as e:  # noqa: BLE001
+            last_exc = e
+            err_str = str(e).lower()
+            is_not_found = (
+                getattr(e, "code", None) == 404
+                or getattr(e, "status_code", None) == 404
+                or "404" in err_str
+                or "not_found" in err_str
+                or "no longer available" in err_str
+            )
+            if is_not_found and cand != candidates[-1]:
+                log.warning(
+                    "[gemini_client] modelo '%s' no disponible (404/NOT_FOUND) — probando siguiente candidato...",
+                    cand
+                )
+                continue
+            raise
+
+    if last_exc:
+        raise last_exc
 
 
 # ────────────────────────────────────────────────────────────── IMAGEN ──

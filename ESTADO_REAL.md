@@ -59,7 +59,8 @@ mantiene el inventario público.
 | **Stage 1 NotebookLM Query & Fallback (BB1-BB3)**: default `NOTEBOOKLM_CONTEXT_TOOL=notebook_query`, fallback resiliente si el servidor no la expone o ante `TOOL_UNKNOWN`, parsing de JSON con extracción exclusiva de `answer` y reporte transparente de errores/mensajes de fuentes en `CONTEXT_EMPTY`. | ✅ real | `test_bb_stage1_notebook_query.py` (9) |
 | **Pipeline Guards & Flow Trimming (BB5)**: aborto con `BLUEPRINT_DEMO` si el motor es `local-demo` sin `PIPELINE_ALLOW_DEMO=1`, recorte de escenas con `max_scenes` (1-12) conservando cierre, y validación/escritura atómica de `_sync_auth_json` con `chmod 600`. | ✅ real | `test_bb5_pipeline_guards.py` (5) |
 | **Contexto Local de Respaldo por Nicho (BC)**: fallback transparente a `backend/data/nichos/<nicho_id>/contexto.md` (con validación de nombre, rechazo de path traversal y symlinks, límite de 64 KB) si NotebookLM devuelve error de autenticación/sesión expirada; soporte directo de `PIPELINE_CONTEXT_SOURCE=local` omitiendo llamadas remotas; y registro explícito de `context_source: "local" | "notebooklm"`. | ✅ real | `test_bc_contexto_local.py` (5) |
-| Suite canónica | ✅ 62 baterías en `tests/run_all.py` (añadida 2026-11-19: `test_bc_contexto_local.py` para BC; ver resultado vigente del runner) | runner |
+| **Modelos Gemini con Fallback & Build Label Vivo de NotebookLM (BD)**: filtrado y desduplicación de cookies por especificidad de host descartando dominios ajenos, derivación en vivo del build label desde el DOM/HTML de la pestaña activa con orden de precedencia único, y cadena de fallback ante 404 NOT_FOUND en `gemini_client` recordando el modelo activo durante el proceso. | ✅ real | `test_bd_gemini_models_and_bl.py` (6) |
+| Suite canónica | ✅ 63 baterías en `tests/run_all.py` (añadida 2026-11-19: `test_bd_gemini_models_and_bl.py` para BD; ver resultado vigente del runner) | runner |
 
 ## 3. Lo que AÚN NO está demostrado (límites honestos)
 

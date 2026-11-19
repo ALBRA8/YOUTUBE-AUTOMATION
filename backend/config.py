@@ -67,7 +67,8 @@ NOTEBOOKLM_HOME = os.getenv("NOTEBOOKLM_HOME", "").strip()
 NOTEBOOKLM_PROFILE = os.getenv("NOTEBOOKLM_PROFILE", "").strip()
 # Host base y build label de Google Notebook
 NOTEBOOKLM_BASE_URL = os.getenv("NOTEBOOKLM_BASE_URL", "https://notebook.google.com").strip()
-NOTEBOOKLM_BL = os.getenv("NOTEBOOKLM_BL", "boq_labs-tailwind-frontend_20261112.11_p0").strip()
+DEFAULT_NOTEBOOKLM_BL = "boq_labs-tailwind-frontend_20261117.07_p0"
+NOTEBOOKLM_BL = os.getenv("NOTEBOOKLM_BL", DEFAULT_NOTEBOOKLM_BL).strip()
 
 # ── 🔐 INT-069 · session hardening — refresh automático de cookies ──────
 # Si el preflight del MCP de NotebookLM detecta AUTH_REQUIRED (cookies
@@ -219,9 +220,13 @@ NVIDIA_FALLBACK_MODELS = [
         "deepseek-ai/deepseek-v4.1-flash,moonshotai/kimi-k2.6").split(",") if m.strip()]
 
 # ── Modelos Gemini ────────────────────────────────────────────────────────
-# gemini-2.5-flash: modelo REAL con generosa cuota gratuita (el default
-# anterior "gemini-3.6-flash" no existe en la API → HTTP 404 Model Not Found)
-GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-2.5-flash")
+DEFAULT_GEMINI_FALLBACKS = "gemini-flash-latest,gemini-3.8-flash,gemini-2.5-flash"
+GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-3.8-flash")
+GEMINI_TEXT_MODEL_FALLBACKS = [
+    m.strip()
+    for m in os.getenv("GEMINI_TEXT_MODEL_FALLBACKS", DEFAULT_GEMINI_FALLBACKS).split(",")
+    if m.strip()
+]
 GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
 GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
 
@@ -351,11 +356,12 @@ SECRET_KEYS = {"GEMINI_API_KEY", "NVIDIA_API_KEY", "PEXELS_API_KEY",
 def reload() -> None:
     """Relee .env y actualiza las variables globales de este módulo.
     Permite cambiar claves/ajustes desde el dashboard SIN reiniciar."""
-    global GEMINI_API_KEY, GEMINI_TEXT_MODEL, GEMINI_IMAGE_MODEL
+    global GEMINI_API_KEY, GEMINI_TEXT_MODEL, GEMINI_TEXT_MODEL_FALLBACKS, GEMINI_IMAGE_MODEL
     global GEMINI_TTS_MODEL, GEMINI_TTS_VOICE, TTS_PROVIDER, EDGE_TTS_VOICE
     global TTS_RATE, WHISPER_MODEL, WHISPER_DEVICE, FPS
     global NVIDIA_API_KEY, NVIDIA_MODEL, NVIDIA_BASE_URL
     global FLOW_MCP_ENABLED, FLOW_MCP_DIR, FLOW_MCP_MODEL, FLOW_MCP_TIMEOUT, FLOW_MCP_VIDEO_ENABLED
+    global NOTEBOOKLM_BL
     load_dotenv(ENV_PATH, override=True)
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
@@ -372,7 +378,13 @@ def reload() -> None:
         m.strip() for m in os.getenv(
             "NVIDIA_FALLBACK_MODELS",
             "deepseek-ai/deepseek-v4.1-flash,moonshotai/kimi-k2.6").split(",") if m.strip()]
-    GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-2.5-flash")
+    GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-3.8-flash")
+    GEMINI_TEXT_MODEL_FALLBACKS = [
+        m.strip()
+        for m in os.getenv("GEMINI_TEXT_MODEL_FALLBACKS", DEFAULT_GEMINI_FALLBACKS).split(",")
+        if m.strip()
+    ]
+    NOTEBOOKLM_BL = os.getenv("NOTEBOOKLM_BL", DEFAULT_NOTEBOOKLM_BL).strip()
     GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
     GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
     GEMINI_TTS_VOICE = os.getenv("GEMINI_TTS_VOICE", "Fenrir")
