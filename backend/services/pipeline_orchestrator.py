@@ -59,6 +59,8 @@ _STAGES_ACTIVE = {ST_QUEUED, ST_PREFLIGHT, ST_STAGE1, ST_STAGE2, ST_STAGE3,
                   ST_STAGE4}
 
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{6,80}$")
+_NICHO_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")
+MAX_NICHO_CONTEXT_BYTES = 64 * 1024  # 64 KB
 _PATH_LINE_RE = re.compile(r"([A-Za-z]:\\[^\s]+|/[^\s]+)\s*$")
 
 _STEPS = (
@@ -79,7 +81,13 @@ class PipelineError(Exception):
 
 
 def _cfg(name: str, default: Any) -> Any:
-    return getattr(config, name, default)
+    val = getattr(config, name, None)
+    if val is not None and val != "":
+        return val
+    env_val = os.environ.get(name)
+    if env_val is not None:
+        return env_val
+    return default
 
 
 def _last_path(text: str) -> str:
@@ -139,12 +147,50 @@ class PipelineOrchestrator:
                                   "progress_pct": 0, "output": "",
                                   "error_code": "", "error_detail": "",
                                   "started_at": "", "finished_at": ""})
+        run.setdefault("context_source", "")
+        run.setdefault("nicho_id", None)
         return run
+
+    def _load_local_context(self, nicho_id: str | None) -> str | None:
+        """Carga el contexto local de respaldo en backend/data/nichos/<nicho_id>/contexto.md.
+        Valida que nicho_id cumpla con ^[a-z0-9][a-z0-9_-]{0,40}$, previene traversal y symlinks,
+        y lee hasta un máximo de 64 KB UTF-8."""
+        if not nicho_id:
+            return None
+        nid = str(nicho_id).strip()
+        if not _NICHO_ID_RE.match(nid):
+            raise PipelineError(f"nicho_id inválido: '{nid[:40]}'", "INVALID_NICHO_ID")
+
+        nichos_dir = (config.DATA_DIR / "nichos").resolve()
+        target_dir = (nichos_dir / nid).resolve()
+        target_file = (target_dir / "contexto.md").resolve()
+
+        try:
+            target_dir.relative_to(nichos_dir)
+            target_file.relative_to(target_dir)
+        except (ValueError, RuntimeError):
+            raise PipelineError(f"nicho_id fuera de nichos: '{nid}'", "INVALID_NICHO_ID")
+
+        if target_dir.is_symlink() or target_file.is_symlink():
+            raise PipelineError(f"symlinks no permitidos en nicho_id: '{nid}'", "INVALID_NICHO_ID")
+
+        if not target_file.is_file():
+            return None
+
+        try:
+            content_bytes = target_file.read_bytes()
+            if len(content_bytes) > MAX_NICHO_CONTEXT_BYTES:
+                content_bytes = content_bytes[:MAX_NICHO_CONTEXT_BYTES]
+            return content_bytes.decode("utf-8", errors="replace")
+        except OSError as e:
+            log.warning("[pipeline] Error leyendo contexto local de nicho '%s': %s", nid, e)
+            return None
 
     # ──────────────────────────────── API pública ──
     def create_run(self, idea: str, notebook_id: str | None = None,
                    fmt: str = "short", style: str = "auto",
-                   max_scenes: int | None = None) -> dict:
+                   max_scenes: int | None = None,
+                   nicho_id: str | None = None) -> dict:
         idea = (idea or "").strip()
         if not idea:
             raise PipelineError("idea requerida para el pipeline", "IDEA_REQUIRED")
@@ -159,6 +205,13 @@ class PipelineOrchestrator:
                 raise PipelineError("max_scenes debe ser un entero entre 1 y 12", "INVALID_MAX_SCENES") from e
             if not (1 <= max_scenes <= 12):
                 raise PipelineError("max_scenes debe ser un entero entre 1 y 12", "INVALID_MAX_SCENES")
+        if nicho_id is not None:
+            nicho_id = str(nicho_id).strip()
+            if nicho_id:
+                if not _NICHO_ID_RE.match(nicho_id):
+                    raise PipelineError(f"nicho_id inválido: '{nicho_id[:40]}'", "INVALID_NICHO_ID")
+            else:
+                nicho_id = None
         now = time.strftime("%Y%m%d_%H%M%S")
         run_id = f"run_{now}_{uuid.uuid4().hex[:6]}"
         run = {
@@ -166,6 +219,8 @@ class PipelineOrchestrator:
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "idea": idea[:500],
             "notebook_id": (notebook_id or "").strip(),
+            "nicho_id": nicho_id,
+            "context_source": "",
             "format": fmt if fmt in ("short", "long") else "short",
             "style": (style or "auto").strip()[:40] or "auto",
             "max_scenes": max_scenes,
@@ -488,16 +543,18 @@ class PipelineOrchestrator:
             # ── pre-flight gatekeeper (§2): aborta ANTES de gastar tokens ──
             self._set_step(run, ST_PREFLIGHT, "running")
             run["progress_pct"] = 5
-            pre_n = await self.manager.test_pipeline(
-                "notebooklm", notebook_id=run["notebook_id"] or None)
+            is_local_mode = str(_cfg("PIPELINE_CONTEXT_SOURCE", "") or "").strip().lower() == "local"
+            if not is_local_mode:
+                pre_n = await self.manager.test_pipeline(
+                    "notebooklm", notebook_id=run["notebook_id"] or None)
+                if not pre_n.get("ok"):
+                    code = ("PRE_FLIGHT_AUTH" if pre_n.get("state") == mcpm.ST_AUTH_REQUIRED
+                            else "PRE_FLIGHT_NOTEBOOKLM")
+                    self._fail(run, code,
+                               f"NotebookLM no listo: state={pre_n.get('state')} "
+                               f"auth={pre_n.get('auth')} {pre_n.get('detail') or pre_n.get('auth_detail') or ''}")
+                    return
             pre_f = await self.manager.test_pipeline("google-flow")
-            if not pre_n.get("ok"):
-                code = ("PRE_FLIGHT_AUTH" if pre_n.get("state") == mcpm.ST_AUTH_REQUIRED
-                        else "PRE_FLIGHT_NOTEBOOKLM")
-                self._fail(run, code,
-                           f"NotebookLM no listo: state={pre_n.get('state')} "
-                           f"auth={pre_n.get('auth')} {pre_n.get('detail') or pre_n.get('auth_detail') or ''}")
-                return
             if not pre_f.get("ok"):
                 code = ("PRE_FLIGHT_AUTH" if pre_f.get("state") == mcpm.ST_AUTH_REQUIRED
                         else "PRE_FLIGHT_FLOW")
@@ -511,13 +568,13 @@ class PipelineOrchestrator:
             # produce un id, [0/3] ABORTA con PRE_FLIGHT_MISSING_NOTEBOOK_ID antes de
             # gastar tokens — nunca se llega a Stage 1 con notebook_id vacío.
             nid = (run["notebook_id"] or "").strip()
-            if not nid:
+            if not nid and not is_local_mode:
                 nid = str(_cfg("NOTEBOOKLM_NOTEBOOK_ID", "") or "").strip()
                 if nid:
                     run["notebook_id"] = nid          # env → estado (visibilidad total)
                     self._save(run)
-            pre_detail = "notebooklm ✅ · google-flow ✅"
-            if not nid:
+            pre_detail = "local-context ✅ · google-flow ✅" if is_local_mode else "notebooklm ✅ · google-flow ✅"
+            if not nid and not is_local_mode:
                 disc = getattr(self.manager, "discover_notebook_id", None)
                 auto = ""
                 if disc:
@@ -546,112 +603,180 @@ class PipelineOrchestrator:
                     return
             self._set_step(run, ST_PREFLIGHT, "ok", pre_detail)
 
-            # ── Stage 1: contexto de NotebookLM (solo-lectura) ──
+            # ── Stage 1: contexto de NotebookLM (solo-lectura) o Local ──
             self._set_step(run, ST_STAGE1, "running")
             run["progress_pct"] = 25
-            tool = str(_cfg("NOTEBOOKLM_CONTEXT_TOOL", "notebook_query") or "").strip()
-            query = str(_cfg(
-                "NOTEBOOKLM_CONTEXT_QUERY",
-                "Extrae del notebook la biblia de investigación para producir un "
-                "video: puntos clave y datos verificables, arco narrativo sugerido, "
-                "y una descripción física CONSISTENTE del personaje principal "
-                "(look, ropa, rasgos) reutilizable en todas las escenas.") or "").strip()
+            nicho_id = run.get("nicho_id")
+            context = None
+            context_source = ""
 
-            # BB1: si el servidor no expone la tool configurada pero sí notebook_query, usar notebook_query y loguear aviso
-            if tool != "notebook_query":
-                exposed_tools = await self._exposed_tools("notebooklm")
-                if exposed_tools and tool not in exposed_tools and "notebook_query" in exposed_tools:
+            # 2) Si PIPELINE_CONTEXT_SOURCE == "local", saltar NotebookLM por completo
+            if str(_cfg("PIPELINE_CONTEXT_SOURCE", "") or "").strip().lower() == "local":
+                local_ctx = self._load_local_context(nicho_id)
+                if local_ctx:
+                    context = local_ctx
+                    context_source = "local"
                     log.warning(
-                        f"[pipeline {run['run_id']}] El servidor NotebookLM no expone '{tool}' "
-                        f"pero sí 'notebook_query' — usando 'notebook_query'"
+                        "[pipeline %s] PIPELINE_CONTEXT_SOURCE=local: "
+                        "usando contexto local de '%s' (%d caracteres)",
+                        run["run_id"], nicho_id, len(context)
                     )
-                    tool = "notebook_query"
-
-            try:
-                # HOTFIX INT-023.4: inyección EXPLÍCITA del id resuelto en los
-                # arguments (defensa en profundidad; mcp_manager re-valida/inyecta).
-                id_key = str(_cfg("NOTEBOOKLM_ID_KEY", "notebook_id") or "notebook_id")
-                args = {"query": query}
-                if (run["notebook_id"] or "").strip():
-                    args[id_key] = run["notebook_id"].strip()
-                res = await self.manager.execute(
-                    "notebooklm", tool, args,
-                    timeout=float(_cfg("NOTEBOOKLM_MCP_TIMEOUT", 60.0)),
-                    notebook_id=run["notebook_id"] or None)
-            except mcpm.MCPManagerError as e:
-                if e.code == "TOOL_UNKNOWN" and tool != "notebook_query":
-                    exposed = await self._exposed_tools("notebooklm")
-                    if "notebook_query" in exposed or not exposed:
-                        log.warning(
-                            f"[pipeline {run['run_id']}] El servidor NotebookLM no expone '{tool}' "
-                            f"pero sí 'notebook_query' — fallback a 'notebook_query'"
-                        )
-                        tool = "notebook_query"
-                        try:
-                            res = await self.manager.execute(
-                                "notebooklm", tool, args,
-                                timeout=float(_cfg("NOTEBOOKLM_MCP_TIMEOUT", 60.0)),
-                                notebook_id=run["notebook_id"] or None)
-                        except mcpm.MCPManagerError as e2:
-                            code = ("PRE_FLIGHT_MISSING_NOTEBOOK_ID"
-                                    if e2.code == "MISSING_NOTEBOOK_ID" else "CONTEXT_EXTRACTION_FAILED")
-                            self._fail(run, code, f"tool '{tool}': [{e2.code}] {e2}")
-                            return
-                    else:
-                        self._fail(run, "CONTEXT_EXTRACTION_FAILED", f"tool '{tool}': [{e.code}] {e}")
-                        return
                 else:
-                    code = ("PRE_FLIGHT_MISSING_NOTEBOOK_ID"
-                            if e.code == "MISSING_NOTEBOOK_ID" else "CONTEXT_EXTRACTION_FAILED")
-                    self._fail(run, code, f"tool '{tool}': [{e.code}] {e}")
-                    return
-
-            raw_text = (res.get("text") or "").strip()
-            parsed_json = None
-            if raw_text:
-                try:
-                    loaded = json.loads(raw_text)
-                    if isinstance(loaded, dict):
-                        parsed_json = loaded
-                except (json.JSONDecodeError, ValueError):
-                    parsed_json = None
-
-            if parsed_json is not None:
-                # BB2/BB3: si "text" es JSON, usar solo el campo "answer".
-                st = parsed_json.get("status")
-                ans = parsed_json.get("answer")
-                ans_str = str(ans or "").strip()
-                if st != "success":
-                    err_msg = str(parsed_json.get("error") or parsed_json.get("message") or "").strip()
-                    if err_msg:
-                        detail = f"el cuaderno no tiene fuentes o no respondió: {err_msg}"
-                    else:
-                        detail = "el cuaderno no tiene fuentes o no respondió: sube fuentes en NotebookLM"
-                    self._fail(run, "CONTEXT_EMPTY", detail)
-                    return
-                if not ans_str:
                     self._fail(
                         run, "CONTEXT_EMPTY",
-                        "el cuaderno no tiene fuentes o no respondió: sube fuentes en NotebookLM"
+                        f"Sin sesión de NotebookLM y sin contexto local del nicho '{nicho_id or ''}'"
                     )
                     return
-                context = ans_str
-            else:
-                # Si el texto no es JSON, comportamiento actual
-                context = raw_text
-                if not context:
-                    self._fail(run, "CONTEXT_EMPTY",
-                               f"la tool '{tool}' devolvió texto vacío — revisa el "
-                               f"notebookId y NOTEBOOKLM_CONTEXT_TOOL")
-                    return
+
+            if context is None:
+                tool = str(_cfg("NOTEBOOKLM_CONTEXT_TOOL", "notebook_query") or "").strip()
+                query = str(_cfg(
+                    "NOTEBOOKLM_CONTEXT_QUERY",
+                    "Extrae del notebook la biblia de investigación para producir un "
+                    "video: puntos clave y datos verificables, arco narrativo sugerido, "
+                    "y una descripción física CONSISTENTE del personaje principal "
+                    "(look, ropa, rasgos) reutilizable en todas las escenas.") or "").strip()
+
+                # BB1: si el servidor no expone la tool configurada pero sí notebook_query, usar notebook_query y loguear aviso
+                if tool != "notebook_query":
+                    exposed_tools = await self._exposed_tools("notebooklm")
+                    if exposed_tools and tool not in exposed_tools and "notebook_query" in exposed_tools:
+                        log.warning(
+                            f"[pipeline {run['run_id']}] El servidor NotebookLM no expone '{tool}' "
+                            f"pero sí 'notebook_query' — usando 'notebook_query'"
+                        )
+                        tool = "notebook_query"
+
+                auth_error_detected = False
+                auth_error_msg = ""
+                res = None
+
+                try:
+                    # HOTFIX INT-023.4: inyección EXPLÍCITA del id resuelto en los
+                    # arguments (defensa en profundidad; mcp_manager re-valida/inyecta).
+                    id_key = str(_cfg("NOTEBOOKLM_ID_KEY", "notebook_id") or "notebook_id")
+                    args = {"query": query}
+                    if (run["notebook_id"] or "").strip():
+                        args[id_key] = run["notebook_id"].strip()
+                    res = await self.manager.execute(
+                        "notebooklm", tool, args,
+                        timeout=float(_cfg("NOTEBOOKLM_MCP_TIMEOUT", 60.0)),
+                        notebook_id=run["notebook_id"] or None)
+                except mcpm.MCPManagerError as e:
+                    if e.code == "TOOL_UNKNOWN" and tool != "notebook_query":
+                        exposed = await self._exposed_tools("notebooklm")
+                        if "notebook_query" in exposed or not exposed:
+                            log.warning(
+                                f"[pipeline {run['run_id']}] El servidor NotebookLM no expone '{tool}' "
+                                f"pero sí 'notebook_query' — fallback a 'notebook_query'"
+                            )
+                            tool = "notebook_query"
+                            try:
+                                res = await self.manager.execute(
+                                    "notebooklm", tool, args,
+                                    timeout=float(_cfg("NOTEBOOKLM_MCP_TIMEOUT", 60.0)),
+                                    notebook_id=run["notebook_id"] or None)
+                            except mcpm.MCPManagerError as e2:
+                                if e2.code in ("AUTH_REQUIRED", "SESSION_INVALID") or "auth" in str(e2).lower() or "expired" in str(e2).lower():
+                                    auth_error_detected = True
+                                    auth_error_msg = str(e2)
+                                else:
+                                    code = ("PRE_FLIGHT_MISSING_NOTEBOOK_ID"
+                                            if e2.code == "MISSING_NOTEBOOK_ID" else "CONTEXT_EXTRACTION_FAILED")
+                                    self._fail(run, code, f"tool '{tool}': [{e2.code}] {e2}")
+                                    return
+                        else:
+                            self._fail(run, "CONTEXT_EXTRACTION_FAILED", f"tool '{tool}': [{e.code}] {e}")
+                            return
+                    elif e.code in ("AUTH_REQUIRED", "SESSION_INVALID") or "auth" in str(e).lower() or "expired" in str(e).lower():
+                        auth_error_detected = True
+                        auth_error_msg = str(e)
+                    else:
+                        code = ("PRE_FLIGHT_MISSING_NOTEBOOK_ID"
+                                if e.code == "MISSING_NOTEBOOK_ID" else "CONTEXT_EXTRACTION_FAILED")
+                        self._fail(run, code, f"tool '{tool}': [{e.code}] {e}")
+                        return
+
+                if not auth_error_detected and res is not None:
+                    raw_text = (res.get("text") or "").strip()
+                    parsed_json = None
+                    if raw_text:
+                        try:
+                            loaded = json.loads(raw_text)
+                            if isinstance(loaded, dict):
+                                parsed_json = loaded
+                        except (json.JSONDecodeError, ValueError):
+                            parsed_json = None
+
+                    if parsed_json is not None:
+                        # BB2/BB3: si "text" es JSON, usar solo el campo "answer".
+                        st = parsed_json.get("status")
+                        ans = parsed_json.get("answer")
+                        ans_str = str(ans or "").strip()
+                        err_msg = str(parsed_json.get("error") or parsed_json.get("message") or "").strip()
+
+                        if st != "success":
+                            if "authentication expired" in err_msg.lower() or "re-authenticate" in err_msg.lower() or "auth" in err_msg.lower():
+                                auth_error_detected = True
+                                auth_error_msg = err_msg
+                            else:
+                                if err_msg:
+                                    detail = f"el cuaderno no tiene fuentes o no respondió: {err_msg}"
+                                else:
+                                    detail = "el cuaderno no tiene fuentes o no respondió: sube fuentes en NotebookLM"
+                                self._fail(run, "CONTEXT_EMPTY", detail)
+                                return
+                        elif not ans_str:
+                            self._fail(
+                                run, "CONTEXT_EMPTY",
+                                "el cuaderno no tiene fuentes o no respondió: sube fuentes en NotebookLM"
+                            )
+                            return
+                        else:
+                            context = ans_str
+                            context_source = "notebooklm"
+                    else:
+                        # Si el texto no es JSON, comportamiento actual
+                        context = raw_text
+                        if not context:
+                            self._fail(run, "CONTEXT_EMPTY",
+                                       f"la tool '{tool}' devolvió texto vacío — revisa el "
+                                       f"notebookId y NOTEBOOKLM_CONTEXT_TOOL")
+                            return
+                        context_source = "notebooklm"
+
+                # 1) Si la consulta a NotebookLM devolvió error de autenticación:
+                if auth_error_detected:
+                    local_ctx = self._load_local_context(nicho_id)
+                    if local_ctx:
+                        context = local_ctx
+                        context_source = "local"
+                        log.warning(
+                            "[pipeline %s] NotebookLM no autenticado ('%s'): "
+                            "usando contexto local de '%s' (%d caracteres)",
+                            run["run_id"], auth_error_msg, nicho_id, len(context)
+                        )
+                    else:
+                        detail = f"el cuaderno no respondió: {auth_error_msg or 'Authentication expired'}"
+                        self._fail(
+                            run, "CONTEXT_EMPTY",
+                            f"{detail} — Sin sesión de NotebookLM y sin contexto local del nicho"
+                        )
+                        return
 
             rd = self._run_dir(run["run_id"])
             rd.mkdir(parents=True, exist_ok=True)
             (rd / "context.md").write_text(context, encoding="utf-8")
             run["context_chars"] = len(context)
-            self._set_step(run, ST_STAGE1, "ok",
-                           f"{len(context)} caracteres extraídos del notebook "
-                           f"«{run['notebook_id'] or '(env fallback)'}»")
+            run["context_source"] = context_source
+            if context_source == "local":
+                self._set_step(run, ST_STAGE1, "ok",
+                               f"{len(context)} caracteres cargados del contexto local "
+                               f"de nicho «{nicho_id or ''}»")
+            else:
+                self._set_step(run, ST_STAGE1, "ok",
+                               f"{len(context)} caracteres extraídos del notebook "
+                               f"«{run['notebook_id'] or '(env fallback)'}»")
 
             # ── Stage 2: blueprint con el generador EXISTENTE (sin tocarlo) ──
             self._set_step(run, ST_STAGE2, "running")

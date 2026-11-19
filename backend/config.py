@@ -148,6 +148,8 @@ NOTEBOOKLM_CONTEXT_QUERY = os.getenv(
     "rasgos) reutilizable en todas las escenas.").strip()
 # Máximo de contexto inyectado al generador (protege los tokens del LLM).
 PIPELINE_CONTEXT_MAX_CHARS = int(os.getenv("PIPELINE_CONTEXT_MAX_CHARS", "6000"))
+# Origen del contexto para Stage 1: "" / "notebooklm" (default) o "local" (data/nichos/<nicho_id>/contexto.md)
+PIPELINE_CONTEXT_SOURCE = os.getenv("PIPELINE_CONTEXT_SOURCE", "").strip()
 # Asset de referencia de personaje en Flow: se sube UNA vez y todas las
 # escenas lo referencian como @{personaje} (consistencia inter-escena).
 FLOW_REF_ASSET_NAME = os.getenv("FLOW_REF_ASSET_NAME", "personaje").strip()

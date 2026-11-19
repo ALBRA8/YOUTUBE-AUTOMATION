@@ -14,6 +14,8 @@
 ## EN RESERVA (no tocar)
 - HANDS (control manual del PC): dormido.
 ## HECHO
+- Contexto Local de Respaldo por Nicho y Fallback de Autenticación (BC, 2026-11-19):
+  Fallback transparente a `backend/data/nichos/<nicho_id>/contexto.md` (validación regex `^[a-z0-9][a-z0-9_-]{0,40}$`, rechazo estricto de path traversal y symlinks, límite de 64 KB) cuando la consulta a NotebookLM devuelve expiración de sesión/error de autenticación. Soporte directo para `PIPELINE_CONTEXT_SOURCE=local` omitiendo llamadas remotas a NotebookLM y preflight gatekeeper adaptado. Registro de `context_source: "local" | "notebooklm"` en el estado del pipeline. Batería hermética `test_bc_contexto_local.py` (5 tests) integrada como batería canónica nº 62.
 - Conectividad en Vivo Ecosistema Google y Sonda INT-093 (2026-11-14):
   Chrome CDP 9333 verificado en vivo con perfil compartido. Google Flow autenticado con 5 tools operativas (test real de flow_list_assets en 1.6 s con 26 assets). Adaptación de NotebookLM MCP al dominio notebook.google.com y build label activo (boq_labs-tailwind-frontend_20261112.11_p0), recuperando 10 cuadernos reales en vivo (FRUTINOVELAS, Alex Hormozi, etc.; 49cce1f; test_notebooklm_base_url.py). Sonda INT-093 ejecutada contra el backend activo (sonda_nombres.json, confirmando q3, q4, q5 SOPORTADO). Sincronización reactiva de notebook_id y nicho_id en app-mcp.js (0778ae4), alcanzando el estado 4/4 completo (verde) en el panel web.
 - Resiliencia MCP y Fallbacks de Render (AA1-AA2, 2026-11-13):

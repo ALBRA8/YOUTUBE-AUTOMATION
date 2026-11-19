@@ -60,3 +60,10 @@
 - **Hecho:** Diagnóstico y remediación de la causa raíz de `[LIST_EMPTY]` (expiración de tokens CSRF `SNlM0e` / `FdrFJe` y build label desactualizado de Google). Implementación de parsing nativo `batchexecute`, extracción en vivo de tokens vía CDP 9333, inyección dinámica de `NOTEBOOKLM_BL`, sincronización atómica en `_sync_auth_json(..., tokens=...)` y fallback transparente con `_cdp_list_notebooks_direct`.
 - **Resultado:** 7/7 tests en `test_bb5_pipeline_guards.py`; trinquete 286 intacto; 7 cuadernos reales listados en vivo con `FRUTINOVELAS` identificado.
 - **Referencia:** `SES-2026-11-18-01_ENDURECIMIENTO_DEFINITIVO_NOTEBOOKLM_CDP.md`.
+
+## SES-2026-11-19-01 — Contexto Local de Respaldo por Nicho y Experimento de Cookies
+- **Estado:** CLOSED / PASS.
+- **Hecho:** Experimento de cookies CDP sobre `notebook.google.com` (E-A..E-E: 24 cookies de host específico, GET httpx HTTP 200 sin redirección a accounts, conclusión sobre RPCs batchexecute). Implementación de contexto local de respaldo por nicho en `pipeline_orchestrator.py` con validación regex, rechazo de path traversal/symlinks, límite 64 KB, fallback automático ante auth error y modo `PIPELINE_CONTEXT_SOURCE=local`.
+- **Resultado:** 5/5 tests PASS en `test_bc_contexto_local.py`; 62 baterías canónicas registradas en `run_all.py` y `ESTADO_REAL.md`; integridad documental y trinquete de excepciones verificados.
+- **Referencia:** `SES-2026-11-19-01_CONTEXTO_LOCAL_RESPALDO_Y_EXPERIMENTO_COOKIES.md`.
+

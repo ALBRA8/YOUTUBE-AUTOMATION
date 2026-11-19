@@ -111,6 +111,7 @@ __pycache__/
 # Perfil Chrome unificado (runtime local, cookies y cache)
 backend/data/google_profile_global/
 backend/data/registro_nichos.json
+backend/data/nichos/
 
 # Scratch temporary files
 scratch/

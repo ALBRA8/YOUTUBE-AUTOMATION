@@ -3510,7 +3510,8 @@ async def pipeline_run(body: dict):
             notebook_id=(body.get("notebook_id") or "").strip() or None,
             fmt=body.get("format") if body.get("format") in ("short", "long") else "short",
             style=(body.get("style") or "auto").strip(),
-            max_scenes=max_scenes)
+            max_scenes=max_scenes,
+            nicho_id=body.get("nicho_id"))
         _pipe.orchestrator.start_run(run["run_id"])
     except _pipe.PipelineError as e:
         status = 409 if e.code == "PIPELINE_BUSY" else 400
