@@ -110,7 +110,9 @@ async def synthesize(text: str, out_path: Path, provider: str | None = None,
         dur = await primary(text, out_path, voice)
         used = provider
     except Exception as e:  # noqa: BLE001
-        log.warning("TTS primario '%s' falló (%s) → fallback edge/gemini", provider, e)
+        # _sanitize_error: el fallo del proveedor puede ecoar la API key
+        log.warning("TTS primario '%s' falló (%s) → fallback edge/gemini",
+                    provider, gemini_client._sanitize_error(e))
         if provider == "gemini":
             dur = await fallback(text, out_path, config.EDGE_TTS_VOICE)
         else:

@@ -9,6 +9,7 @@ import base64
 import io
 import json
 import logging
+import re
 import wave
 from typing import Any
 
@@ -19,6 +20,35 @@ log = logging.getLogger("gemini")
 _client = None
 _client_key = None
 _remembered_text_model: str | None = None
+
+
+# ── [AUDITORÍA 2026-11 · logs] secretos fuera de los logs ────────────────────
+# Los errores de la API pueden ECOAR la credencial («API key not valid. …
+# [AIza…]», la URL del request con ?key=…, un Bearer del gateway…). Cualquier
+# `log.warning(…, e)` en crudo es una fuga a server.log/consola. Todo lo que
+# llegue a un log pasa por _sanitize_error.
+_REDACTED = "***REDACTADO***"
+
+
+def _sanitize_error(err: Any) -> str:
+    """Representación de un error SIN secretos. Redacta la API key
+    configurada, el formato Google (AIza…), Bearer …, y parámetros de URL
+    tipo key=/api_key=/token=. Jamás lanza (un fallo del saneador jamás
+    debe tumbar un reintento)."""
+    try:
+        s = str(err)
+        key = (getattr(config, "GEMINI_API_KEY", "") or "").strip()
+        if len(key) >= 8 and key in s:
+            s = s.replace(key, _REDACTED)
+        s = re.sub(r"AIza[0-9A-Za-z_\-]{10,}", _REDACTED, s)
+        s = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._\-]{8,}", r"\1" + _REDACTED, s)
+        s = re.sub(
+            r"(?i)(api[_-]?key|[?&]key|access[_-]?token|refresh[_-]?token)"
+            r"=([A-Za-z0-9._\-]{8,})",
+            lambda m: m.group(1) + "=" + _REDACTED, s)
+        return s
+    except Exception:  # noqa: BLE001
+        return "<error no serializable>"
 
 
 def get_active_text_model() -> str:
@@ -86,7 +116,8 @@ async def _retry(coro_factory, tries: int = 3, base: float = 2.0,
             if is_not_found or attempt == tries - 1:
                 raise
             wait = base ** attempt
-            log.warning("Gemini intento %d falló (%s). Reintento en %.0fs", attempt + 1, e, wait)
+            log.warning("Gemini intento %d falló (%s). Reintento en %.0fs",
+                        attempt + 1, _sanitize_error(e), wait)
             await asyncio.sleep(wait)
 
 
