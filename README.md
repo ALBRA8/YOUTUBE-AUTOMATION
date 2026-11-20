@@ -157,6 +157,8 @@ Por defecto el servidor escucha en `127.0.0.1` y funciona **abierto**, como Jupy
 
 Blindajes incluidos de serie (auditoría 2026-09): claves de API enmascaradas en `/api/config`, listas blancas de columnas contra inyección SQL en SQLite, semáforo de renders (1 mezcla FFmpeg a la vez por defecto, configurable con `MAX_CONCURRENT_RENDERS`) y limpieza automática de clips intermedios tras cada render (`KEEP_INTERMEDIATES=1` para desactivarla; botón/cleanup manual vía `POST /api/projects/{pid}/cleanup`).
 
+Blindajes de la auditoría multi-fuente 2026-11: **OAuth con state CSRF** de un solo uso (TTL 10 min — el callback exige el state que el propio servidor emitió; un código de un consentimiento ajeno jamás se acepta), **apiKey de la extensión cifrada AES-256-GCM** (chrome.storage.local guarda solo ciphertext; la clave vive en `chrome.storage.session`, memoria del navegador — tras cerrar Chrome se pide de nuevo), **ffmpeg/ffprobe asíncronos en TTS** (el servidor deja de congelarse durante cada conversión; el ffprobe colgado se mata por timeout), **secretos fuera de los logs** (`_sanitize_error` redacta API keys, Bearer y params `key=` de los errores de Gemini) y **yt-dlp colgado → mensaje claro** (`UrlModeError` con el timeout en vez de un 500 sin contexto).
+
 ## 🗂️ Estructura del proyecto
 ```
 yt_automation_v2/
