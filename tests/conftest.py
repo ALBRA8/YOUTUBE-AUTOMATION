@@ -74,6 +74,7 @@ STANDALONE_BATTERIES = [
     "security/test_job_identity.py",
     "security/test_project_isolation.py",
     "security/test_project_path_security.py",
+    "security/test_sqli.py",                 # AUDITORÍA 2026-11: batería standalone SQLi
     "security/test_ssrf.py",
     "test_burn_subtitles_resilience.py",
     "test_gobernanza.py",
