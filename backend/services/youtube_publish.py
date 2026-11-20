@@ -8,6 +8,8 @@ Opcional: se activa solo si el usuario coloca client_secret.json en backend/data
 """
 import logging
 import os
+import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -16,6 +18,33 @@ from config import PORT, YT_CLIENT_SECRET, YT_TOKEN_FILE
 log = logging.getLogger("publish")
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload",
           "https://www.googleapis.com/auth/youtube.readonly"]
+
+# ── [AUDITORÍA 2026-11 · CSRF] state OAuth de un solo uso ─────────────────
+# El flujo loopback anterior aceptaba CUALQUIER ?code= en el callback: un
+# atacante podía iniciar un consentimiento con SU client_id y colarle el
+# código resultante al navegador de la víctima (login CSRF → el servidor
+# enlaza EL CANAL DEL ATACANTE). Ahora cada URL de consentimiento lleva un
+# state aleatorio (secrets.token_urlsafe(32)) que el servidor registra con
+# TTL y consume UNA sola vez; el callback lo exige intacto.
+STATE_TTL_S = 600  # 10 min para completar el consentimiento
+_pending_states: dict[str, float] = {}  # state → monotonic de expiración
+
+
+def _prune_states() -> None:
+    """Limpia states expirados (best-effort, jamás lanza)."""
+    ahora = time.monotonic()
+    for s in [s for s, exp in _pending_states.items() if exp <= ahora]:
+        _pending_states.pop(s, None)
+
+
+def validate_state(state: str) -> bool:
+    """Consume un state OAuth: válido UNA sola vez dentro del TTL.
+    Devuelve False si falta, está alterado, expiró o ya se consumió."""
+    if not state:
+        return False
+    _prune_states()
+    exp = _pending_states.pop(state, None)
+    return exp is not None and exp > time.monotonic()
 
 
 def redirect_uri() -> str:
@@ -33,8 +62,11 @@ def has_token() -> bool:
     return Path(YT_TOKEN_FILE).exists()
 
 
-def build_auth_url() -> str | None:
-    """Genera URL de consentimiento con retorno loopback (sin OOB)."""
+def build_auth_url() -> tuple[str, str] | None:
+    """Genera URL de consentimiento con retorno loopback (sin OOB) + state
+    CSRF aleatorio. Devuelve (url, state): el state DEBE volver intacto en
+    el callback (o enviarse junto al código en /api/publish/exchange) —
+    single-use con TTL de 10 min. Auditoría multi-fuente 2026-11."""
     if not configured():
         return None
     try:
@@ -42,15 +74,27 @@ def build_auth_url() -> str | None:
         flow = Flow.from_client_secrets_file(
             YT_CLIENT_SECRET, scopes=SCOPES,
             redirect_uri=redirect_uri())
+        state = secrets.token_urlsafe(32)
         auth_url, _ = flow.authorization_url(
-            access_type="offline", include_granted_scopes="true", prompt="consent")
-        return auth_url
+            access_type="offline", include_granted_scopes="true", prompt="consent",
+            state=state)
+        _prune_states()
+        _pending_states[state] = time.monotonic() + STATE_TTL_S
+        return auth_url, state
     except Exception as e:  # noqa: BLE001
         log.error("auth url error: %s", e)
         return None
 
 
-def exchange_code(code: str) -> bool:
+def exchange_code(code: str, state: str | None = None) -> bool:
+    """Intercambia el código por el token. EXIGE un state válido emitido por
+    build_auth_url (protección CSRF; single-use). Sin state legítimo lanza
+    ValueError — el código de un consentimiento no iniciado por este
+    servidor jamás se acepta."""
+    if state is None or not validate_state(state):
+        raise ValueError(
+            "state OAuth ausente/inválido (protección CSRF): vuelve a "
+            "generar la URL de consentimiento con «Conectar mi canal»")
     if not configured():
         return False
     from google_auth_oauthlib.flow import Flow

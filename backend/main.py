@@ -2078,10 +2078,11 @@ async def publish_status():
 
 @app.get("/api/publish/auth-url")
 async def publish_auth_url():
-    url = youtube_publish.build_auth_url()
-    if not url:
+    pair = youtube_publish.build_auth_url()
+    if not pair:
         raise HTTPException(400, "Falta client_secret.json en backend/data/")
-    return {"url": url}
+    url, state = pair
+    return {"url": url, "state": state}  # [AUDITORÍA 2026-11] state CSRF viaja al dashboard
 
 
 def _oauth_page(ok: bool, msg: str) -> str:
@@ -2101,10 +2102,11 @@ def _oauth_page(ok: bool, msg: str) -> str:
 
 
 @app.get("/api/publish/callback")
-async def publish_callback(code: str = "", error: str = ""):
+async def publish_callback(code: str = "", state: str = "", error: str = ""):
     """Retorno OAuth de Google (loopback, reemplaza el flujo OOB retirado):
-    intercambia el código, guarda el token en backend/data/token.json y
-    muestra confirmación. El usuario solo autoriza en el navegador."""
+    valida el state CSRF (single-use, auditoría 2026-11), intercambia el
+    código, guarda el token en backend/data/token.json y muestra
+    confirmación. El usuario solo autoriza en el navegador."""
     if error:
         return HTMLResponse(_oauth_page(False, f"Google devolvió: {error}"))
     if not code:
@@ -2114,9 +2116,13 @@ async def publish_callback(code: str = "", error: str = ""):
         return HTMLResponse(_oauth_page(False, "Falta backend/data/client_secret.json"),
                             status_code=400)
     try:
-        ok = youtube_publish.exchange_code(code)
+        # exchange_code valida y CONSUME el state (single-use); ValueError = CSRF
+        ok = youtube_publish.exchange_code(code, state)
         msg = ("Token guardado en backend/data/token.json. Ya puedes publicar "
                "desde el dashboard.") if ok else "No se pudo intercambiar el código."
+    except ValueError as e:
+        # state ausente/alterado/expirado → 400 explícito (protección CSRF)
+        return HTMLResponse(_oauth_page(False, str(e)), status_code=400)
     except Exception as e:  # noqa: BLE001
         ok = False
         msg = f"Error al intercambiar el código: {str(e)[:220]}"
@@ -2126,10 +2132,13 @@ async def publish_callback(code: str = "", error: str = ""):
 @app.post("/api/publish/exchange")
 async def publish_exchange(body: dict):
     code = (body.get("code") or "").strip()
+    state = (body.get("state") or "").strip()
     if not code:
         raise HTTPException(400, "falta el código")
-    try:  # M4: un fallo OAuth jamás vuelve a ser un 500
-        ok = youtube_publish.exchange_code(code)
+    try:  # M4: un fallo OAuth jamás vuelve a ser un 500; ValueError = CSRF
+        ok = youtube_publish.exchange_code(code, state)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, f"intercambio OAuth falló: {str(e)[:200]}") from e
     return {"ok": ok}

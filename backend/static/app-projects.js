@@ -725,15 +725,18 @@ function renderPublish() {
   if (sel) sel.onchange = () => { PUB_PID = sel.value; renderPublish(); };
 }
 
+let YT_STATE = '';  // [AUDITORÍA 2026-11] state CSRF del consentimiento vivo
+
 async function ytAuth() {
   if (guardDemo()) return;
   try { const r = await api('/publish/auth-url');
+        YT_STATE = r.state || '';
         window.open(r.url, '_blank'); toast('Abre el enlace y pega el código aquí', 'ok'); }
   catch (e) { toast(e.message, 'err'); }
 }
 async function ytExchange() {
   if (guardDemo()) return;
-  try { await api('/publish/exchange', { method: 'POST', body: { code: $('#yt-code').value } });
+  try { await api('/publish/exchange', { method: 'POST', body: { code: $('#yt-code').value, state: YT_STATE } });
         toast('¡Canal conectado! ✅', 'ok'); await refreshAll(); renderPublish(); }
   catch (e) { toast(e.message, 'err'); }
 }
