@@ -131,7 +131,8 @@ def test_exchange_con_state_legitimo_guarda_token(pub):
     tok = Path(pub.YT_TOKEN_FILE)
     assert tok.exists()
     assert tok.read_text(encoding="utf-8").startswith("{")
-    assert (tok.stat().st_mode & 0o777) == 0o600  # permiso 0600 (v2.19)
+    if sys.platform != "win32":
+        assert (tok.stat().st_mode & 0o777) == 0o600  # permiso 0600 (v2.19, POSIX)
     # el state se consumió: reusarlo para otro código es rechazado
     with pytest.raises(ValueError, match="CSRF"):
         pub.exchange_code("4/otro-codigo", state)

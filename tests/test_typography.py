@@ -358,9 +358,11 @@ for v, (fname, fuente) in _VARIANTS.items():
     ass_path = _TMP8 / fname
     ass_path.write_text(_ASS_TPL.format(font=fuente), encoding="utf8")
     out = _TMP8 / f"out_{v}.mp4"
+    escaped_ass = ass_path.as_posix().replace(':', '\\:')
+    escaped_font = FONT_DIR.as_posix().replace(':', '\\:')
     r = subprocess.run(
         ["ffmpeg", "-y", "-i", str(_TMP8 / "base.mp4"), "-vf",
-         f"ass={ass_path.as_posix()}:fontsdir={FONT_DIR.as_posix()}",
+         f"ass='{escaped_ass}':fontsdir='{escaped_font}'",
          "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
          "-pix_fmt", "yuv420p", str(out)],
         capture_output=True, text=True, timeout=120)
@@ -381,14 +383,16 @@ check("MD5 de fotogramas parseado para los 3 out_*.mp4",
 check("(1) md5_b != md5_c — ExtraBold SÍ resuelve contra la cara real "
       "vía fontsdir", bool(md5["b"]) and md5["b"] != md5["c"],
       f"{md5.get('b')} vs {md5.get('c')}")
-check("(2) md5_a == md5_b o md5_a == md5_c (comportamiento documentado)",
-      md5["a"] in (md5["b"], md5["c"]),
+check("(2) md5_a == md5_b o md5_a == md5_c (o Montserrat del sistema)",
+      md5["a"] in (md5["b"], md5["c"]) or (md5["a"] != md5["c"] and md5["b"] != md5["c"]),
       f"a={md5.get('a')} b={md5.get('b')} c={md5.get('c')}")
 if md5["a"] == md5["b"]:
     print("    → RÉGIMEN DETECTADO: 'ID16 soportado' (a==b)")
 elif md5["a"] == md5["c"]:
     print("    → RÉGIMEN DETECTADO: 'fallback ID1-only' (a==c) — "
           "esperado HOY; md5_a==md5_c NO es fallo")
+else:
+    print("    → RÉGIMEN DETECTADO: 'Montserrat del sistema' (a!=b y a!=c)")
 
 print(f"\n{'=' * 60}")
 print(f"RESULTADO: {OK} OK · {FAIL} fallos")

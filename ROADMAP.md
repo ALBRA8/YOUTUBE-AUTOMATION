@@ -14,6 +14,11 @@
 ## EN RESERVA (no tocar)
 - HANDS (control manual del PC): dormido.
 ## HECHO
+- Estabilidad Flow CDP, Keepalive Acotado, Latencia Gemini ThinkingConfig y Endurecimiento Windows (2026-11-20):
+  D1: Consolidación de flags en Chrome de launch_google_login con una sola opción `--disable-features=SessionCrashedBubble,IntensiveWakeUpThrottling,CalculateNativeWinOcclusion` más opciones anti-throttling (`--disable-background-timer-throttling`, `--disable-renderer-backgrounding`, `--disable-backgrounding-occluded-windows`).
+  D2: Keepalive acotado a la corrida durante etapas 0 a 2 que sondea `flow_list_assets` periódicamente evitando el congelamiento de CDP por oclusión de Windows y se cancela al inicio de etapa 3 (donde el calentamiento toma el relevo).
+  D3: Optimización de latencia en llamadas estructuradas de Gemini mediante inyección de `ThinkingConfig(thinking_budget=0)` exclusivamente en la generación de guion, logrando un 77.5% de reducción de tiempo de respuesta (de 48.41s a 10.89s). Registro enriquecido en warnings de reintento con segundos transcurridos y `type(e).__name__` ante mensajes vacíos.
+  Reparación de tests en Windows NTFS (cierres de conexiones SQLite con `gc.collect()`, escape de rutas de unidades en filtros ffmpeg, normalización CRLF/LF y mocks herméticos). Suite canónica en 2812 OK (0 fallos en 66 baterías) y pytest completo en 865 passed.
 - Modelos Gemini con Fallback y Build Label Vivo de NotebookLM (BD, 2026-11-19):
   2A: Filtrado y desduplicación de cookies para BASE_URL (`urls=[BASE_URL]`) en `mcp_manager._cdp_fetch_cookies_raw`, descartando dominios ajenos (`accounts.google.com`) y desduplicando con prioridad por especificidad de host (`notebook.google.com` > `.google.com`).
   2B: Derivación de build label en vivo desde el DOM/HTML de la pestaña activa en cada conexión de NotebookLM (`_live_bl`), alineando defaults únicos en `config.py` y `mcp_manager.py` con precedencia estricta (`_live_bl` > `os.environ["NOTEBOOKLM_BL"]` > `config.NOTEBOOKLM_BL`).

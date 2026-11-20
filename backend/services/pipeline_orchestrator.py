@@ -541,6 +541,31 @@ class PipelineOrchestrator:
 
     async def _run(self, run_id: str) -> None:
         run = self._load(run_id)
+        keepalive_task: asyncio.Task | None = None
+
+        async def _keepalive_loop(interval: float = 45.0, timeout: float = 30.0) -> None:
+            try:
+                while True:
+                    await asyncio.sleep(interval)
+                    try:
+                        res = await self.manager.execute("google-flow", "flow_list_assets", {}, timeout=timeout)
+                        log.info("[pipeline %s] Keepalive Flow CDP: ok=%s", run.get("run_id"), res.get("ok"))
+                    except (mcpm.MCPManagerError, RuntimeError, OSError, TimeoutError, asyncio.TimeoutError) as e:
+                        # Los errores solo se registran, nunca se lanzan
+                        log.warning("[pipeline %s] Keepalive Flow CDP falló (ignorado): %s", run.get("run_id"), e)
+            except asyncio.CancelledError:
+                pass
+
+        async def _cancel_keepalive() -> None:
+            nonlocal keepalive_task
+            if keepalive_task and not keepalive_task.done():
+                keepalive_task.cancel()
+                try:
+                    await keepalive_task
+                except (asyncio.CancelledError, RuntimeError, OSError):
+                    pass
+                keepalive_task = None
+
         try:
             # ── pre-flight gatekeeper (§2): aborta ANTES de gastar tokens ──
             self._set_step(run, ST_PREFLIGHT, "running")
@@ -604,6 +629,10 @@ class PipelineOrchestrator:
                                "Capturar sesión».")
                     return
             self._set_step(run, ST_PREFLIGHT, "ok", pre_detail)
+            # D2: Keepalive acotado a la corrida durante etapas 0 a 2
+            ka_interval = float(_cfg("FLOW_KEEPALIVE_INTERVAL", 45.0))
+            ka_timeout = float(_cfg("FLOW_KEEPALIVE_TIMEOUT", 30.0))
+            keepalive_task = asyncio.create_task(_keepalive_loop(ka_interval, ka_timeout))
 
             # ── Stage 1: contexto de NotebookLM (solo-lectura) o Local ──
             self._set_step(run, ST_STAGE1, "running")
@@ -845,6 +874,9 @@ class PipelineOrchestrator:
             self._set_step(run, ST_STAGE2, "ok",
                            f"«{blueprint['title']}» — {len(scenes)} escenas "
                            f"(motor: {blueprint['engine']})")
+
+            # D2: Cancelar keepalive al empezar la etapa 3 (el calentamiento ya cubre la transición)
+            await _cancel_keepalive()
 
             # ── Stage 3: despacho a Flow (consistencia de personaje) ──
             self._set_step(run, ST_STAGE3, "running")

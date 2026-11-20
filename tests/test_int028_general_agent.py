@@ -203,6 +203,10 @@ class FakeNiches:
 
 _orig_niches = ga.niches_svc
 ga.niches_svc = FakeNiches()  # patch hermético del servicio de nichos
+_orig_nvidia_avail = ga.nvidia_client.available
+_orig_gemini_avail = ga.gemini_client.available
+ga.nvidia_client.available = lambda: False
+ga.gemini_client.available = lambda: False
 
 db, orch = FakeDB(), FakeOrch()
 r = asyncio.run(ga.execute({"action": "create_video", "reply": "",
@@ -298,6 +302,8 @@ check("plan(\"\") → help local (nunca lanza)",
 r = asyncio.run(ga.plan("crea un video sobre romanos", None, None, None))
 check("plan() sin claves degrada a regex local con avatar opcional",
       r["action"] == "create_video" and "romanos" in r["params"]["idea"])
+ga.nvidia_client.available = _orig_nvidia_avail
+ga.gemini_client.available = _orig_gemini_avail
 
 # ══════════════════════ S5 · cero marca VÓRTICE activa ═════════════════════
 print("── S5. cero marca VÓRTICE activa (cerebro + UI)")

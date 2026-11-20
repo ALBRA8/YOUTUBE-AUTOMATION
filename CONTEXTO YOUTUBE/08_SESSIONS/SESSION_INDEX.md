@@ -79,3 +79,9 @@
 - **Resultado:** 5/5 tests PASS en `test_be_flow_cdp_stability.py`; 64 baterías canónicas en `run_all.py` y `ESTADO_REAL.md`; trinquete 286 intacto.
 - **Referencia:** `SES-2026-11-19-03_FLOW_CDP_ESTABILIDAD_Y_REINTENTO_ACOTADO.md`.
 
+## SES-2026-11-20-01 — Estabilidad Flow CDP, Latencia Gemini (ThinkingConfig), Tests Windows y Suite Canónica
+- **Estado:** CLOSED / PASS.
+- **Hecho:** Reparación hermética de tests en Windows NTFS (bloqueos SQLite, filtros ffmpeg con letras de unidad, saltos CRLF vs LF, aislamiento de clientes LLM reales en tests herméticos). Implementación de D1 (`--disable-features` consolidado), D2 (keepalive en segundo plano durante etapas 0 a 2 cancelado en etapa 3), D3 (`ThinkingConfig(thinking_budget=0)` con 77.5% de mejora en latencia + logging con tiempo y tipo de error) y pruebas herméticas.
+- **Resultado:** 2812 OK · 0 fallos en 66 baterías (`tests/run_all.py`), 865 passed en `pytest`, `compileall` y `ruff` 100% verde; trinquete 286 intacto.
+- **Referencia:** `SES-2026-11-20-01_ESTABILIDAD_FLOW_CDP_LATENCIA_GEMINI_Y_SUITE_COMPLETA.md`.
+

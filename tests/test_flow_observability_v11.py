@@ -564,7 +564,7 @@ def main() -> int:
                 ["git", "show", f"{ref}:{relpath}"],
                 capture_output=True)
             igual = (remote.returncode == 0 and local.exists()
-                     and remote.stdout == local.read_bytes())
+                     and remote.stdout.replace(b"\r\n", b"\n") == local.read_bytes().replace(b"\r\n", b"\n"))
             if igual:
                 check(f"{etiqueta} byte-idéntico a {ref}", True)
             elif relpath.endswith("production_json.py") and remote.returncode == 0 \

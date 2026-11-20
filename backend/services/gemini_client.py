@@ -10,6 +10,7 @@ import io
 import json
 import logging
 import re
+import time
 import wave
 from typing import Any
 
@@ -102,9 +103,11 @@ async def _retry(coro_factory, tries: int = 3, base: float = 2.0,
     del pipeline indefinidamente; ahora cada intento vence a `timeout` s y
     cuenta como fallo reintentable."""
     for attempt in range(tries):
+        t0 = time.monotonic()
         try:
             return await asyncio.wait_for(coro_factory(), timeout=timeout)
         except Exception as e:  # noqa: BLE001
+            elapsed = time.monotonic() - t0
             err_str = str(e).lower()
             is_not_found = (
                 getattr(e, "code", None) == 404
@@ -116,14 +119,18 @@ async def _retry(coro_factory, tries: int = 3, base: float = 2.0,
             if is_not_found or attempt == tries - 1:
                 raise
             wait = base ** attempt
-            log.warning("Gemini intento %d falló (%s). Reintento en %.0fs",
-                        attempt + 1, _sanitize_error(e), wait)
+            sanitized = _sanitize_error(e)
+            if not str(e).strip() or not sanitized:
+                sanitized = type(e).__name__
+            log.warning("Gemini intento %d falló tras %.2fs (%s). Reintento en %.0fs",
+                        attempt + 1, elapsed, sanitized, wait)
             await asyncio.sleep(wait)
 
 
 # ─────────────────────────────────────────────────────────────── TEXTO ──
 async def generate_json(prompt: str, schema: dict | None = None,
-                        system: str | None = None, model: str | None = None) -> Any:
+                        system: str | None = None, model: str | None = None,
+                        low_reasoning: bool = False) -> Any:
     """Genera contenido estructurado JSON. Lanza si no hay key.
     `model` sobreescribe GEMINI_TEXT_MODEL. Si falla con 404 NOT_FOUND,
     prueba la cadena de GEMINI_TEXT_MODEL_FALLBACKS y recuerda el primero que funcione."""
@@ -145,6 +152,11 @@ async def generate_json(prompt: str, schema: dict | None = None,
                 cfg["response_schema"] = schema
             if system:
                 cfg["system_instruction"] = system
+            if low_reasoning and hasattr(types, "ThinkingConfig"):
+                try:
+                    cfg["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+                except Exception:
+                    pass
             return client().models.generate_content(
                 model=cand,
                 contents=prompt,

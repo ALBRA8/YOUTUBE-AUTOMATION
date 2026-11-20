@@ -1248,7 +1248,7 @@ class MCPClientManager:
                     "--no-first-run", "--no-default-browser-check",
                     "--disable-session-crashed-bubble",
                     "--hide-crash-restore-bubble",
-                    "--disable-features=SessionCrashedBubble",
+                    "--disable-features=SessionCrashedBubble,IntensiveWakeUpThrottling,CalculateNativeWinOcclusion",
                     "--disable-blink-features=AutomationControlled",
                     "--disable-background-timer-throttling",
                     "--disable-renderer-backgrounding",

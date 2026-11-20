@@ -6,6 +6,7 @@
 """
 import asyncio
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -197,6 +198,73 @@ async def test_2c_gemini_fallback_chain_all_fail_raises():
                     with pytest.raises(Exception) as exc_info:
                         await gemini_client.generate_json("prompt")
                     assert "404" in str(exc_info.value)
+
+
+# ==============================================================================
+# 2D: D3 LATENCIA DE GEMINI Y RETRY LOGGING HERMÉTICO
+# ==============================================================================
+
+@pytest.mark.asyncio
+async def test_d3_retry_logs_elapsed_and_type_name_on_empty_str(caplog):
+    """D3: en el warning de cada intento registra segundos transcurridos y type(e).__name__ cuando str(e) venga vacío."""
+    attempts = 0
+
+    async def _failing_coro():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            class EmptyError(Exception):
+                def __str__(self):
+                    return ""
+            raise EmptyError()
+        return "success"
+
+    with caplog.at_level(logging.WARNING, logger="gemini"):
+        res = await gemini_client._retry(_failing_coro, tries=2, base=0.01)
+        assert res == "success"
+
+    matching = [r for r in caplog.records if "EmptyError" in r.message]
+    assert len(matching) == 1
+    assert "tras" in matching[0].message
+    assert "s" in matching[0].message
+
+
+@pytest.mark.asyncio
+async def test_d3_low_reasoning_sets_thinking_budget_0():
+    """D3: low_reasoning=True aplica ThinkingConfig(thinking_budget=0) en GenerateContentConfig."""
+    mock_client = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.text = '{"status": "ok"}'
+    mock_client.models.generate_content.return_value = mock_resp
+
+    with patch.object(gemini_client, "available", return_value=True), \
+         patch.object(gemini_client, "client", return_value=mock_client):
+        await gemini_client.generate_json("test prompt", low_reasoning=True)
+
+    call_args = mock_client.models.generate_content.call_args
+    cfg = call_args.kwargs.get("config")
+    assert cfg is not None
+    assert hasattr(cfg, "thinking_config")
+    assert cfg.thinking_config is not None
+    assert cfg.thinking_config.thinking_budget == 0
+
+
+@pytest.mark.asyncio
+async def test_d3_default_reasoning_does_not_set_thinking_budget():
+    """D3: llamada normal (low_reasoning=False) no inyecta thinking_budget=0."""
+    mock_client = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.text = '{"status": "ok"}'
+    mock_client.models.generate_content.return_value = mock_resp
+
+    with patch.object(gemini_client, "available", return_value=True), \
+         patch.object(gemini_client, "client", return_value=mock_client):
+        await gemini_client.generate_json("test prompt", low_reasoning=False)
+
+    call_args = mock_client.models.generate_content.call_args
+    cfg = call_args.kwargs.get("config")
+    assert cfg is not None
+    assert cfg.thinking_config is None
 
 
 if __name__ == "__main__":

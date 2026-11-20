@@ -262,10 +262,17 @@ def main() -> int:
     # doctors (P-EXT-RUNTIME) y rompen sus checks "sin conexión inventada"
     # si quedan vivos: sin este wipe la batería deja huella en
     # test_doctor_preflight/test_production_doctor.
-    with db.connect() as con:
+    con = db.connect()
+    try:
         con.execute("DELETE FROM flow_jobs")
         con.execute("DELETE FROM scenes")
         con.execute("DELETE FROM projects")
+        con.commit()
+    finally:
+        con.close()
+    del con
+    import gc
+    gc.collect()
     shutil.rmtree(_TMP, ignore_errors=True)
     check("tmp eliminado", not _TMP.exists())
 

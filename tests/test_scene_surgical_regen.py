@@ -56,11 +56,11 @@ class FakeManager:
         # "ok": True en las respuestas — el doble debe reflejarlo o la
         # corrutina _stage3 corta con FLOW_CDP_SLOW antes de despachar.
         if tool == "flow_generate_image":
-            path = f"/tmp/fake_flow_{len(self.calls)}.png"
+            path = str(Path(tempfile.gettempdir()) / f"fake_flow_{len(self.calls)}.png")
             Path(path).write_bytes(b"fake png")  # A13/P1.6: el tool REAL deja el archivo en disco
             return {"ok": True, "text": f"Saved image to {path}"}
         if tool == "flow_generate_video":
-            path = f"/tmp/fake_flow_{len(self.calls)}.mp4"
+            path = str(Path(tempfile.gettempdir()) / f"fake_flow_{len(self.calls)}.mp4")
             Path(path).write_bytes(b"fake mp4")  # A13/P1.6: _stage3 exige video_file en disco
             return {"ok": True, "text": f"Saved video to {path}"}
         if tool == "flow_upload_file":

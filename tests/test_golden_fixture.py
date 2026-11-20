@@ -264,10 +264,17 @@ def main() -> int:
     # bajo pytest la sesión comparte la SQLite canónica y las filas de este
     # proyecto son "cola foránea" para las baterías que corren después
     # (production_doctor clasifica DOC-D-COLA-INCOMPLETA con pids ajenos).
-    with db.connect() as con:
+    con = db.connect()
+    try:
         con.execute("DELETE FROM flow_jobs")
         con.execute("DELETE FROM scenes")
         con.execute("DELETE FROM projects")
+        con.commit()
+    finally:
+        con.close()
+    del con
+    import gc
+    gc.collect()
     shutil.rmtree(_TMP, ignore_errors=True)
     check("tmp eliminado", not _TMP.exists())
 

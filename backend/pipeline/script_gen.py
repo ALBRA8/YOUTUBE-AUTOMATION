@@ -329,7 +329,7 @@ async def from_script(script_text: str, style_id: str, fmt: str,
             + f"\n\nGUION:\n{script_text[:8000]}"
         )
         return await gemini_client.generate_json(prompt, gemini_client.schema_scenes(),
-                                                 system=SYSTEM)
+                                                 system=SYSTEM, low_reasoning=True)
     except Exception as e:  # noqa: BLE001
         log.warning("Gemini falló (%s) — uso generador local", str(e)[:120])
         return _local_fallback("script", script_text, style_id, fmt, custom_prompt)
@@ -349,7 +349,7 @@ async def from_idea(idea: str, style_id: str, fmt: str,
             + _base_instructions(style["prompt"], n, fmt, custom_prompt, avatar)
         )
         return await gemini_client.generate_json(prompt, gemini_client.schema_scenes(),
-                                                 system=SYSTEM)
+                                                 system=SYSTEM, low_reasoning=True)
     except Exception as e:  # noqa: BLE001
         log.warning("Gemini falló (%s) — uso generador local", str(e)[:120])
         return _local_fallback("idea", idea, style_id, fmt, custom_prompt)
@@ -409,7 +409,7 @@ async def from_url_transcript(viral_meta: dict, transcript: str, style_id: str,
     try:
         raw = await gemini_client.generate_json(_prompt(False),
                                                 gemini_client.schema_scenes(),
-                                                system=SYSTEM)
+                                                system=SYSTEM, low_reasoning=True)
         result = build_result(raw)
         report = originality.originality_report(transcript, _narration_text(result))
         if report["too_similar"]:
@@ -418,7 +418,7 @@ async def from_url_transcript(viral_meta: dict, transcript: str, style_id: str,
                         report["overlap"] * 100, report["longest_run"])
             raw2 = await gemini_client.generate_json(_prompt(True),
                                                      gemini_client.schema_scenes(),
-                                                     system=SYSTEM)
+                                                     system=SYSTEM, low_reasoning=True)
             result2 = build_result(raw2)
             report2 = originality.originality_report(
                 transcript, _narration_text(result2))
@@ -452,7 +452,7 @@ async def from_audio_transcript(transcript: str, style_id: str, fmt: str,
             + f"\n\nTRANSCRIPCIÓN:\n{transcript[:8000]}"
         )
         result = await gemini_client.generate_json(prompt, gemini_client.schema_scenes(),
-                                                   system=SYSTEM)
+                                                   system=SYSTEM, low_reasoning=True)
         # el modo audio no pasa por build_result: sanitización directa
         if isinstance(result.get("scenes"), list):
             sanitize_script_scenes(result["scenes"])

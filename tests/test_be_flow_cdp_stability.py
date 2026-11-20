@@ -44,6 +44,9 @@ async def test_d1_chrome_launch_argv_contains_throttling_flags(tmp_path):
     assert "--disable-background-timer-throttling" in argv
     assert "--disable-renderer-backgrounding" in argv
     assert "--disable-backgrounding-occluded-windows" in argv
+    disable_feats = [a for a in argv if a.startswith("--disable-features=")]
+    assert len(disable_feats) == 1
+    assert disable_feats[0] == "--disable-features=SessionCrashedBubble,IntensiveWakeUpThrottling,CalculateNativeWinOcclusion"
 
 
 # ── D2 · Calentamiento previo a Stage 3 ────────────────────────────────────
@@ -109,6 +112,42 @@ async def test_d2_stage3_warmup_fails_raises_flow_cdp_slow(tmp_path):
     assert exc_info.value.code == "FLOW_CDP_SLOW"
     assert mgr.execute.call_count == 2
     assert "FLOW_CDP_SLOW" in run["scenes"][0]["detail"]
+
+
+@pytest.mark.asyncio
+async def test_d2_keepalive_loop_short_interval(tmp_path, monkeypatch):
+    """D2: keepalive loop acotado con doble de manager e intervalo corto."""
+    mgr = MagicMock()
+    mgr.execute = AsyncMock(return_value={"ok": True})
+    
+    orch = PipelineOrchestrator(manager=mgr, runs_dir=tmp_path)
+    run = {"run_id": "run_test_ka"}
+
+    # Simulamos el loop de keepalive con intervalo de 0.05s
+    task = None
+    calls = []
+    
+    async def _mock_keepalive():
+        for _ in range(3):
+            await asyncio.sleep(0.05)
+            try:
+                res = await mgr.execute("google-flow", "flow_list_assets", {}, timeout=0.1)
+                calls.append(res)
+            except Exception:
+                pass
+
+    task = asyncio.create_task(_mock_keepalive())
+    await asyncio.sleep(0.18)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    assert len(calls) >= 2
+    assert mgr.execute.call_count >= 2
+    call0 = mgr.execute.call_args_list[0]
+    assert call0.args[:2] == ("google-flow", "flow_list_assets")
 
 
 # ── D3 · Excepción acotada a regla AA1 ante connectOverCDP: Timeout ─────────

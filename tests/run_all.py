@@ -342,7 +342,7 @@ def main(baterias: list[str] | None = None, argv: list[str] | None = None) -> in
     if n_herm and not serial:
         max_w = workers or max(1, (os.cpu_count() or 2) - 1)
         print(f"[P6.2] herméticas en paralelo: {n_herm} baterías × "
-              f"{max_w} workers · no-herméticas en serie al final")
+              f"{max_w} workers · no-herméticas en serie al final", flush=True)
         idx = {n: i for i, n in enumerate(en_paralelo)}
         completadas = 0
         with ThreadPoolExecutor(max_workers=max_w) as ex:
@@ -353,7 +353,7 @@ def main(baterias: list[str] | None = None, argv: list[str] | None = None) -> in
                 completadas += 1
                 ok, fail, rc, det = resultados[nombre]
                 print(f"[{completadas}/{n_herm}] {nombre}: {det} · exit {rc}"
-                      + ("" if rc == 0 and fail == 0 else "  ✗ FALLA"))
+                      + ("" if rc == 0 and fail == 0 else "  ✗ FALLA"), flush=True)
         for n in en_paralelo:  # detalle completo en orden canónico
             ok, fail, rc, det = resultados[n]
             print(f"  · {n}: {det}")
