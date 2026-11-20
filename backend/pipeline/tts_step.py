@@ -66,7 +66,7 @@ async def synthesize_scenes(project: dict, scenes: list[dict], on_progress=None,
         wav = out_dir / f"scene_{i:02d}.wav"
         text = _text_of(sc)
         meta = sc.get("meta") or {}
-        dur = tts_service.probe_duration(wav)
+        dur = await tts_service.probe_duration_async(wav)
         if dur >= MIN_SCENE_DUR and meta.get("tts_hash") == _hash_of(text):
             durations[i] = dur
             used_per_scene[i] = meta.get("tts") or "cache"
@@ -196,7 +196,7 @@ async def _synthesize_batched(project: dict, scenes: list[dict], todo: list[int]
         try:
             pcm = await gemini_client.tts_pcm("\n\n".join(texts), voice)
             chunk_wav.write_bytes(pcm)
-            chunk_dur = tts_service.probe_duration(chunk_wav)
+            chunk_dur = await tts_service.probe_duration_async(chunk_wav)
             if chunk_dur < 1.0:
                 raise RuntimeError("audio del lote demasiado corto")
 
@@ -214,7 +214,7 @@ async def _synthesize_batched(project: dict, scenes: list[dict], todo: list[int]
                 st, en = bounds[k]
                 scene_wav = out_dir / f"scene_{i:02d}.wav"
                 _ffmpeg_cut(chunk_wav, scene_wav, st, en - st)
-                dur = tts_service.probe_duration(scene_wav)
+                dur = await tts_service.probe_duration_async(scene_wav)
                 if dur < MIN_SCENE_DUR:
                     raise RuntimeError(f"split escena {i + 1} demasiado corto")
                 durations[i] = dur
