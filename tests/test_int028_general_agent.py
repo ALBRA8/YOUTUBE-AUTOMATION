@@ -317,8 +317,11 @@ check("identidad Agente General en la UI", "Agente General" in app_js)
 check("index.html sirve app.js con cache-busting por versión",
       "app.js?v=" in (BACKEND / "static" / "index.html").read_text(encoding="utf-8"))
 main_src = (BACKEND / "main.py").read_text(encoding="utf-8")
-check("main.py importa general_agent como agent_svc (redirect)",
-      "general_agent as agent_svc" in main_src)
+# [P6.1] el import top-level pasó a DIFERIDO (_svc_lazy): el cerebro único
+# sigue siendo services/general_agent.py, solo que ya no se paga al arrancar.
+check("main.py redirige al Agente General vía servicio diferido (_svc_lazy)",
+      '_svc_lazy("services.general_agent")' in main_src
+      and "from services import (backup as backup_svc" in main_src)
 check("main.py sin import del módulo retirado",
       re.search(r"from services import \(\s*agent\b", main_src) is None
       and "import agent as" not in main_src)
@@ -352,7 +355,8 @@ check("toda operación mapeada existe en el registro del arnés",
 # ═══════════════════ S7 · contratos estructurales (M9/hands) ═══════════════
 print("── S7. contratos estructurales (gate M9 en /api/chat, hands denylist)")
 check("gate M9 en /api/chat intacto (DESTRUCTIVE_ACTIONS)",
-      "action not in agent_svc.DESTRUCTIVE_ACTIONS" in main_src)
+      "action not in _svc_lazy(\"services.general_agent\").DESTRUCTIVE_ACTIONS"
+      in main_src)
 check("contrato needs_confirm/pending intacto en /api/chat",
       '"needs_confirm": True' in main_src and '"pending":' in main_src)
 selfaudit_src = (BACKEND / "services" / "hands" / "selfaudit.py").read_text(

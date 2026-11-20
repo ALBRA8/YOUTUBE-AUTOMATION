@@ -289,6 +289,20 @@ def _preflight_lanzamiento(project_id: str) -> None:
     )
 
 
+def _subs_no_quemados(project_id: str) -> bool:
+    """[A14 · P1.7] True si subs_status.json declara burned=False (el render
+    cayó al fallback silencioso de copiar el raw SIN subtítulos). Ausente o
+    ilegible → False (no bloquea: proyectos legacy sin el archivo)."""
+    import json as _json
+    f = OUTPUT_DIR / project_id / "subs_status.json"
+    if not f.is_file():
+        return False
+    try:
+        return _json.loads(f.read_text(encoding="utf-8")).get("burned") is False
+    except (OSError, ValueError):
+        return False
+
+
 async def start_pipeline(project_id: str, autopublish: bool = False) -> str:
     project = db.get_project(project_id)
     if not project:
@@ -887,6 +901,13 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
             if (meta_now.get("qa_final") or {}).get("worst") == "error":
                 await _emit(job_id, project_id, "ready", 100,
                             "Listo (autopublish OMITIDO: QA final con errores)")
+            elif _subs_no_quemados(project_id):
+                # [A14 · P1.7] autopublish TAMBIÉN respeta el gate de
+                # subtítulos: el fallback silencioso (copiado sin quemar)
+                # jamás llega a YouTube por accidente.
+                await _emit(job_id, project_id, "ready", 100,
+                            "Listo (autopublish OMITIDO: subtítulos no quemados — "
+                            "publica manualmente o re-renderiza)")
             else:
                 await _emit(job_id, project_id, "publishing", 97, "Subiendo a YouTube…")
                 jid_pub = db.create_job(project_id, kind="publish")

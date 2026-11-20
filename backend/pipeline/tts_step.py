@@ -352,8 +352,17 @@ async def build_full_track(project: dict, durations: list[float]) -> Path:
         f"concat=n={len(durations)}:v=0:a=1[out]"
     cmd = ["ffmpeg", "-y", *inputs, "-filter_complex", chain, "-map", "[out]",
            "-ar", "24000", "-ac", "1", str(full)]
-    p = await asyncio.to_thread(
-        lambda: subprocess.run(cmd, capture_output=True, text=True))
+    # [M · P2.4] TOPE de tiempo: un ffmpeg colgado (disco lleno, AV antivirus)
+    # congelaba la etapa TTS para siempre. El proceso corre en hilo (to_thread);
+    # subprocess.TimeoutExpired corta a los 180 s y el pipeline registra fallo.
+    try:
+        p = await asyncio.to_thread(
+            lambda: subprocess.run(cmd, capture_output=True, text=True,
+                                   timeout=180))
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            "concat de audio excedió 180s (ffmpeg colgado; proceso abortado)"
+        ) from None
     if p.returncode != 0:
         log.error("concat audio: %s", p.stderr[-400:])
         raise RuntimeError("No se pudo unir el audio")

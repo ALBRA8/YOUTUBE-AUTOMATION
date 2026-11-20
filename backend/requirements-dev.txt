@@ -4,3 +4,4 @@ pytest-asyncio>=1
 starlette[full]
 httpx
 ruff>=0.5
+pytest-xdist>=3.3            # P6.2: pytest -n auto (mismo comando que CI)

@@ -314,3 +314,42 @@ def harden_pil(max_pixels: int) -> int:
         return int(max_pixels)
     except Exception:  # noqa: BLE001 — PIL ausente: nada que endurecer
         return 0
+
+
+# ── A6 · P0.6 — ACL real para .env (chmod no hace NADA en NTFS) ─────────────
+def apply_env_acl(path) -> str | None:
+    """Fija permisos restrictivos del archivo de secretos (.env).
+
+    Windows (NTFS): chmod 0600 es un NO-OP — la ACL real se fija con icacls
+    quitando herencia y dejando SOLO el usuario actual con control total.
+    POSIX: chmod 0600 (dueño lectura/escritura, nada para grupo/otros).
+    Devuelve el modo/ACL aplicado (str informativo) o None si falló.
+    Jamás lanza: un fallo de ACL no debe tumbar el arranque."""
+    import logging
+    import os
+    import subprocess
+    from pathlib import Path
+    p = Path(path)
+    if not p.is_file():
+        return None
+    try:
+        if os.name == "nt":
+            user = os.environ.get("USERNAME") or os.environ.get("USER") or ""
+            if not user:
+                return None
+            cmd = ["icacls", str(p), "/inheritance:r",
+                   "/grant:r", f"{user}:F"]
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  timeout=15, check=False)
+            if proc.returncode != 0:
+                logging.getLogger("security").warning(
+                    "icacls falló para %s: %s", p.name, proc.stderr[:120])
+                return None
+            return f"icacls:{user}:F"
+        p.chmod(0o600)
+        return "0600"
+    except (OSError, subprocess.SubprocessError) as e:
+        # defensa, nunca crítico: un fallo de ACL no tumba el arranque
+        logging.getLogger("security").warning(
+            "apply_env_acl(%s) falló: %s", p.name, str(e)[:120])
+        return None

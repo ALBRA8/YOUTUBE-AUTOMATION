@@ -1,17 +1,27 @@
 #!/usr/bin/env python3
 """Runner de las baterías canónicas de tests (fuente de verdad).
 
-Ejecuta las baterías canónicas en orden, cada una en su PROPIO proceso python3
+Ejecuta las baterías canónicas, cada una en su PROPIO proceso python3
 (aislamiento total de sys.modules), imprime un resumen por batería
 (X OK · Y fallos) y un total. Exit code != 0 si alguna batería falla
 o no puede ejecutarse.
 
+[P6.2] PARALELIZACIÓN: cada batería paga 11–17 s de import de backend al
+arrancar (Windows); en serie eran ~65 baterías × arranque. Las herméticas
+son subprocess I/O-bound y corren en un ThreadPoolExecutor (default
+max_workers = cpu−1); las NON_HERMETIC_BATTERIES van en SERIE al final.
+Los hijos respetan PYTHONIOENCODING/utf-8 y PYTHONDONTWRITEBYTECODE=1.
+Flags:
+  --serial        comportamiento clásico (todas en serie)
+  --workers N     sobreescribe el nº de workers del pool
+  --hermetic/--ci solo herméticas (CI)
 Uso:  cd yt_automation_v2 && python3 tests/run_all.py
 """
 import os
 import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 TESTS_DIR = Path(__file__).resolve().parent
@@ -186,6 +196,11 @@ BATERIAS = [
                                  # system-owned metadata (16)
     "security/test_sqli.py",     # AUDITORÍA 2026-11: SQLi por nombre de
                                  # columna — lista blanca por tabla (22)
+    "security/test_auditoria_repairs.py",  # REPARACIONES P0-P2 (2026-11-20):
+                                 # C1 env.bak, C4 CLAIMED→DONE, C5 claim→fail
+                                 # →claim, A10 UNVERIFIABLE terminal, C8
+                                 # scheduler, A7 zip-bomb/411, A1 badge, A16
+                                 # dialog, A6 ACL, A14 gate subs, P5.4 (44)
     "test_harness.py",           # YOUTUBE HARNESS CONTRACT V1: contrato
                                  # estricto, permisos, libro idempotente,
                                  # estados §9, puente legacy del chat
@@ -260,52 +275,103 @@ def main(baterias: list[str] | None = None, argv: list[str] | None = None) -> in
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     args = sys.argv[1:] if argv is None else argv
     hermetic = "--hermetic" in args or "--ci" in args
+    serial = "--serial" in args
+    workers = None
+    if "--workers" in args:
+        i = args.index("--workers")
+        if i + 1 < len(args):
+            workers = max(1, int(args[i + 1]))
+    # [P6.2] selección por nombre: los argv que no son flags son baterías
+    posiciones = [a for a in args if not a.startswith("--")
+                  and not (a.isdigit() and "--workers" in args)]
+    posiciones = [a for a in posiciones if (TESTS_DIR / a).exists()]
+    if posiciones:
+        baterias = posiciones
     if baterias is not None:
         lista = baterias
     elif hermetic:
         lista = [b for b in BATERIAS if b not in NON_HERMETIC_BATTERIES]
     else:
         lista = BATERIAS
+
+    # [P6.2] reparto: herméticas en pool; no-herméticas SIEMPRE en serie al
+    # final. --serial restaura el comportamiento clásico (todo en serie).
+    if serial:
+        en_paralelo, en_serie = [], lista
+    else:
+        en_paralelo = [b for b in lista if b not in NON_HERMETIC_BATTERIES]
+        en_serie = [b for b in lista if b in NON_HERMETIC_BATTERIES]
+
     total_ok = 0
     total_fail = 0
     fallidas: list[str] = []
+    resultados: dict[str, tuple[int, int, int, str]] = {}
 
     child_env = os.environ.copy()
     child_env["PYTHONIOENCODING"] = "utf-8"
     child_env["PYTHONUTF8"] = "1"
+    child_env["PYTHONDONTWRITEBYTECODE"] = "1"  # [P6.2] sin .pyc en los hijos
 
-    for i, nombre in enumerate(lista, 1):
-        print(f"\n──────── [{i}/{len(lista)}] {nombre} ────────")
+    def _ejecutar(nombre: str):
         proc = subprocess.run(
             [sys.executable, str(TESTS_DIR / nombre)],
             cwd=str(TESTS_DIR.parent), capture_output=True, text=True,
             encoding="utf-8", errors="replace", env=child_env,
         )
-        if proc.stdout:
-            sys.stdout.write(proc.stdout)
-        if proc.stderr:
-            sys.stderr.write(proc.stderr)
+        return nombre, proc
 
-        coincidencias = _RESUMEN.findall(proc.stdout)
+    def _procesar(nombre: str, proc) -> None:
+        nonlocal total_ok, total_fail
+        coincidencias = _RESUMEN.findall(proc.stdout or "")
         if coincidencias:
             ok, fail = (int(n) for n in coincidencias[-1])
             if proc.returncode != 0 and fail == 0:
-                fail = 1  # exit != 0 sin fallos en resumen cuenta como mínimo 1 fallo
+                fail = 1
             detalle = f"{ok} OK · {fail} fallos"
         else:
-            ok = 0
-            fail = 1  # sin resumen (crash/anormal) cuenta como mínimo 1 fallo
+            ok, fail = 0, 1
             detalle = "SIN RESUMEN (¿crash?)"
         verde = proc.returncode == 0 and fail == 0
+        resultados[nombre] = (ok, fail, proc.returncode, detalle)
         total_ok += ok
         total_fail += fail
         if not verde:
             fallidas.append(nombre)
-        print(f"  → {nombre}: {detalle} · exit {proc.returncode}"
-              + ("" if verde else "  ✗ FALLA"))
+
+    n_herm = len(en_paralelo)
+    if n_herm and not serial:
+        max_w = workers or max(1, (os.cpu_count() or 2) - 1)
+        print(f"[P6.2] herméticas en paralelo: {n_herm} baterías × "
+              f"{max_w} workers · no-herméticas en serie al final")
+        idx = {n: i for i, n in enumerate(en_paralelo)}
+        completadas = 0
+        with ThreadPoolExecutor(max_workers=max_w) as ex:
+            futs = {ex.submit(_ejecutar, n): n for n in en_paralelo}
+            for fut in as_completed(futs):
+                nombre, proc = fut.result()
+                _procesar(nombre, proc)
+                completadas += 1
+                ok, fail, rc, det = resultados[nombre]
+                print(f"[{completadas}/{n_herm}] {nombre}: {det} · exit {rc}"
+                      + ("" if rc == 0 and fail == 0 else "  ✗ FALLA"))
+        for n in en_paralelo:  # detalle completo en orden canónico
+            ok, fail, rc, det = resultados[n]
+            print(f"  · {n}: {det}")
+
+    for i, nombre in enumerate(en_serie, 1):
+        print(f"\n──────── [serie {i}/{len(en_serie)}] {nombre} ────────")
+        nombre_out, proc = _ejecutar(nombre)
+        _procesar(nombre_out, proc)
+        if proc.stdout:
+            sys.stdout.write(proc.stdout)
+        if proc.stderr:
+            sys.stderr.write(proc.stderr)
+        ok, fail, rc, det = resultados[nombre]
+        print(f"  → {nombre}: {det} · exit {rc}"
+              + ("" if rc == 0 and fail == 0 else "  ✗ FALLA"))
 
     print(f"\n═══ TOTAL: {total_ok} OK · {total_fail} fallos "
-          f"en {len(BATERIAS)} baterías ═══")
+          f"en {len(lista)} baterías ═══")
     if fallidas:
         print("Baterías en rojo: " + ", ".join(fallidas))
         return 1

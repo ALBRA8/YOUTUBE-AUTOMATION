@@ -4,6 +4,7 @@ YOUTUBE AUTOMATION v2.0 — Servidor principal (FastAPI)
 Dashboard en http://127.0.0.1:8000  ·  progreso por SSE  ·  coste $0/video
 """
 import asyncio
+import os
 import time
 import io
 import json
@@ -18,35 +19,67 @@ from typing import Optional
 import config
 import database as db
 import security
+
+# [P4.1] HIGIENE REPRODUCIBLE · UTF-8 SIEMPRE: en Windows, el stdout por
+# defecto es cp1252 y cada «falló»/«Escena_NN» salía mojado (fallÃ³). El
+# log, stdout y stderr van en UTF-8 desde el primer import.
+logging.basicConfig(
+    level=logging.INFO,
+    encoding="utf-8",  # NO-OP seguro en Python < 3.9 (kwargs tolerado)
+    format="%(asctime)s %(name)s %(levelname)s %(message)s")
+import sys as _sys  # noqa: E402
+for _stream in (_sys.stdout, _sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):  # capturas no-texto en tests
+        pass
+
+log = logging.getLogger("main")
 from config import DATA_DIR, HOST, OUTPUT_DIR, PORT, TMP_DIR
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
                                Response, StreamingResponse)
 from fastapi.staticfiles import StaticFiles
-from pipeline import images as imgs_pipeline
 from pipeline import orchestrator
 from pipeline import project_workspace  # INT-086: workspace modular
 from pipeline import video as video_pipeline
 from pipeline.subtitles import words_to_srt
-from services import (general_agent as agent_svc,  # INT-028: cerebro único (ex-VÓRTICE)
-                      backup as backup_svc, camera_recipes,
+from services import (backup as backup_svc, camera_recipes,
                       doctor as doctor_svc,
                       gemini_client, guion_json as guion_svc,
                       library as library_svc,
-                      niches as niches_svc, nvidia_client,
+                      niches as niches_svc,
                       niche_templates as ntpl_svc,  # INT-086: catálogo
                       production_json as prod_svc, scheduler,
                       trend_research as trends_svc,
-                      tts_service, universos,  # INT-090: blindaje de universos
-                      url_mode, whisper_service, youtube_publish)
+                      universos,  # INT-090: blindaje de universos
+                      url_mode, youtube_publish)
+
+# [P6.1] IMPORT DIFERIDO de servicios que SOLO consumen endpoints concretos:
+# general_agent (141 ms), nvidia_client, whisper_service, tts_service y
+# pipeline.images ya no se pagan al ARRANCAR (en Windows: segundos de disco
+# lento + antivirus por import). El primer uso de cada endpoint los carga
+# una vez y quedan cacheados (_svc). NUNCA se elimina verificación, solo
+# trabajo redundante de importación en rutas que no se usan en el arranque.
+import importlib as _importlib
+_LAZY_MODS: dict = {}
+
+
+def _svc_lazy(mod_name: str):
+    """Import perezoso cacheado (P6.1): el arranque de main.py no paga los
+    módulos de servicios que solo usan endpoints individuales."""
+    m = _LAZY_MODS.get(mod_name)
+    if m is None:
+        m = _importlib.import_module(mod_name)
+        _LAZY_MODS[mod_name] = m
+    return m
 from services import avatar_schema
 from routers import niches as niches_router
 from routers import registro as registro_router
 from services.themes import STYLES, get_style
 
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s %(name)s %(levelname)s %(message)s")
-log = logging.getLogger("main")
+# logging ya configurado UTF-8 arriba ([P4.1]) — basicConfig es idempotente
+# y el getLogger reutiliza el mismo logger "main".
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -63,10 +96,20 @@ async def lifespan(app: FastAPI):
             "ALLOW_OPEN_LAN=1 si asumes el riesgo.")
     try:
         env_file = Path(config.__file__).resolve().parent / ".env"
-        if env_file.is_file() and (env_file.stat().st_mode & 0o077):
-            env_file.chmod(0o600)
+        if env_file.is_file():
+            # [A6 · P0.6] chmod no hace NADA en NTFS: en Windows la ACL real
+            # se fija con icacls (herencia quitada, solo el usuario actual).
+            security.apply_env_acl(env_file)
     except Exception as exc:
-        log.warning("no se pudo fijar permisos 0600 a .env: %s", exc)
+        log.warning("no se pudo fijar permisos 0600/ACL a .env: %s", exc)
+
+    # [C8 · P2.5] el scheduler de la FÁBRICA arranca en lifespan (antes solo
+    # arrancaba al guardar Ajustes → sin guardar una vez, 0 vídeos/día).
+    try:
+        from services import scheduler as factory_scheduler
+        factory_scheduler.arrancar()
+    except (ImportError, RuntimeError, ValueError, OSError) as exc:
+        log.warning("scheduler de fábrica no arrancó: %s", exc)
 
     # 2. Backups al arrancar y arranque de scheduler (v2.12.2)
     try:
@@ -82,7 +125,13 @@ async def lifespan(app: FastAPI):
     # Shutdown si aplica
 
 
-app = FastAPI(title="YT Automation v2.0", version=config.APP_VERSION, lifespan=lifespan)
+# [P6.1] el schema OpenAPI de FastAPI es LAZY (se construye al primer
+# /openapi.json, jamás al arrancar) y auth_guard responde 404 a /docs y
+# /openapi.json en modo local (A5/P0.4) → en local el schema NUNCA se
+# genera. Las rutas DEBEN existir para que, con MASTER_API_KEY activada,
+# la documentación sirva (200) — por eso openapi_url queda por defecto.
+app = FastAPI(title="YT Automation v2.0", version=config.APP_VERSION,
+              lifespan=lifespan)
 # P3-1: Routers modulares (Fase 1: Nichos)
 app.include_router(niches_router.router)
 # PASO 3.2 minidramas: registro de producciones (SOLO LECTURA)
@@ -132,10 +181,17 @@ async def auth_guard(request, call_next):
         return await call_next(request)
 
     _p = request.url.path
-    # PHASE 1 · M1: la documentación y el schema abierto también exigen
-    # clave (/docs, /redoc, /openapi.json — /mcp/* ya quedaba cubierto).
+    # PHASE 1 · M1: la documentación y el schema abierto exigen clave.
+    # [A5 · P0.4] EN MODO LOCAL TAMBIÉN quedan protegidos: sin MASTER_API_KEY
+    # no hay quién «pase» la clave, así que /docs,/redoc,/openapi.json
+    # responden 404 (no revelan superficie interna) salvo DOCS_ENABLED=1.
     _is_docs = (_p in ("/docs", "/redoc", "/openapi.json")
                 or _p.startswith("/docs/") or _p.startswith("/redoc/"))
+    if _is_docs and not security.enabled() \
+            and os.getenv("DOCS_ENABLED", "").strip() not in ("1", "true", "yes"):
+        return JSONResponse(status_code=404,
+                            content={"detail": "documentación deshabilitada en "
+                                               "modo local (DOCS_ENABLED=1 para activar)"})
     if security.enabled() and (_p.startswith("/api/") or _p.startswith("/mcp")
                                or _is_docs) \
             and _p not in security.PUBLIC_PATHS:
@@ -185,15 +241,36 @@ async def csrf_guard(request, call_next):
     cl = request.headers.get("content-length") or ""
     if cl.isdigit() and int(cl) > config.LIMITS["MAX_BODY_BYTES"]:
         return JSONResponse(status_code=413, content={"detail": "body demasiado grande"})
+    # [A7 · P0.5] tope de body REAL: el único caso SIN límite es
+    # Transfer-Encoding: chunked (RFC 9112 §6: sin CL y sin TE el body es 0
+    # bytes — DELETE/POST sin body son legítimos y jamás llevan tope).
+    # Un body chunked por el que el cliente declara longitud desconocida
+    # (streaming ilimitado) se rechaza 411 en mutaciones.
+    if m in ("POST", "PUT", "PATCH", "DELETE") \
+            and not cl \
+            and (request.headers.get("transfer-encoding")
+                 or "").strip().lower() not in ("", "identity"):
+        return JSONResponse(status_code=411,
+                            content={"detail": "Content-Length requerido "
+                                               "(no se aceptan bodies chunked sin tope)"})
     return await call_next(request)
 
 
 # [flow-bridge v1.1] CORS endurecido (P0-4: declarado EXTERNO a auth_guard y csrf_guard
 # para que los preflights OPTIONS y las respuestas 401/403 reciban cabeceras CORS)
+# [A5 · P0.4] CORS por IDs de extensión CONOCIDOS: si EXTENSION_IDS está en
+# .env (separada por comas), solo esas IDs pueden cruzar CORS; sin ella se
+# conserva el regex histórico [a-p]+ (compatibilidad) y /api/auth/status lo avisa.
+import re as _re_cors  # noqa: E402
+if config.EXTENSION_IDS:
+    _ext_ids = "|".join(_re_cors.escape(i.strip()) for i in config.EXTENSION_IDS if i.strip())
+    _ext_regex = rf"chrome-extension://({_ext_ids})"
+else:
+    _ext_regex = r"chrome-extension://[a-p]+"
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^(chrome-extension://[a-p]+|https?://(localhost|127\.0\.0\.1)(:\d+)?)$",
+    allow_origin_regex=rf"^({_ext_regex}|https?://(localhost|127\.0\.0\.1)(:\d+)?)$",
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["*"],
@@ -301,13 +378,39 @@ def _to_float(v, default: float, name: str) -> float:
         raise HTTPException(400, f"'{name}' debe ser numérico")
 
 
+# [C1 · P0.1] extensiones que _path_contenida considera SERVIBLES: media
+# únicamente (imágenes/vídeo/audio). data/backups/** (env.bak con
+# GEMINI_API_KEY y HF_TOKEN en claro, token.json.bak, .db) y cualquier
+# binario/sistema (.env, .json, .db, .py…) queda FUERA por construcción.
+_MEDIA_EXT = {
+    ".mp4", ".mov", ".webm", ".mkv", ".avi",
+    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp",
+    ".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus",
+}
+
+
 def _path_contenida(raw: str) -> "Path | None":
     """INT-080 · M5 para rutas arbitrarias: devuelve la ruta RESUELTA solo si
     vive bajo una raíz segura del backend (data/, tmp/, static/, output/).
     Bloquea leer/servir archivos fuera de ellas (p.ej. backend/.env) aunque un
-    endpoint reciba una ruta absoluta del cliente."""
+    endpoint reciba una ruta absoluta del cliente.
+
+    [C1 · P0.1] dos candados añadidos (data/backups contiene env.bak con
+    GEMINI_API_KEY/HF_TOKEN en claro, token.json.bak y los .db):
+      1. SOLO extensiones de media (_MEDIA_EXT) — un .env/.bak/.db/.json ya
+         no es servible aunque alguien lo copie bajo data/.
+      2. data/backups/** EXCLUIDO SIEMPRE — fail-closed incluso si mañana
+         se añade una extensión nueva a la lista."""
     try:
         rp = Path(raw).resolve()
+    except (OSError, ValueError):
+        return None
+    if rp.suffix.lower() not in _MEDIA_EXT:
+        return None
+    try:
+        backups = (DATA_DIR / "backups").resolve()
+        if rp == backups or rp.is_relative_to(backups):
+            return None
     except (OSError, ValueError):
         return None
     for root in (DATA_DIR, TMP_DIR, STATIC_DIR, OUTPUT_DIR,
@@ -320,6 +423,28 @@ def _path_contenida(raw: str) -> "Path | None":
     return None
 
 
+_MP4_MAGIC = (b"ftyp",)
+
+
+def _es_video_real(p: Path) -> bool:
+    """[C1 · P0.1] ¿es un vídeo REAL y no un disfraz? Magic bytes primero
+    (barato: mp4/mov 'ftyp' en offset 4, webm/mkv EBML); si no casan,
+    ffprobe corto decide. Solo-lectura, sin excepciones hacia arriba."""
+    try:
+        with open(p, "rb") as f:
+            head = f.read(12)
+        if len(head) >= 8 and head[4:8] in _MP4_MAGIC:
+            return True
+        if head.startswith(b"\x1aE\xdf\xa3"):  # EBML (webm/mkv)
+            return True
+    except OSError:
+        return False
+    # dudoso → ffprobe decide (probe_duration devuelve 0.0 ante cualquier
+    # fallo interno; jamás lanza, no necesita try propio)
+    from pipeline.video import probe_duration  # diferido (subprocess)
+    return probe_duration(p) > 0.05
+
+
 # ──────────────────────────────────────────────────────── básicos ──
 # [P3-2] _int080_security_guard migrado a lifespan
 
@@ -327,17 +452,28 @@ def _path_contenida(raw: str) -> "Path | None":
 @app.get("/api/health")
 async def health():
     return {"ok": True, "version": config.APP_VERSION, "gemini": gemini_client.available(),
-            "nvidia": nvidia_client.available(),
-            "nvidia_model": nvidia_client.last_model(),
-            "whisper": whisper_service.available(),
+            "nvidia": _svc_lazy("services.nvidia_client").available(),
+            "nvidia_model": _svc_lazy("services.nvidia_client").last_model(),
+            "whisper": _svc_lazy("services.whisper_service").available(),
             "youtube": youtube_publish.configured(),
             "canales": False}  # puente WhatsApp/Telegram pendiente de re-cosecha (v2.11.2)
 
 
 @app.get("/api/auth/status")
 async def auth_status():
-    """El dashboard consulta esto al cargar: si hay clave maestra, pide login."""
-    return {"auth_required": security.enabled()}
+    """El dashboard consulta esto al cargar: si hay clave maestra, pide login.
+    [A5 · P0.4] aviso honesto en modo local: sin MASTER_API_KEY el panel está
+    abierto en 127.0.0.1 (modelo OBS/Jupyter) y CORS admite CUALQUIER ID de
+    extensión chrome-extension:// mientras no se configure EXTENSION_IDS."""
+    avisos = []
+    if not security.enabled():
+        avisos.append("modo local SIN clave maestra: define MASTER_API_KEY en "
+                      "backend/.env para proteger el panel (obligatorio si "
+                      "expones el puerto fuera de 127.0.0.1)")
+    if not config.EXTENSION_IDS:
+        avisos.append("CORS sin EXTENSION_IDS configurada: se acepta cualquier "
+                      "ID de extensión chrome-extension:// (regex [a-p]+)")
+    return {"auth_required": security.enabled(), "avisos": avisos}
 
 
 @app.get("/api/styles")
@@ -388,7 +524,7 @@ async def settings():
     return {
         "gemini_key": gemini_client.available(),
         "tts_provider": config.TTS_PROVIDER,
-        "whisper": whisper_service.available(),
+        "whisper": _svc_lazy("services.whisper_service").available(),
         "youtube_configured": youtube_publish.configured(),
         "youtube_token": youtube_publish.has_token(),
         "edge_voices": [
@@ -521,7 +657,7 @@ async def get_config():
         "env_exists": config.ENV_PATH.exists(),
         "gemini_key_set": gemini_client.available(),
         "gemini_key_masked": _mask(config.GEMINI_API_KEY),
-        "nvidia_key_set": nvidia_client.available(),
+        "nvidia_key_set": _svc_lazy("services.nvidia_client").available(),
         "nvidia_key_masked": _mask(config.NVIDIA_API_KEY),
         "nvidia_model": config.NVIDIA_MODEL,
         "tts_provider": config.TTS_PROVIDER,
@@ -530,7 +666,7 @@ async def get_config():
         "tts_rate": config.TTS_RATE,
         "whisper_model": config.WHISPER_MODEL,
         "whisper_device": config.WHISPER_DEVICE,
-        "whisper_available": whisper_service.available(),
+        "whisper_available": _svc_lazy("services.whisper_service").available(),
         "fps": config.FPS,
         "youtube_configured": youtube_publish.configured(),
         "youtube_token": youtube_publish.has_token(),
@@ -890,11 +1026,11 @@ async def avatars_image_get(aid: str):
 async def cerebros_list():
     """v2.12.1 · CEREBROS: catálogo de modelos NVIDIA con estado vivo
     (ok/fail/untested + latencia del último uso) y el activo."""
-    if not nvidia_client.available():
+    if not _svc_lazy("services.nvidia_client").available():
         return {"activo": None, "cerebros": [], "aviso": "sin NVIDIA_API_KEY"}
-    act = nvidia_client.active_cerebro()
+    act = _svc_lazy("services.nvidia_client").active_cerebro()
     return {"activo": act["alias"], "modelo": act["model"],
-            "cerebros": nvidia_client.list_cerebros()}
+            "cerebros": _svc_lazy("services.nvidia_client").list_cerebros()}
 
 
 _IMAGE_RE = re.compile(
@@ -905,10 +1041,10 @@ _IMAGE_RE = re.compile(
 async def cerebros_pick(body: dict):
     """Elige el cerebro del Agente General (persistente en .env, aplica al instante)."""
     alias = str((body or {}).get("alias") or "").strip()
-    c = nvidia_client.find_cerebro(alias)
+    c = _svc_lazy("services.nvidia_client").find_cerebro(alias)
     if not c:
         raise HTTPException(400, "cerebro desconocido: " + alias)
-    nvidia_client.set_preferred(alias)
+    _svc_lazy("services.nvidia_client").set_preferred(alias)
     config.save_env({"NVIDIA_MODEL": c["model"]})
     return {"ok": True, "activo": c["alias"], "model": c["model"],
             "name": c["name"], "vision": c["vision"],
@@ -925,11 +1061,11 @@ async def chat(body: dict):
     confirm = body.get("confirm") or None
     if confirm:
         action = str(confirm.get("action") or "")
-        if action not in agent_svc.DESTRUCTIVE_ACTIONS:
+        if action not in _svc_lazy("services.general_agent").DESTRUCTIVE_ACTIONS:
             raise HTTPException(400, "acción no confirmable")
         plan_out = {"action": action, "params": confirm.get("params") or {},
                     "reply": "", "engine": "confirm"}
-        result = await agent_svc.execute(plan_out, db, orchestrator, db.list_avatars())
+        result = await _svc_lazy("services.general_agent").execute(plan_out, db, orchestrator, db.list_avatars())
         result["engine"] = "confirm"
         return result
     # INT-084 · mejora 6: alias «mensaje» ≡ «message» (integraciones ES/EN);
@@ -945,13 +1081,13 @@ async def chat(body: dict):
         raise HTTPException(400, "imagen inválida (usa data URL o http(s))")
     if image and len(image) > 5_500_000:
         raise HTTPException(413, "imagen demasiado grande (máx ~4MB)")
-    cinfo = nvidia_client.find_cerebro(prefer) if prefer else None
+    cinfo = _svc_lazy("services.nvidia_client").find_cerebro(prefer) if prefer else None
     if image and cinfo and not cinfo["vision"]:
         raise HTTPException(400, f"el cerebro {cinfo['name']} no ve imágenes — "
                                  "cambia a uno con visión (👁️)")
-    plan_out = await agent_svc.plan(message, history, db.list_avatars(), db,
+    plan_out = await _svc_lazy("services.general_agent").plan(message, history, db.list_avatars(), db,
                                     prefer=prefer, image=image)
-    if plan_out.get("action") in agent_svc.DESTRUCTIVE_ACTIONS:
+    if plan_out.get("action") in _svc_lazy("services.general_agent").DESTRUCTIVE_ACTIONS:
         what = (plan_out.get("params", {}).get("name")
                 or plan_out.get("params", {}).get("project_name") or "").strip()
         if plan_out["action"] == "cleanup_failed":
@@ -963,38 +1099,16 @@ async def chat(body: dict):
                 "pending": {"action": plan_out["action"],
                             "params": plan_out.get("params", {})},
                 "engine": plan_out.get("engine", "local")}
-    result = await agent_svc.execute(plan_out, db, orchestrator, db.list_avatars())
+    result = await _svc_lazy("services.general_agent").execute(plan_out, db, orchestrator, db.list_avatars())
     result["engine"] = plan_out.get("engine", "local")
     return result
 
 
-# ─────────────────────────── backups (v2.12.2 · resiliencia) ──
-@app.get("/api/backups")
-async def backups_list():
-    """Backups disponibles (DB + token.json + .env) — el más nuevo primero."""
-    return {"dir": str(backup_svc.BACKUP_DIR), "keep": backup_svc.KEEP,
-            "interval_h": backup_svc.INTERVAL_H, "backups": backup_svc.list_backups()}
-
-
-@app.post("/api/backups")
-async def backups_create():
-    """Crea un backup ahora mismo (manual)."""
-    r = await asyncio.to_thread(backup_svc.create_backup, "manual")
-    if not r:
-        raise HTTPException(500, "el backup falló — revisa el log del servidor")
-    return {"ok": True, "backup": r, "message": "Backup creado ✅"}
-
-
-@app.post("/api/backups/restore")
-async def backups_restore(body: dict):
-    """Restaura un backup (antes deja uno de seguridad pre-restore)."""
-    name = str((body or {}).get("name") or "")
-    try:
-        r = await asyncio.to_thread(backup_svc.restore_backup, name)
-    except (ValueError, FileNotFoundError) as e:
-        raise HTTPException(400, str(e))
-    return {"ok": True, **r,
-            "message": f"Restaurado {name} — reinicia el servidor para recargar todo"}
+# ─────────────────────────── backups + retención (v2.12.2 / P5.4) ──
+# [P6.4·entrega 1] dominio MANTENIMIENTO extraído a routers/maintenance.py:
+# mismas rutas, mismas respuestas (cero ruptura para UI y baterías).
+from routers.maintenance import router as maintenance_router  # noqa: E402
+app.include_router(maintenance_router)
 
 
 # ──────────────────────────────────────────────────────── proyectos ──
@@ -1523,28 +1637,29 @@ async def dialog_pick_folder():
 
 @app.get("/api/dialog/browse-dirs")
 async def dialog_browse_dirs(path: str = ""):
-    """Explorador visual in-browser: navega discos y carpetas de la máquina sin depender de ventanas emergentes."""
-    import os, string
-    from pathlib import Path
+    """Explorador visual in-browser: navega discos y carpetas de la máquina sin depender de ventanas emergentes.
+    [A16 · P0.3] exige RAÍZ CONFIGURADA (DIALOG_ROOTS en .env, separada por
+    «;»): sin raíces declaradas el explorador está DESHABILITADO y cualquier
+    ruta fuera de ellas responde ok:false — ya no hay browsing libre de todo
+    el disco (que era un listador de filesystem para cualquier origen).
+    La elección TOTALMENTE libre sigue existiendo vía el selector NATIVO de
+    Windows (POST /api/pick-folder), que no expone el filesystem a la web."""
+    import os
     clean_p = (path or "").strip().strip('"').strip()
+    roots = _dialog_roots()
+    if not roots:
+        return {"ok": False, "error": "explorador deshabilitado: define DIALOG_ROOTS en backend/.env (rutas separadas por «;»)"}
     if not clean_p:
-        drives = []
-        if os.name == "nt":
-            import ctypes
-            bitmask = ctypes.windll.kernel32.GetLogicalDrives()
-            for letter in string.ascii_uppercase:
-                if bitmask & 1:
-                    d = f"{letter}:\\"
-                    if os.path.exists(d):
-                        drives.append({"name": f"Disco ({letter}:)", "path": d})
-                bitmask >>= 1
-        return {"ok": True, "current": "", "parent": "", "dirs": drives}
+        dirs = [{"name": f"Raíz: {r}", "path": str(r)} for r in roots]
+        return {"ok": True, "current": "", "parent": "", "dirs": dirs}
 
     target = Path(clean_p).resolve()
+    if not _en_dialog_roots(target, roots):
+        return {"ok": False, "error": "ruta fuera de las raíces configuradas (DIALOG_ROOTS)"}
     if not target.exists() or not target.is_dir():
         return {"ok": False, "error": f"Carpeta no encontrada: {target}"}
 
-    parent = str(target.parent) if target.parent != target else ""
+    parent = str(target.parent) if (target.parent != target and _en_dialog_roots(target.parent, roots)) else ""
     subdirs = []
     try:
         for entry in os.scandir(target):
@@ -1558,12 +1673,19 @@ async def dialog_browse_dirs(path: str = ""):
 
 @app.post("/api/dialog/create-dir")
 async def dialog_create_dir(body: dict):
-    """Crea una carpeta nueva en la ruta seleccionada."""
-    from pathlib import Path
+    """Crea una carpeta nueva en la ruta seleccionada.
+    [A16 · P0.3] SOLO bajo una raíz configurada (DIALOG_ROOTS): crear
+    directorios arbitrarios en el disco (p.ej. C:\\Users\\…\\Startup) era
+    escritura libre para cualquier cliente con Origin local."""
     ruta = (body.get("path") or "").strip().strip('"')
     if not ruta:
         return {"ok": False, "error": "Ruta requerida"}
+    roots = _dialog_roots()
+    if not roots:
+        return {"ok": False, "error": "explorador deshabilitado: define DIALOG_ROOTS en backend/.env"}
     p = Path(ruta).resolve()
+    if not _en_dialog_roots(p, roots):
+        return {"ok": False, "error": "ruta fuera de las raíces configuradas (DIALOG_ROOTS)"}
     try:
         p.mkdir(parents=True, exist_ok=True)
         return {"ok": True, "path": str(p)}
@@ -1572,6 +1694,32 @@ async def dialog_create_dir(body: dict):
 
 
 # ── AGENTE 2 · Abrir Carpeta en el PC del usuario (1 clic en la web) ────
+def _dialog_roots() -> list[Path]:
+    """[A16 · P0.3] raíces configuradas para el explorador in-browser.
+    DIALOG_ROOTS en .env (separadas por «;»). Default: la carpeta de
+    workspaces (PROJECTS_DIR) — el uso legítimo del explorador es elegir
+    destino de proyectos; browse-dirs/create-dir mueren fuera de ellas."""
+    raw = (getattr(config, "DIALOG_ROOTS", "") or "").strip()
+    if not raw:
+        raw = str(config.PROJECTS_DIR)
+    roots = []
+    for part in raw.split(";"):
+        part = part.strip().strip('"')
+        if part:
+            try:
+                roots.append(Path(part).resolve())
+            except (OSError, ValueError):
+                continue
+    return roots
+
+
+def _en_dialog_roots(p: Path, roots: list[Path]) -> bool:
+    try:
+        return any(p == r or p.is_relative_to(r) for r in roots)
+    except (OSError, ValueError):
+        return False
+
+
 def _abrir_carpeta_sistema(ruta: Path) -> tuple[bool, str]:
     """Abre la carpeta en el explorador de archivos del SO (Windows primero:
     os.startfile es el mecanismo nativo del Explorador de archivos). En
@@ -1662,7 +1810,10 @@ async def delete_project(pid: str):
     job = db.active_job_for_project(pid)
     if job:
         orchestrator.cancel_job(job["id"])
-    shutil.rmtree(security.safe_project_output_dir(pid), ignore_errors=True)
+    # [A7 · P2.2] el rmtree de un proyecto con GB de vídeo es I/O lento:
+    # en hilo, no en el event loop.
+    await asyncio.to_thread(
+        shutil.rmtree, security.safe_project_output_dir(pid), True)
     project_workspace.purge_workspace(p)  # INT-086: vista organizada
     db.delete_project(pid)  # ahora también purga flow_jobs (integridad)
     return {"ok": True}
@@ -1751,8 +1902,11 @@ async def project_video(pid: str, download: bool = False):
         raise HTTPException(404, "video no disponible")
     # INT-080: contención M5 — la columna video_url solo puede apuntar a
     # raíces seguras del backend; nunca a rutas arbitrarias del disco.
+    # [C1 · P0.1] además: EXCLUSIÓN de data/backups/** (env.bak, token.json.bak,
+    # .db) y validación de que sea vídeo REAL (magic bytes/ffprobe corto).
     video_fs = _path_contenida(p["video_url"])
-    if not video_fs or not video_fs.is_file():
+    if not video_fs or not video_fs.is_file() \
+            or not await asyncio.to_thread(_es_video_real, video_fs):
         raise HTTPException(404, "video no disponible")
     return FileResponse(
         video_fs,
@@ -1781,8 +1935,9 @@ async def project_contact_sheet(pid: str):
     p = db.get_project(pid)
     if not p or not p.get("video_url"):
         raise HTTPException(404, "video no disponible")
-    video_fs = _path_contenida(p["video_url"])  # INT-080: contención M5
-    if not video_fs or not video_fs.is_file():
+    video_fs = _path_contenida(p["video_url"])  # INT-080: contención M5 + P0.1
+    if not video_fs or not video_fs.is_file() \
+            or not await asyncio.to_thread(_es_video_real, video_fs):
         raise HTTPException(404, "video no disponible")
     out = security.safe_project_output_dir(_pid(pid)) / "contact_sheet.jpg"
     if not out.is_file():
@@ -1982,7 +2137,7 @@ async def regen_image(scene_id: str, body: dict):
     if not scene:
         raise HTTPException(404, "escena no existe")
     project = db.get_project(pid)
-    path, method = await imgs_pipeline.generate_scene_image(scene, project, int(scene["idx"]))
+    path, method = await _svc_lazy("pipeline.images").generate_scene_image(scene, project, int(scene["idx"]))
     db.update_scene(scene_id, image_path=str(path))
     return {"image": f"/api/scenes/{scene_id}/image?project_id={pid}&v={path}", "method": method}
 
@@ -1996,7 +2151,7 @@ async def regen_flow_scene(scene_id: str, body: dict):
     if not scene:
         raise HTTPException(404, "escena no existe")
     project = db.get_project(pid)
-    path, method = await imgs_pipeline.generate_scene_image(scene, project, int(scene["idx"]))
+    path, method = await _svc_lazy("pipeline.images").generate_scene_image(scene, project, int(scene["idx"]))
     db.update_scene(scene_id, image_path=str(path))
     return {
         "ok": True,
@@ -2164,6 +2319,22 @@ async def publish_video(pid: str, body: dict):
     if qa.get("worst") == "error":
         raise HTTPException(409, "QA del render final con errores — "
                                  "publicación bloqueada; re-renderiza el proyecto")
+    # [A14 · P1.7] GATE DE SUBTÍTULOS: un render sin subtítulos quemados no
+    # se publica (antes quedaba ready y se autopublicaba mudo de texto — la
+    # retención de Shorts depende del texto en pantalla). Se bloquea si
+    # subs_status.json declara burned=False (fallback silencioso), salvo
+    # override explícito en el body ({\"sin_subtitulos\": true}).
+    subs_status_file = OUTPUT_DIR / pid / "subs_status.json"
+    if subs_status_file.is_file() and not bool((body or {}).get("sin_subtitulos")):
+        try:
+            _subs = json.loads(subs_status_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            _subs = {}
+        if _subs.get("burned") is False:
+            raise HTTPException(
+                409, "subtítulos NO quemados (subs_status.json burned=false) — "
+                     "publicación bloqueada; re-renderiza o envía "
+                     "sin_subtitulos=true para forzar")
     if not youtube_publish.configured():
         raise HTTPException(400, "Configura client_secret.json (README §Publicar)")
     jid = db.create_job(pid, kind="publish")
@@ -2409,7 +2580,8 @@ async def video_qa_endpoint(pid: str):
     _pid(pid)
     from services import video_qa
     try:
-        return video_qa.qa_project(pid)
+        # [A7 · P2.2] ffprobe/PIL del QA completo en hilo (event loop libre)
+        return await asyncio.to_thread(video_qa.qa_project, pid)
     except LookupError as e:
         raise HTTPException(404, str(e)) from e
 
@@ -3156,7 +3328,8 @@ async def avatar_lipsync_musetalk(avatar_id: str, body: dict):
 
     # Convertir a WAV 16-bit PCM estándar para el análisis fonético
     cmd = ["ffmpeg", "-y", "-i", str(mp3_path), "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le", str(wav_path)]
-    subprocess.run(cmd, capture_output=True, check=True)
+    # [A7 · P2.2] ffmpeg fuera del event loop (antes congelaba health/jobs)
+    await asyncio.to_thread(lambda: subprocess.run(cmd, capture_output=True, check=True))
 
     # INT-072: HF Spaces hiperrealista primero ($0.00) con fail-open al motor
     # local determinista. La decisión vive en render_avatar_animation.
@@ -3177,14 +3350,24 @@ async def avatar_lipsync_musetalk(avatar_id: str, body: dict):
 
 @app.post("/api/product/badge")
 async def product_badge(body: dict):
-    """🛍️ INT-055: Genera un badge de conversión e-commerce en PNG transparente."""
+    """🛍️ INT-055: Genera un badge de conversión e-commerce en PNG transparente.
+    [A1 · P0.2] `type` saneado (security.safe_filename) y el destino final
+    validado con resolve()+is_relative_to(static_assets): un type
+    "../../boot" ya no escribe fuera de static/assets (400 si escapa)."""
     from services import ecommerce_overlays
-    badge_type = body.get("type") or "rating"
+    badge_type = (body.get("type") or "rating").strip()
+    try:
+        safe_type = security.safe_filename(
+            badge_type.replace("/", "_").replace("\\", "_") or "rating")
+    except ValueError:
+        raise HTTPException(400, "tipo de badge inválido")
     text_main = body.get("text")
     tag = body.get("tag")
     out_dir = STATIC_DIR / "assets"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_file = out_dir / f"badge_{badge_type}.png"
+    out_file = (out_dir / f"badge_{safe_type}.png").resolve()
+    if not out_file.is_relative_to(out_dir.resolve()):
+        raise HTTPException(400, "tipo de badge escapa del directorio de assets")
     p = ecommerce_overlays.generate_ecommerce_badge(
         badge_type=badge_type,
         text_main=text_main,
@@ -3348,7 +3531,10 @@ async def product_studio_preview(body: dict):
     raw_img = out_dir / f"raw_{timestamp}.png"
     # P0-2: urlopen seguía redirects sin revalidar (el validar_url de arriba
     # solo cubría la URL original) → safe_fetch_bytes revalida cada salto.
-    raw_img.write_bytes(security.safe_fetch_bytes(
+    # [A7 · P2.2] la descarga (urllib sincrónico) corre en hilo: hasta 15 s
+    # de event loop congelado antes.
+    raw_img.write_bytes(await asyncio.to_thread(
+        security.safe_fetch_bytes,
         image_url, timeout=15, max_bytes=15 * 1024 * 1024))
 
     cutout = out_dir / f"cutout_{timestamp}.png"

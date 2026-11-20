@@ -290,12 +290,25 @@ LIMITS = {
     "MAX_ZIP_COMPRESSED_BYTES": _lim("MAX_ZIP_COMPRESSED_BYTES", 150 * 1024 * 1024),  # A7
     "MAX_ZIP_UNCOMPRESSED_BYTES": _lim("MAX_ZIP_UNCOMPRESSED_BYTES", 600 * 1024 * 1024),  # A7
     "MAX_ZIP_FILES": _lim("MAX_ZIP_FILES", 300),                        # A7
+    "MAX_ZIP_RATIO": _lim("MAX_ZIP_RATIO", 1000),                       # A7/P2.8 bomba 1000:1
     "MAX_IMAGE_PIXELS": _lim("MAX_IMAGE_PIXELS", 40_000_000),           # M10 bomba descompresión
     "MAX_PRODUCTION_UNITS": _lim("MAX_PRODUCTION_UNITS", 40),           # A9 (≈ guion_json MAX_ESCENAS)
     "FLOW_JOB_BODY_BYTES": _lim("FLOW_JOB_BODY_BYTES", 64 * 1024 * 1024),      # complete binario
     "FLOW_JOBS_RETENTION_DAYS": _lim("FLOW_JOBS_RETENTION_DAYS", 30),   # M11 done/dead
     "LEDGER_MAX_LINES": _lim("LEDGER_MAX_LINES", 5000),                 # M11 ledger adaptación
+    "OUTPUT_RETENTION_PROJECTS": _lim("OUTPUT_RETENTION_PROJECTS", 10), # P5.4 retención media
 }
+
+# [A5 · P0.4] IDs de extensión Chrome CONOCIDAS para CORS (separadas por comas).
+# Vacío (default) → regex histórico chrome-extension://[a-p]+ y aviso en
+# /api/auth/status. Con valor, SOLO esas IDs cruzan CORS.
+EXTENSION_IDS = [x.strip() for x in os.getenv("EXTENSION_IDS", "").split(",")
+                 if x.strip()]
+
+# [A16 · P0.3] raíces del explorador in-browser (separadas por «;»). Vacío →
+# default PROJECTS_DIR (destino legítimo de workspaces). El selector NATIVO de
+# Windows (pick-folder) no pasa por aquí: es un diálogo local, no una API web.
+DIALOG_ROOTS = os.getenv("DIALOG_ROOTS", "")
 
 
 def ffmpeg() -> str:

@@ -29,6 +29,7 @@ const fs = require('fs');
 const path = require('path');
 
 const REPO = path.resolve(__dirname, '..');
+const EXT_ID = 'a' + 'bcdefghijklmnopqrstuvwx' + 'ab'; // 32 chars [a-p] aprox
 const BRIDGE_JS = path.join(REPO, 'extension', 'bridge.js');
 
 let OK = 0, FAIL = 0;
@@ -57,12 +58,23 @@ function buildStubs() {
       onAlarm: { addListener: (f) => [] },
     },
     runtime: {
+      // [P3.4] el sender real de la extensión lleva id (32 a-p) y url del
+      // popup: el arnés simula el POPUP, no un content script anónimo.
+      id: EXT_ID,
+      getURL: (p) => 'chrome-extension://' + EXT_ID + '/' + p,
       onMessage: { addListener: (f) => msgListeners.push(f) },
       sendMessage: async () => ({ ok: true, accepted: true }),
     },
   };
   return { store, msgListeners, chrome };
 }
+
+/* sender fiel de un mensaje lanzado desde el popup (P3.4): mismo id de
+   extensión, url popup.html, SIN tab (los content scripts SÍ tienen tab). */
+const POPUP_SENDER = () => ({
+  id: EXT_ID,
+  url: 'chrome-extension://' + EXT_ID + '/popup.html',
+});
 
 function loadBridge(chrome) {
   const src = fs.readFileSync(BRIDGE_JS, 'utf8');
@@ -87,7 +99,7 @@ function lastListener(ml) { return ml[ml.length - 1]; }
 function msgSetCfg(ml, cfg) {
   return new Promise((resolve) => {
     const f = lastListener(ml);
-    if (!f || !f({ type: 'BRIDGE_SET_CFG', cfg }, {}, resolve)) {
+    if (!f || !f({ type: 'BRIDGE_SET_CFG', cfg }, POPUP_SENDER(), resolve)) {
       resolve({ ok: false, error: 'listener no respondió' });
     }
   });
@@ -95,7 +107,7 @@ function msgSetCfg(ml, cfg) {
 function msgGetCfg(ml) {
   return new Promise((resolve) => {
     const f = lastListener(ml);
-    if (!f || !f({ type: 'BRIDGE_GET_CFG' }, {}, resolve)) {
+    if (!f || !f({ type: 'BRIDGE_GET_CFG' }, POPUP_SENDER(), resolve)) {
       resolve({ ok: false, error: 'listener no respondió' });
     }
   });

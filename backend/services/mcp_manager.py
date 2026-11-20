@@ -945,10 +945,39 @@ class MCPClientManager:
     @staticmethod
     def kill_profile_processes(profile_path: Path | str | None = None) -> list[int]:
         """Busca y termina cualquier proceso Chrome huérfano/zombi que esté bloqueando
-        profile_path para permitir que el nuevo Chrome con CDP se enlace sin conflictos."""
+        profile_path para permitir que el nuevo Chrome con CDP se enlace sin conflictos.
+
+        [P6.3] psutil en vez del PowerShell Get-CimInstance (la consulta WMI
+        costaba 1-3 s por llamada y se ejecutaba en el event loop): psutil
+        enumera procesos + cmdline en <100 ms y es multiplataforma. Fallback
+        al camino PowerShell histórico si psutil no está instalado."""
         p_str = str(profile_path if profile_path else _cfg("GOOGLE_PROFILE_GLOBAL", ""))
         p_name = Path(p_str).name
         killed = []
+        try:
+            import psutil  # P6.3: enumeración rápida, sin WMI
+            me = psutil.Process()
+            for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+                try:
+                    info = proc.info
+                    if (info["name"] or "").lower() not in ("chrome.exe", "chrome"):
+                        continue
+                    cmdline = " ".join(info["cmdline"] or [])
+                    if p_name and p_name not in cmdline:
+                        continue
+                    if proc.pid == me.pid:
+                        continue
+                    proc.kill()  # SIGKILL / TerminateProcess
+                    killed.append(proc.pid)
+                except (psutil.NoSuchProcess, psutil.AccessDenied,
+                        psutil.ZombieProcess):
+                    continue
+            if killed:
+                log.info("[mcp-profile] Procesos zombis de Chrome purgados en %s: %s",
+                         p_str, killed)
+            return killed
+        except ImportError:
+            pass  # sin psutil → camino clásico PowerShell (solo Windows)
         if sys.platform == "win32":
             try:
                 ps_cmd = (
@@ -968,7 +997,8 @@ class MCPClientManager:
                                        capture_output=True, timeout=8)
                         killed.append(pid)
                 if killed:
-                    log.info("[mcp-profile] Procesos zombis de Chrome purgados en %s: %s", p_str, killed)
+                    log.info("[mcp-profile] Procesos zombis de Chrome purgados en %s (ps): %s",
+                             p_str, killed)
             except Exception as e:
                 log.warning("[mcp-profile] Error al purgar procesos de %s: %s", p_str, e)
         return killed
@@ -1183,16 +1213,21 @@ class MCPClientManager:
             #   En no-Windows None es estructural (no hay comprobación) y no purga.
             on_windows = sys.platform == "win32"
             if force_window:
-                killed_pids = self.kill_profile_processes(profile)
+                # [A7 · P2.2] purga/sondeo FUERA del event loop (to_thread):
+                # el PowerShell/psutil de la purga bloqueaba health/jobs 1-3 s.
+                killed_pids = await asyncio.to_thread(
+                    self.kill_profile_processes, profile)
                 heal_res = self.heal_chrome_profile(profile)  # borra Singleton* + repara
                 already_up = False
                 relaunched = True
                 log.warning("[mcp] force_window=True: purgados %s zombis del perfil "
                             "→ spawn de ventana interactiva garantizada", killed_pids or "[]")
             else:
-                window_state = self._windows_visible_state(profile)
+                window_state = await asyncio.to_thread(
+                    self._windows_visible_state, profile)
                 if window_state is False or (window_state is None and on_windows):
-                    killed_pids = self.kill_profile_processes(profile)
+                    killed_pids = await asyncio.to_thread(
+                        self.kill_profile_processes, profile)
                     heal_res = self.heal_chrome_profile(profile)
                     already_up = False
                     relaunched = True
@@ -1202,7 +1237,7 @@ class MCPClientManager:
         if not already_up:
             # Purgar SIEMPRE procesos huérfanos/zombis en profile antes del spawn (tanto CDP como sin CDP)
             # para evitar que una instancia fantasma capture la petición silenciosamente sin abrir ventana visible.
-            killed = self.kill_profile_processes(profile)
+            killed = await asyncio.to_thread(self.kill_profile_processes, profile)
             if killed:
                 heal_res = self.heal_chrome_profile(profile)
             chrome = self._find_chrome_bin()
@@ -1242,7 +1277,8 @@ class MCPClientManager:
                     log.warning("[mcp] Chrome lanzado (pid=%s) pero CDP %s NO "
                                 "responde tras 3 s — posible fantasma nuevo", pid, port)
                 if spawn_confirmed:
-                    window_state_after_spawn = self._windows_visible_state(profile)
+                    window_state_after_spawn = await asyncio.to_thread(
+                        self._windows_visible_state, profile)
                     if window_state_after_spawn is False:
                         log.warning("[mcp] CDP %s arriba pero SIN ventana visible "
                                     "(MainWindowHandle==0) — revisar sesión de Windows", port)

@@ -140,6 +140,15 @@ CREATE TABLE IF NOT EXISTS flow_jobs (    -- Flow Bridge: cola de assets para la
     updated_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_flow_jobs_project ON flow_jobs(project_id, status);
+-- [A9 · P2.3] índices de los caminos calientes de la cola:
+--  · claim_next / _recover_en_con filtran por (status, lease_until).
+--  · enqueue_project deduplica y complete() cuenta pendientes por
+--    (kind, scene_number, part) del proyecto (project_id ya en
+--    idx_flow_jobs_project como prefijo).
+CREATE INDEX IF NOT EXISTS idx_flow_jobs_status_lease
+    ON flow_jobs(status, lease_until);
+CREATE INDEX IF NOT EXISTS idx_flow_jobs_kind_scene
+    ON flow_jobs(project_id, kind, scene_number, part);
 CREATE TABLE IF NOT EXISTS brand_profiles (  -- INT-042: Identidad persistente de marca / canal
     id             TEXT PRIMARY KEY,
     name           TEXT NOT NULL,

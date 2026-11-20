@@ -999,6 +999,15 @@ class PipelineOrchestrator:
                     "aspect": aspect, "outDir": str(rd), "outFile": out_file},
                     timeout=float(_cfg("FLOW_MCP_TIMEOUT", 120.0)))
                 video = _last_path(text) or out_file
+                # [A13 · P1.6] VERIFICAR en disco ANTES de marcar done: el tool
+                # puede responder 200 con texto de éxito sin haber dejado el
+                # MP4 (descarga truncada, disco lleno, rename fallido). Antes
+                # la escena quedaba done con video_file inexistente y el
+                # ensamblado moría después con el run en verde.
+                if not Path(video).is_file():
+                    raise mcpm.MCPManagerError(
+                        f"flow_generate_video respondió pero el archivo no "
+                        f"existe en disco: {video}", "TOOL_ERROR")
                 s["status"], s["video_file"] = "done", video
                 run["done_count"] += 1
                 log.info("[pipeline %s] escena %s OK → %s",

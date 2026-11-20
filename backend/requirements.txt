@@ -37,3 +37,4 @@ google-auth-oauthlib>=1.2         # OAuth YouTube (loopback, sin OOB)
 # INT-080 · usado por ecommerce_overlays.py y accent_meter.py (import top-level)
 numpy>=1.26
 opencv-python-headless>=4.8  # INT-056: remoción de fondos claros en e-commerce (ecommerce_overlays.py)
+psutil>=5.9                  # P6.3: enumeración de procesos Chrome en mcp_manager (sustituye PowerShell WMI)

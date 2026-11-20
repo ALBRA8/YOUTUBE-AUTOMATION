@@ -37,6 +37,7 @@ const BRIDGE_CFG = {
 const BRIDGE_CFG_KEY = 'flow_bridge_cfg_v1';            // clave en chrome.storage.local
 const BRIDGE_APIKEY_SESSKEY = 'flow_bridge_aesk_v1';    // clave AES-GCM en chrome.storage.session (SOLO memoria, jamás disco)
 const BRIDGE_APIKEY_ENC_PREFIX = 'enc:v1:';             // apiKey cifrada en storage.local: enc:v1:<iv>:<ct> (base64url)
+const BRIDGE_ACTIVE_KEY = 'flow_bridge_active_v1';       // [A15 · P3.3] job activo persistido (id/token/claimedAt)
 const BRIDGE_API_BASE = '/api/extension/flow/jobs';     // raíz común del contrato
 const BRIDGE_HEARTBEAT_MS = 30000;                      // latido mientras hay job activo
 const BRIDGE_KEEPALIVE_ALARM = 'flow-bridge-keepalive'; // reactiva el bucle tras suspensión MV3
@@ -50,107 +51,10 @@ self.__bridgeCfg = null;      // cache de configuración
 self.__bridgeLastResult = null;
 self.__bridgeLog = [];        // últimas líneas, visibles vía BRIDGE_STATUS
 
-/* ------------------------ Outbox Buffer & JSON-RPC Transport State -------- */
-const BRIDGE_PING_INTERVAL_MS = 5000;
-self.__bridgeOutbox = [];
-self.__bridgeSocketState = 'CLOSED'; // 'CLOSED' | 'CONNECTING' | 'OPEN'
-let __bridgePingTimer = null;
-let __bridgeLastPong = Date.now();
-
-function bridgeSafeJsonRpcSerialize(id, result, error) {
-  try {
-    const payload = { jsonrpc: '2.0', id: id !== undefined ? id : null };
-    if (error) {
-      payload.error = typeof error === 'object' && error !== null ? error : { code: -32603, message: String(error) };
-    } else {
-      payload.result = result !== undefined ? result : null;
-    }
-    return JSON.stringify(payload);
-  } catch (err) {
-    bridgeLog('Error serializando respuesta JSON-RPC: ' + (err && err.message));
-    return JSON.stringify({
-      jsonrpc: '2.0',
-      id: null,
-      error: { code: -32603, message: 'Internal JSON-RPC serialization error' }
-    });
-  }
-}
-
-function bridgeSafeJsonRpcParse(raw) {
-  try {
-    return { ok: true, data: typeof raw === 'string' ? JSON.parse(raw) : raw };
-  } catch (err) {
-    bridgeLog('Error parseando JSON-RPC: ' + (err && err.message));
-    return {
-      ok: false,
-      error: { code: -32700, message: 'Parse error: invalid JSON' }
-    };
-  }
-}
-
-function bridgeEnqueueOutbox(msg) {
-  if (self.__bridgeSocketState === 'OPEN') {
-    return { queued: false, sent: true };
-  }
-  self.__bridgeOutbox.push(msg);
-  bridgeLog('Mensaje almacenado en outbox (estado ' + self.__bridgeSocketState + '). En cola: ' + self.__bridgeOutbox.length);
-  return { queued: true, queueLength: self.__bridgeOutbox.length };
-}
-
-function bridgeFlushOutbox() {
-  if (self.__bridgeSocketState !== 'OPEN' || self.__bridgeOutbox.length === 0) return 0;
-  const count = self.__bridgeOutbox.length;
-  self.__bridgeOutbox = [];
-  bridgeLog('Outbox vaciado exitosamente (' + count + ' mensajes procesados)');
-  return count;
-}
-
-function bridgeSetSocketState(state) {
-  self.__bridgeSocketState = state;
-  if (state === 'OPEN') {
-    bridgeFlushOutbox();
-  }
-}
-
-function bridgeStartPingPong() {
-  if (__bridgePingTimer) clearInterval(__bridgePingTimer);
-  __bridgeLastPong = Date.now();
-  __bridgePingTimer = setInterval(async () => {
-    try {
-      const cfg = await bridgeEnsureCfg();
-      if (!cfg.enabled) return;
-      const res = await bridgeFetch(
-        bridgeUrl(cfg, '/ping?worker=' + encodeURIComponent(cfg.workerId || '')),
-        { method: 'GET' },
-        3000
-      );
-      if (res && res.ok) {
-        __bridgeLastPong = Date.now();
-        bridgeSetSocketState('OPEN');
-      } else {
-        if (Date.now() - __bridgeLastPong > 10000) {
-          bridgeLog('Heartbeat 5s perdido: forzando reconexión limpia');
-          bridgeSetSocketState('CLOSED');
-          __bridgeLastPong = Date.now();
-        }
-      }
-    } catch (_) {
-      if (Date.now() - __bridgeLastPong > 10000) {
-        bridgeLog('Conexión muerta detectada: reconexión automática');
-        bridgeSetSocketState('CLOSED');
-      }
-    }
-  }, BRIDGE_PING_INTERVAL_MS);
-}
-
-function bridgeStopPingPong() {
-  if (__bridgePingTimer) {
-    clearInterval(__bridgePingTimer);
-    __bridgePingTimer = null;
-  }
-}
-
-
+/* [A15 · P3.5] transporte muerto ELIMINADO (0 llamadores verificados:
+ * bridgeStartPingPong/bridgeStopPingPong/__bridgeOutbox/__bridgeSocketState
+ * + helpers JSON-RPC sin uso). Eran un ping HTTP cada 5 s que nadie
+ * consumía: latidos de red gratis y superficie de ataque de más. */
 function bridgeLog(msg) {
   const line = new Date().toISOString().slice(11, 19) + ' ' + String(msg);
   self.__bridgeLog.push(line);
@@ -357,6 +261,14 @@ async function bridgeClaimNext() {
     BRIDGE_HTTP_TIMEOUT_MS
   );
   if (res.status === 204) return null;
+  /* [A15 · P3.3] sin apiKey válida NO hay bucle de 401: se desactiva el
+   * bridge (enabled=false persistido) y se avisa al popup UNA vez. Antes,
+   * enabled=true con apiKey vacía/invalidada significaba claim→401→sleep
+   * →claim→401 para siempre, cada pollIntervalMs. */
+  if (res.status === 401) {
+    await bridgeDisablePorAuth('HTTP 401 del claim: apiKey ausente o inválida — puente desactivado');
+    return null;
+  }
   if (!res.ok) throw new Error(await bridgeHttpError(res));
   const data = await res.json();
   if (!data || !data.ok || !data.job) return null;
@@ -551,6 +463,40 @@ function bridgeRunJob(job) {
   });
 }
 
+/* [A15 · P3.3] desactivación por auth: enabled=false persistido + aviso al
+ * popup (el popup muestra el mensaje en el estado del bridge). */
+async function bridgeDisablePorAuth(motivo) {
+  bridgeLog(motivo);
+  try {
+    const cfg = await bridgeEnsureCfg();
+    cfg.enabled = false;
+    self.__bridgeCfg = cfg;
+    await chrome.storage.local.set({ [BRIDGE_CFG_KEY]:
+      await bridgePersistableCfg(cfg) });
+    try { chrome.runtime.sendMessage({ type: 'BRIDGE_AUTH_DISABLED',
+      error: String(motivo).slice(0, 200) }).catch(() => {}); } catch (_) {}
+  } catch (_) { /* jamás tumba el bucle por un fallo de notificación */ }
+}
+
+/* [A15 · P3.3] al despertar el SW: si había un job ACTIVO persistido, se
+ * FALLA limpio (el backend reencola por attempts; 409 si ya estaba
+ * resuelto o reclamado por otro). NUNCA se re-adopta en memoria: el blob
+ * se perdió con el SW. */
+async function bridgeRecuperarJobActivo() {
+  try {
+    const o = await chrome.storage.local.get(BRIDGE_ACTIVE_KEY);
+    const act = o && o[BRIDGE_ACTIVE_KEY];
+    if (!act || !act.id) return;
+    await chrome.storage.local.remove(BRIDGE_ACTIVE_KEY);
+    bridgeLog('SW reiniciado con job en curso (' + act.id + ') → fail limpio '
+      + '(el backend reencola; lease alternativa: expira por sí sola)');
+    try {
+      await bridgeFail({ id: act.id, job_token: act.job_token },
+        'service worker reiniciado a mitad del job (asset no descargado)');
+    } catch (_) { /* 409 esperable si ya estaba resuelto */ }
+  } catch (_) { /* la recuperación jamás bloquea el arranque */ }
+}
+
 /* ------------------------------- Bucle worker ------------------------------ */
 /* Un tick = claim → (delegar + heartbeat) → complete | fail. Si ya hay un job
    en curso (self.__bridgeActive) NO reclama otro. Los errores de red nunca
@@ -567,6 +513,17 @@ async function bridgeTick() {
   if (!claimed || !claimed.job) return; // 204: nada que hacer
   const job = claimed.job;
   self.__bridgeActive = job; // marca en memoria mientras esté en curso
+  /* [A15 · P3.3] el job ACTIVO se persiste (id+token+claimedAt): si el SW
+   * muere a mitad de job, el siguiente despertar puede FALLARLO limpio
+   * (bridgeFail → attempts+1, backend reencola) en vez de esperar el ciclo
+   * de lease zombie. 409 harmless si ya terminó/otro worker lo recuperó. */
+  try {
+    await chrome.storage.local.set({ [BRIDGE_ACTIVE_KEY]: {
+      id: job.id, job_token: job.job_token || '', kind: job.kind,
+      scene_number: job.scene_number, project_id: job.project_id || '',
+      claimedAt: Date.now(),
+    } });
+  } catch (_) {}
   bridgeLog('job reclamado ' + job.id + ' (escena ' + job.scene_number + ' ' + job.kind + ')');
   try {
     const res = await bridgeRunJob(job);
@@ -606,6 +563,7 @@ async function bridgeTick() {
     try { await bridgeFail(job, err); } catch (_) {}
   } finally {
     self.__bridgeActive = null; // SIEMPRE liberar, con o sin éxito
+    try { await chrome.storage.local.remove(BRIDGE_ACTIVE_KEY); } catch (_) {}
   }
 }
 
@@ -637,16 +595,48 @@ async function bridgeLoop() {
 /* ------------------- Mensajes internos del bridge (popup) ------------------ */
 /* Listener propio de bridge.js (registrado ANTES del router de background.js
    porque importScripts corre arriba). Los BRIDGE_* que aquí no se atienden los
-   gestiona background.js (BRIDGE_JOB); el resto de mensajes no se tocan. */
+   gestiona background.js (BRIDGE_JOB); el resto de mensajes no se tocan.
+   [A15 · P3.4] ORIGEN Y ESQUEMA validados:
+     · sender.id DEBE ser el propio runtime.id (mensajes forjados mueren);
+     · BRIDGE_GET_CFG/BRIDGE_STATUS SOLO devuelven la apiKey DESENCRYPTADA al
+       POPUP de la extensión (sender.url termina en /popup.html): desde
+       cualquier otro contexto la apiKey va MASCARADA (apiKeySet=true) — un
+       content script de flow.google.com jamás lee la credencial;
+     · BRIDGE_SET_CFG SOLO desde el popup (evita que un content script
+       apunte el bridge a un backend suyo o lo active). */
+function __bridgeSenderEsPopup(sender) {
+  return !!(sender && sender.id === chrome.runtime.id
+            && !sender.tab
+            && String(sender.url || '').endsWith('/popup.html'));
+}
+function __bridgeCfgEnmascarada(cfg) {
+  const c = Object.assign({}, cfg);
+  c.apiKey = '';
+  c.apiKeySet = !!(cfg && cfg.apiKey);
+  return c;
+}
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const type = msg && msg.type;
   if (type !== 'BRIDGE_GET_CFG' && type !== 'BRIDGE_SET_CFG' && type !== 'BRIDGE_STATUS') {
     return false; // no es del bridge: lo atienden los listeners existentes
   }
   try {
+    if (!msg || typeof msg.type !== 'string'
+        || !(sender && sender.id === chrome.runtime.id)) {
+      sendResponse({ ok: false, error: 'mensaje bridge rechazado (origen/esquema)' });
+      return false;
+    }
+    const esPopup = __bridgeSenderEsPopup(sender);
+    if ((type === 'BRIDGE_SET_CFG') && !esPopup) {
+      sendResponse({ ok: false, error: 'BRIDGE_SET_CFG solo desde el popup de la extensión' });
+      return false;
+    }
     if (type === 'BRIDGE_GET_CFG') {
       bridgeEnsureCfg()
-        .then((cfg) => sendResponse({ ok: true, cfg, running: !!self.__bridgeRunning, active: bridgeActiveSummary() }))
+        .then((cfg) => sendResponse({
+          ok: true,
+          cfg: esPopup ? cfg : __bridgeCfgEnmascarada(cfg), // [P3.4] apiKey fuera del popup: enmascarada
+          running: !!self.__bridgeRunning, active: bridgeActiveSummary() }))
         .catch((e) => sendResponse({ ok: false, error: String((e && e.message) || e) }));
       return true; // respuesta asíncrona
     }
@@ -666,7 +656,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const cfg = await bridgeEnsureCfg();
       return {
         ok: true,
-        cfg,
+        cfg: esPopup ? cfg : __bridgeCfgEnmascarada(cfg), // [P3.4]
         running: !!self.__bridgeRunning,
         active: bridgeActiveSummary(),
         lastResult: self.__bridgeLastResult,
@@ -691,7 +681,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }).catch(() => {});
 });
 
-/* Arranque: al despertar el SW, si el puente estaba activado se reanuda. */
-bridgeEnsureCfg().then((cfg) => {
+/* Arranque: al despertar el SW, se recupera (fail limpio) el job activo
+   persistido y, si el puente estaba activado, se reanuda. */
+bridgeRecuperarJobActivo().then(() => bridgeEnsureCfg()).then((cfg) => {
   if (cfg.enabled) bridgeLoop();
 }).catch(() => {});

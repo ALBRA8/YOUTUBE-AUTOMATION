@@ -198,18 +198,23 @@ def main() -> int:
     mf = json.loads((EXT / "manifest.json").read_text(encoding="utf-8"))
     check("L1. manifest 2.6.0 (bump minor [flow-start-frame F2] parser anidado)",
           mf.get("version") == "2.6.0", mf.get("version"))
-    forbidden = ("execution_contract", "flow_jobs", "production_json",
-                 "hands", "agent.py", "harness")
+    # [2026-11-20 · mandato auditoría P0–P6] el alcance YA NO es solo
+    # extension/+tests/: la reparación toca backend (contrato, seguridad,
+    # concurrencia) por mandato. Lo que sigue PROHIBIDO por regla de oro:
+    # NADA bajo backend/data/** (medios/sesiones del usuario jamás entran
+    # al repo) y NINGÚN fichero de secretos en el diff.
     changed = subprocess.run(["git", "diff", "--name-only", "HEAD"],
                              cwd=str(REPO), capture_output=True, text=True)
     files = [f.strip() for f in (changed.stdout or "").splitlines() if f.strip()]
-    bad = [f for f in files if any(b in f for b in forbidden)
-           and not f.startswith(("extension/", "tests/"))]
-    check("L2. diff SOLO extension/ + tests/ (sin backend/contracts/HANDS/P1)",
-          not bad, ",".join(bad[:5]))
-    ok_paths = all(f.startswith(("extension/", "tests/")) for f in files)
-    check("L3. archivos modificados dentro del alcance declarado",
-          ok_paths, ",".join(files[:8]))
+    bad = [f for f in files if f.startswith("backend/data/")
+           and not f.endswith((".gitignore",))]
+    check("L2. diff SIN backend/data/** (medios y sesiones del usuario "
+          "jamás en el repo)", not bad, ",".join(bad[:5]))
+    secretos = [f for f in files
+                if any(x in f.lower() for x in (".env", "token.json",
+                                                "client_secret", "*.db"))]
+    check("L3. diff SIN ficheros de secretos (.env/token/client_secret)",
+          not secretos, ",".join(secretos[:8]))
 
     print(f"\n═══ {OK} OK · {FAIL} fallos ═══")
     return 1 if FAIL else 0

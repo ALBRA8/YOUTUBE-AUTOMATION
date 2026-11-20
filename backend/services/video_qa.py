@@ -335,6 +335,29 @@ def qa_project(pid: str) -> dict:
     video_url = (project or {}).get("video_url")
     if video_url and Path(str(video_url)).exists():
         final_info = qa_video(video_url, final=True)
+        # [M · P1.9] COHERENCIA TEMPORAL: la duración REAL del render final
+        # se compara con la Σ de las duraciones esperadas por escena
+        # (meta.duration de cada escena; la narración manda). Desfase > 12%
+        # (o > 1.5 s en renders cortos) → flag warn: vídeos de escenas
+        # truncadas/estiradas por el ensamblado ya no pasan desapercibidos.
+        try:
+            esperada = sum(
+                float(sc.get("duration") or 0.0) for sc in (scenes or []))
+        except (TypeError, ValueError):
+            esperada = 0.0
+        real = float(final_info.get("duration_s") or 0.0)
+        if esperada > 0 and real > 0:
+            tolerancia = max(1.5, esperada * 0.12)
+            desvio = abs(real - esperada)
+            final_info["expected_duration_s"] = round(esperada, 3)
+            final_info["duration_tolerance_s"] = round(tolerancia, 3)
+            if desvio > tolerancia:
+                final_info["flags"].append({
+                    "sev": "warn",
+                    "msg": f"duración real {real:.1f}s ≠ Σ esperada "
+                           f"{esperada:.1f}s (desvío {desvio:.1f}s > "
+                           f"tolerancia {tolerancia:.1f}s) — escenas "
+                           f"truncadas o repetidas en el ensamblado"})
 
     # P2-1: Control de umbral de placeholders en Video QA
     max_ph = config.max_allowed_placeholders()  # P1-5: fuente única

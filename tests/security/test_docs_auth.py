@@ -71,10 +71,15 @@ finally:
     _security.reload()  # restaura el estado real (sin clave)
 
 R = _results
-check("modo local: /docs sigue abierto (cero ruptura)",
-      R["local_docs"].status_code == 200, str(R["local_docs"].status_code))
-check("modo local: /openapi.json sigue abierto",
-      R["local_openapi"].status_code == 200)
+# [A5 · P0.4] modo local: /docs y /openapi.json TAMBIÉN protegidos — sin
+# clave no hay quién «pase» la autenticación, así que responden 404 (la
+# documentación interna no se expone). Para el desarrollador:
+# DOCS_ENABLED=1 reactiva el Swagger sin clave.
+check("modo local: /docs → 404 (P0.4: docs no se exponen sin clave)",
+      R["local_docs"].status_code == 404, str(R["local_docs"].status_code))
+check("modo local: /openapi.json → 404 (schema interno oculto)",
+      R["local_openapi"].status_code == 404,
+      str(R["local_openapi"].status_code))
 check("protegido: /docs SIN auth → 401",
       R["docs_noauth"].status_code == 401, str(R["docs_noauth"].status_code))
 check("protegido: /redoc SIN auth → 401", R["redoc_noauth"].status_code == 401)

@@ -28,6 +28,7 @@ import logging
 import math
 import random
 import subprocess
+import threading
 from pathlib import Path
 
 from config import (AUDIO_MASTER_BROADCAST, FPS,
@@ -119,7 +120,12 @@ def _run_ffmpeg(cmd: list[str], timeout: int = 900) -> subprocess.CompletedProce
 
 
 def probe_duration(path: Path) -> float:
-    """Duración REAL de un medio con ffprobe (nunca estimar: sincronía exacta)."""
+    """Duración REAL de un medio con ffprobe (nunca estimar: sincronía exacta).
+
+    [P6.3] caché por (ruta, mtime, tamaño) en OUTPUT_DIR/.dur_cache.json:
+    el mismo asset ya no se re-prueba con ffprobe en cada render/QA (un
+    proyecto de 10 escenas pagaba 10×3 ffprobe por render). La clave incluye
+    mtime+tamaño: un asset regenerado invalida su entrada sola."""
     try:
         p = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
@@ -128,6 +134,45 @@ def probe_duration(path: Path) -> float:
         return float(p.stdout.strip().splitlines()[0])
     except Exception:  # noqa: BLE001
         return 0.0
+
+
+_DUR_CACHE_LOCK = threading.Lock()
+
+
+def _dur_cache_file() -> Path:
+    return OUTPUT_DIR / ".dur_cache.json"
+
+
+def probe_duration_cached(path: Path) -> float:
+    """probe_duration con caché persistente (P6.3). Devuelve 0.0 igual que
+    probe_duration ante fallos (y NO cachea fallos: un ffprobe fallido por
+    I/O transitorio se reintenta la próxima vez)."""
+    p = Path(path)
+    try:
+        st = p.stat()
+    except OSError:
+        return 0.0
+    key = f"{p.resolve()}:{st.st_mtime_ns}:{st.st_size}"
+    with _DUR_CACHE_LOCK:
+        try:
+            cache = json.loads(_dur_cache_file().read_text(encoding="utf-8"))
+        except (OSError, ValueError):  # caché ausente/corrupta: se reconstruye
+            cache = {}
+        hit = cache.get(key)
+        if isinstance(hit, (int, float)) and hit > 0:
+            return float(hit)
+        dur = probe_duration(p)
+        if dur > 0:
+            cache[key] = dur
+            # poda: máximo 2000 entradas (LRU barato por inserción)
+            if len(cache) > 2000:
+                cache = dict(list(cache.items())[-2000:])
+            try:
+                _dur_cache_file().write_text(
+                    json.dumps(cache), encoding="utf-8")
+            except OSError:
+                pass  # caché es best-effort: jamás rompe un render
+        return dur
 
 
 def safe_kenburns_scale(w: int, h: int, target_factor: float = 2.5, max_dim: int = 4320) -> tuple[int, int]:
@@ -432,7 +477,11 @@ async def _concat_xfade(project: dict, clips: list[Path], out: Path,
     duraciones REALES (ffprobe) de cada clip. Sin audio (clips -an):
     la voz se mezcla después en mux_audio_music."""
     tdur = TRANSITION_DUR
-    durs = [probe_duration(c) for c in clips]
+    # [A8 · P2.2] los ffprobe de duración corren en hilos (antes bloqueaban
+    # el event loop N×30s — health/dashboard congelados durante el ensamblado).
+    # Con caché (P6.3) el 2º render es instantáneo.
+    durs = await asyncio.gather(*[asyncio.to_thread(probe_duration, c)
+                                  for c in clips])
     if any(d <= tdur + 0.1 for d in durs):
         raise RuntimeError("clip demasiado corto para xfade")
     inputs: list[str] = []
@@ -495,7 +544,37 @@ async def mux_audio_music(project: dict, video_silent: Path, voice_full: Path) -
                "-shortest", str(out)]
         p = await asyncio.to_thread(lambda: _run_ffmpeg(cmd, timeout=600))
         if p.returncode != 0:
-            log.warning("mux con música falló (%s) → solo voz", p.stderr[-200:])
+            # [M · P1.8] el fallback "solo voz" era un log y una MENTIRA: se
+            # seguía de largo con `out` nunca escrito y el pipeline moría
+            # después. Ahora se ejecuta DE VERDAD el mux sin música (y si
+            # también falla, propaga el error original — nada silencioso).
+            log.warning("mux con música falló (%s) → reintento SOLO VOZ",
+                        p.stderr[-200:])
+            cmd_voz = ["ffmpeg", "-y", "-i", str(video_silent), "-i", str(voice_full),
+                       "-map", "0:v", "-map", "1:a", "-c:v", "copy",
+                       *(("-af", BROADCAST_LOUDNORM) if master else ()),
+                       "-c:a", "aac", "-b:a", "192k", *ar_args,
+                       "-shortest", str(out)]
+            p2 = await asyncio.to_thread(lambda: _run_ffmpeg(cmd_voz, timeout=300))
+            if p2.returncode != 0:
+                raise RuntimeError(
+                    "No se pudo unir audio y video (ni con música ni solo voz): "
+                    + (p.stderr or p2.stderr)[-300:])
+            (proj_dir / "music_track.json").write_text(json.dumps(
+                {"track": None, "ducking": False,
+                 "fallback_solo_voz": True},
+                ensure_ascii=False), encoding="utf8")
+            (proj_dir / "audio_master.json").write_text(json.dumps(
+                {"enabled": master, "loudnorm": BROADCAST_LOUDNORM if master else None,
+                 "target_lufs": -14 if master else None,
+                 "lra": 11 if master else None,
+                 "tp_dbtp": -1.0 if master else None,
+                 "dual_mono": True if master else None,
+                 "sample_rate": 48000 if master else None,
+                 "codec": "aac", "bitrate": "192k",
+                 "music_ducking": False, "fallback_solo_voz": True},
+                ensure_ascii=False), encoding="utf8")
+            return out
     else:
         cmd = ["ffmpeg", "-y", "-i", str(video_silent), "-i", str(voice_full),
                "-map", "0:v", "-map", "1:a", "-c:v", "copy",

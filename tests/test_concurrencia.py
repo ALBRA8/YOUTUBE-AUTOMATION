@@ -177,7 +177,13 @@ def main() -> int:
     print("── 3. token de una sola era (lease vencido re-entregado)")
     jd = _drain("w-viejo", pid="proj_conc_b")  # B ya drenada… re-encolamos
     if not jd:
-        fj.enqueue_project("proj_conc_b")
+        # [A11 · P1.4] enqueue_project ya NO duplica jobs claimed vigentes:
+        # para material, expiramos las leases de los claimed de B (worker
+        # "muerto") y el próximo claim los recupera a queued.
+        with db.connect() as con:
+            con.execute("UPDATE flow_jobs SET lease_until="
+                        "'2000-01-01T00:00:00+00:00' "
+                        "WHERE project_id='proj_conc_b' AND status='claimed'")
         jd = _drain("w-viejo", pid="proj_conc_b")
     job = jd[0]
     with db.connect() as con:  # worker "muere" sin heartbeat
@@ -196,6 +202,12 @@ def main() -> int:
           bool(fj.heartbeat(jn["id"], jn["job_token"])))
 
     print("── 4. completes CONCURRENTES de jobs distintos")
+    # [A11 · P1.4] enqueue ya no duplica los claimed vigentes de C (sección 2
+    # los dejó claimed): simulamos workers muertos expirando sus leases y
+    # re-encolamos para recrear los no-done de C para la carrera.
+    with db.connect() as con:
+        con.execute("UPDATE flow_jobs SET lease_until='2000-01-01T00:00:00+00:00' "
+                    "WHERE project_id='proj_conc_c' AND status='claimed'")
     fj.enqueue_project("proj_conc_c")  # recrea los no-done de C para la carrera
     blancos = _drain("w-pre2", pid="proj_conc_c")
     results = []

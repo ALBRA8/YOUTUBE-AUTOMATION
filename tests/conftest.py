@@ -76,6 +76,13 @@ STANDALONE_BATTERIES = [
     "security/test_project_path_security.py",
     "security/test_sqli.py",                 # AUDITORÍA 2026-11: batería standalone SQLi
     "security/test_ssrf.py",
+    "security/test_auditoria_repairs.py",    # REPARACIONES P0-P2 (2026-11-20):
+                                             # env.bak no servible, CLAIMED→DONE
+                                             # False, claim→fail→claim avanza,
+                                             # UNVERIFIABLE terminal, scheduler
+                                             # arrancado, zip-bomb, badge, dialog
+                                             # roots, 411 chunked, ACL .env,
+                                             # gate subtítulos, retención dry-run
     "test_burn_subtitles_resilience.py",
     "test_gobernanza.py",
     "test_hands.py",

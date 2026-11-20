@@ -101,6 +101,10 @@ def _bundle_v3(src: str) -> str:
     m_status = re.search(r"const STATUS = \{[^}]+\};", src)
     m_img = re.search(r"const SCENE_WATCHDOG_MS_IMAGES = 5 \* 60000;", src)
     m_len = re.search(r"const MAX_PROMPT_MATCH_LEN = \d+;", src)
+    # [P3.1] el watchdog real depende del flag de hidratación (guard del
+    # evento que llega antes de hidratar): sin la declaración en el bundle
+    # el arnés revienta con ReferenceError al invocar watchdogCheck.
+    m_hydrated = re.search(r"let __hydrated = false;", src)
     ventana = _extraer(src,
                        "/* --- [video-window v3] Ventana operativa de VIDEO",
                        "/* --- Fase 3-e")
@@ -112,8 +116,10 @@ def _bundle_v3(src: str) -> str:
                        "/* ---------------- Watchdog por escena")
     watchdog = _extraer(src, "/* ---------------- Watchdog por escena",
                         "/* ------------- Rate limit")
-    partes = [m_status.group(0), m_img.group(0), m_len.group(0), ventana,
-              norm, deteccion, seccion, watchdog]
+    partes = [m_status.group(0), m_img.group(0), m_len.group(0),
+              (m_hydrated.group(0) if m_hydrated
+               else "let __hydrated = false;"),
+              ventana, norm, deteccion, seccion, watchdog]
     return "\n\n".join(p for p in partes if p)
 
 

@@ -108,18 +108,22 @@ class FakeManager:
                                         f'Reference it in prompts as @{{{n}}}.'}
         if tool == "flow_generate_image":
             self._img_n += 1
+            path = f"/tmp/fake/gen_img_{self._img_n:03d}.png"
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).write_bytes(b"fake png")  # A13/P1.6: el tool REAL deja el archivo
             return {"ok": True, "text": f"Generated 1 image(s) in 2.0s with 2 "
-                                        f"({args.get('aspect')}):\n"
-                                        f"/tmp/fake/gen_img_{self._img_n:03d}.png"}
+                                        f"({args.get('aspect')}):\n{path}"}
         if tool == "flow_generate_video":
             self._vid_n += 1
             if self.fail_video_at and self._vid_n == self.fail_video_at:
                 raise mcpm.MCPManagerError("Flow video generation failed: boom",
                                            "TOOL_ERROR")
+            out = args.get("outFile") or "/tmp/fake/gen_video.mp4"
+            Path(out).parent.mkdir(parents=True, exist_ok=True)
+            Path(out).write_bytes(b"fake mp4")  # A13/P1.6: _stage3 exige video_file en disco
             return {"ok": True, "text": f'Generated video in 5.0s (100 bytes, '
                                         f'{args.get("aspect")}) with startFrame '
-                                        f'"{args.get("startFrame")}":\n'
-                                        f'{args.get("outFile")}'}
+                                        f'"{args.get("startFrame")}":\n{out}'}
         return {"ok": True, "text": "ok"}
 
 

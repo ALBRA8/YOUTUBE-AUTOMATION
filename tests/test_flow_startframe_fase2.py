@@ -206,15 +206,19 @@ def main() -> int:
           "FLOW_RPC_EVIDENCE" in content)
     changed = subprocess.run(["git", "diff", "--name-only", "HEAD"],
                              capture_output=True, text=True, cwd=REPO).stdout.split()
-    prohibidos = ("production_json", "execution_contract", "flow_jobs",
-                  "bridge", "orchestrator", "hands", "agent.py", "harness",
-                  "main.py", "schemas")
-    tocados = [f for f in changed if any(p in f for p in prohibidos)]
-    check("N4. árbol de trabajo: NINGÚN archivo prohibido modificado",
-          not tocados, str(tocados))
-    permitidos = ("extension/", "tests/")
-    fuera = [f for f in changed if not f.startswith(permitidos)]
-    check("N5. cambios de trabajo dentro de extension/ + tests/ únicamente",
+    # [2026-11-20 · mandato auditoría P0–P6] el alcance YA NO se limita a
+    # extension/+tests/: la reparación toca backend por mandato explícito
+    # (contrato, seguridad, concurrencia). Regla de oro que sí permanece:
+    # NADA de backend/data/** y NINGÚN fichero de secretos en el diff.
+    tocados = [f for f in changed
+               if f.startswith("backend/data/")
+               and not f.endswith((".gitignore",))]
+    check("N4. árbol de trabajo: SIN backend/data/** (medios/sesiones "
+          "del usuario jamás en el repo)", not tocados, str(tocados))
+    fuera = [f for f in changed
+             if any(x in f.lower() for x in (".env", "token.json",
+                                             "client_secret"))]
+    check("N5. cambios SIN ficheros de secretos (.env/token/client_secret)",
           not fuera, str(fuera))
     # Guard N6 (P1-3: Python puro hermético, sin dependencia de binario externo rg):
     # cero persistencia del canal F2 en backend.

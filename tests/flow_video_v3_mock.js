@@ -67,6 +67,9 @@ function makeCtx(opts) {
   };
   const ctx = vm.createContext(sandbox);
   vm.runInContext(bundle, ctx, { filename: 'background_v3_seccion.js' });
+  // [P3.1] el arnés simula un SW YA HIDRATADO (loadState corrió): en el SW
+  // real __hydrated=true tras hidratar; watchdogCheck solo juzga entonces.
+  vm.runInContext('__hydrated = true;', ctx);
   return { sandbox, ctx, recorded };
 }
 

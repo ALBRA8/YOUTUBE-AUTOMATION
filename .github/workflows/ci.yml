@@ -17,17 +17,20 @@ jobs:
       # que antes solo se verificaba por subcadenas) debe romper el CI.
       - name: Sintaxis de todo el repo (compileall, P0-1)
         run: python -m compileall -q -x '\.venv' backend launchers tools tests
-      - name: Instalar dependencias
+      - name: Instalar dependencias (lockfile exacto — mismo comando que local, P4.2/P4.3)
         run: |
           python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt -r backend/requirements-dev.txt
-          pip install opencv-python-headless
+          # P4.3: el CI instala el LOCKFILE con pins exactos verificados —
+          # el mismo comando que en la máquina local. Antes el CI instalaba
+          # rangos (>=) y podía divergir de lo que corre el operador.
+          pip install -r backend/requirements-lock.txt
+          pip install -r backend/requirements-dev.txt
       - name: Lint critico con ruff (F821, E9, F63, F7, F82)
         run: python -m ruff check --select F821,E9,F63,F7,F82 backend tools
       - name: ffmpeg (exigido en recolección por test_int077_ugc_pacing)
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Suite pytest (aislada de .env y con fixes 658740b)
-        run: python -m pytest tests/ -q
+        run: python -m pytest tests/ -q -n auto  # P6.2: xdist, mismo comando que local
       # D-010: HANDS está en RESERVA (dormido), pero su código no puede
       # pudrirse: sus 4 baterías son herméticas y corren dentro del paso hermético.
       # Baterías standalone herméticas (P0-2): ejecutan las suites excluidas de pytest
