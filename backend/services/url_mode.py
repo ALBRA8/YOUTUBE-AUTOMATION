@@ -53,7 +53,16 @@ def ytdlp_cmd() -> list[str]:
 
 
 def _run(cmd: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    """subprocess.run con timeout. [AUDITORÍA 2026-11] Un yt-dlp colgado ya
+    no escapa como subprocess.TimeoutExpired crudo (acababa en un 500 sin
+    contexto): se traduce a UrlModeError, el tipo que TODOS los llamadores
+    ya saben presentar al usuario."""
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as e:
+        raise UrlModeError(
+            f"yt-dlp excedió {timeout}s sin responder (proceso colgado) — "
+            "reintenta o revisa la conexión") from e
 
 
 def _guard_ssrf(url: str) -> str:
