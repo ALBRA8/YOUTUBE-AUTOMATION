@@ -35,6 +35,8 @@ const BRIDGE_CFG = {
   workerId: '',
 };
 const BRIDGE_CFG_KEY = 'flow_bridge_cfg_v1';            // clave en chrome.storage.local
+const BRIDGE_APIKEY_SESSKEY = 'flow_bridge_aesk_v1';    // clave AES-GCM en chrome.storage.session (SOLO memoria, jamás disco)
+const BRIDGE_APIKEY_ENC_PREFIX = 'enc:v1:';             // apiKey cifrada en storage.local: enc:v1:<iv>:<ct> (base64url)
 const BRIDGE_API_BASE = '/api/extension/flow/jobs';     // raíz común del contrato
 const BRIDGE_HEARTBEAT_MS = 30000;                      // latido mientras hay job activo
 const BRIDGE_KEEPALIVE_ALARM = 'flow-bridge-keepalive'; // reactiva el bucle tras suspensión MV3
@@ -168,6 +170,96 @@ function bridgeActiveSummary() {
 /* ----------------------------- Configuración ------------------------------ */
 /* BRIDGE_CFG se guarda en chrome.storage.local bajo flow_bridge_cfg_v1.
    workerId se genera UNA vez (w-<8hex>) y se persiste. */
+
+/* ── [AUDITORÍA 2026-11] apiKey CIFRADA AES-256-GCM ──────────────────────────
+   La apiKey (X-API-Key contra el backend) ANTES vivía EN CLARO en
+   chrome.storage.local: cualquier lector del perfil (otra persona en el
+   equipo, malware con acceso a disco, un backup) obtenía la credencial.
+   Ahora storage.local guarda SOLO ciphertext ('enc:v1:<iv>:<ct>', base64url)
+   y la clave AES-GCM vive en chrome.storage.session — memoria del navegador
+   que MV3 nunca escribe a disco y se borra al cerrar Chrome. Si el entorno
+   no ofrece cripto o storage.session se degrada HONESTAMENTE: la apiKey
+   queda solo en memoria volátil (se pide de nuevo tras reiniciar el SW) o,
+   como último recurso, legacy en claro CON aviso en el log. */
+function bridgeB64FromBytes(bytes) {
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function bridgeBytesFromB64(s) {
+  const b64 = String(s || '').replace(/-/g, '+').replace(/_/g, '/');
+  const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+  const bin = atob(b64 + pad);
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
+
+async function bridgeAesKey() {
+  /* Clave AES-GCM de la apiKey: 1) cache de módulo, 2) storage.session
+     (persiste entre reinicios del SW, muere al cerrar el navegador),
+     3) generarla NON-extractable y guardarla. null si no hay crypto. */
+  if (self.__bridgeAesKey) return self.__bridgeAesKey;
+  if (!(typeof crypto !== 'undefined' && crypto.subtle && crypto.getRandomValues)) return null;
+  try {
+    const o = await chrome.storage.session.get(BRIDGE_APIKEY_SESSKEY);
+    if (o && o[BRIDGE_APIKEY_SESSKEY]) {
+      self.__bridgeAesKey = o[BRIDGE_APIKEY_SESSKEY];
+      return self.__bridgeAesKey;
+    }
+  } catch (_) { /* storage.session no disponible: solo memoria */ }
+  const key = await crypto.subtle.generateKey(
+    { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  self.__bridgeAesKey = key;
+  try { await chrome.storage.session.set({ [BRIDGE_APIKEY_SESSKEY]: key }); } catch (_) {}
+  return key;
+}
+
+async function bridgeEncryptApiKey(plain) {
+  const key = await bridgeAesKey();
+  if (!key) return null; // sin cripto disponible: no se puede cifrar
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv }, key, new TextEncoder().encode(String(plain)));
+  return BRIDGE_APIKEY_ENC_PREFIX + bridgeB64FromBytes(iv) + ':'
+    + bridgeB64FromBytes(new Uint8Array(ct));
+}
+
+async function bridgeDecryptApiKey(stored) {
+  const raw = String(stored == null ? '' : stored);
+  if (!raw.startsWith(BRIDGE_APIKEY_ENC_PREFIX)) return raw; // legado en claro (migración)
+  const partes = raw.slice(BRIDGE_APIKEY_ENC_PREFIX.length).split(':');
+  if (partes.length !== 2 || !partes[0] || !partes[1]) return ''; // formato corrupto
+  try {
+    const key = await bridgeAesKey();
+    if (!key) return ''; // clave perdida (memoria/session muertos) → pedir de nuevo
+    const pt = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: bridgeBytesFromB64(partes[0]) },
+      key, bridgeBytesFromB64(partes[1]));
+    return new TextDecoder().decode(pt);
+  } catch (_) {
+    return ''; // ciphertext alterado o clave distinta: vacío, jamás basura
+  }
+}
+
+async function bridgePersistableCfg(cfg) {
+  /* Versión SEGURA para disco: sin apiKey en claro; apiKeyEnc con IV fresco
+     en cada guardado. Fallback explícito (sin crypto): legacy en claro + log. */
+  const persist = Object.assign({}, cfg);
+  delete persist.apiKey;
+  if (cfg.apiKey) {
+    const enc = await bridgeEncryptApiKey(cfg.apiKey);
+    if (enc) {
+      persist.apiKeyEnc = enc;
+    } else {
+      persist.apiKey = cfg.apiKey; // último recurso: storage sin crypto.subtle
+      bridgeLog('AVISO: no hay crypto.subtle — apiKey guardada EN CLARO (fallback)');
+    }
+  } else {
+    delete persist.apiKeyEnc;
+  }
+  return persist;
+}
+
 async function bridgeEnsureCfg() {
   if (self.__bridgeCfg) return self.__bridgeCfg;
   let stored = null;
@@ -175,15 +267,17 @@ async function bridgeEnsureCfg() {
     const o = await chrome.storage.local.get(BRIDGE_CFG_KEY);
     stored = o && o[BRIDGE_CFG_KEY];
   } catch (_) { /* storage no disponible: usa defaults */ }
-  const cfg = Object.assign({}, BRIDGE_CFG, (stored && typeof stored === 'object') ? stored : {});
+  const raw = (stored && typeof stored === 'object') ? stored : {};
+  const cfg = Object.assign({}, BRIDGE_CFG, raw);
   cfg.baseUrl = bridgeNormalizeBaseUrl(cfg.baseUrl);
-  cfg.apiKey = String(cfg.apiKey || '');
+  cfg.apiKey = await bridgeDecryptApiKey(
+    raw.apiKeyEnc != null ? raw.apiKeyEnc : raw.apiKey); // descifra; legacy pasa tal cual
   cfg.pollIntervalMs = bridgeClampPoll(cfg.pollIntervalMs);
   cfg.enabled = !!cfg.enabled;
   if (!/^w-[0-9a-f]{8}$/.test(String(cfg.workerId || ''))) {
     const bytes = crypto.getRandomValues(new Uint8Array(4));
     cfg.workerId = 'w-' + Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
-    try { await chrome.storage.local.set({ [BRIDGE_CFG_KEY]: cfg }); } catch (_) {}
+    try { await chrome.storage.local.set({ [BRIDGE_CFG_KEY]: await bridgePersistableCfg(cfg) }); } catch (_) {}
   }
   self.__bridgeCfg = cfg;
   return cfg;
@@ -198,12 +292,13 @@ async function bridgeSetCfg(partial) {
   next.enabled = !!next.enabled;
   if (!/^w-[0-9a-f]{8}$/.test(String(next.workerId || ''))) next.workerId = cur.workerId; // nunca regenerar por accidente
   try {
-    await chrome.storage.local.set({ [BRIDGE_CFG_KEY]: next });
+    await chrome.storage.local.set({ [BRIDGE_CFG_KEY]: await bridgePersistableCfg(next) });
   } catch (e) {
     throw new Error('no se pudo guardar la configuración del bridge: ' + String((e && e.message) || e));
   }
   self.__bridgeCfg = next;
-  bridgeLog('cfg guardada: ' + next.baseUrl + ' enabled=' + next.enabled);
+  bridgeLog('cfg guardada: ' + next.baseUrl + ' enabled=' + next.enabled
+    + (next.apiKey ? ' apiKey=cifrada(AES-GCM)' : ' sin apiKey'));
   return next;
 }
 

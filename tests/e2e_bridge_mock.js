@@ -139,6 +139,8 @@ function loadBridge(chrome) {
   const sandbox = {
     console, setTimeout, clearTimeout, setInterval, clearInterval,
     fetch, AbortController, Blob, crypto: globalThis.crypto,
+    // globales de un service worker MV3 que Node no inyecta en un contexto VM:
+    TextEncoder, TextDecoder, atob, btoa,
     chrome, URL, URLSearchParams,
   };
   sandbox.self = sandbox;
