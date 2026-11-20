@@ -539,22 +539,32 @@ class PipelineOrchestrator:
                 pass
         return set()
 
+    async def _flow_keepalive(self, run: dict, interval: float = 45.0,
+                              timeout: float = 30.0) -> None:
+        """D2: keepalive CDP acotado a la corrida (etapas 0-2): ping periódico a
+        flow_list_assets para que el transporte CDP de Flow no se duerma mientras
+        Gemini genera el blueprint (Stage 2 puede tardar minutos). Los errores
+        SOLO se registran — nunca se lanzan ni tumban la corrida. Cancelable:
+        _run cancela la tarea que la ejecuta en TODAS las salidas (finally)."""
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                try:
+                    res = await self.manager.execute(
+                        "google-flow", "flow_list_assets", {}, timeout=timeout)
+                    log.info("[pipeline %s] Keepalive Flow CDP: ok=%s",
+                             run.get("run_id"), res.get("ok"))
+                except (mcpm.MCPManagerError, RuntimeError, OSError, TimeoutError,
+                        asyncio.TimeoutError) as e:
+                    # Los errores solo se registran, nunca se lanzan
+                    log.warning("[pipeline %s] Keepalive Flow CDP falló (ignorado): %s",
+                                run.get("run_id"), e)
+        except asyncio.CancelledError:
+            pass
+
     async def _run(self, run_id: str) -> None:
         run = self._load(run_id)
         keepalive_task: asyncio.Task | None = None
-
-        async def _keepalive_loop(interval: float = 45.0, timeout: float = 30.0) -> None:
-            try:
-                while True:
-                    await asyncio.sleep(interval)
-                    try:
-                        res = await self.manager.execute("google-flow", "flow_list_assets", {}, timeout=timeout)
-                        log.info("[pipeline %s] Keepalive Flow CDP: ok=%s", run.get("run_id"), res.get("ok"))
-                    except (mcpm.MCPManagerError, RuntimeError, OSError, TimeoutError, asyncio.TimeoutError) as e:
-                        # Los errores solo se registran, nunca se lanzan
-                        log.warning("[pipeline %s] Keepalive Flow CDP falló (ignorado): %s", run.get("run_id"), e)
-            except asyncio.CancelledError:
-                pass
 
         async def _cancel_keepalive() -> None:
             nonlocal keepalive_task
@@ -632,7 +642,8 @@ class PipelineOrchestrator:
             # D2: Keepalive acotado a la corrida durante etapas 0 a 2
             ka_interval = float(_cfg("FLOW_KEEPALIVE_INTERVAL", 45.0))
             ka_timeout = float(_cfg("FLOW_KEEPALIVE_TIMEOUT", 30.0))
-            keepalive_task = asyncio.create_task(_keepalive_loop(ka_interval, ka_timeout))
+            keepalive_task = asyncio.create_task(
+                self._flow_keepalive(run, ka_interval, ka_timeout))
 
             # ── Stage 1: contexto de NotebookLM (solo-lectura) o Local ──
             self._set_step(run, ST_STAGE1, "running")
@@ -909,6 +920,11 @@ class PipelineOrchestrator:
         except Exception as e:  # noqa: BLE001 — nunca colgar el backend por una corrida
             self._fail(run, "PIPELINE_CRASH", str(e)[:300])
         finally:
+            # D2: el keepalive se cancela en CUALQUIER salida (fin normal, fallo
+            # de etapa 1/2, excepción de la corrida o cancelación externa) —
+            # junto al single-flight de _busy, para no dejar tareas huérfanas
+            # de keepalive viviendo más allá de la corrida.
+            await _cancel_keepalive()
             if self._busy == run_id:
                 self._busy = None
 

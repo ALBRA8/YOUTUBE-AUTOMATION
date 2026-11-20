@@ -85,3 +85,9 @@
 - **Resultado:** 2812 OK · 0 fallos en 66 baterías (`tests/run_all.py`), 865 passed en `pytest`, `compileall` y `ruff` 100% verde; trinquete 286 intacto.
 - **Referencia:** `SES-2026-11-20-01_ESTABILIDAD_FLOW_CDP_LATENCIA_GEMINI_Y_SUITE_COMPLETA.md`.
 
+## SES-2026-11-21-01 — Keepalive D2 cancelado en CUALQUIER salida + batería sobre `_run` real
+- **Estado:** CLOSED / PASS (verificación completa). Piloto real NO ejecutado (Corresponde a Antigravity; regla D-007).
+- **Hecho:** Corregida fuga de keepalive D2 en `pipeline_orchestrator.py::_run`: la tarea sobrevivía como huérfana si la corrida fallaba en etapa 1/2 o lanzaba excepción (solo se cancelaba en la transición a Stage 3). Cancelación ahora en el `finally` de `_run` (junto al single-flight `_busy`), loop extraído a `PipelineOrchestrator._flow_keepalive(run, interval, timeout)`. Batería `test_be_flow_cdp_stability.py` reescrita: los tests D2 keepalive ejecutan el `_run` REAL (create_run→start_run) con manager doble e intervalo 0.05 s y verifican con `asyncio.all_tasks()` que no sobrevive ninguna tarea tras (a) pings en etapas 0-2 con fallo en etapa 2 y (c) una corrida que llega a etapa 3 (sin pings dentro de ella). Anti-test vacuo verificado: sin el fix, (a+b) falla en `assert _surviving_keepalive_tasks() == []`.
+- **Resultado:** compileall rc=0; ruff F821,E9,F63,F7,F82 verde; pytest COMPLETO 875 passed · 0 failed; run_all.py 66 baterías · 2847 OK · 0 fallos; trinquete 286 intacto (no subido).
+- **Referencia:** `SES-2026-11-21-01_KEEPALIVE_ANY_EXIT_Y_BATERIA_RUN_REAL.md`.
+
