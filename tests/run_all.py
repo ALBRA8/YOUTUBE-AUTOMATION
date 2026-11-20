@@ -184,6 +184,8 @@ BATERIAS = [
                                  # unidades, JSON anidado, PIL, ledger (17)
     "security/test_config_security.py",  # A2/M6: .env newline injection +
                                  # system-owned metadata (16)
+    "security/test_sqli.py",     # AUDITORÍA 2026-11: SQLi por nombre de
+                                 # columna — lista blanca por tabla (22)
     "test_harness.py",           # YOUTUBE HARNESS CONTRACT V1: contrato
                                  # estricto, permisos, libro idempotente,
                                  # estados §9, puente legacy del chat
