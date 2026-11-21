@@ -119,6 +119,29 @@ def _run_ffmpeg(cmd: list[str], timeout: int = 900) -> subprocess.CompletedProce
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
 
+# BH2 ─ escape de rutas dentro de VALORES de filtro ffmpeg (ass=, subtitles=,
+# fontsdir=…). ffmpeg parsea en DOS niveles: 1º el grafo (avfilter), que copia
+# VERBATIM lo encerrado entre comillas simples y solo procesa el escape '\'
+# FUERA de ellas; 2º el valor de la opción (av_opt), que separa por ':' y
+# procesa '\'. Por eso el valor va ENTRE COMILLAS SIMPLES y, dentro, se
+# escapa a nivel de opción: '\' → '\\', ':' → '\:' y "'" → cierre + literal
+# re-escapado + apertura. El patrón antiguo (solo .replace(':', '\\:') SIN
+# comillas) rompía rutas Windows: el nivel grafo consumía el escape y el ':'
+# de la unidad partía el valor por la mitad (p. ej. D:\…\YOUTUBE AUTOMATION\…).
+_BS = chr(92)
+
+
+def ffmpeg_filter_path(p: str | Path) -> str:
+    """Devuelve `p` listo para incrustarse en un VALOR de opción de filtro
+    ffmpeg (ass=/subtitles=/fontsdir=…), probado contra la semántica exacta
+    de av_get_token (tests BH con parser réplica de dos niveles)."""
+    s = str(p)
+    s = s.replace(_BS, _BS + _BS)                     # \ → \\
+    s = s.replace(":", _BS + ":")                      # : → \:
+    s = s.replace("'", "'" + _BS * 3 + "''")          # ' → ' \ \ \ ' '
+    return "'" + s + "'"
+
+
 def probe_duration(path: Path) -> float:
     """Duración REAL de un medio con ffprobe (nunca estimar: sincronía exacta).
 
@@ -462,7 +485,8 @@ async def concat_clips(project: dict, clips: list[Path],
 
     concat_file = proj_dir / "concat.txt"
     concat_file.write_text(
-        "\n".join(f"file '{c.as_posix()}'" for c in clips), encoding="utf8")
+        "\n".join("file '" + c.as_posix().replace("'", "'\\''") + "'"
+                  for c in clips), encoding="utf8")
     cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file),
            "-c", "copy", str(out)]
     p = await asyncio.to_thread(lambda: _run_ffmpeg(cmd, timeout=300))
@@ -634,14 +658,13 @@ async def burn_subtitles(project: dict, video_raw: Path, words_path: Path) -> Pa
         encoding="utf8")
 
     final = proj_dir / f"{project['id']}_final.mp4"
-    sub_filter = f"ass={ass_path.as_posix().replace(':', '\\\\:')}"
+    sub_filter = f"ass={ffmpeg_filter_path(ass_path)}"
     # INT-021: fontsdir hace que libass resuelva la Montserrat ExtraBold
     # embarcada (matching por familia ID1, verificado empíricamente con A/B
     # de MD5 de fotogramas — CONTEXTO INT-021 §3). Sin fontsdir el estilo
     # degradaría en silencio a la fuente por defecto del sistema.
     if typo_mod.FONT_DIR.is_dir():
-        sub_filter += (f":fontsdir="
-                       f"{typo_mod.FONT_DIR.as_posix().replace(':', '\\\\:')}")
+        sub_filter += f":fontsdir={ffmpeg_filter_path(typo_mod.FONT_DIR)}"
     # INT-012 / P2-2 / OPT-UNIFIED / AA2: Ensamblado unificado con validación de capas PNG
     # y fallback resiliente. Valida cada PNG antes de armar el filter_complex (PIL.verify).
     # Si una capa es inválida se omite registrándola en subs_status.json. Si ffmpeg falla (rc!=0),

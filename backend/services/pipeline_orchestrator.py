@@ -62,7 +62,14 @@ _STAGES_ACTIVE = {ST_QUEUED, ST_PREFLIGHT, ST_STAGE1, ST_STAGE2, ST_STAGE3,
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{6,80}$")
 _NICHO_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")
 MAX_NICHO_CONTEXT_BYTES = 64 * 1024  # 64 KB
-_PATH_LINE_RE = re.compile(r"([A-Za-z]:\\[^\s]+|/[^\s]+)\s*$")
+
+# BH1: rutas de imagen/video que Flow devuelve en su texto — ahora CON
+# espacios, tildes y unidad de Windows (p. ej.
+# "D:\PROYECTOS\YOUTUBE AUTOMATION\…\ancla.jpg"). El patrón antiguo
+# ([A-Za-z]:\\[^\s]+|/[^\s]+) cortaba en el primer espacio y perdía la ruta.
+_MEDIA_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov")
+_WIN_DRIVE_RE = re.compile(r"[A-Za-z]:[/\\]")
+_UNIX_PATH_RE = re.compile(r"(?:^|[\s\"'=(])(/.+)$")
 
 # ── BG2: puerta DECLARADA de blueprint externo (nunca oculta) ────────────
 # POST /api/pipeline/run acepta "blueprint" {label, title, scenes}. La
@@ -102,15 +109,71 @@ def _cfg(name: str, default: Any) -> Any:
     return default
 
 
+def _path_from_line(line: str) -> str:
+    r"""BH1: extrae la ruta completa de imagen/video que contiene UNA línea
+    de la respuesta de Flow. Acepta letra de unidad de Windows (X:\ o X:/)
+    o barra inicial POSIX, CON espacios y tildes. Devuelve "" si la línea no
+    contiene una ruta válida."""
+    s = (line or "").strip().lstrip("- ").strip().strip('"').strip("'").strip()
+    if not s or not s.lower().endswith(_MEDIA_EXTS):
+        return ""
+    cand = ""
+    drives = list(_WIN_DRIVE_RE.finditer(s))
+    if drives:
+        cand = s[drives[-1].start():]          # desde la última unidad al final
+    else:
+        m = _UNIX_PATH_RE.search(s)
+        if m:
+            cand = m.group(1)
+    cand = cand.strip().strip('"').strip().strip("'").strip()
+    if len(cand) < 6:                           # mínimo: /a.png | X:\x.png
+        return ""
+    if cand.lower().startswith("//") or "://" in cand:
+        return ""                               # URL, no ruta de disco
+    if any(ch in cand for ch in '<>|'):
+        return ""                               # inválidos en ruta
+    return cand if cand.lower().endswith(_MEDIA_EXTS) else ""
+
+
 def _last_path(text: str) -> str:
     """Extrae la última ruta de archivo de la respuesta textual de Flow.
-    Los servidores GoogleFlowMCP responden con '…:\\n<ruta local>'."""
+    Los servidores GoogleFlowMCP responden con '…:\\n<ruta local>'.
+    BH1: toma la ÚLTIMA línea no vacía que contenga una ruta completa
+    terminada en extensión de imagen o video (.png .jpg .jpeg .webp .mp4
+    .mov), con unidad de Windows o barra inicial, admitiendo espacios y
+    tildes (antes se cortaba en el primer espacio)."""
     for line in reversed((text or "").strip().splitlines()):
-        line = line.strip().lstrip("- ").strip()
-        m = _PATH_LINE_RE.search(line)
-        if m:
-            return m.group(1).strip()
+        if not line.strip():
+            continue
+        p = _path_from_line(line)
+        if p:
+            return p
     return ""
+
+
+def _recent_media_in_dir(out_dir: str | Path, t0: float) -> str:
+    """BH1 respaldo: si el texto de Flow no trae ruta, usa el archivo MÁS
+    RECIENTE de outDir con extensión de imagen/video válida y fecha posterior
+    al inicio de la llamada (t0, con tolerancia de 2 s por granularidad del
+    FS). "" si no hay nada que cumpla — el caller falla con su mensaje de
+    siempre; jamás inventa una ruta."""
+    try:
+        rd = Path(out_dir)
+        mejor, mejor_m = "", -1.0
+        for p in rd.iterdir():
+            if not p.name.lower().endswith(_MEDIA_EXTS):
+                continue
+            try:
+                if not p.is_file():
+                    continue
+                m = p.stat().st_mtime
+            except OSError:
+                continue
+            if m >= t0 - 2.0 and m >= mejor_m:
+                mejor, mejor_m = str(p), m
+        return mejor
+    except OSError:
+        return ""
 
 
 def _asset_name_from_file(path_text: str) -> str:
@@ -1086,11 +1149,12 @@ class PipelineOrchestrator:
             prompt = ("Personaje principal CONSISTENTE para una serie de videos, "
                       "retrato completo, fondo neutro, iluminación uniforme. "
                       + (ctx[:400] if ctx else ""))
+            t0 = time.time()   # BH1: respaldo por fecha posterior a la llamada
             text = await self._flow_call(run, "flow_generate_image", {
                 "prompt": prompt, "aspect": "1:1", "count": 1,
                 "model": str(_cfg("FLOW_MCP_MODEL", "2") or "2"),
                 "outDir": str(rd)})
-            local = _last_path(text)
+            local = _last_path(text) or _recent_media_in_dir(rd, t0)
             if not local:
                 raise mcpm.MCPManagerError(
                     "flow_generate_image no devolvió ruta del ancla de personaje",
@@ -1160,10 +1224,11 @@ class PipelineOrchestrator:
                 # 1) start-frame de la escena con el personaje de referencia @{ref}
                 img_prompt = (f"Image 1 -> Personaje: @{{{ref}}}\n"
                               f"{s['image_prompt'] or s['title']}").strip()
+                t0 = time.time()   # BH1: respaldo por fecha posterior a la llamada
                 text = await self._flow_call(run, "flow_generate_image", {
                     "prompt": img_prompt, "aspect": aspect, "count": 1,
                     "model": model, "outDir": str(rd)})
-                frame = _last_path(text)
+                frame = _last_path(text) or _recent_media_in_dir(rd, t0)
                 if not frame:
                     raise mcpm.MCPManagerError(
                         "flow_generate_image no devolvió ruta del start-frame",
@@ -1173,11 +1238,12 @@ class PipelineOrchestrator:
                 motion = (f"{s['image_prompt']}\nMovimiento de cámara y acción, "
                           f"plano continuo coherente: {s['narration'][:300]}").strip()
                 out_file = str(rd / f"scene_{s['scene_id']}.mp4")
+                t0 = time.time()   # BH1: respaldo por fecha posterior a la llamada
                 text = await self._flow_call(run, "flow_generate_video", {
                     "prompt": motion, "startFrame": start_frame,
                     "aspect": aspect, "outDir": str(rd), "outFile": out_file},
                     timeout=float(_cfg("FLOW_MCP_TIMEOUT", 120.0)))
-                video = _last_path(text) or out_file
+                video = _last_path(text) or _recent_media_in_dir(rd, t0) or out_file
                 # [A13 · P1.6] VERIFICAR en disco ANTES de marcar done: el tool
                 # puede responder 200 con texto de éxito sin haber dejado el
                 # MP4 (descarga truncada, disco lleno, rename fallido). Antes

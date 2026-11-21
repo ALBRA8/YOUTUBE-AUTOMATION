@@ -265,6 +265,11 @@ BATERIAS = [
                                  # externo (validación estricta INVALID_BLUEPRINT,
                                  # etapa 2 sin Gemini, engine "external:<label>",
                                  # blueprint_source "external") (39)
+    "test_bh_rutas_windows_espacios.py",  # BH1-BH2: rutas Flow con espacios/
+                                 # unidad Windows en _last_path + respaldo outDir
+                                 # (ancla/start-frame/video) + escape ffmpeg de
+                                 # la etapa 4 (ass=/fontsdir= con comillas,
+                                 # concat demuxer, badge sin ruta en filtro)
 ]
 
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")

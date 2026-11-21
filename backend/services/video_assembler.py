@@ -250,7 +250,11 @@ def build_concat_cmd(scene_outs: list[Path], run_dir: Path) -> dict:
     re-codificar). list.txt con rutas ABSOLUTAS y comillas escapadas."""
     run_dir = Path(run_dir)
     list_path = run_dir / NORM_DIRNAME / "concat_list.txt"
-    lines = [f"file '{p.resolve()}'" for p in scene_outs]
+    # BH2: comillas simples de la ruta escapadas a nivel demuxer ('\'') — las
+    # rutas con espacios ya van seguras entre comillas; un apóstrofe en el
+    # nombre de carpeta rompía la línea file '…' del concat.
+    lines = ["file '" + str(p.resolve()).replace("'", "'\\''") + "'"
+             for p in scene_outs]
     list_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     concat_out = run_dir / "video_concat.mp4"
     cmd = [FFMPEG_BIN, "-y", "-hide_banner", "-loglevel", "error",
