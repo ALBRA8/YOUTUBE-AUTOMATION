@@ -85,7 +85,11 @@ def test_bb5_stage2_blueprint_demo_aborts_when_not_allowed(monkeypatch):
         st = orch.get_status(run["run_id"])
         assert st["stage"] == "error"
         assert st["error_code"] == "BLUEPRINT_DEMO"
-        assert "Gemini no respondió (¿GEMINI_API_KEY inválida?): el guion salió del generador demo y no se despacha a Flow" in st["error_detail"]
+        # BG1: mensaje honesto con el motivo real — la sugerencia fija
+        # "¿GEMINI_API_KEY inválida?" fue eliminada.
+        assert st["error_detail"].startswith("Gemini falló:")
+        assert "¿GEMINI_API_KEY inválida?" not in st["error_detail"]
+        assert "el guion salió del generador demo y no se despacha a Flow" in st["error_detail"]
 
         step2 = [s for s in st["steps"] if s["stage"] == "stage2_blueprint"][0]
         assert step2["state"] == "failed"

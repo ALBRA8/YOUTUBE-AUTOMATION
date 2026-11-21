@@ -52,6 +52,35 @@ def _sanitize_error(err: Any) -> str:
         return "<error no serializable>"
 
 
+# ── [BG1 · 2026-11] política de reintento consciente del error ────────────
+# · 429 RESOURCE_EXHAUSTED → NO se reintenta sobre el mismo modelo (cuota
+#   diaria: reintentar solo quema intentos) — la cadena de modelos pasa al
+#   siguiente candidato de GEMINI_TEXT_MODEL_FALLBACKS.
+# · 503 UNAVAILABLE → se reintenta con esperas de 5 y 15 s ANTES de pasar al
+#   siguiente modelo (alta demanda transitoria).
+# · 404 NOT_FOUND → sin reintento (modelo inexistente; cadena al siguiente).
+_RETRY_503_WAITS = (5.0, 15.0)
+
+
+def _api_status(e: BaseException) -> str:
+    """Clasifica un error de la API de Gemini: '404' | '429' | '503' | ''.
+    Acepta .code/.status_code del SDK o el código en el texto (p. ej.
+    '429 RESOURCE_EXHAUSTED'). Sin try/except a propósito (P2-2 trinquete):
+    solo getattr/str/regex sobre excepciones reales — operaciones que no
+    fallan en la práctica; un fallo teórico saldría honesto, no en silencio."""
+    code = getattr(e, "code", None) or getattr(e, "status_code", None)
+    s = str(e)
+    sl = s.lower()
+    if code == 429 or "resource_exhausted" in sl:
+        return "429"
+    if code == 503 or "unavailable" in sl:
+        return "503"
+    if (code == 404 or "not_found" in sl or "no longer available" in sl
+            or re.search(r"\b404\b", s)):
+        return "404"
+    return ""
+
+
 def get_active_text_model() -> str:
     """Devuelve el modelo de texto activo o recordado en el proceso."""
     global _remembered_text_model
@@ -101,24 +130,24 @@ async def _retry(coro_factory, tries: int = 3, base: float = 2.0,
     """Reintentos con backoff exponencial + TIMEOUT por intento (§reintentos:
     timeout explícito). Antes una llamada colgada de Gemini estancaba el paso
     del pipeline indefinidamente; ahora cada intento vence a `timeout` s y
-    cuenta como fallo reintentable."""
+    cuenta como fallo reintentable.
+    BG1: la política es consciente del error — 404/429 suben de inmediato
+    (sin quemar reintentos sobre el mismo modelo; decide la cadena de
+    modelos) y 503 se reintenta con esperas de 5 y 15 s antes de pasar al
+    siguiente candidato."""
     for attempt in range(tries):
         t0 = time.monotonic()
         try:
             return await asyncio.wait_for(coro_factory(), timeout=timeout)
         except Exception as e:  # noqa: BLE001
             elapsed = time.monotonic() - t0
-            err_str = str(e).lower()
-            is_not_found = (
-                getattr(e, "code", None) == 404
-                or getattr(e, "status_code", None) == 404
-                or "404" in err_str
-                or "not_found" in err_str
-                or "no longer available" in err_str
-            )
-            if is_not_found or attempt == tries - 1:
+            status = _api_status(e)
+            if status in ("404", "429") or attempt == tries - 1:
                 raise
-            wait = base ** attempt
+            if status == "503":
+                wait = _RETRY_503_WAITS[min(attempt, len(_RETRY_503_WAITS) - 1)]
+            else:
+                wait = base ** attempt
             sanitized = _sanitize_error(e)
             if not str(e).strip() or not sanitized:
                 sanitized = type(e).__name__
@@ -133,7 +162,9 @@ async def generate_json(prompt: str, schema: dict | None = None,
                         low_reasoning: bool = False) -> Any:
     """Genera contenido estructurado JSON. Lanza si no hay key.
     `model` sobreescribe GEMINI_TEXT_MODEL. Si falla con 404 NOT_FOUND,
-    prueba la cadena de GEMINI_TEXT_MODEL_FALLBACKS y recuerda el primero que funcione."""
+    429 RESOURCE_EXHAUSTED o 503 UNAVAILABLE (tras sus esperas de 5/15 s),
+    prueba la cadena de GEMINI_TEXT_MODEL_FALLBACKS y recuerda el primero
+    que funcione. Agotada la cadena, falla con el motivo real."""
     global _remembered_text_model
     if not available():
         raise RuntimeError("GEMINI_API_KEY no configurada")
@@ -176,18 +207,18 @@ async def generate_json(prompt: str, schema: dict | None = None,
             return parsed
         except (Exception,) as e:  # noqa: BLE001
             last_exc = e
-            err_str = str(e).lower()
-            is_not_found = (
-                getattr(e, "code", None) == 404
-                or getattr(e, "status_code", None) == 404
-                or "404" in err_str
-                or "not_found" in err_str
-                or "no longer available" in err_str
-            )
-            if is_not_found and cand != candidates[-1]:
+            status = _api_status(e)
+            # BG1: 404 (modelo inexistente), 429 (cuota — sin reintento en el
+            # mismo modelo) y 503 (tras agotar sus esperas de 5/15 s) pasan al
+            # siguiente candidato; cualquier otro error sube tal cual (motivo
+            # real para el llamador).
+            if status in ("404", "429", "503") and cand != candidates[-1]:
                 log.warning(
-                    "[gemini_client] modelo '%s' no disponible (404/NOT_FOUND) — probando siguiente candidato...",
-                    cand
+                    "[gemini_client] modelo '%s' no disponible (%s) — probando siguiente candidato...",
+                    cand,
+                    {"404": "404/NOT_FOUND",
+                     "429": "429/RESOURCE_EXHAUSTED",
+                     "503": "503/UNAVAILABLE"}[status],
                 )
                 continue
             raise
@@ -223,18 +254,16 @@ async def generate_text(prompt: str, system: str | None = None,
             return resp.text
         except (Exception,) as e:  # noqa: BLE001
             last_exc = e
-            err_str = str(e).lower()
-            is_not_found = (
-                getattr(e, "code", None) == 404
-                or getattr(e, "status_code", None) == 404
-                or "404" in err_str
-                or "not_found" in err_str
-                or "no longer available" in err_str
-            )
-            if is_not_found and cand != candidates[-1]:
+            status = _api_status(e)
+            # BG1: misma cadena que generate_json (404/429/503 → siguiente
+            # candidato; otros errores suben con el motivo real).
+            if status in ("404", "429", "503") and cand != candidates[-1]:
                 log.warning(
-                    "[gemini_client] modelo '%s' no disponible (404/NOT_FOUND) — probando siguiente candidato...",
-                    cand
+                    "[gemini_client] modelo '%s' no disponible (%s) — probando siguiente candidato...",
+                    cand,
+                    {"404": "404/NOT_FOUND",
+                     "429": "429/RESOURCE_EXHAUSTED",
+                     "503": "503/UNAVAILABLE"}[status],
                 )
                 continue
             raise

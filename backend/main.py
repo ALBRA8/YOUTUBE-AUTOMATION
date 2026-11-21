@@ -3686,7 +3686,10 @@ async def pipeline_run(body: dict):
     """Lanza la corrida completa con el notebookId activo del MCP Manager
     (payload → .env fallback dentro de mcp_manager). Single-flight: Flow
     serializa en el Chrome dedicado, así que una segunda corrida en marcha
-    se rechaza con 409."""
+    se rechaza con 409. BG2: acepta un campo opcional "blueprint" (puerta
+    DECLARADA {label, title, scenes}) — con blueprint válido la etapa 2 NO
+    llama a Gemini (engine "external:<label>"); inválido → 400
+    INVALID_BLUEPRINT."""
     idea = (body.get("idea") or "").strip()
     if not idea:
         raise HTTPException(400, "idea requerida (¿qué video produce el pipeline?)")
@@ -3706,7 +3709,8 @@ async def pipeline_run(body: dict):
             fmt=body.get("format") if body.get("format") in ("short", "long") else "short",
             style=(body.get("style") or "auto").strip(),
             max_scenes=max_scenes,
-            nicho_id=body.get("nicho_id"))
+            nicho_id=body.get("nicho_id"),
+            blueprint=body.get("blueprint"))
         _pipe.orchestrator.start_run(run["run_id"])
     except _pipe.PipelineError as e:
         status = 409 if e.code == "PIPELINE_BUSY" else 400

@@ -33,6 +33,7 @@ import logging
 import os
 import re
 import time
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -62,6 +63,17 @@ _RUN_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{6,80}$")
 _NICHO_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")
 MAX_NICHO_CONTEXT_BYTES = 64 * 1024  # 64 KB
 _PATH_LINE_RE = re.compile(r"([A-Za-z]:\\[^\s]+|/[^\s]+)\s*$")
+
+# ── BG2: puerta DECLARADA de blueprint externo (nunca oculta) ────────────
+# POST /api/pipeline/run acepta "blueprint" {label, title, scenes}. La
+# validación es EXTRICTA y cualquier caso inválido → INVALID_BLUEPRINT (sin
+# reparación silenciosa ni truncado). Con blueprint válido la etapa 2 NO
+# llama a Gemini: engine "external:<label>", gemini_model "" y
+# blueprint_source "external" visible en /api/pipeline/status.
+EXTERNAL_BLUEPRINT_MAX_BYTES = 20 * 1024          # payload total <=20 KB
+_EXTERNAL_LABEL_RE = re.compile(r"[A-Za-z0-9 _.\-]{1,30}")
+_EXTERNAL_BP_KEYS = {"label", "title", "scenes"}
+_EXTERNAL_SCENE_KEYS = {"title", "narration", "image_prompt"}
 
 _STEPS = (
     (ST_PREFLIGHT, "[0/3] Pre-flight: verificando sesión de ambos MCP…"),
@@ -109,6 +121,76 @@ def _asset_name_from_file(path_text: str) -> str:
     return stem
 
 
+def _strip_control_chars(s: str) -> str:
+    """BG2: quita caracteres de control (categoría Unicode Cc) de un string.
+    Normalización declarada de la puerta externa — nunca rechaza por ellos."""
+    return "".join(c for c in s if unicodedata.category(c) != "Cc")
+
+
+def validate_external_blueprint(bp: Any, max_scenes: int | None = None) -> dict:
+    """BG2: valida y normaliza un blueprint externo (puerta declarada).
+    Esquema EXACTO:
+      {"label": str 1-30 [A-Za-z0-9 _.-], "title": str <=120,
+       "scenes": [{"title" <=80, "narration" <=300, "image_prompt" <=1200}]}
+    · 1..12 escenas; si hay más que max_scenes → rechazo (NUNCA truncar).
+    · solo strings; los caracteres de control se QUITAN (normalización).
+    · payload total <=20 KB.
+    Cualquier otro caso inválido → PipelineError INVALID_BLUEPRINT."""
+    def _invalid(msg: str) -> PipelineError:
+        return PipelineError(
+            f"blueprint externo inválido: {msg}", "INVALID_BLUEPRINT")
+
+    if not isinstance(bp, dict):
+        raise _invalid("debe ser un objeto JSON {label, title, scenes}")
+    try:
+        size = len(json.dumps(bp, ensure_ascii=False).encode("utf-8"))
+    except (TypeError, ValueError) as e:
+        raise _invalid(f"no serializable a JSON ({type(e).__name__})") from e
+    if size > EXTERNAL_BLUEPRINT_MAX_BYTES:
+        raise _invalid(f"payload {size} bytes supera el límite de "
+                       f"{EXTERNAL_BLUEPRINT_MAX_BYTES} bytes")
+    if set(bp.keys()) != _EXTERNAL_BP_KEYS:
+        recibidas = ", ".join(sorted(str(k) for k in bp.keys())) or "(ninguna)"
+        raise _invalid("claves exactas requeridas: label, title, scenes "
+                       f"(recibidas: {recibidas})")
+    label = bp.get("label")
+    if not isinstance(label, str) or not _EXTERNAL_LABEL_RE.fullmatch(label):
+        raise _invalid("label debe ser un string de 1-30 caracteres "
+                       "[A-Za-z0-9 _.-]")
+    title = bp.get("title")
+    if not isinstance(title, str):
+        raise _invalid("title debe ser un string")
+    title = _strip_control_chars(title)
+    if len(title) > 120:
+        raise _invalid(f"title {len(title)} caracteres supera el máximo de 120")
+    scenes_in = bp.get("scenes")
+    if not isinstance(scenes_in, list):
+        raise _invalid("scenes debe ser una lista")
+    if not (1 <= len(scenes_in) <= 12):
+        raise _invalid(f"{len(scenes_in)} escenas fuera del rango 1-12")
+    if max_scenes is not None and len(scenes_in) > max_scenes:
+        # BG2: rechazo explícito — NUNCA truncar en silencio
+        raise _invalid(f"{len(scenes_in)} escenas superan max_scenes={max_scenes}")
+    scenes_out: list[dict] = []
+    for i, sc in enumerate(scenes_in):
+        if not isinstance(sc, dict) or set(sc.keys()) != _EXTERNAL_SCENE_KEYS:
+            raise _invalid(f"escena {i + 1}: claves exactas requeridas: "
+                           "title, narration, image_prompt")
+        clean: dict[str, str] = {}
+        for k, lim in (("title", 80), ("narration", 300),
+                       ("image_prompt", 1200)):
+            v = sc.get(k)
+            if not isinstance(v, str):
+                raise _invalid(f"escena {i + 1}: '{k}' debe ser un string")
+            v = _strip_control_chars(v)
+            if len(v) > lim:
+                raise _invalid(f"escena {i + 1}: '{k}' con {len(v)} caracteres "
+                               f"supera el máximo de {lim}")
+            clean[k] = v
+        scenes_out.append(clean)
+    return {"label": label, "title": title, "scenes": scenes_out}
+
+
 class PipelineOrchestrator:
     """Coordina las 3 etapas y guarda el estado de cada corrida."""
 
@@ -149,6 +231,9 @@ class PipelineOrchestrator:
                                   "started_at": "", "finished_at": ""})
         run.setdefault("context_source", "")
         run.setdefault("nicho_id", None)
+        # backfill BG2: corridas creadas antes de la puerta de blueprint externo
+        run.setdefault("blueprint_source", "")
+        run.setdefault("external_blueprint", None)
         return run
 
     def _load_local_context(self, nicho_id: str | None) -> str | None:
@@ -190,7 +275,8 @@ class PipelineOrchestrator:
     def create_run(self, idea: str, notebook_id: str | None = None,
                    fmt: str = "short", style: str = "auto",
                    max_scenes: int | None = None,
-                   nicho_id: str | None = None) -> dict:
+                   nicho_id: str | None = None,
+                   blueprint: dict | None = None) -> dict:
         idea = (idea or "").strip()
         if not idea:
             raise PipelineError("idea requerida para el pipeline", "IDEA_REQUIRED")
@@ -205,6 +291,11 @@ class PipelineOrchestrator:
                 raise PipelineError("max_scenes debe ser un entero entre 1 y 12", "INVALID_MAX_SCENES") from e
             if not (1 <= max_scenes <= 12):
                 raise PipelineError("max_scenes debe ser un entero entre 1 y 12", "INVALID_MAX_SCENES")
+        # BG2: blueprint externo (puerta declarada) — se valida EN LA CREACIÓN
+        # para que un blueprint inválido jamás llegue a arrancar una corrida.
+        external_bp = None
+        if blueprint is not None:
+            external_bp = validate_external_blueprint(blueprint, max_scenes)
         if nicho_id is not None:
             nicho_id = str(nicho_id).strip()
             if nicho_id:
@@ -234,6 +325,8 @@ class PipelineOrchestrator:
             "blueprint_title": "",
             "engine": "",
             "gemini_model": "",
+            "blueprint_source": "",             # BG2: "external" si blueprint externo
+            "external_blueprint": external_bp,  # BG2: blueprint normalizado o None
             "scenes": [],
             "dispatched": 0,
             "done_count": 0,
@@ -823,58 +916,94 @@ class PipelineOrchestrator:
             # ── Stage 2: blueprint con el generador EXISTENTE (sin tocarlo) ──
             self._set_step(run, ST_STAGE2, "running")
             run["progress_pct"] = 45
-            idea_enriched = (
-                f"{run['idea']}\n\n[Contexto verificado extraído de NotebookLM — "
-                f"úsalo como bíblia de investigación: hechos, arco narrativo y "
-                f"descripción consistente del personaje]:\n"
-                + context[:int(_cfg("PIPELINE_CONTEXT_MAX_CHARS", 6000))])
-            try:
-                raw = await script_gen.from_idea(idea_enriched, run["style"],
-                                                 run["format"], None, None)
-                res2 = script_gen.build_result(raw)
-            except Exception as e:  # noqa: BLE001 — surfaced, no tumba el backend
-                self._fail(run, "BLUEPRINT_FAILED", str(e)[:300])
-                return
+            ext_bp = run.get("external_blueprint")
+            if ext_bp:
+                # BG2: puerta DECLARADA — el blueprint llegó validado en
+                # create_run y Gemini NO se llama en esta etapa. Visible:
+                # engine "external:<label>", gemini_model "" y
+                # blueprint_source "external" en /api/pipeline/status.
+                log.warning("[pipeline %s] Blueprint EXTERNO %s: no generado por Gemini",
+                            run["run_id"], ext_bp["label"])
+                scenes = []
+                for i, sc in enumerate(ext_bp["scenes"]):
+                    scenes.append({
+                        "scene_id": f"s{i + 1}",
+                        "title": sc.get("title") or f"Escena {i + 1}",
+                        "narration": sc.get("narration") or "",
+                        "image_prompt": sc.get("image_prompt") or "",
+                        "status": "pending",
+                        "attempts": 0,
+                        "video_file": "",
+                        "detail": "",
+                    })
+                active_model = ""
+                blueprint = {"title": ext_bp.get("title") or run["idea"][:60],
+                             "hook": "", "cta": "",
+                             "engine": f"external:{ext_bp['label']}",
+                             "notebook_id": run["notebook_id"],
+                             "format": run["format"], "style": run["style"],
+                             "context_source": run.get("context_source", "notebooklm"),
+                             "gemini_model": "",
+                             "blueprint_source": "external",
+                             "scenes": scenes}
+            else:
+                idea_enriched = (
+                    f"{run['idea']}\n\n[Contexto verificado extraído de NotebookLM — "
+                    f"úsalo como bíblia de investigación: hechos, arco narrativo y "
+                    f"descripción consistente del personaje]:\n"
+                    + context[:int(_cfg("PIPELINE_CONTEXT_MAX_CHARS", 6000))])
+                try:
+                    raw = await script_gen.from_idea(idea_enriched, run["style"],
+                                                     run["format"], None, None)
+                    res2 = script_gen.build_result(raw)
+                except Exception as e:  # noqa: BLE001 — surfaced, no tumba el backend
+                    self._fail(run, "BLUEPRINT_FAILED", str(e)[:300])
+                    return
 
-            if res2.get("engine") == "local-demo" and os.environ.get("PIPELINE_ALLOW_DEMO") != "1":
-                self._fail(run, "BLUEPRINT_DEMO",
-                           "Gemini no respondió (¿GEMINI_API_KEY inválida?): "
-                           "el guion salió del generador demo y no se despacha a Flow")
-                return
+                if res2.get("engine") == "local-demo" and os.environ.get("PIPELINE_ALLOW_DEMO") != "1":
+                    # BG1: motivo REAL registrado por script_gen (código y tipo,
+                    # sin claves). Sin error registrado → no había GEMINI_API_KEY
+                    # (hecho, no la sugerencia fija eliminada).
+                    motivo = (script_gen.describe_gemini_error()
+                              or "sin GEMINI_API_KEY configurada")
+                    self._fail(run, "BLUEPRINT_DEMO",
+                               f"Gemini falló: {motivo} — "
+                               "el guion salió del generador demo y no se despacha a Flow")
+                    return
 
-            scenes = []
-            for i, sc in enumerate(res2.get("scenes") or []):
-                scenes.append({
-                    "scene_id": f"s{i + 1}",
-                    "title": sc.get("title") or f"Escena {i + 1}",
-                    "narration": sc.get("narration") or "",
-                    "image_prompt": sc.get("image_prompt") or "",
-                    "status": "pending",
-                    "attempts": 0,
-                    "video_file": "",
-                    "detail": "",
-                })
-            if not scenes:
-                self._fail(run, "BLUEPRINT_EMPTY",
-                           "el generador no devolvió escenas — revisa GEMINI_API_KEY "
-                           "o el contenido del notebook")
-                return
+                scenes = []
+                for i, sc in enumerate(res2.get("scenes") or []):
+                    scenes.append({
+                        "scene_id": f"s{i + 1}",
+                        "title": sc.get("title") or f"Escena {i + 1}",
+                        "narration": sc.get("narration") or "",
+                        "image_prompt": sc.get("image_prompt") or "",
+                        "status": "pending",
+                        "attempts": 0,
+                        "video_file": "",
+                        "detail": "",
+                    })
+                if not scenes:
+                    self._fail(run, "BLUEPRINT_EMPTY",
+                               "el generador no devolvió escenas — revisa GEMINI_API_KEY "
+                               "o el contenido del notebook")
+                    return
 
-            ms = run.get("max_scenes")
-            if ms and len(scenes) > ms:
-                scenes = (scenes[:ms - 1] + [scenes[-1]]) if ms > 1 else [scenes[-1]]
-                for idx, sc in enumerate(scenes):
-                    sc["scene_id"] = f"s{idx + 1}"
-            from services import gemini_client
-            active_model = gemini_client.get_active_text_model()
-            blueprint = {"title": res2.get("title") or run["idea"][:60],
-                         "hook": res2.get("hook", ""), "cta": res2.get("cta", ""),
-                         "engine": res2.get("engine", "") or f"gemini ({active_model})",
-                         "notebook_id": run["notebook_id"],
-                         "format": run["format"], "style": run["style"],
-                         "context_source": run.get("context_source", "notebooklm"),
-                         "gemini_model": active_model,
-                         "scenes": scenes}
+                ms = run.get("max_scenes")
+                if ms and len(scenes) > ms:
+                    scenes = (scenes[:ms - 1] + [scenes[-1]]) if ms > 1 else [scenes[-1]]
+                    for idx, sc in enumerate(scenes):
+                        sc["scene_id"] = f"s{idx + 1}"
+                from services import gemini_client
+                active_model = gemini_client.get_active_text_model()
+                blueprint = {"title": res2.get("title") or run["idea"][:60],
+                             "hook": res2.get("hook", ""), "cta": res2.get("cta", ""),
+                             "engine": res2.get("engine", "") or f"gemini ({active_model})",
+                             "notebook_id": run["notebook_id"],
+                             "format": run["format"], "style": run["style"],
+                             "context_source": run.get("context_source", "notebooklm"),
+                             "gemini_model": active_model,
+                             "scenes": scenes}
             (rd / "blueprint.json").write_text(
                 json.dumps(blueprint, ensure_ascii=False, indent=1),
                 encoding="utf-8")
@@ -882,6 +1011,8 @@ class PipelineOrchestrator:
             run["blueprint_title"] = blueprint["title"]
             run["engine"] = blueprint["engine"]
             run["gemini_model"] = active_model
+            if ext_bp:
+                run["blueprint_source"] = "external"
             self._set_step(run, ST_STAGE2, "ok",
                            f"«{blueprint['title']}» — {len(scenes)} escenas "
                            f"(motor: {blueprint['engine']})")

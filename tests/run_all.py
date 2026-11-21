@@ -257,6 +257,14 @@ BATERIAS = [
                                  # vivo y cadena de modelos Gemini con fallback ante 404 (6)
     "test_be_flow_cdp_stability.py",   # BE: Flags CDP de fondo, calentamiento de Stage 3
                                  # y reintento acotado ante connectOverCDP: Timeout (5)
+    "test_bg_gemini_errors_and_external_blueprint.py", # BG1-BG2: resiliencia Gemini
+                                 # (429 sin retry mismo modelo → fallbacks, 503 con
+                                 # esperas 5/15 s, 404 inmediato) + mensaje honesto en
+                                 # BLUEPRINT_DEMO ("Gemini falló: <motivo real>", sin
+                                 # la sugerencia fija) + puerta DECLARADA de blueprint
+                                 # externo (validación estricta INVALID_BLUEPRINT,
+                                 # etapa 2 sin Gemini, engine "external:<label>",
+                                 # blueprint_source "external") (39)
 ]
 
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")

@@ -4,6 +4,7 @@ Modos: script (texto dado), idea (semilla), url (transcripción viral originaliz
 audio (transcripción de voz propia ya insertada en meta).
 Genera JSON estructurado: título, hook, escenas con narration + image_prompt, cta.
 """
+import asyncio
 import logging
 
 from services import gemini_client
@@ -13,6 +14,70 @@ from services.themes import get_style, NEUTRAL_STYLE_PROMPT
 from pipeline.sanitizer import sanitize_script_scenes
 
 log = logging.getLogger("script")
+
+# ── [BG1 · 2026-11] último error de Gemini (código y tipo, SIN claves) ──────
+# Los generadores degradan a local-demo en vez de propagar la excepción, así
+# que el motivo REAL de la caída de Gemini se registra aquí y el orquestador
+# lo surface honesto en el mensaje de BLUEPRINT_DEMO. Jamás contiene la API
+# key: el detalle pasa por gemini_client._sanitize_error.
+_LAST_GEMINI_ERROR: dict | None = None
+
+
+def last_gemini_error() -> dict | None:
+    """Último error de Gemini registrado en este proceso (código y tipo,
+    sin claves) o None si no hay ninguno."""
+    return _LAST_GEMINI_ERROR
+
+
+def clear_gemini_error() -> None:
+    """Olvida el error registrado — se llama al inicio de CADA generación
+    para que el motivo surfaced corresponda SIEMPRE a la corrida actual."""
+    global _LAST_GEMINI_ERROR
+    _LAST_GEMINI_ERROR = None
+
+
+def record_gemini_error(e: BaseException) -> dict | None:
+    """Guarda el último error de Gemini (código y tipo, sin claves).
+    Motivo legible: '429 cuota' | '503 alta demanda' | 'timeout' |
+    'clave inválida' | '404 modelo no disponible' | literal <código + tipo>.
+    Sin try/except propio (P2-2 trinquete): las piezas que sí pueden recibir
+    datos raros ya están blindadas — `_api_status` (getattr/str/regex sobre
+    excepciones reales) y `_sanitize_error` (bloque propio del baseline)."""
+    sl = str(e).lower()
+    code = getattr(e, "code", None) or getattr(e, "status_code", None)
+    status = gemini_client._api_status(e)
+    _timeout_cls = getattr(asyncio, "TimeoutError", TimeoutError)
+    if isinstance(e, (TimeoutError, _timeout_cls)):
+        reason = "timeout"
+    elif status == "429":
+        reason = "429 cuota"
+    elif status == "503":
+        reason = "503 alta demanda"
+    elif ("api_key_invalid" in sl or "api key not valid" in sl
+          or "unauthenticated" in sl or "permission_denied" in sl
+          or "permission denied" in sl or code in (401, 403)):
+        reason = "clave inválida"
+    elif status == "404":
+        reason = "404 modelo no disponible"
+    else:
+        reason = f"{code if code is not None else ''} {type(e).__name__}".strip()
+    global _LAST_GEMINI_ERROR
+    _LAST_GEMINI_ERROR = {
+        "code": code if code is not None else "",
+        "type": type(e).__name__,
+        "reason": reason,
+        # sin claves: saneado por gemini_client._sanitize_error
+        "detail": gemini_client._sanitize_error(e)[:200],
+    }
+    return _LAST_GEMINI_ERROR
+
+
+def describe_gemini_error() -> str:
+    """Motivo legible del último fallo de Gemini ('' si no hay ninguno)."""
+    err = _LAST_GEMINI_ERROR
+    if not err:
+        return ""
+    return str(err.get("reason") or "")
 
 # Reglas de retención psicológica (Inyección 5): 3 fases obligatorias que
 # el LLM debe respetar en TODO guion. Maximizan retención y compartidos.
@@ -318,6 +383,7 @@ async def from_script(script_text: str, style_id: str, fmt: str,
                       custom_prompt: str | None = None,
                       avatar: dict | None = None,
                       pacing: str = "normal") -> dict:
+    clear_gemini_error()  # BG1: el motivo surfaced corresponde a ESTA corrida
     if not gemini_client.available():
         return _local_fallback("script", script_text, style_id, fmt, custom_prompt)
     try:
@@ -331,6 +397,7 @@ async def from_script(script_text: str, style_id: str, fmt: str,
         return await gemini_client.generate_json(prompt, gemini_client.schema_scenes(),
                                                  system=SYSTEM, low_reasoning=True)
     except Exception as e:  # noqa: BLE001
+        record_gemini_error(e)  # BG1: código y tipo, sin claves
         log.warning("Gemini falló (%s) — uso generador local", str(e)[:120])
         return _local_fallback("script", script_text, style_id, fmt, custom_prompt)
 
@@ -339,6 +406,7 @@ async def from_idea(idea: str, style_id: str, fmt: str,
                     custom_prompt: str | None = None,
                     avatar: dict | None = None,
                     pacing: str = "normal") -> dict:
+    clear_gemini_error()  # BG1: el motivo surfaced corresponde a ESTA corrida
     if not gemini_client.available():
         return _local_fallback("idea", idea, style_id, fmt, custom_prompt)
     try:
@@ -351,6 +419,7 @@ async def from_idea(idea: str, style_id: str, fmt: str,
         return await gemini_client.generate_json(prompt, gemini_client.schema_scenes(),
                                                  system=SYSTEM, low_reasoning=True)
     except Exception as e:  # noqa: BLE001
+        record_gemini_error(e)  # BG1: código y tipo, sin claves
         log.warning("Gemini falló (%s) — uso generador local", str(e)[:120])
         return _local_fallback("idea", idea, style_id, fmt, custom_prompt)
 
@@ -371,6 +440,7 @@ async def from_url_transcript(viral_meta: dict, transcript: str, style_id: str,
     original — "similar pero NO igual", y AHORA VERIFICABLE: se mide el
     solape de 5-gramas del guion contra la transcripción y, si supera el
     umbral (18%), se relanza UNA vez con instrucción anti-copia dura."""
+    clear_gemini_error()  # BG1: el motivo surfaced corresponde a ESTA corrida
     seed = viral_meta.get("title") or transcript[:120]
     if not gemini_client.available():
         return _local_fallback("url", seed, style_id, fmt, custom_prompt,
@@ -429,6 +499,7 @@ async def from_url_transcript(viral_meta: dict, transcript: str, style_id: str,
         result["originality"] = report
         return result
     except Exception as e:  # noqa: BLE001
+        record_gemini_error(e)  # BG1: código y tipo, sin claves
         log.warning("Gemini falló (%s) — uso generador local", str(e)[:120])
         return _local_fallback("url", seed, style_id, fmt, custom_prompt,
                                source_text=transcript)
@@ -439,6 +510,7 @@ async def from_audio_transcript(transcript: str, style_id: str, fmt: str,
                                 avatar: dict | None = None,
                                 pacing: str = "normal") -> dict:
     """El usuario grabó su voz (modo Audio): pulimos y estructuramos su narración."""
+    clear_gemini_error()  # BG1: el motivo surfaced corresponde a ESTA corrida
     if not gemini_client.available():
         return _local_fallback("audio", transcript, style_id, fmt, custom_prompt)
     try:
@@ -458,6 +530,7 @@ async def from_audio_transcript(transcript: str, style_id: str, fmt: str,
             sanitize_script_scenes(result["scenes"])
         return result
     except Exception as e:  # noqa: BLE001
+        record_gemini_error(e)  # BG1: código y tipo, sin claves
         log.warning("Gemini falló (%s) — uso generador local", str(e)[:120])
         return _local_fallback("audio", transcript, style_id, fmt, custom_prompt)
 
