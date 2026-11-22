@@ -114,7 +114,11 @@ def _filter_option_values(vf_value: str) -> tuple[str, list[str]]:
 # ═══════════════════════ manager hermético configurable ═══════════════════
 class MockManagerBH:
     """Mock del MCP manager: respuestas en cola para flow_generate_image/video
-    y side-effect opcional (p. ej. escribir el archivo en outDir)."""
+    y side-effect opcional (p. ej. escribir el archivo en outDir).
+    BI1: mantiene un proyecto Flow MÍNIMO — flow_generate_image registra el
+    asset con nombre POR CONTENIDO (no el stem del archivo local) y
+    flow_list_assets lo lista, para que el startFrame detectado sea el
+    nombre de Flow."""
 
     def __init__(self, image_texts=None, video_text="Generated video:", 
                  on_execute=None):
@@ -122,6 +126,8 @@ class MockManagerBH:
         self._img_texts = list(image_texts or [])
         self._video_text = video_text
         self._on_execute = on_execute
+        self.flow_assets: list[str] = []   # BI1: proyecto Flow simulado
+        self._img_n = 0
 
     async def test_pipeline(self, service, notebook_id=None):
         return {"service": service, "ok": True, "state": "connected",
@@ -138,7 +144,14 @@ class MockManagerBH:
         if tool == "notebook_query":
             return {"ok": True, "text": json.dumps(
                 {"status": "success", "answer": "CONTEXTO FALSO del notebook"})}
+        if tool == "flow_list_assets":    # BI1: listado del proyecto simulado
+            if not self.flow_assets:
+                return {"ok": True, "text": "(the project has no images yet)"}
+            return {"ok": True,
+                    "text": "\n".join(f"- {n}" for n in self.flow_assets)}
         if tool == "flow_generate_image":
+            self._img_n += 1
+            self.flow_assets.append(f"Recurso de Flow {self._img_n:02d}")
             t = self._img_texts.pop(0) if self._img_texts else \
                 "Generated 1 image(s):"
             return {"ok": True, "text": t}
@@ -146,6 +159,7 @@ class MockManagerBH:
             return {"ok": True, "text": self._video_text}
         if tool == "flow_upload_file":
             n = args.get("name", "ref")
+            self.flow_assets.append(n)
             return {"ok": True, "text": f'Uploaded "{n}". Reference as @{{{n}}}.'}
         return {"ok": True, "text": "ok"}
 
@@ -346,7 +360,13 @@ def test_bh1_stage3_rutas_espacios_de_principio_a_fin():
         vids = [a for t, a in orch.manager.exec_calls
                 if t == "flow_generate_video"]
         assert vids, "no se despachó el video"
-        assert vids[0]["startFrame"] == "mi_frame_uno", vids[0]
+        # BI1: startFrame = nombre del asset en Flow (la 2ª imagen: la 1ª es el
+        # ancla); el stem local "mi_frame_uno" ya NO se usa como asset name.
+        assert vids[0]["startFrame"] == "Recurso de Flow 02", vids[0]
+        # BH1 se mantiene: la ruta Windows CON ESPACIOS del ancla llegó entera
+        # a flow_upload_file
+        ups = [a for t, a in orch.manager.exec_calls if t == "flow_upload_file"]
+        assert ups and ups[0]["filePath"].endswith("mi ancla.png"), ups
         st = orch.get_status(run["run_id"])
         assert st["scenes"][0]["status"] == "done", st["scenes"][0]
         assert st["scenes"][0]["video_file"] == str(

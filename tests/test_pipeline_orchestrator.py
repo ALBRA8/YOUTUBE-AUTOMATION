@@ -47,7 +47,11 @@ def check(nombre, cond, extra=""):
 
 
 class FakeManager:
-    """Sustituto hermético de MCPClientManager con comportamiento dirigido."""
+    """Sustituto hermético de MCPClientManager con comportamiento dirigido.
+    BI1: mantiene un PROYECTO Flow simulado — flow_generate_image registra el
+    asset con nombre basado en el CONTENIDO del prompt (como Flow real, p.
+    ej. "Red apple character peeking") y flow_list_assets lo lista; el stem
+    del archivo local (gen_img_NNN) es deliberadamente DIFERENTE."""
 
     def __init__(self, nblm_ok=True, flow_ok=True, fail_video_at=None,
                  context_error=None, flow_dies_in_stage3=False,
@@ -62,6 +66,7 @@ class FakeManager:
         self.disc_calls = 0                     # nº de llamadas a discover_notebook_id
         self.calls = []                          # (kind, service, tool, arguments)
         self._probe_n = 0                        # nº de test_pipeline de flow
+        self.flow_assets: list[str] = []         # BI1: proyecto Flow simulado
         self._img_n = 0
         self._vid_n = 0
 
@@ -104,10 +109,24 @@ class FakeManager:
                                         "rojo, datos del caso, arco en 3 actos."}
         if tool == "flow_upload_file":
             n = args.get("name", "ref")
+            self.flow_assets.append(n)   # BI1: la subida registra el asset
             return {"ok": True, "text": f'Uploaded and named "{n}". '
                                         f'Reference it in prompts as @{{{n}}}.'}
+        if tool == "flow_list_assets":   # BI1: listado del proyecto simulado
+            if not self.flow_assets:
+                return {"ok": True, "text": "(the project has no images yet)"}
+            return {"ok": True,
+                    "text": "\n".join(f"- {n}" for n in self.flow_assets)}
         if tool == "flow_generate_image":
             self._img_n += 1
+            # BI1: Flow nombra el asset por el CONTENIDO del prompt — el ancla
+            # de personaje y los start-frames reciben nombres distintos al
+            # archivo local descargado (previsualización reducida).
+            if "Personaje principal CONSISTENTE" in args.get("prompt", ""):
+                asset = "Retrato del personaje principal"
+            else:
+                asset = f"Red apple character peeking {self._img_n:02d}"
+            self.flow_assets.append(asset)
             path = f"/tmp/fake/gen_img_{self._img_n:03d}.png"
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             Path(path).write_bytes(b"fake png")  # A13/P1.6: el tool REAL deja el archivo
@@ -268,8 +287,10 @@ async def stage_tests():
         check("todos los videos en 9:16 (format short)",
               all(c[3].get("aspect") == "9:16" for c in vids), [c[3].get("aspect") for c in vids])
         frames = [c[3].get("startFrame") for c in vids]
-        check("startFrame = asset generado por escena (distintos)",
-              len(set(frames)) == 3 and all(f.startswith("gen_img_") for f in frames),
+        check("startFrame = nombre Flow del asset (BI1), no el archivo local",
+              len(set(frames)) == 3
+              and all(f.startswith("Red apple character peeking") for f in frames)
+              and all(not f.startswith("gen_img_") for f in frames),
               frames)
         imgs = [c for c in exec_calls if c[2] == "flow_generate_image"]
         check("start-frames citan a @{personaje} (consistencia)",
@@ -331,7 +352,10 @@ async def stage_tests():
         vids_after = [c for c in exec_after if c[2] == "flow_generate_video"]
         check("retry despacha exactamente 1 video (s2)", len(vids_after) == 1,
               len(vids_after))
-        check("retry NO re-sub la referencia (cacheada)",
+        check("retry NO regenera la imagen (BI1: start-frame reutilizado)",
+              not any(c[2] == "flow_generate_image" for c in exec_after),
+              exec_after)
+        check("retry NO re-sub nada (BI1: ni referencia ni respaldo)",
               not any(c[2] == "flow_upload_file" for c in exec_after), exec_after)
         check("attempts de s2 = 2", st_by_id["s2"]["attempts"] == 2,
               st_by_id["s2"]["attempts"])

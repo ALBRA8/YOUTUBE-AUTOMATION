@@ -270,6 +270,14 @@ BATERIAS = [
                                  # (ancla/start-frame/video) + escape ffmpeg de
                                  # la etapa 4 (ass=/fontsdir= con comillas,
                                  # concat demuxer, badge sin ruta en filtro)
+    "test_bi1_startframe_flow_assets.py",  # BI1: startFrame = nombre REAL del
+                                 # asset Flow (diff flow_list_assets antes/
+                                 # después de generar; ids desempatan; cero/
+                                 # varios/duplicado → respaldo flow_upload_file
+                                 # f"{run_id}-{scene_id}" con warning; subida
+                                 # fallida → error claro) + retry reutiliza el
+                                 # start-frame sin regenerar imagen + ancla
+                                 # intacta (13)
 ]
 
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")

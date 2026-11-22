@@ -35,6 +35,7 @@ import re
 import time
 import unicodedata
 import uuid
+from collections import Counter
 from pathlib import Path
 from typing import Any, Callable
 
@@ -178,10 +179,112 @@ def _recent_media_in_dir(out_dir: str | Path, t0: float) -> str:
 
 def _asset_name_from_file(path_text: str) -> str:
     """Nombre de asset Flow para un archivo local generado (stem saneado).
-    flow.js nombra los archivos sin caracteres raros; defensa extra igualmente."""
+    flow.js nombra los archivos sin caracteres raros; defensa extra igualmente.
+    BI1: ya NO se usa para derivar el startFrame — Flow nombra sus assets por
+    el CONTENIDO del prompt y el nombre real se detecta con el diff de
+    flow_list_assets (_unique_new_asset); se conserva solo como utilidad de
+    saneo para casos futuros."""
     stem = Path(path_text).stem.strip()
     stem = re.sub(r"[^A-Za-z0-9_\-]", "_", stem)[:64] or "frame"
     return stem
+
+
+# ── BI1: startFrame = nombre REAL del asset en Flow ─────────────────────
+# Flow nombra sus assets por el contenido del prompt (p. ej. "Red apple
+# character peeking"), no por el archivo local descargado (que es una
+# previsualización reducida, p. ej. 286x512). Derivar el startFrame del stem
+# local hacía fallar flow_generate_video con "Start frame asset … not found
+# in Flow project assets". Detección: diff de flow_list_assets ANTES y
+# DESPUÉS de cada flow_generate_image; si no es concluyente, respaldo de
+# subida con nombre explícito único.
+_ASSET_ID_RE = re.compile(r"\[id:\s*([^\]\s]+)\]|\(id:\s*([^)\s]+)\)",
+                           re.IGNORECASE)
+
+
+def _parse_asset_listing(text: str) -> list[tuple[str, str | None]]:
+    """BI1: parsea la salida de flow_list_assets → [(nombre, id|None), …].
+    Formatos admitidos: viñetas "- Nombre", líneas planas, "(the project has
+    no images yet)", "[]"/"{}" y JSON [{"name": …, "id": …}]. Un id inline
+    ("- Nombre (id: xyz)") se separa del nombre. El id es OPCIONAL (el tool
+    real lista solo nombres; si un listado futuro lo trae, se usa para
+    desempatar). Nunca inventa entradas."""
+    t = (text or "").strip()
+    if not t or "has no images yet" in t:
+        return []
+    if t.startswith("[") or t.startswith("{"):
+        try:
+            data = json.loads(t)
+        except (ValueError, TypeError):
+            data = None
+        if isinstance(data, list):
+            out: list[tuple[str, str | None]] = []
+            for it in data:
+                if isinstance(it, str) and it.strip():
+                    out.append((it.strip(), None))
+                elif (isinstance(it, dict) and isinstance(it.get("name"), str)
+                      and it.get("name").strip()):
+                    aid = it.get("id")
+                    out.append((it["name"].strip(),
+                                aid.strip() if isinstance(aid, str)
+                                and aid.strip() else None))
+            return out
+        if isinstance(data, dict):
+            inner = data.get("assets")
+            if isinstance(inner, list):
+                return _parse_asset_listing(
+                    json.dumps(inner, ensure_ascii=False))
+            return []
+    out = []
+    for line in t.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("- "):
+            line = line[2:].strip()          # prefijo ANTES del id: índices correctos
+        if not line or set(line) <= {"-"}:   # vacía o viñeta sin texto
+            continue
+        m = _ASSET_ID_RE.search(line)
+        aid = ""
+        if m:
+            aid = (m.group(1) or m.group(2) or "").strip()
+            line = (line[:m.start()] + line[m.end():]).strip(" -(\"'").strip()
+        if not line:
+            continue
+        out.append((line, aid or None))
+    return out
+
+
+def _unique_new_asset(before: list[tuple[str, str | None]],
+                      after: list[tuple[str, str | None]]) -> tuple[str, str]:
+    """BI1: calcula el ÚNICO asset nuevo entre dos listados de Flow.
+    Devuelve (nombre, "") si hay EXACTAMENTE uno identificable con certeza;
+    (None, motivo) si hay cero o varios (ambiguo) — el caller usa el
+    respaldo de subida y JAMÁS adivina.
+    · Si AMBOS listados traen id en TODAS sus entradas, la diferencia de
+      ids manda (desempata incluso con nombres repetidos).
+    · Si no, diferencia de MULTICONJUNTO de nombres; un excedente cuyo
+      nombre YA existía antes (duplicado) es ambiguo por definición:
+      @{nombre} podría estar apuntando al asset viejo."""
+    if before and after and all(aid for _, aid in before) \
+            and all(aid for _, aid in after):
+        b_ids = {aid for _, aid in before}
+        nuevos = [(n, aid) for n, aid in after if aid not in b_ids]
+        if len(nuevos) == 1:
+            return nuevos[0][0], ""
+        if nuevos:
+            return None, (f"{len(nuevos)} assets nuevos por id: "
+                          + "; ".join(n for n, _ in nuevos[:3]))
+        return None, "0 nuevos (por id)"
+    cb = Counter(n for n, _ in before)
+    ca = Counter(n for n, _ in after)
+    excedente = ca - cb
+    nuevos = sorted(n for n, c in excedente.items() for _ in range(c))
+    if len(nuevos) == 1 and cb[nuevos[0]] == 0:
+        return nuevos[0], ""
+    if not nuevos:
+        return None, "0 nuevos"
+    return None, (f"{len(nuevos)} nuevos/ambiguos: "
+                  + "; ".join(nuevos[:3]))
 
 
 def _strip_control_chars(s: str) -> str:
@@ -997,6 +1100,7 @@ class PipelineOrchestrator:
                         "status": "pending",
                         "attempts": 0,
                         "video_file": "",
+                        "start_frame_asset": "",   # BI1: nombre Flow real
                         "detail": "",
                     })
                 active_model = ""
@@ -1044,6 +1148,7 @@ class PipelineOrchestrator:
                         "status": "pending",
                         "attempts": 0,
                         "video_file": "",
+                        "start_frame_asset": "",   # BI1: nombre Flow real
                         "detail": "",
                     })
                 if not scenes:
@@ -1166,9 +1271,32 @@ class PipelineOrchestrator:
         self._save(run)
         return ref_name
 
+    async def _list_assets(self, run: dict) -> list[tuple[str, str | None]] | None:
+        """BI1: flow_list_assets parseado → [(nombre, id|None), …].
+        None si el listado FALLA (el caller trata ese caso como ambiguo →
+        respaldo de subida, sin adivinar); [] si Flow no tiene assets."""
+        try:
+            res = await self.manager.execute(
+                "google-flow", "flow_list_assets", {}, timeout=30.0)
+            if not res.get("ok"):
+                log.warning("[pipeline %s] flow_list_assets respondió ok=False",
+                            run.get("run_id"))
+                return None
+            return _parse_asset_listing(res.get("text") or "")
+        except (mcpm.MCPManagerError, RuntimeError, OSError, TimeoutError,
+                asyncio.TimeoutError) as e:
+            log.warning("[pipeline %s] flow_list_assets falló: %s",
+                        run.get("run_id"), e)
+            return None
+
     async def _stage3(self, run: dict, only_scene_ids: set[str] | None = None) -> None:
         """Despacho por escena. Una escena que falla NO aborta la corrida:
-        se registra scene_id + detalle y se continúa (§2 del mandato)."""
+        se registra scene_id + detalle y se continúa (§2 del mandato).
+        BI1: el startFrame es el nombre REAL del asset en Flow (diff de
+        flow_list_assets antes/después de generar; respaldo de subida con
+        nombre explícito si la detección es ambigua). En retry, si la escena
+        ya tiene start-frame y el asset sigue en Flow, NO se regenera la
+        imagen: solo el video (ahorra créditos)."""
         # gate barato: Flow debe seguir conectado (retry incluido)
         pre = await self.manager.test_pipeline("google-flow")
         if not pre.get("ok"):
@@ -1222,18 +1350,78 @@ class PipelineOrchestrator:
             self._save(run)
             try:
                 # 1) start-frame de la escena con el personaje de referencia @{ref}
-                img_prompt = (f"Image 1 -> Personaje: @{{{ref}}}\n"
-                              f"{s['image_prompt'] or s['title']}").strip()
-                t0 = time.time()   # BH1: respaldo por fecha posterior a la llamada
-                text = await self._flow_call(run, "flow_generate_image", {
-                    "prompt": img_prompt, "aspect": aspect, "count": 1,
-                    "model": model, "outDir": str(rd)})
-                frame = _last_path(text) or _recent_media_in_dir(rd, t0)
-                if not frame:
-                    raise mcpm.MCPManagerError(
-                        "flow_generate_image no devolvió ruta del start-frame",
-                        "TOOL_ERROR")
-                start_frame = _asset_name_from_file(frame)
+                #    BI1: Flow nombra sus assets por el CONTENIDO del prompt — el
+                #    stem del archivo local NO es el nombre del asset (el video
+                #    fallaba con "Start frame asset … not found in Flow project
+                #    assets"). Se detecta el nombre real por diff de listados y,
+                #    si es ambiguo, se sube la copia local con nombre explícito.
+                start_frame = str(s.get("start_frame_asset") or "")
+                if start_frame:
+                    # BI1 · retry: si Flow aún lista el asset, NO regenerar la
+                    # imagen (ahorra créditos): reutilizar el nombre guardado.
+                    listing = await self._list_assets(run)
+                    if listing is not None and start_frame in {
+                            n for n, _ in listing}:
+                        log.info("[pipeline %s] escena %s reutiliza start-frame "
+                                 "'%s' (no regenera imagen)",
+                                 run["run_id"], s["scene_id"], start_frame)
+                    else:
+                        if listing is None:
+                            log.warning("[pipeline %s] escena %s: listado Flow "
+                                        "indisponible — no se puede confirmar el "
+                                        "start-frame '%s'; se regenera la imagen",
+                                        run["run_id"], s["scene_id"], start_frame)
+                        else:
+                            log.warning("[pipeline %s] escena %s: el start-frame "
+                                        "'%s' ya NO está en Flow — se regenera "
+                                        "la imagen", run["run_id"],
+                                        s["scene_id"], start_frame)
+                        start_frame = ""
+                        s["start_frame_asset"] = ""
+                if not start_frame:
+                    img_prompt = (f"Image 1 -> Personaje: @{{{ref}}}\n"
+                                  f"{s['image_prompt'] or s['title']}").strip()
+                    antes = await self._list_assets(run)
+                    t0 = time.time()   # BH1: respaldo por fecha posterior a la llamada
+                    text = await self._flow_call(run, "flow_generate_image", {
+                        "prompt": img_prompt, "aspect": aspect, "count": 1,
+                        "model": model, "outDir": str(rd)})
+                    frame = _last_path(text) or _recent_media_in_dir(rd, t0)
+                    if not frame:
+                        raise mcpm.MCPManagerError(
+                            "flow_generate_image no devolvió ruta del start-frame",
+                            "TOOL_ERROR")
+                    despues = await self._list_assets(run)
+                    nuevo, motivo = "", "listado Flow indisponible"
+                    if antes is not None and despues is not None:
+                        nuevo, motivo = _unique_new_asset(antes, despues)
+                    if nuevo:
+                        # nombre EXACTO tal como lo lista Flow (con espacios/
+                        # tildes si los tiene) — nunca el stem del archivo local
+                        start_frame = nuevo
+                    else:
+                        # BI1: detección no concluyente (0/varios nuevos,
+                        # duplicados o listado caído) → respaldo HONESTO: subir
+                        # la copia local (previsualización reducida) con nombre
+                        # explícito único. Si la subida también falla → error
+                        # claro, sin adivinar.
+                        start_frame = f"{run['run_id']}-{s['scene_id']}"
+                        log.warning(
+                            "[pipeline %s] escena %s: asset nuevo indetectable "
+                            "en Flow (%s) — se sube la copia local reducida "
+                            "como '%s'", run["run_id"], s["scene_id"], motivo,
+                            start_frame)
+                        try:
+                            await self._flow_call(run, "flow_upload_file",
+                                                  {"filePath": frame,
+                                                   "name": start_frame,
+                                                   "replace": False})
+                        except mcpm.MCPManagerError as e:
+                            raise mcpm.MCPManagerError(
+                                f"asset de start-frame indetectable en Flow "
+                                f"({motivo}) y la subida de respaldo "
+                                f"'{start_frame}' falló: {e}", e.code) from e
+                    s["start_frame_asset"] = start_frame
                 # 2) video con movimiento coherente + narración de la escena
                 motion = (f"{s['image_prompt']}\nMovimiento de cámara y acción, "
                           f"plano continuo coherente: {s['narration'][:300]}").strip()

@@ -97,3 +97,60 @@
   lugar de subir el baseline).
 - **No subido**: BASELINE de `except Exception` (regla de la misión).
 - **Commit**: ver `git log -1` (hash en el cierre de la sesión).
+
+---
+
+## Sesión 2026-11-22 · CIERRE BI1 (backend)
+
+- **Base**: `a3fd2c8` (BH1-BH2, último commit de `main`) — alineada con
+  `git fetch` + `git merge --ff-only origin/main` (local 147 commits detrás
+  del remoto; el ancestro local era 259c2a7/INT-093).
+- **Alcance**: BI1 — la etapa 3 de `pipeline_orchestrator` derivaba el
+  startFrame de `_asset_name_from_file(frame)` (stem del archivo local),
+  pero Flow nombra sus assets por el CONTENIDO del prompt (p. ej. "Red apple
+  character peeking") y `flow_generate_video` fallaba con "Start frame asset
+  … not found in Flow project assets". Además la copia descargada es una
+  previsualización reducida (286x512): no hay que volver a subirla.
+- **Cambios** (`backend/services/pipeline_orchestrator.py`):
+  - `_parse_asset_listing()`: parsea `flow_list_assets` (viñetas "- Nombre",
+    líneas planas, "has no images yet", "[]"/"{}", JSON [{"name","id"}] y
+    {"assets":[…]}, id inline "- Nombre (id: xyz)") → [(nombre, id|None)]
+    sin inventar entradas.
+  - `_unique_new_asset()`: diff ANTES/DESPUÉS de generar; exactamente UN
+    asset nuevo → ese nombre; si AMBOS listados traen id en todas sus
+    entradas, la diferencia de ids desempata duplicados; un excedente cuyo
+    nombre ya existía es ambiguo por definición (cero/varios → motivo).
+  - `_list_assets()`: `flow_list_assets` parseado; None si el listado falla
+    (el caller trata ese caso como ambiguo → respaldo, sin adivinar).
+  - `_stage3()` por escena: detección del nombre real; respaldo HONESTO con
+    `flow_upload_file` nombre único `f"{run_id}-{scene_id}"` +
+    `log.warning` ("se sube la copia local reducida"); subida también
+    fallida → error claro `[TOOL_ERROR]` con ambos motivos; nombre guardado
+    en `scenes[].start_frame_asset` (campo nuevo en ambas rutas de creación
+    de escenas, persistido en state.json). En retry, si Flow aún lista el
+    start-frame → NO se regenera la imagen (ahorra créditos): solo video;
+    si el asset ya no está o el listado cae → regenera vía diff y
+    re-detecta. El ancla de personaje NO se toca; `_asset_name_from_file`
+    ya no alimenta el startFrame (se conserva como utilidad documentada).
+  - Tests: nueva batería `tests/test_bi1_startframe_flow_assets.py` (13
+    checks, doble de proyecto Flow controlable: un asset nuevo/0/varios/
+    duplicados/ids, respaldo por subida, subida fallida, retry reutiliza,
+    asset desaparecido, listado caído, ancla intacta con secuencia
+    estructural); `test_pipeline_orchestrator.py` (INT-023) con proyecto
+    Flow simulado — startFrame = nombre Flow, retry sin regenerar imagen
+    (55→57 checks); `test_bh_rutas_windows_espacios.py` end-to-end etapa 3
+    actualizado a la semántica BI1 (mock con proyecto mínimo, conserva la
+    prueba de ruta Windows con espacios en el filePath del ancla);
+    registro en `tests/run_all.py` (69 baterías).
+- **Resultados literales**: pytest COMPLETO **956 passed · 0 failed**
+  (tras instalar `edge-tts` + `google-genai` + `ruff` en el sandbox
+  reciclado; los 7 fallos previos de la batería BG eran SOLO por falta de
+  `google-genai` — verificados idénticos en la base limpia a3fd2c8 con
+  `git stash`); `python tests/run_all.py` (serial, 6 segmentos por el
+  límite de 10 min del sandbox) — **2929 OK · 0 fallos en 69 baterías**
+  (499+592+750+518+448+122), sin baterías en rojo. compileall OK (exit 0);
+  `ruff check backend tools tests --select F821,E9,F63,F7,F82` — "All
+  checks passed!". Trinquete P2-2 `except Exception` intacto (sin BASELINE
+  subido).
+- **No subido**: BASELINE de `except Exception` (regla de la misión).
+- **Commit**: ver `git log -1` (hash en el cierre de la sesión).
