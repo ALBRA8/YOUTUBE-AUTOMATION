@@ -115,10 +115,11 @@ def _filter_option_values(vf_value: str) -> tuple[str, list[str]]:
 class MockManagerBH:
     """Mock del MCP manager: respuestas en cola para flow_generate_image/video
     y side-effect opcional (p. ej. escribir el archivo en outDir).
-    BI1: mantiene un proyecto Flow MÍNIMO — flow_generate_image registra el
-    asset con nombre POR CONTENIDO (no el stem del archivo local) y
-    flow_list_assets lo lista, para que el startFrame detectado sea el
-    nombre de Flow."""
+    BI1/BJ4: mantiene un proyecto Flow MÍNIMO — flow_generate_image registra
+    el asset con nombre POR CONTENIDO (no el stem del archivo local) y su
+    mediaId; flow_list_assets lista el proyecto en formato BJ2
+    "- <nombre> [id:<mediaId>]", para que el startFrame detectado sea el del
+    asset real."""
 
     def __init__(self, image_texts=None, video_text="Generated video:", 
                  on_execute=None):
@@ -126,7 +127,7 @@ class MockManagerBH:
         self._img_texts = list(image_texts or [])
         self._video_text = video_text
         self._on_execute = on_execute
-        self.flow_assets: list[str] = []   # BI1: proyecto Flow simulado
+        self.flow_assets: list[tuple[str, str]] = []   # BI1/BJ4: (nombre, mediaId)
         self._img_n = 0
 
     async def test_pipeline(self, service, notebook_id=None):
@@ -144,14 +145,16 @@ class MockManagerBH:
         if tool == "notebook_query":
             return {"ok": True, "text": json.dumps(
                 {"status": "success", "answer": "CONTEXTO FALSO del notebook"})}
-        if tool == "flow_list_assets":    # BI1: listado del proyecto simulado
+        if tool == "flow_list_assets":    # BJ2: listado real con mediaId
             if not self.flow_assets:
                 return {"ok": True, "text": "(the project has no images yet)"}
             return {"ok": True,
-                    "text": "\n".join(f"- {n}" for n in self.flow_assets)}
+                    "text": "\n".join(f"- {n} [id:{mid}]"
+                                      for n, mid in self.flow_assets)}
         if tool == "flow_generate_image":
             self._img_n += 1
-            self.flow_assets.append(f"Recurso de Flow {self._img_n:02d}")
+            self.flow_assets.append((f"Recurso de Flow {self._img_n:02d}",
+                                     f"mid{self._img_n:02d}"))
             t = self._img_texts.pop(0) if self._img_texts else \
                 "Generated 1 image(s):"
             return {"ok": True, "text": t}
@@ -159,7 +162,7 @@ class MockManagerBH:
             return {"ok": True, "text": self._video_text}
         if tool == "flow_upload_file":
             n = args.get("name", "ref")
-            self.flow_assets.append(n)
+            self.flow_assets.append((n, f"mid{len(self.flow_assets) + 1:03d}"))
             return {"ok": True, "text": f'Uploaded "{n}". Reference as @{{{n}}}.'}
         return {"ok": True, "text": "ok"}
 
@@ -278,7 +281,11 @@ def test_bh1_respaldo_reciente_posterior_t0():
 
 
 def test_bh1_respaldo_solo_extensiones_validas():
-    """BH1: .txt/.json/.ass se ignoran; .mp4/.mov/.webp/.MP4 cuentan."""
+    """BH1: .txt/.json/.ass se ignoran; .mp4/.mov/.webp/.MP4 cuentan.
+    Los mtimes se fijan EXPLÍCITAMENTE con os.utime: en filesystems con
+    granularidad gruesa dos escrituras consecutivas pueden caer en el mismo
+    tick y el orden de iterdir decidiría (flake observado en el sandbox
+    Linux); con mtimes deterministas el "más reciente" es clip.MP4 siempre."""
     with tempfile.TemporaryDirectory() as td:
         rd = Path(td)
         (rd / "notas.txt").write_text("x")
@@ -286,6 +293,10 @@ def test_bh1_respaldo_solo_extensiones_validas():
         (rd / "subs.ass").write_text("[Script Info]")
         (rd / "clip.mov").write_bytes(b"x")
         (rd / "clip.MP4").write_bytes(b"x")
+        ahora = time.time()
+        # DENTRO de la ventana t0-2s del respaldo y con orden determinista
+        os.utime(rd / "clip.mov", (ahora - 1.5, ahora - 1.5))
+        os.utime(rd / "clip.MP4", (ahora - 0.5, ahora - 0.5))
         got = po._recent_media_in_dir(rd, time.time())
         assert got.endswith(".MP4"), got   # el más reciente de los válidos
 
@@ -351,6 +362,9 @@ def test_bh1_stage3_rutas_espacios_de_principio_a_fin():
             image_texts=[
                 "Generated 1 image(s) in 1.0s:\n"
                 r"D:\PROYECTOS\YOUTUBE AUTOMATION\ancla\mi ancla.png",
+                # BJ4: la 2ª imagen del tool REAL trae línea "Asset:" (antes de
+                # la ruta) — el video debe ir por id:<mediaId>
+                "Asset: Recurso de Flow 02 [id:mid02]\n"
                 "Saved: /PROYECTOS dir/frames/mi frame uno.PNG",
             ],
             video_text="Generated video in 8s (no path here)",
@@ -360,9 +374,13 @@ def test_bh1_stage3_rutas_espacios_de_principio_a_fin():
         vids = [a for t, a in orch.manager.exec_calls
                 if t == "flow_generate_video"]
         assert vids, "no se despachó el video"
-        # BI1: startFrame = nombre del asset en Flow (la 2ª imagen: la 1ª es el
-        # ancla); el stem local "mi_frame_uno" ya NO se usa como asset name.
-        assert vids[0]["startFrame"] == "Recurso de Flow 02", vids[0]
+        # BJ4: startFrame = "id:<mediaId>" de la línea "Asset:" (la 2ª imagen:
+        # la 1ª es el ancla); el stem local "mi_frame_uno" NO se usa.
+        assert vids[0]["startFrame"] == "id:mid02", vids[0]
+        st = orch.get_status(run["run_id"])
+        assert st["scenes"][0]["start_frame_asset"] == "Recurso de Flow 02", \
+            st["scenes"][0]
+        assert st["scenes"][0]["start_frame_asset_id"] == "mid02"
         # BH1 se mantiene: la ruta Windows CON ESPACIOS del ancla llegó entera
         # a flow_upload_file
         ups = [a for t, a in orch.manager.exec_calls if t == "flow_upload_file"]

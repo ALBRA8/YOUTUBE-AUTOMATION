@@ -87,7 +87,10 @@ def main() -> None:
                                                    "(run notebooklm login)"}})
             elif MODE == "flow":
                 out({"jsonrpc": "2.0", "id": rid,
-                     **content("- asset1.png\n- asset2.png" if name == "flow_list_assets"
+                     # BJ2: formato real del tool "- <name> [id:<mediaId>]"
+                     **content("- asset1.png [id:11111111-1111-4111-8111-111111111111]\n"
+                              "- asset2.png [id:22222222-2222-4222-8222-222222222222]"
+                               if name == "flow_list_assets"
                                else f"{name} ok")})
             else:
                 out({"jsonrpc": "2.0", "id": rid,

@@ -6,7 +6,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
-import { CDP_PORT, FLOW_URL, ensureChrome } from './chrome.js';
+import { CDP_PORT, FLOW_URL, ensureChrome, FLOW_CDP_CONNECT_TIMEOUT_MS } from './chrome.js';
+import { extractPickerAssets, extractTiles, newTiles, pickStartFrameAsset, startFrameNotFoundError } from './assets.js';
 
 export const MODELS = {
   'pro': 'Nano Banana Pro',
@@ -45,11 +46,30 @@ export function getProjectId() {
   return process.env.FLOW_PROJECT_ID || readState().projectId;
 }
 
+// BJ1: la conexión CDP EN FRÍO tarda 32-40 s → timeout PROPIO
+// (chrome.js: FLOW_CDP_CONNECT_TIMEOUT_MS, 120000 por defecto y configurable
+// por entorno), UN reintento si vence y registro por stderr de cuánto tardó
+// (stderr y no stdout: mcp.js habla JSON-RPC por stdout).
+async function connectOnce() {
+  const t0 = Date.now();
+  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`, { timeout: FLOW_CDP_CONNECT_TIMEOUT_MS });
+  return { browser, ms: Date.now() - t0 };
+}
+
 async function connect() {
   await ensureChrome();
-  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`);
-  const context = browser.contexts()[0];
-  return { browser, context };
+  const t0 = Date.now();
+  let res;
+  try {
+    res = await connectOnce();
+  } catch (err) {
+    const msg = String(err?.message || err).split('\n')[0];
+    console.error(`[flow] CDP connect intento 1 falló tras ${Date.now() - t0}ms (${msg}); reintento único…`);
+    res = await connectOnce();
+  }
+  console.error(`[flow] CDP connect OK en ${res.ms}ms`);
+  const context = res.browser.contexts()[0];
+  return { browser: res.browser, context };
 }
 
 async function flowPage(context) {
@@ -114,14 +134,10 @@ async function inProject(fn) {
 
 // ---------- assets (uploaded files and generated images in the project) ----------
 
+// BJ2: tiles() vive en assets.js (función pura, testeada sin navegador);
+// aquí solo se ejecuta dentro del navegador. Devuelve {name, mediaId}.
 function tiles(page) {
-  return page.evaluate(() => [...document.querySelectorAll('flow-grid-tile-container')].map((t) => {
-    const titleEl = t.querySelector('span.footer-title') || t.querySelector('.footer-title');
-    const name = (titleEl?.textContent || '').trim();
-    const img = t.querySelector('img[data-media-id], img');
-    const mediaId = img?.dataset.mediaId || (img?.src?.match(/image\/([0-9a-f-]{36})/i) || [])[1] || '';
-    return { name, mediaId };
-  }).filter((t) => t.mediaId));
+  return page.evaluate(extractTiles);
 }
 
 export async function listAssets() {
@@ -304,11 +320,6 @@ function failedTiles(page) {
     .map((e) => e.innerText).filter((s) => /error|fail|unusual|no se ha podido|falló|política|policy|inusual/i.test(s)));
 }
 
-function mediaIds(page) {
-  return page.evaluate(() =>
-    [...document.querySelectorAll('flow-image-tile img[data-media-id]')].map((i) => i.dataset.mediaId));
-}
-
 function slug(text) {
   return text.replace(MENTION, '$1').toLowerCase().normalize('NFKD').replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-').slice(0, 40) || 'image';
 }
@@ -322,7 +333,10 @@ export async function generateImages({ prompt, aspect = '1:1', count = 1, model 
 
   return inProject(async (page, context, projectId) => {
     await configure(page, { aspect, count, model });
-    const before = new Set(await mediaIds(page));
+    // BJ2: diff de tiles() ANTES/DESPUÉS POR mediaId → los assets creados se
+    // devuelven con nombre + mediaId sin ambigüedad (aunque Flow repita
+    // nombres, el mediaId es único).
+    const before = await tiles(page);
     const failedBefore = (await failedTiles(page)).length;
     await writePrompt(page, prompt);
     const submit = page.locator('flow-generate-icon-button button[type=submit]');
@@ -333,7 +347,7 @@ export async function generateImages({ prompt, aspect = '1:1', count = 1, model 
     let fresh = [];
     while (Date.now() - started < timeoutMs) {
       await page.waitForTimeout(2000);
-      fresh = (await mediaIds(page)).filter((id) => !before.has(id));
+      fresh = newTiles(before, await tiles(page));
       if (fresh.length >= count) break;
       const failed = await failedTiles(page);
       if (failed.length > failedBefore) throw new Error(`Flow reported a failed generation: ${failed[0].replace(/\s+/g, ' ').slice(0, 200)}`);
@@ -343,17 +357,34 @@ export async function generateImages({ prompt, aspect = '1:1', count = 1, model 
     fs.mkdirSync(outDir, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const files = [];
-    for (const [i, id] of fresh.slice(0, count).entries()) {
-      const src = await page.locator(`flow-image-tile img[data-media-id="${id}"]`).getAttribute('src');
+    const assets = [];
+    for (const [i, tile] of fresh.slice(0, count).entries()) {
+      const src = await imgSrcByMediaId(page, tile.mediaId);
+      if (!src) throw new Error(`Download failed: no src for media ${tile.mediaId}`);
       const res = await context.request.get(src);
-      if (!res.ok()) throw new Error(`Download failed (${res.status()}) for media ${id}`);
+      if (!res.ok()) throw new Error(`Download failed (${res.status()}) for media ${tile.mediaId}`);
       const ext = (res.headers()['content-type'] || '').includes('png') ? 'png' : 'jpg';
       const file = path.join(outDir, `${stamp}-${slug(prompt)}-${i + 1}.${ext}`);
       fs.writeFileSync(file, await res.body());
       files.push(file);
+      assets.push({ name: tile.name, mediaId: tile.mediaId });
     }
-    return { files, projectId, model, aspect, seconds: Math.round((Date.now() - started) / 1000) };
+    // BJ2: `assets` alimenta las líneas "Asset: <name> [id:<mediaId>]" de la
+    // salida MCP (mcp.js, vía generatedImagesText) — el orden es el mismo que
+    // el de `files`.
+    return { files, assets, projectId, model, aspect, seconds: Math.round((Date.now() - started) / 1000) };
   });
+}
+
+// BJ2: src del <img> de un mediaId (data-media-id, o uuid en el src como
+// respaldo para tiles cuyo mediaId vino de la URL).
+async function imgSrcByMediaId(page, mediaId) {
+  const direct = page.locator(`img[data-media-id="${mediaId}"]`).first();
+  if (await direct.count()) return await direct.getAttribute('src');
+  return page.evaluate((mid) => {
+    const hit = [...document.querySelectorAll('img')].find((i) => (i.src || '').includes(`/image/${mid}/`));
+    return hit?.src || '';
+  }, mediaId);
 }
 
 // ---------- video generation (Start Frame -> Google Flow Video) ----------
@@ -409,17 +440,36 @@ export async function generateVideo({
 }) {
   if (!prompt?.trim()) throw new Error('prompt is required');
   if (!startFrame?.trim()) throw new Error('startFrame is required');
+  // BJ3: se acepta "id:<mediaId>" (preferido: viene de las líneas "Asset: " de
+  // flow_generate_image y es inequívoco) o el nombre del asset.
+  const spec = String(startFrame || '').trim();
 
   return inProject(async (page, context, projectId) => {
     await configureVideo(page, { aspect });
 
-    // Ensure start frame asset is selected in the Iniciar slot
+    // Chip ya presente en el slot: quitarlo SOLO si no es el asset pedido.
     // INT-073: variantes del chip del slot (flow-image-ingredient-chip,
-    // flow-ingredient-chip genérico) y con/sin prefijo div.
+    // flow-ingredient-chip genérico) y con/sin prefijo div. BJ3: con id se
+    // compara el data-media-id del <img> del chip; con nombre, el texto.
     const existingChip = page.locator('div.frame-trigger flow-image-ingredient-chip, div.frame-trigger flow-ingredient-chip, .frame-trigger flow-image-ingredient-chip').first();
+    let usedAsset = null;   // BJ3: la salida indica qué asset se usó
     if (await existingChip.count()) {
-      const chipText = (await existingChip.first().innerText()).trim();
-      if (!chipText.toLowerCase().includes(startFrame.toLowerCase())) {
+      const chipText = ((await existingChip.first().innerText().catch(() => '')) || '').trim();
+      let chipMatches = false;
+      if (/^id:/i.test(spec)) {
+        const want = spec.slice(3).trim();
+        const chipMid = (await existingChip.first().locator('img').first().getAttribute('data-media-id').catch(() => '')) || '';
+        chipMatches = chipMid === want;
+        if (chipMatches) usedAsset = { name: chipText || spec, mediaId: want };
+      } else {
+        chipMatches = chipText.toLowerCase().includes(spec.toLowerCase());
+        if (chipMatches) {
+          const chipMid = (await existingChip.first().locator('img').first().getAttribute('data-media-id').catch(() => '')) || '';
+          usedAsset = { name: spec, mediaId: chipMid };
+        }
+      }
+      if (!chipMatches) {
+        usedAsset = null;
         const deleteBtn = existingChip.locator('button, [role=button]').first();
         if (await deleteBtn.count()) {
           await deleteBtn.click();
@@ -435,16 +485,26 @@ export async function generateVideo({
       await iniciarBtn.click();
       await page.waitForTimeout(1000);
 
-      const escapedName = startFrame.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const assetOption = page.locator('.cdk-overlay-container button.asset-item').filter({
-        has: page.locator('.asset-title, span.footer-title', { hasText: new RegExp(`^\\s*${escapedName}\\s*$`, 'i') }),
-      }).first();
-      const fallbackOption = page.locator('.cdk-overlay-container button.asset-item').filter({ hasText: startFrame }).first();
-      const targetOption = (await assetOption.count()) ? assetOption : fallbackOption;
+      // BJ3: candidatos visibles del selector + selección PURA (assets.js,
+      // testeada sin navegador): "id:<mediaId>" por mediaId; nombre por
+      // coincidencia exacta sin mayúsculas/minúsculas, la primera (más
+      // reciente) si hay varias.
+      const candidates = await page.evaluate(extractPickerAssets);
+      const match = pickStartFrameAsset(candidates, spec);
+      if (!match) {
+        await page.keyboard.press('Escape');
+        throw new Error(startFrameNotFoundError(spec, candidates, 8));
+      }
+
+      const targetOption = /^id:/i.test(spec)
+        ? page.locator('.cdk-overlay-container button.asset-item').filter({ has: page.locator(`img[data-media-id="${match.mediaId}"]`) }).first()
+        : page.locator('.cdk-overlay-container button.asset-item').filter({
+            has: page.locator('.asset-title, span.footer-title', { hasText: new RegExp(`^\\s*${match.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i') }),
+          }).first();
 
       if ((await targetOption.count()) === 0) {
         await page.keyboard.press('Escape');
-        throw new Error(`Start frame asset "${startFrame}" not found in Flow project assets. Upload it first with flow_upload_file.`);
+        throw new Error(startFrameNotFoundError(spec, candidates, 8));
       }
 
       await targetOption.click();
@@ -455,11 +515,12 @@ export async function generateVideo({
         await addBtn.click();
         await page.waitForTimeout(1000);
       }
+      usedAsset = match;
     }
 
     const slotImg = page.locator('div.frame-trigger img, .frame-trigger img, flow-image-ingredient-chip img');
     if ((await slotImg.count()) === 0) {
-      throw new Error(`Start Frame slot was not set for asset "${startFrame}"`);
+      throw new Error(`Start Frame slot was not set for asset "${spec}"`);
     }
 
     const beforeVideos = new Set(await page.evaluate(() =>
@@ -576,7 +637,8 @@ export async function generateVideo({
       file: destination,
       projectId,
       aspect,
-      startFrame,
+      startFrame: spec,
+      usedAsset,   // BJ3: {name, mediaId} del asset realmente usado (si se resolvió)
       seconds: Math.round((Date.now() - started) / 1000),
       bytes: videoBuffer.length,
     };
