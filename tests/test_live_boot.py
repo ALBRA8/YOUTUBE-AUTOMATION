@@ -65,7 +65,8 @@ for script, desc in SCRIPTS:
             script_path = _tmp_copy
         proc = subprocess.run(["bash", str(script_path)],
                               cwd=str(TESTS_DIR.parent),
-                              capture_output=True, text=True, timeout=300)
+                              capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=300)
     finally:
         if _tmp_copy is not None:
             _tmp_copy.unlink(missing_ok=True)

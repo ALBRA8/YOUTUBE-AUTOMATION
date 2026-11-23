@@ -24,6 +24,14 @@ import sys
 from pathlib import Path
 
 import pytest
+# [D5 · F8] UTF-8 en stdout/stderr: en Windows (cp1252) el separador «·» del
+# resumen llegaba mojibake al guardián (test_registro_baterias) y el parseo
+# del resumen caía a «0 OK · -1 fallos» — cazado por el job ci-windows.
+try:
+    for _d5s in (sys.stdout, sys.stderr):
+        _d5s.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 BACKEND = Path(__file__).resolve().parents[1] / "backend"
 if str(BACKEND) not in sys.path:

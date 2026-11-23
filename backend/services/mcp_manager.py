@@ -315,6 +315,15 @@ class _Conn:
                 if not line:
                     break
                 self._on_line(line.decode("utf-8", errors="replace").strip())
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            # [F8] el lector NUNCA muere en silencio: si algo revienta dentro
+            # del bucle (transport roto, cierre a mitad de línea), los futures
+            # pendientes despiertan ya con PROCESS_DEAD (mismo camino que EOF)
+            # en el `finally` — y queda constancia en el tail de stderr.
+            log.warning("[mcp:%s] _read_loop abortado: %r", self.service, e)
+            self.stderr_tail.append(f"read_loop abortado: {e!r}"[:200])
         finally:
             # Resiliencia: si el proceso cierra stdout (EOF) o cae, despertar inmediatamente
             # a todos los futures pendientes con PROCESS_DEAD en vez de esperar el timeout completo de 30s/60s.
@@ -328,11 +337,17 @@ class _Conn:
 
     async def _stderr_loop(self) -> None:
         assert self.proc and self.proc.stderr
-        while True:
-            chunk = await self.proc.stderr.readline()
-            if not chunk:
-                break
-            self.stderr_tail.append(chunk.decode("utf-8", errors="replace").rstrip())
+        try:
+            while True:
+                chunk = await self.proc.stderr.readline()
+                if not chunk:
+                    break
+                self.stderr_tail.append(chunk.decode("utf-8", errors="replace").rstrip())
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            # [F8] idem _read_loop: el tail de diagnóstico no muere en silencio.
+            log.warning("[mcp:%s] _stderr_loop abortado: %r", self.service, e)
 
     # ── ciclo de vida ──
     async def handshake(self) -> None:
