@@ -181,27 +181,13 @@ async def generate_scene_image(scene: dict, project: dict, idx: int,
         if img_url and (idx == 0 or idx == 3 or str(scene.get("title", "")).lower() in ("hook", "cta", "scene_01", "scene_04")):
             try:
                 from services.ecommerce_overlays import remove_product_background, composite_product_on_studio
-<<<<<<< HEAD
-                from security import safe_fetch_bytes  # [SSRF A1/A8]
-=======
                 from security import safe_fetch_bytes
->>>>>>> origin/main
                 s_dir = scene_dir(project["id"])
                 s_dir.mkdir(parents=True, exist_ok=True)
                 raw_prod = s_dir / "product_raw.png"
                 if not raw_prod.is_file():
-<<<<<<< HEAD
-                    # [SSRF · A1/A8] la descarga del plan C pasa por la
-                    # guardia anti-SSRF: el urlopen crudo que traía INT-055
-                    # aceptaba file:// e IPs privadas (vector cerrado por la
-                    # auditoría y reintroducido aquí).
-                    raw_prod.write_bytes(safe_fetch_bytes(
-                        img_url, 30.0,
-                        headers={"User-Agent": "Mozilla/5.0"}))
-=======
                     data = await asyncio.to_thread(safe_fetch_bytes, img_url, 15.0, None, 20 * 1024 * 1024)
                     raw_prod.write_bytes(data)
->>>>>>> origin/main
 
                 cutout_png = s_dir / "product_cutout.png"
                 if not cutout_png.is_file():
