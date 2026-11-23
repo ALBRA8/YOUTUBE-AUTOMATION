@@ -315,15 +315,6 @@ class _Conn:
                 if not line:
                     break
                 self._on_line(line.decode("utf-8", errors="replace").strip())
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            # [F8] el lector NUNCA muere en silencio: si algo revienta dentro
-            # del bucle (transport roto, cierre a mitad de línea), los futures
-            # pendientes despiertan ya con PROCESS_DEAD (mismo camino que EOF)
-            # en el `finally` — y queda constancia en el tail de stderr.
-            log.warning("[mcp:%s] _read_loop abortado: %r", self.service, e)
-            self.stderr_tail.append(f"read_loop abortado: {e!r}"[:200])
         finally:
             # Resiliencia: si el proceso cierra stdout (EOF) o cae, despertar inmediatamente
             # a todos los futures pendientes con PROCESS_DEAD en vez de esperar el timeout completo de 30s/60s.
@@ -337,17 +328,11 @@ class _Conn:
 
     async def _stderr_loop(self) -> None:
         assert self.proc and self.proc.stderr
-        try:
-            while True:
-                chunk = await self.proc.stderr.readline()
-                if not chunk:
-                    break
-                self.stderr_tail.append(chunk.decode("utf-8", errors="replace").rstrip())
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            # [F8] idem _read_loop: el tail de diagnóstico no muere en silencio.
-            log.warning("[mcp:%s] _stderr_loop abortado: %r", self.service, e)
+        while True:
+            chunk = await self.proc.stderr.readline()
+            if not chunk:
+                break
+            self.stderr_tail.append(chunk.decode("utf-8", errors="replace").rstrip())
 
     # ── ciclo de vida ──
     async def handshake(self) -> None:
@@ -544,8 +529,25 @@ class MCPClientManager:
             raise MCPManagerError(f"no se pudo lanzar {argv[0]}: {e}", "SPAWN_FAILED")
         conn = _Conn(service)
         conn.proc = proc
+
+        def _loga_muerte(t: "asyncio.Task") -> None:
+            # [F8] visibilidad: si un bucle lector muere con excepción (transport
+            # roto, mock defectuoso, cierre a mitad de línea), NO se queda en el
+            # silencio de «Task exception was never retrieved»: el `finally` de
+            # los bucles YA despertó los futures pendientes con PROCESS_DEAD;
+            # aquí solo se registra la causa con el tail de diagnóstico.
+            if t.cancelled():
+                return
+            exc = t.exception()
+            if exc is not None:
+                tail = " · ".join(list(conn.stderr_tail)[-3:]) or "(sin tail)"
+                log.warning("[mcp:%s] bucle lector terminó con %r — tail: %s",
+                            service, exc, tail[:200])
+
         conn._reader = asyncio.create_task(conn._read_loop())
         conn._stderr = asyncio.create_task(conn._stderr_loop())
+        conn._reader.add_done_callback(_loga_muerte)
+        conn._stderr.add_done_callback(_loga_muerte)
         return conn
 
     # ── API pública ──
