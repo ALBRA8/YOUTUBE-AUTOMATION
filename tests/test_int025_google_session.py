@@ -637,9 +637,11 @@ def ui_tests():
     check("acciones del hub presentes (Abrir ventana / Reparar perfil / Refrescar / Cambiar cuenta)",
           "gsessOpenWindow()" in appjs and "gsessRepairProfile()" in appjs
           and "gsessRefresh()" in appjs and "gsessLogout()" in appjs)
-    check("copy del mandato «una sola vez» presente",
-          "Inicia sesión <b>una sola vez</b>" in appjs
-          and "Flow + NotebookLM automáticamente" in appjs)
+    check("copy del flujo de sesión única presente (UI main: X4 «Conectar todo» "
+          "+ gsessStart con «Abriendo Google…» y sincronización de sesión)",
+          "Conectar todo" in appjs
+          and "Abriendo Google…" in appjs
+          and "Sincronizando sesión" in appjs)
     check("endpoint launch-auth-browser invocado por la UI (gsessOpenChrome)",
           "/mcp/launch-auth-browser" in appjs
           and appjs.index("async function gsessOpenChrome")

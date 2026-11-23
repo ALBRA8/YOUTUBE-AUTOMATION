@@ -108,9 +108,12 @@ def _guardian_hermetica():
 import socket, sys, threading, urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 fallos = []
+# [D7 diseño final]: getaddrinfo pasa (security.validar_url necesita
+# resolver para INSPECCIONAR IPs); lo que se quema es connect() externo.
 try:
-    socket.getaddrinfo("example.com", 80)
-    fallos.append("getaddrinfo externo NO bloqueado")
+    s = socket.create_connection(("example.com", 80), timeout=5)
+    s.close()
+    fallos.append("connect externo NO bloqueado")
 except OSError as e:
     if "herm" not in str(e).lower():
         fallos.append("error externo inesperado: " + str(e))

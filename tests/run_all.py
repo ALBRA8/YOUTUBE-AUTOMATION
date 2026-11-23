@@ -337,6 +337,94 @@ EXCLUDED_BATTERIES: dict[str, str] = {
     "test_d4_timeout_sleep.py":
         "batería de ACEPTACIÓN D4 (timeout): duerme 400 s; SOLO se ejecuta "
         "vía `python tests/run_all.py --timeout-seg 5 -b tests/test_d4_timeout_sleep.py`",
+    "test_gemini_sanitize.py":
+        "pytest nativa (8 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_h2_secrets_hygiene.py":
+        "pytest nativa (2 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_launchers_relocation.py":
+        "pytest nativa (8 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_notebooklm_base_url.py":
+        "pytest nativa (1 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_oauth_state.py":
+        "pytest nativa (13 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_opt_mcp_resilience.py":
+        "pytest nativa (3 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_opt_nvenc_intermediates.py":
+        "pytest nativa (2 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_opt_single_pass_render.py":
+        "pytest nativa (4 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_p0_1_product_ssrf.py":
+        "pytest nativa (1 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_p0_2_ssrf_guard.py":
+        "pytest nativa (2 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_p0_2_ssrf_siblings.py":
+        "pytest nativa (7 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_p0_4_middleware_order.py":
+        "pytest nativa (1 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_p0_5_dns_rebinding.py":
+        "pytest nativa (2 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_p1_5_placeholder_gate.py":
+        "pytest nativa (4 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_p2_1_placeholder_threshold.py":
+        "pytest nativa (3 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_p2_1_smoke_render.py":
+        "pytest nativa (1 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_p2_2_except_ratchet.py":
+        "pytest nativa (2 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_p2_2_video_encoding_chain.py":
+        "pytest nativa (3 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_p2_3_audio_loudnorm.py":
+        "pytest nativa (2 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_p2_3_openapi_operation_ids.py":
+        "pytest nativa (2 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_p2_4_kenburns_jitter.py":
+        "pytest nativa (4 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_p2_5_faststart.py":
+        "pytest nativa (2 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_p2_5_protocolo_fase3.py":
+        "pytest nativa (6 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_p2_6_startframe_status.py":
+        "pytest nativa (1 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_p3_1_routers_phase1.py":
+        "pytest nativa (3 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_p3_2_lifespan_and_error_handling.py":
+        "pytest nativa (3 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_p3_3_docs_integrity.py":
+        "pytest nativa (3 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_q1_registro_cobertura.py":
+        "pytest nativa (14 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_q3_disparo_flow.py":
+        "pytest nativa (15 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_q4_registro_nicho.py":
+        "pytest nativa (8 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_registro_conexion.py":
+        "pytest nativa (19 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_registro_produccion.py":
+        "pytest nativa (24 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_run_all_accounting.py":
+        "pytest nativa (2 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_sonda_capacidades.py":
+        "pytest nativa (40 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_tts_async.py":
+        "pytest nativa (9 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_url_mode_timeout.py":
+        "pytest nativa (5 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_w1_connect_all_google.py":
+        "pytest nativa (3 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_x2_connect_all_no_mata_sano.py":
+        "pytest nativa (4 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_x3_saltos_linea.py":
+        "pytest nativa (4 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_y1_catalogo_activo.py":
+        "pytest nativa (4 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_z1_main_subprocess.py":
+        "pytest nativa (2 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_z2_lipsync_musetalk.py":
+        "pytest nativa (2 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_z3_video_probe_nvenc.py":
+        "pytest nativa (2 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
+    "test_z4_ruff_ci.py":
+        "pytest nativa (4 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
     "test_brand_profiles.py":
         "pytest nativa (9 tests): se ejecuta via `pytest tests/`; no es bateria standalone de run_all",
     "test_flow_mcp_bridge.py":
@@ -569,7 +657,8 @@ def _ejecutar(nombre: str, ruta: Path, env: dict, timeout_seg: int) -> dict:
     dur = time.perf_counter() - t0
     res = {"nombre": nombre, "ok": 0, "fail": 0, "skip": False,
            "timeout": interrumpida, "crash": False, "detalle": "",
-           "duracion": dur, "exit": proc.returncode if proc.returncode is not None else -9}
+           "duracion": dur, "exit": proc.returncode if proc.returncode is not None else -9,
+           "out": out or "", "err": err or ""}
     if interrumpida:
         res["fail"] = 1
         res["detalle"] = f"TIMEOUT (> {timeout_seg}s): árbol de procesos eliminado"
@@ -587,6 +676,12 @@ def _ejecutar(nombre: str, ruta: Path, env: dict, timeout_seg: int) -> dict:
         res["crash"] = True
         res["fail"] = 1
         detalle = "SIN RESUMEN (¿crash?)"
+    # [P0-3 · contabilidad honesta] exit != 0 es fallo AUNQUE el resumen diga
+    # «0 fallos» (la batería se rompió después de imprimir el resumen). El
+    # test_run_all_accounting congela exactamente este caso.
+    if res["exit"] != 0 and not res["skip"]:
+        res["fail"] = max(res["fail"], 1)
+        detalle += f" · exit != 0 ({res['exit']})"
     res["detalle"] = detalle
     return res
 
@@ -649,14 +744,11 @@ def main(argv=None) -> int:
         else int(os.getenv("RUN_ALL_BATTERY_TIMEOUT_S", "300") or "300")
     workers = max(1, args.workers)
     if args.hermetica and not args.baterias and not args.bateria_ruta:
-        # [P0-2/CI] semántica heredada del runner P6.2: --hermetic sin
-        # selección corre SOLO las baterías standalone excluidas de pytest
-        # (seguridad/HANDS/gobernanza/...), menos las NON_HERMETIC y los
-        # scripts LIVE de la máquina del dueño.
+        # [P0-2/CI] semántica del runner P6.2: --hermetic sin selección corre
+        # TODAS las baterías EXCEPTO las NON_HERMETIC (test_live_boot) y los
+        # scripts LIVE de la máquina del dueño (nunca están en BATERIAS).
         args.baterias = [
-            p for p in PYTEST_IGNORADAS
-            if p not in NON_HERMETIC_BATTERIES
-            and not p.startswith("test_live_execution")]
+            b for b in BATERIAS if b not in NON_HERMETIC_BATTERIES]
     rutas = _seleccionar(args)
     if args.hermetica:
         omitidas = [r.name for r in rutas
@@ -681,6 +773,10 @@ def main(argv=None) -> int:
                 if ruta.is_relative_to(TESTS_DIR) else ruta.name
             print(f"\n──────── [{i}/{len(rutas)}] {nombre} ────────", flush=True)
             res = _ejecutar(nombre, ruta, env, timeout_seg)
+            if res.get("out"):
+                sys.stdout.write(res["out"])
+            if res.get("err"):
+                sys.stderr.write(res["err"])
             resultados.append(res)
             verde = (not res["fail"]) and (not res["skip"])
             print(f"  → {nombre}: {res['detalle']} · exit {res['exit']} "
@@ -697,6 +793,10 @@ def main(argv=None) -> int:
                 futures[pool.submit(_ejecutar, nombre, ruta, env, timeout_seg)] = nombre
             for fut in as_completed(futures):
                 res = fut.result()
+                if res.get("out"):
+                    sys.stdout.write(res["out"])
+                if res.get("err"):
+                    sys.stderr.write(res["err"])
                 resultados.append(res)
                 verde = (not res["fail"]) and (not res["skip"])
                 print(f"\n──────── {res['nombre']} ────────\n"

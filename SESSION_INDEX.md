@@ -5,6 +5,41 @@
 
 ---
 
+## Sesión 2026-11-23 · CIERRE D1-D8 + V9-V15 (operatividad 100%)
+
+- **Base declarada**: `29f0e90`. Hallazgo material de la sesión: el clone del
+  sandbox había sido movido a `259c2a7` (ancestro del linaje BJ, estado
+  pre-BG/BH/BI/BJ) durante el trabajo, así que el cierre se desarrolló en
+  dos fases: (1) sobre `259c2a7` + cambios sin commit → commit `453a690`;
+  (2) `git merge origin/main` (29f0e90) para restaurar el linaje BJ
+  completo, resolviendo 15 conflictos (run_all fusionado: motor D1-D8 +
+  las 69 baterías de main + guardián; flow_jobs con la estructura C2 de
+  main + reintento D2 re-aplicado; guardias F1/F2 por mandato de auditoría
+  de main; UI contract int025/int028 contra la UI REAL de main).
+- **Alcance**: D1 aislamiento de la BD real (hash+mtime idénticos tras la
+  corrida completa), D2 reintento acotado 50/150/400 ms del BEGIN IMMEDIATE
+  + trazas FLOW_JOBS_TRACE + caso 4b con carga CPU, D3 --workers opt-in
+  (medido serie 89.8 s vs 62.4 s workers-6 pre-merge), D4 timeout por
+  batería con kill de árbol (aceptación con sleep-400 s y timeout 5 s),
+  D5 UTF-8 en 57 baterías (5 verificadas a mano sin env), D6 registro
+  canónico con guardián (70 BATERIAS + 103 excluidas con motivo, 0
+  huérfanas), D7 sitecustomize real (HTTP real: 200 sin guardia / bloqueo
+  con guardia), D8 SKIP visible; V9 import 1125-1198 ms (<5000), V10
+  EXPLAIN sin SCAN flow_jobs, V11 restos P5 no presentes en el repo
+  (artefactos de la máquina del dueño, comandos entregados), V12 pin
+  opencv==4.13.0.90, V13 byte-identidad CRLF-safe, V14 job ci-windows
+  (exploratorio), V15 badge/callout sin default inseguro + SSRF del plan C
+  → safe_fetch_bytes (versión de main, async + 20 MB).
+- **Bugs reales cazados por la fusión**: el runner D1-D8 había perdido el
+  veredicto P0-3 (`exit != 0` con resumen «0 fallos» contaba verde) —
+  restaurado y congelado por `test_run_all_accounting` (adaptado a la capa
+  Popen); eco de stdout/stderr de cada batería restaurado en el runner.
+- **No subido**: BASELINE de `except Exception` (regla de la misión).
+- **Resultados literales**: ver la fila «Suite canónica» de ESTADO_REAL.md
+  (70 baterías) y el informe de la sesión.
+
+---
+
 ## Sesión 2026-11-22 · CIERRE BJ (backend + tools/GoogleFlowMCP)
 
 - **Base**: `a3fd2c8` declarada en la misión; al alinear con `git fetch` +
