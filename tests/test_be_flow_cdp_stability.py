@@ -7,6 +7,9 @@ Tests herméticos para D1, D2 y D3 (Estabilidad Flow/CDP):
 - D3: Excepción acotada a regla AA1: si flow_generate_image, flow_generate_video,
       flow_new_project o flow_upload_file fallan con error conteniendo "connectOverCDP: Timeout",
       permitir UN reintento precedido de calentamiento. Cualquier otro error no se reintenta.
+- BK1: el calentamiento de Stage 3 usa timeout FLOW_CDP_CONNECT_TIMEOUT_MS/1000 + 30
+      (150 s por defecto; misma constante y default que el MCP server en
+      tools/GoogleFlowMCP/src/chrome.js), manteniendo los mismos 2 intentos.
 """
 from __future__ import annotations
 
@@ -23,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 import config as config_mod
 from pipeline import script_gen
 from services import mcp_manager as mcpm
+from services import pipeline_orchestrator as po_mod
 from services.pipeline_orchestrator import PipelineOrchestrator, PipelineError
 
 
@@ -309,6 +313,82 @@ async def test_d3_other_tool_error_does_not_retry():
 
     assert "Safety violation" in str(exc_info.value)
     assert conn.call.call_count == 1  # EXACTAMENTE 1 intento, cero reintentos
+
+
+# ── BK1 · Timeout del calentamiento Stage 3 (FLOW_CDP_CONNECT_TIMEOUT_MS) ──
+def _limpiar_fuente_timeout(monkeypatch):
+    """Deja la fuente del timeout en estado repo (sin env ni attr de config)
+    para que el default sea realmente el default."""
+    monkeypatch.delenv("FLOW_CDP_CONNECT_TIMEOUT_MS", raising=False)
+    if hasattr(config_mod, "FLOW_CDP_CONNECT_TIMEOUT_MS"):
+        monkeypatch.delattr(config_mod, "FLOW_CDP_CONNECT_TIMEOUT_MS")
+
+
+def test_bk1_warm_timeout_default_150s(monkeypatch):
+    """BK1: sin FLOW_CDP_CONNECT_TIMEOUT_MS, el calentamiento usa 150 s (120000/1000 + 30)."""
+    _limpiar_fuente_timeout(monkeypatch)
+    assert po_mod._flow_warm_timeout() == pytest.approx(150.0)
+
+
+@pytest.mark.parametrize("raw", ["no-es-numero", "", "0", "-5", "nan"])
+def test_bk1_warm_timeout_invalido_cae_al_default(monkeypatch, raw):
+    """BK1: valor inválido/vacío/0/negativo/NaN → default (misma política que el JS)."""
+    monkeypatch.setenv("FLOW_CDP_CONNECT_TIMEOUT_MS", raw)
+    assert po_mod._flow_warm_timeout() == pytest.approx(150.0)
+
+
+@pytest.mark.parametrize("ms,esperado", [("60000", 90.0), ("30000", 60.0), ("180000", 210.0)])
+def test_bk1_warm_timeout_env_sigue_formula(monkeypatch, ms, esperado):
+    """BK1: con FLOW_CDP_CONNECT_TIMEOUT_MS válido, el timeout es (ms/1000) + 30."""
+    monkeypatch.setenv("FLOW_CDP_CONNECT_TIMEOUT_MS", ms)
+    assert po_mod._flow_warm_timeout() == pytest.approx(esperado)
+
+
+async def _run_warmup_y_devolver_llamadas(tmp_path, monkeypatch, timeout_ms=None):
+    """Corre el tramo de calentamiento de _stage3 con manager doble (sin red)
+    y devuelve la PRIMERA llamada execute (la del calentamiento)."""
+    _limpiar_fuente_timeout(monkeypatch)
+    if timeout_ms is not None:
+        monkeypatch.setenv("FLOW_CDP_CONNECT_TIMEOUT_MS", str(timeout_ms))
+    mgr = MagicMock()
+    mgr.test_pipeline = AsyncMock(return_value={"ok": True})
+    mgr.execute = AsyncMock(return_value={"ok": True, "text": "assets"})
+    orch = PipelineOrchestrator(manager=mgr, runs_dir=tmp_path)
+    orch._ensure_reference = AsyncMock(return_value="personaje")
+    run = {
+        "run_id": "run_warm_bk1",
+        "format": "short",
+        "scenes": [{"scene_id": "s1", "status": "pending",
+                    "attempts": 0, "detail": ""}],
+        "failed_scene_ids": [],
+        "dispatched": 0,
+        "progress_pct": 50,
+        "done_count": 0,
+    }
+    with patch.object(orch, "_flow_call", AsyncMock(return_value="image.png")):
+        try:
+            await orch._stage3(run)
+        except Exception:
+            pass  # igual que el patrón D2: el calentamiento ya ocurrió en execute[0]
+    return mgr, mgr.execute.call_args_list[0]
+
+
+@pytest.mark.asyncio
+async def test_bk1_stage3_warmup_usa_timeout_150s_por_defecto(tmp_path, monkeypatch):
+    """BK1 (uso real): la llamada de calentamiento pasa 150.0 s al manager."""
+    mgr, call0 = await _run_warmup_y_devolver_llamadas(tmp_path, monkeypatch)
+    assert call0.args[0] == "google-flow"
+    assert call0.args[1] == "flow_list_assets"
+    assert call0.kwargs.get("timeout") == pytest.approx(150.0)
+    assert mgr.execute.call_count == 1  # ok al 1er intento: sin reintentos
+
+
+@pytest.mark.asyncio
+async def test_bk1_stage3_warmup_usa_timeout_de_env(tmp_path, monkeypatch):
+    """BK1 (uso real): con FLOW_CDP_CONNECT_TIMEOUT_MS=60000 la llamada usa 90.0 s."""
+    _mgr, call0 = await _run_warmup_y_devolver_llamadas(tmp_path, monkeypatch,
+                                                        timeout_ms=60000)
+    assert call0.kwargs.get("timeout") == pytest.approx(90.0)
 
 
 if __name__ == "__main__":

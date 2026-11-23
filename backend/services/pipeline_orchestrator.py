@@ -109,6 +109,26 @@ def _cfg(name: str, default: Any) -> Any:
     return default
 
 
+def _flow_warm_timeout() -> float:
+    """BK1: timeout (segundos) del calentamiento Stage 3 de flow_list_assets.
+
+    El connectOverCDP EN FRÍO tarda 32-120 s (BJ1) y el MCP server usa su
+    PROPIO timeout FLOW_CDP_CONNECT_TIMEOUT_MS (120000 ms por defecto — misma
+    constante y mismo default que tools/GoogleFlowMCP/src/chrome.js). El
+    calentamiento debe dar margen a ESE connect más su propio margen de
+    listado: (ms / 1000) + 30 → 150 s por defecto. Un valor no numérico,
+    vacío, 0, negativo o NaN cae al default (misma política que el JS:
+    Number.isFinite(n) && n > 0).
+    """
+    try:
+        ms = float(_cfg("FLOW_CDP_CONNECT_TIMEOUT_MS", 120000))
+    except (TypeError, ValueError):
+        ms = 120000.0
+    if not (ms > 0):  # cubre 0, negativos y NaN
+        ms = 120000.0
+    return ms / 1000.0 + 30.0
+
+
 def _path_from_line(line: str) -> str:
     r"""BH1: extrae la ruta completa de imagen/video que contiene UNA línea
     de la respuesta de Flow. Acepta letra de unidad de Windows (X:\ o X:/)
@@ -1320,12 +1340,16 @@ class PipelineOrchestrator:
             raise PipelineError(detail, "FLOW_NOT_CONNECTED")
 
         # D2: Calentamiento previo a Stage 3: llamada real a flow_list_assets (hasta 2 intentos)
+        # BK1: timeout = FLOW_CDP_CONNECT_TIMEOUT_MS/1000 + 30 (150 s por defecto):
+        # el connectOverCDP en frío puede tardar hasta 120 s y el calentamiento
+        # es la PRIMERA llamada CDP de la corrida.
         warm_ok = False
         last_warm_err = ""
+        warm_timeout = _flow_warm_timeout()
         for attempt in range(1, 3):
             try:
                 res = await self.manager.execute(
-                    "google-flow", "flow_list_assets", {}, timeout=30.0)
+                    "google-flow", "flow_list_assets", {}, timeout=warm_timeout)
                 if res.get("ok"):
                     warm_ok = True
                     break

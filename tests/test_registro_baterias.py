@@ -108,10 +108,15 @@ def _guardian_hermetica():
 import socket, sys, threading, urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 fallos = []
-# [D7 diseño final]: getaddrinfo pasa (security.validar_url necesita
+# [D7 diseño final / BK2]: getaddrinfo pasa (security.validar_url necesita
 # resolver para INSPECCIONAR IPs); lo que se quema es connect() externo.
+# BK2: el objetivo es la IP literal 192.0.2.1 (RFC 5737 TEST-NET-1, IP de
+# documentación) y NO un nombre DNS: getaddrinfo con IP numérica no consulta
+# DNS, así el check no depende de que exista resolución de nombres en la
+# máquina. La guardia quema el connect() por no ser loopback, con "[hermética
+# D7]" en el mensaje.
 try:
-    s = socket.create_connection(("example.com", 80), timeout=5)
+    s = socket.create_connection(("192.0.2.1", 80), timeout=5)
     s.close()
     fallos.append("connect externo NO bloqueado")
 except OSError as e:
