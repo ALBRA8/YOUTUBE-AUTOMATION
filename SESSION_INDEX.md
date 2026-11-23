@@ -53,10 +53,28 @@
   pytest 953 passed / 0 failed · npm test 28/28 · ruff limpio · compileall OK ·
   test_auditoria_repairs 46 OK · test_lock_drift 30 OK · live_boot en árbol
   CRLF 34 OK. Informe completo: `docs/informe_cierre_F1-F10.md`.
+- **ci-windows: 4 rondas reales, 3 fallos de Windows cazados y corregidos**:
+  (1) corrida #1 → `test_registro_baterias §D` en Windows parseaba
+  «0 OK · -1 fallos»: los HIJOS minidrama (test_minidrama_clip_validator,
+  test_observador_piloto) no tenían el reconfigure D5 — en cp1252 el «·» sale
+  0xB7 y el regex del resumen no matchea → bloque D5 añadido a ambas
+  (54 y 12 OK re-medidos). Además se detectaron bucles MCP muriendo en
+  silencio (3.13): primero try/except, REVERTIDO por el TRINQUETE P2-2
+  (287 > 286, corrida #2 falló SOLO por eso — la resiliencia ya existía en
+  el finally que despierta futures con PROCESS_DEAD) y sustituido por un
+  done-callback en el _spawn del producto (log con tail, 0 except Exception
+  nuevos; trinquete 2 passed, mcp_manager 38 OK). (2) corrida #3 →
+  `run_all --hermetic` real en Windows: única roja test_memorydv — los checks
+  de sandbox usaban str.startswith(str(_TMP)) y en los runners Windows
+  tempfile.mkdtemp devuelve 8.3 (RUNNER~1) que resolve() expande → FIX
+  is_relative_to sobre formas resueltas en test_memorydv (§11/§12) y
+  test_skills_autonomia (§6) (36 y 34 OK re-medidos). (3) corrida #4 →
+  **CI COMPLETA VERDE en f90d558: ci (ubuntu, gate requerido) success +
+  ci-windows success — la suite canónica `run_all --hermetic` (69 baterías)
+  y pytest xdist pasan en windows-latest / Python 3.13**.
 - **Pendiente del dueño** (documentado en el informe §honesto): borrados
   físicos de la lipo (−483 MB venv roto, −234 MB cachés perfil, −122 MB
-  biblioteca), verificación connect-all-google tras podar, corrida verde de
-  ci-windows (se dispara con este push).
+  biblioteca) y verificación connect-all-google tras podar.
 - **Commit**: ver `git log -1` (hash en el cierre de la sesión).
 
 ---
