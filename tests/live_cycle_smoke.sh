@@ -5,6 +5,10 @@
 #   → project_done → auto-render → status → video_qa.
 # La última escena es solo-imagen (contrato P1): 2 escenas → 3 jobs.
 set -u
+# [D1] el sandbox de este humo ES su propio aislamiento: la runner (run_all)
+# exporta DB_PATH/DATA_DIR/etc. hacia su dir de corrida; aquí se NEUTRALIZAN
+# para que el uvicorn interno use los defaults del sandbox (backend/data).
+unset DB_PATH DATA_DIR OUTPUT_DIR TMP_DIR PROJECTS_DIR MUSIC_DIR TEMP_DIR
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 SANDBOX="${TMPDIR:-/tmp}/yt_cycle_smoke_$$"
 PORT=${CYCLE_SMOKE_PORT:-8766}

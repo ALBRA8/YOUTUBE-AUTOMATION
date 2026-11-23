@@ -18,6 +18,15 @@ Lo que garantiza el Flow Bridge cuando N extensiones/worker corren a la vez:
 Uso:  cd yt_automation_v2 && python3 tests/test_concurrencia.py
       python3 -m pytest tests/test_concurrencia.py -q
 """
+
+# [D5] consola UTF-8 aunque el host use cp1252: baterías ejecutadas a mano
+# SIN variables de entorno no deben morir por imprimir "──" u otros glifos.
+import sys as _d5sys
+for _d5s in (_d5sys.stdout, _d5sys.stderr):
+    try:
+        _d5s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 import io
 import json
 import shutil
@@ -224,6 +233,50 @@ def main() -> int:
                         ).fetchone()["c"]
     check("colas consistentes: todos los jobs de C en done",
           q == 3, f"done={q}")
+
+    print("── 4b. [D2] completes paralelos CON CARGA DE CPU artificial → 3/3")
+    # Evidencia del dueño: junto a OTRA batería (contención real de CPU/E/S)
+    # la suelta era 16/2 — un complete() perdía el BEGIN IMMEDIATE agotando
+    # el busy_timeout mientras otro complete sostenía el lock durante su
+    # ffprobe. Ahora _begin_inmediato reintenta (50/150/400 ms). Este caso
+    # exige 3/3 CON un proceso quemando CPU, replicando esa contención.
+    import subprocess as _sp
+    quemador = _sp.Popen(
+        [sys.executable, "-c", "import time; t = time.time()\n"
+                               "while time.time() - t < 30: pass"],
+        stdin=_sp.DEVNULL, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+    try:
+        # proyecto FRESCO (el re-enqueue respeta los done: con C no habría
+        # nada nuevo que completar)
+        _proyecto("proj_conc_e", n=2)
+        fj.enqueue_project("proj_conc_e")
+        blancos_carga = _drain("w-carga", pid="proj_conc_e")
+        resultados_carga = []
+
+        def _completa_carga(j):
+            try:
+                if j["kind"] == "video":
+                    _consent_allow(j)
+                payload = _png() if j["kind"] == "image" else _mp4()
+                r = fj.complete(j["id"], j["job_token"], payload)
+                resultados_carga.append((j["id"], bool(r)))
+            except Exception as e:  # noqa: BLE001
+                resultados_carga.append((j["id"], f"EXC:{e}"[:60]))
+
+        ts_c = [threading.Thread(target=_completa_carga, args=(j,))
+                for j in blancos_carga]
+        for t in ts_c:
+            t.start()
+        for t in ts_c:
+            t.join(timeout=60)
+        ok_c = sum(1 for _, r in resultados_carga if r is True)
+        check(f"completes con carga CPU: {ok_c}/{len(blancos_carga)} "
+              f"aplicados sin error (3/3 exigido)",
+              blancos_carga and ok_c == len(blancos_carga) == 3,
+              str(resultados_carga)[:150])
+    finally:
+        quemador.kill()
+        quemador.wait()
 
     print("── 5. enqueue EN CALIENTE mientras otro worker reclama")
     _proyecto("proj_conc_d", n=3)

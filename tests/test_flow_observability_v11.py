@@ -32,6 +32,15 @@ Cubre, EN HERMÉTICO (sin Chrome, sin red, sin Google Flow real):
 Uso:  cd yt_automation_v2 && python3 tests/test_flow_observability_v11.py
       python3 -m pytest tests/test_flow_observability_v11.py -q
 """
+
+# [D5] consola UTF-8 aunque el host use cp1252: baterías ejecutadas a mano
+# SIN variables de entorno no deben morir por imprimir "──" u otros glifos.
+import sys as _d5sys
+for _d5s in (_d5sys.stdout, _d5sys.stderr):
+    try:
+        _d5s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 import json
 import subprocess
 import sys
@@ -563,8 +572,13 @@ def main() -> int:
             remote = subprocess.run(
                 ["git", "show", f"{ref}:{relpath}"],
                 capture_output=True)
+            # [V13] comparación de contenido NORMALIZADO: la suite no debe
+            # depender de cómo se hizo el checkout (core.autocrlf=true en la
+            # máquina del dueño materializa CRLF en el árbol de trabajo; el
+            # índice y `git show` son LF). Se comparan bytes con \r\n→\n.
             igual = (remote.returncode == 0 and local.exists()
-                     and remote.stdout == local.read_bytes())
+                     and remote.stdout.replace(b"\r\n", b"\n")
+                     == local.read_bytes().replace(b"\r\n", b"\n"))
             if igual:
                 check(f"{etiqueta} byte-idéntico a {ref}", True)
             elif relpath.endswith("production_json.py") and remote.returncode == 0 \

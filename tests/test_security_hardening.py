@@ -6,6 +6,15 @@ safe_fetch_bytes / _http_probe del Doctor), anti-inyección de instrucciones
 del sanitizer, auth /mcp con MASTER_API_KEY, publicación idempotente con QA
 gate, chmod 0600 del token OAuth y wiring de las guardias en el código.
 """
+
+# [D5] consola UTF-8 aunque el host use cp1252: baterías ejecutadas a mano
+# SIN variables de entorno no deben morir por imprimir "──" u otros glifos.
+import sys as _d5sys
+for _d5s in (_d5sys.stdout, _d5sys.stderr):
+    try:
+        _d5s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 import sys
 import tempfile
 from pathlib import Path

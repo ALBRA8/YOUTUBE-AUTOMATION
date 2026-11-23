@@ -23,6 +23,15 @@ Regresión cubierta (todo hermético: cero Chrome, cero red, cero Playwright):
 Convención del repo: script stdlib (sin pytest), 0 dependencias externas
 (salvo httpx para el transporte ASGI, igual que INT-023.4/024).
 """
+
+# [D5] consola UTF-8 aunque el host use cp1252: baterías ejecutadas a mano
+# SIN variables de entorno no deben morir por imprimir "──" u otros glifos.
+import sys as _d5sys
+for _d5s in (_d5sys.stdout, _d5sys.stderr):
+    try:
+        _d5s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 import asyncio
 import json
 import os
@@ -586,14 +595,18 @@ async def endpoint_tests():
 
 # ─────────────────────────────── S9 · contrato UI ──
 def ui_tests():
-    print("\n── S9 · contrato UI (sesión unificada + dropdown auto; v≥2.25.0 INT-028) ──")
+    print("\n── S9 · contrato UI (hub «Ecosistema Google» v2.46 + dropdown auto; INT-025→INT-088/090) ──")
     static = BACKEND / "static"
     # INT-088: app.js es un loader; todo el código MCP/NotebookLM vive en app-mcp.js
     appjs = "\n".join((static / f).read_text(encoding="utf-8")
                       for f in ("app-mcp.js", "app-core.js", "app-projects.js",
                                 "app-wizard.js", "app-player.js"))
     index = (static / "index.html").read_text(encoding="utf-8")
-    for sym in ("mcpGsessHTML", "gsessLogin", "gsessCapture", "gsessRefresh",
+    # [UI v2.46] el par gsessLogin/gsessCapture de INT-025 fue absorbido por
+    # el hub SSO «Ecosistema Google» (gsessStart → /mcp/google-sso con
+    # vigilancia de cookies en el backend, INT-090): el contrato verifica el
+    # flujo ACTUAL, no el histórico.
+    for sym in ("mcpGsessHTML", "gsessStart", "gsessOpenChrome", "gsessRefresh",
                 "gsessApply", "mcpPopulateNotebooks", "gsess-card"):
         check(f"app.js define {sym}", sym in appjs)
     check("dropdown de notebooks dinámico presente (#nblm-nid-sel)",
@@ -605,21 +618,23 @@ def ui_tests():
           and "mcpListNotebooks({ silent: true })" in _mc, _mc[:400])
     check("el input #nblm-nid sigue siendo la fuente de pipeRun (regresión)",
           "const nid = mcpNid();" in appjs and 'id="nblm-nid"' in appjs)
-    check("botones login/captura presentes",
-          "🔑 Vincular Sesión Google (Login Único)" in appjs
-          and "📥 Capturar sesión → NotebookLM" in appjs)
-    check("tooltip helper del mandato presente",
-          "abrir el navegador con tu perfil unificado" in appjs
-          and "inicia sesión en Google una sola vez" in appjs
-          and "Refrescar estado" in appjs)
-    check("endpoint launch-auth-browser invocado por la UI",
+    check("botón «Continuar con Google» (SSO Hub) presente",
+          'id="gsess-gbtn"' in appjs and "Continuar con Google" in appjs
+          and 'onclick="gsessStart()"' in appjs)
+    check("acciones del hub presentes (Abrir ventana / Reparar perfil / Refrescar / Cambiar cuenta)",
+          "gsessOpenWindow()" in appjs and "gsessRepairProfile()" in appjs
+          and "gsessRefresh()" in appjs and "gsessLogout()" in appjs)
+    check("copy del mandato «una sola vez» presente",
+          "Inicia sesión <b>una sola vez</b>" in appjs
+          and "Flow + NotebookLM automáticamente" in appjs)
+    check("endpoint launch-auth-browser invocado por la UI (gsessOpenChrome)",
           "/mcp/launch-auth-browser" in appjs
-          and appjs.index("gsessLogin") < appjs.index("/mcp/launch-auth-browser"))
+          and appjs.index("async function gsessOpenChrome")
+              < appjs.index("'/mcp/launch-auth-browser'"))
     check("tras vincular: refresco de badges MCP (pre-flight green)",
-          "mcpRefresh(true)" in appjs[appjs.index("async function gsessLogin"):
-                                       appjs.index("async function gsessCapture")])
-    check("endpoint del backend invocado por la UI",
-          "/mcp/login-google" in appjs and "/mcp/capture-google-session" in appjs)
+          "await gsessRefresh(true)" in appjs and "mcpRefresh(true)" in appjs)
+    check("endpoint del SSO Hub invocado por la UI",
+          "api('/mcp/google-sso'" in appjs)
     check("index.html sirve app.js con cache-busting por versión (INT-028/INT-082)",
           "app.js?v=" in index)
     check("fin del copy-paste: placeholder sin «pegar UUID» obligatorio",

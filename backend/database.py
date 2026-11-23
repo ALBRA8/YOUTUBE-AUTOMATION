@@ -140,6 +140,12 @@ CREATE TABLE IF NOT EXISTS flow_jobs (    -- Flow Bridge: cola de assets para la
     updated_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_flow_jobs_project ON flow_jobs(project_id, status);
+-- [V10 · P6/A9] caminos calientes sin SCAN: claim_next global filtra por
+-- status y ordena por kind/scene/part; el barrido de leases vencidos
+-- (recover_expired, corre EN CADA claim y en el listado de estado) filtra
+-- por status='claimed' AND lease_until < ?.
+CREATE INDEX IF NOT EXISTS idx_flow_jobs_claim ON flow_jobs(status, kind, scene_number, part, created_at);
+CREATE INDEX IF NOT EXISTS idx_flow_jobs_lease ON flow_jobs(status, lease_until);
 CREATE TABLE IF NOT EXISTS brand_profiles (  -- INT-042: Identidad persistente de marca / canal
     id             TEXT PRIMARY KEY,
     name           TEXT NOT NULL,

@@ -33,6 +33,10 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
+import sqlite3
+import sys
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -50,6 +54,63 @@ HEARTBEAT_EXTEND_S = 5 * 60          # heartbeat del worker cada ~30s
 MIN_VIDEO_S = 0.3                    # igual que flow_import.find_flow_videos
 
 IMG_FORMAT_EXT = {"PNG": ".png", "JPEG": ".jpg", "WEBP": ".webp"}
+
+# ── [D2] trazas temporales opt-in + reintento acotado del BEGIN IMMEDIATE ────
+# FLOW_JOBS_TRACE=1 imprime por stderr tiempos de la adquisición del lock y
+# del I/O dentro de complete()/claim_next(): diagnóstico de contención MEDIDO
+# (no adivinado). Overhead cero cuando está desactivada.
+_TRACE = os.getenv("FLOW_JOBS_TRACE", "").strip().lower() not in ("", "0", "false")
+_T0_PROC = time.perf_counter()
+
+
+def _trazar(etiqueta: str, t0: float | None = None, extra: str = "") -> None:
+    """[D2] Traza temporal opt-in por stderr (FLOW_JOBS_TRACE=1).
+    Con t0: duración de la fase (ms). Sin t0: tiempo relativo al proceso."""
+    if not _TRACE:
+        return
+    ahora = time.perf_counter()
+    dt = (ahora - t0) * 1000.0 if t0 is not None else (ahora - _T0_PROC) * 1000.0
+    pref = "dur" if t0 is not None else "t+"
+    print(f"[flow-trace] {pref}={dt:9.1f} ms · {etiqueta}"
+          f"{(' ' + extra) if extra else ''}",
+          file=sys.stderr, flush=True)
+
+
+# backoff del reintento del BEGIN (el punto que CEDE ante SQLITE_BUSY):
+# 3 intentos, 50/150/400 ms — el valor que recomienda la misión D2.
+_BACKOFF_BEGIN_S = (0.05, 0.15, 0.4)
+
+
+def _begin_inmediato(con, etiqueta: str = "") -> None:
+    """[D2] BEGIN IMMEDIATE con REINTENTO ACOTADO ante SQLITE_BUSY.
+
+    ÚNICO punto arreglado: la ADQUISICIÓN del lock de escritura. Si otro
+    writer (p. ej. un complete() con ffprobe dentro de la tx en una máquina
+    saturada) mantiene el lock y el busy_timeout de la conexión vence
+    (database.connect usa timeout=15), sqlite3 levanta OperationalError
+    «database is locked» → antes el trabajo se PERDÍA (evidencia del dueño:
+    test_concurrencia 16/2 junto a otra batería). Ahora: hasta 3 intentos
+    con backoff 50/150/400 ms.
+
+    El reintento es SEGURO porque ocurre ANTES de leer o escribir cualquier
+    fila (sin filas tocadas no hay nada que roll-backear ni tokens que
+    invalidar): la semántica del token/nonce queda INTACTA y NO se añade
+    ningún re-check de token (trampa conocida que rompe complete())."""
+    ultimo = len(_BACKOFF_BEGIN_S) - 1
+    for intento, espera in enumerate(_BACKOFF_BEGIN_S):
+        try:
+            con.execute("BEGIN IMMEDIATE")
+            return
+        except sqlite3.OperationalError as exc:
+            msg = str(exc).lower()
+            if "locked" not in msg and "busy" not in msg:
+                raise
+            if intento == ultimo:
+                raise
+            _trazar(f"BEGIN ocupado ({etiqueta or 'tx'}) — intento "
+                    f"{intento + 1}/{len(_BACKOFF_BEGIN_S)}, reintento "
+                    f"en {int(espera * 1000)} ms")
+            time.sleep(espera)
 
 
 def _now() -> datetime:
@@ -250,7 +311,7 @@ def recover_expired() -> int:
     cutoff = _iso(_now())
     con = db.connect()
     try:
-        con.execute("BEGIN IMMEDIATE")
+        _begin_inmediato(con)
         n = _recover_en_con(con, cutoff)
         _purge_retencion_en_con(con)  # [PHASE 1 · M11] misma tx, idempotente
         con.commit()
@@ -267,9 +328,13 @@ def claim_next(worker: str, pid: str | None = None) -> dict | None:
     ascendente). BEGIN IMMEDIATE evita dobles claims entre workers."""
     con = db.connect()
     try:
-        con.execute("BEGIN IMMEDIATE")
+        t_begin = time.perf_counter()
+        _begin_inmediato(con, f"claim {worker}")
+        _trazar("claim_next: BEGIN adquirido", t_begin, f"worker={worker} pid={pid}")
         cutoff = _iso(_now())
+        t_rec = time.perf_counter()
         _recover_en_con(con, cutoff)  # barrido anti-zombie (2 fases, ver arriba)
+        _trazar("claim_next: barrido recover_expired", t_rec)
         if pid:
             row = con.execute(
                 """SELECT * FROM flow_jobs WHERE status='queued' AND project_id=?
@@ -346,7 +411,7 @@ def heartbeat(job_id: str, token: str, worker=None) -> dict | None:
     guardia: un heartbeat de otro worker o con lease vencida → None (409)."""
     con = db.connect()
     try:
-        con.execute("BEGIN IMMEDIATE")
+        _begin_inmediato(con)
         row = _claimed_by_token(con, job_id, token, worker=worker,
                                 require_lease=True)
         if not row:
@@ -406,7 +471,9 @@ def complete(job_id: str, token: str, data: bytes,
     barrier_error = None
     con = db.connect()
     try:
-        con.execute("BEGIN IMMEDIATE")
+        t_begin = time.perf_counter()
+        _begin_inmediato(con, f"complete {job_id[:8]}")
+        _trazar("complete: BEGIN adquirido", t_begin, f"job={job_id[:8]} worker={worker}")
         row = _claimed_by_token(con, job_id, token, worker=worker,
                                 require_lease=True)
         if not row:
@@ -465,10 +532,13 @@ def complete(job_id: str, token: str, data: bytes,
                                      "gate (§7.1) — " + razon)
 
         if barrier_error is None:
+            t_io = time.perf_counter()
             if kind == "image":
                 asset_path = _save_image(flow_dir, no, data)
             else:
                 asset_path = _save_video(flow_dir, no, part, data)
+            _trazar("complete: I/O asset (PIL/ffprobe) DENTRO de la tx",
+                    t_io, f"kind={kind} escena={no}")
 
             # [execution-contract v1] §13 — REQUESTED vs OBSERVED FLOW vs ACTUAL
             # ASSET. El spec viaja en la fila (columna execution_spec); la
@@ -545,7 +615,10 @@ def complete(job_id: str, token: str, data: bytes,
                 renderable = False
                 if project_done:
                     renderable = _apply_assets_to_scenes(con, pid)
+                t_commit = time.perf_counter()
                 con.commit()
+                _trazar("complete: COMMIT (tx completa)", t_commit,
+                        f"job={job_id[:8]} project_done={project_done}")
     except Exception:
         con.rollback()
         raise
@@ -674,7 +747,7 @@ def fail(job_id: str, token: str, error: str, worker=None) -> dict | None:
                       or err.startswith("timeout-local:"))
     con = db.connect()
     try:
-        con.execute("BEGIN IMMEDIATE")
+        _begin_inmediato(con)
         row = _claimed_by_token(con, job_id, token, worker=worker,
                                 require_lease=True)
         if not row:
@@ -776,7 +849,7 @@ def set_adapted_prompt(job_id: str, prompt_adapted: str,
         return None
     con = db.connect()
     try:
-        con.execute("BEGIN IMMEDIATE")
+        _begin_inmediato(con)
         row = con.execute(
             "SELECT * FROM flow_jobs WHERE id=?", (job_id,)).fetchone()
         if not row or row["kind"] != "video" or row["status"] == "done":
@@ -810,7 +883,7 @@ def requeue_for_adaptation(job_id: str) -> dict | None:
     Solo jobs dead de video. Devuelve {ok, attempts, max_attempts} o None."""
     con = db.connect()
     try:
-        con.execute("BEGIN IMMEDIATE")
+        _begin_inmediato(con)
         row = con.execute(
             "SELECT * FROM flow_jobs WHERE id=?", (job_id,)).fetchone()
         if not row or row["kind"] != "video" or row["status"] != "dead":
@@ -858,7 +931,7 @@ def set_exec_state(job_id: str, token: str, state: str,
         return {"ok": False, "error": "invalid_state"}
     con = db.connect()
     try:
-        con.execute("BEGIN IMMEDIATE")
+        _begin_inmediato(con)
         row = _claimed_by_token(con, job_id, token, worker=worker)
         if not row:
             con.rollback()
@@ -959,7 +1032,7 @@ def generation_consent(job_id: str, token: str,
         if isinstance(ev.get("control_results"), dict) else {}
     con = db.connect()
     try:
-        con.execute("BEGIN IMMEDIATE")
+        _begin_inmediato(con)
         row = _claimed_by_token(con, job_id, token, worker=worker)
         if not row:
             con.rollback()

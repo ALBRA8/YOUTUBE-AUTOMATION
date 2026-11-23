@@ -108,9 +108,11 @@ limpio crea el runtime mínimo (`backend/data/`, SQLite, `output/`) al importar
 - `test_production_json.py`, `test_merge_216_pyav.py`, `test_lanzar_preflight.py`:
   escriben `backend/data/output/<pid>/production.json` (carpeta de proyecto de
   prueba) y la **eliminan al final** de la corrida.
-- `test_guion_json.py`: usa la SQLite real de desarrollo
-  (`backend/data/yt_automation.db`), crea proyectos de prueba y los **borra al
-  final** (`delete_project`).
+- `test_guion_json.py`: crea proyectos de prueba y los **borra al final**
+  (`delete_project`). [D1] bajo `tests/run_all.py` (y cualquier proceso con
+  las variables exportadas) corre contra la SQLite TEMPORAL de la corrida;
+  ejecutada a mano SIN variables usa la SQLite de desarrollo
+  (`backend/data/yt_automation.db`) — comportamiento histórico conservado.
 - `test_live_boot.py`: copia `backend/` a un sandbox temporal (fuera del repo,
   se borra al terminar), usa su PROPIA SQLite vacía y puertos locales
   (127.0.0.1:8765/8766). No toca la DB ni los outputs del desarrollador.

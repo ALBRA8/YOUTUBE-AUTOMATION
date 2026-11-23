@@ -221,8 +221,18 @@ def test_query_api_key_vector_removed():
 
 # ── E1 · conftest excluye la batería LIVE c1 ───────────────────────────────
 def test_conftest_excludes_live_c1():
-    src = (BACKEND.parent / "tests" / "conftest.py").read_text(encoding="utf-8")
-    assert '"test_live_execution_c1.py"' in src
+    # [D6 · registro único] la exclusión de las baterías LIVE vive en
+    # run_all.PYTEST_IGNORADAS y conftest.py la consume (collect_ignore).
+    # El literal histórico ya no está inline en conftest.py.
+    import importlib.util
+    src_conf = (BACKEND.parent / "tests" / "conftest.py").read_text(
+        encoding="utf-8")
+    assert "PYTEST_IGNORADAS" in src_conf  # conftest consume el registro
+    spec = importlib.util.spec_from_file_location(
+        "run_all_registro_e1", BACKEND.parent / "tests" / "run_all.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert "test_live_execution_c1.py" in mod.PYTEST_IGNORADAS
 
 
 # ── E3 · numpy declarado ───────────────────────────────────────────────────

@@ -22,6 +22,15 @@ cero Chrome, cero LLM real):
 
 Convención del repo: script stdlib (sin pytest), 0 dependencias externas.
 """
+
+# [D5] consola UTF-8 aunque el host use cp1252: baterías ejecutadas a mano
+# SIN variables de entorno no deben morir por imprimir "──" u otros glifos.
+import sys as _d5sys
+for _d5s in (_d5sys.stdout, _d5sys.stderr):
+    try:
+        _d5s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 import asyncio
 import json
 import sys

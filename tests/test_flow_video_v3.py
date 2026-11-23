@@ -38,6 +38,15 @@ Capa Flow Adaptation (backend, sobre DB tmp):
 Uso:  cd yt_automation_v2 && python3 tests/test_flow_video_v3.py
       python3 -m pytest tests/test_flow_video_v3.py -q
 """
+
+# [D5] consola UTF-8 aunque el host use cp1252: baterías ejecutadas a mano
+# SIN variables de entorno no deben morir por imprimir "──" u otros glifos.
+import sys as _d5sys
+for _d5s in (_d5sys.stdout, _d5sys.stderr):
+    try:
+        _d5s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 import io
 import json
 import re
@@ -469,7 +478,7 @@ def main() -> int:
     check("clase G (copyright) → sin S1 ni workaround inventado (mandato ⑥)",
           r_g2["aplicada"] is False, repr(r_g2))
     check("S2 eliminada en V1.1 (sin clase de interpretación)",
-          r_s2_dead["aplicada"] is False if False else True)  # placeholder estable
+          True, "clase S2 retirada de la taxonomía V1.1 (placeholder estable)")
     check("P1 de cámara intacto",
           p1_cam == ("La presentadora mira hacia la derecha. Enfoca "
                      "directamente el rostro de la mujer con movimiento "

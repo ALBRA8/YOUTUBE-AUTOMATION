@@ -8,14 +8,20 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
-OUTPUT_DIR = DATA_DIR / "output"
-PROJECTS_DIR = DATA_DIR / "projects"   # INT-086: workspaces modulares
-TMP_DIR = DATA_DIR / "tmp"
+# ── [D1 · aislamiento de la suite] rutas por variable de entorno ──────────
+# tests/run_all.py exporta DATA_DIR/DB_PATH/OUTPUT_DIR/TMP_DIR/PROJECTS_DIR
+# apuntando a un directorio temporal de corrida, de modo que la suite NUNCA
+# muta la base de datos real del dueño (backend/data/yt_automation.db).
+# Sin esas variables (uso normal del producto) los defaults son EXACTAMENTE
+# los valores históricos: cero ruptura.
+DATA_DIR = Path(os.getenv("DATA_DIR") or (BASE_DIR / "data")).resolve()
+OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR") or (DATA_DIR / "output")).resolve()
+PROJECTS_DIR = Path(os.getenv("PROJECTS_DIR") or (DATA_DIR / "projects")).resolve()   # INT-086: workspaces modulares
+TMP_DIR = Path(os.getenv("TMP_DIR") or (DATA_DIR / "tmp")).resolve()
 for d in (DATA_DIR, OUTPUT_DIR, PROJECTS_DIR, TMP_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
-DB_PATH = DATA_DIR / "yt_automation.db"
+DB_PATH = Path(os.getenv("DB_PATH") or (DATA_DIR / "yt_automation.db")).resolve()
 ENV_PATH = BASE_DIR / ".env"
 load_dotenv(ENV_PATH)
 

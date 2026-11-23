@@ -2965,6 +2965,7 @@ async def avatar_lipsync_musetalk(avatar_id: str, body: dict):
     mp3_path = wav_path.with_suffix(".mp3")
 
     # Sintetizar audio con edge-tts
+    import subprocess  # [F821] faltaba: cmd ffmpeg más abajo lo usa
     import edge_tts
     comm = edge_tts.Communicate(text, voice)
     await comm.save(str(mp3_path))

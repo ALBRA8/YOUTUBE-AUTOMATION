@@ -51,10 +51,21 @@ def generate_ecommerce_badge(
     badge_type: str = "rating",
     text_main: str | None = None,
     tag: str | None = None,
-    out_path: Path | None = None,
+    *,
+    out_path: Path,
     scale: float = 1.0
 ) -> Path:
-    """Genera un badge / sticker PNG transparente de alta conversión e-commerce (INT-055)."""
+    """Genera un badge / sticker PNG transparente de alta conversión e-commerce (INT-055).
+
+    [V15 · A1] `out_path` es OBLIGATORIO (keyword-only, sin default): el
+    default histórico `backend/static/assets/badge_<tipo>.png` era una ruta
+    relativa al CWD que permitía escritura arbitraria si se llamaba desde
+    otro sitio (el endpoint /api/product/badge ya sanea la suya con
+    security.safe_filename + resolve + is_relative_to). Sin default, nadie
+    puede reintroducir A1 accidentalmente."""
+    if not out_path:
+        raise ValueError("out_path es obligatorio ([V15 · A1]: sin default "
+                         "de escritura relativa al CWD)")
     preset = BADGE_PRESETS.get(badge_type, BADGE_PRESETS["rating"])
     tag_str = tag or preset["tag"]
     main_str = text_main or preset["text"]
@@ -85,7 +96,9 @@ def generate_ecommerce_badge(
     main_y = int(56 * scale)
     draw.text((main_x, main_y), main_str, fill=(255, 255, 255, 255))
 
-    out = out_path or Path(f"backend/static/assets/badge_{badge_type}.png")
+    # [V15 · A1] out_path OBLIGATORIO (validado arriba): sin ruta relativa
+    # al CWD que permita escritura arbitraria desde otro call-site.
+    out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     im.save(out)
     return out
@@ -352,9 +365,13 @@ def draw_callout_pin(
 def generate_product_callout_layer(
     callouts: list[dict[str, Any]],
     canvas_size: tuple[int, int] = (1080, 1920),
-    output_path: Path | None = None
+    *,
+    output_path: Path,
 ) -> Path:
-    """Genera una capa PNG transparente 1080x1920 con múltiples callouts flotantes para el producto."""
+    """Genera una capa PNG transparente 1080x1920 con múltiples callouts flotantes para el producto.
+
+    [V15 · A1] output_path OBLIGATORIO (mismo cierre que el badge: sin
+    default de escritura relativa al CWD)."""
     im = Image.new("RGBA", canvas_size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(im)
 
@@ -404,7 +421,8 @@ def generate_product_callout_layer(
             accent_rgb=accent_rgb
         )
 
-    out = output_path or Path("backend/static/assets/product_callouts.png")
+    # [V15 · A1] output_path OBLIGATORIO: sin default relativo al CWD.
+    out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     im.save(out)
     return out

@@ -36,3 +36,8 @@ google-auth-oauthlib>=1.2         # OAuth YouTube (loopback, sin OOB)
 
 # INT-080 · usado por ecommerce_overlays.py y accent_meter.py (import top-level)
 numpy>=1.26
+
+# [V12 · INT-055/056] OpenCV: face_tracker.py y ecommerce_overlays.py lo
+# importan (deferido) — los endpoints de e-commerce /api/product/* fallan con
+# ImportError sin él. PIN EXACTO (verificado en verde con la suite):
+opencv-python-headless==4.13.0.90

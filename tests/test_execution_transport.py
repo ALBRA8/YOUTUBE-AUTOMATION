@@ -19,6 +19,15 @@ la edita.
 Uso:  cd yt_automation_v2 && python3 tests/test_execution_transport.py
       python3 -m pytest tests/test_execution_transport.py -q
 """
+
+# [D5] consola UTF-8 aunque el host use cp1252: baterías ejecutadas a mano
+# SIN variables de entorno no deben morir por imprimir "──" u otros glifos.
+import sys as _d5sys
+for _d5s in (_d5sys.stdout, _d5sys.stderr):
+    try:
+        _d5s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 import io
 import json
 import sqlite3

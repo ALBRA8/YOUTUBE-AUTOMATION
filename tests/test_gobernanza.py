@@ -6,6 +6,15 @@ anti zombie-loop por lease_cycles (§reintentos: no reintentar infinitamente),
 gancho MemoryDV de la cola, métricas §observabilidad (tasas + persistencia),
 tools MCP de gobernanza, autonomía L0-L5 integrada y estados de publicación.
 """
+
+# [D5] consola UTF-8 aunque el host use cp1252: baterías ejecutadas a mano
+# SIN variables de entorno no deben morir por imprimir "──" u otros glifos.
+import sys as _d5sys
+for _d5s in (_d5sys.stdout, _d5sys.stderr):
+    try:
+        _d5s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 import asyncio
 import json
 import sqlite3

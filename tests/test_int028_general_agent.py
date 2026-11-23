@@ -21,6 +21,15 @@ Regresión cubierta (todo hermético: cero red, cero LLM, cero filesystem real):
 
 Convención del repo: script stdlib (sin pytest), 0 dependencias externas.
 """
+
+# [D5] consola UTF-8 aunque el host use cp1252: baterías ejecutadas a mano
+# SIN variables de entorno no deben morir por imprimir "──" u otros glifos.
+import sys as _d5sys
+for _d5s in (_d5sys.stdout, _d5sys.stderr):
+    try:
+        _d5s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 import asyncio
 import importlib.util
 import inspect
@@ -312,7 +321,8 @@ check("app.js sin «Soy VÓRTICE»", "Soy VÓRTICE" not in app_js)
 check("app.js sin «VÓRTICE está pensando»", "VÓRTICE está pensando" not in app_js)
 check("app.js con nuevo saludo del Agente General",
       "Soy el Agente General" in app_js and "who\">AGENTE" in app_js)
-check("banner de la home rebrandeado", "<b>Agente General</b>" in app_js)
+check("banner de la home rebrandeado",
+      "Agente General 🤖<small" in app_js)  # [UI v2.46/INT-088] saludo actual del hub AGENTE
 check("index.html sirve app.js con cache-busting por versión",
       "app.js?v=" in (BACKEND / "static" / "index.html").read_text(encoding="utf-8"))
 main_src = (BACKEND / "main.py").read_text(encoding="utf-8")

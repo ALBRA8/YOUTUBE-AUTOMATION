@@ -409,8 +409,12 @@ def test_contratos_fuente_y_version():
           "project_workspace.inject_cierre" in src_orch
           and "project_workspace.sync_artifacts" in src_orch)
     src_conf = (BACKEND / "config.py").read_text(encoding="utf-8")
+    # [D1] PROJECTS_DIR es ahora configurable por env con el default
+    # histórico DATA_DIR/"projects" (cero ruptura) y sigue creándose al
+    # arrancar (mismo bucle mkdir con PROJECTS_DIR, TMP_DIR).
     check("PROJECTS_DIR en config y carpeta creada al arranque",
-          'PROJECTS_DIR = DATA_DIR / "projects"' in src_conf
+          'PROJECTS_DIR' in src_conf
+          and 'DATA_DIR / "projects"' in src_conf
           and "PROJECTS_DIR, TMP_DIR" in src_conf)
 
 

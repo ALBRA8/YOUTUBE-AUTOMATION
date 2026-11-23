@@ -4,6 +4,10 @@
 # memoria no ven (startup, middleware, CORS, puertos, imports).
 # Auto-localizante: sirve desde cualquier checkout del repo.
 set -u
+# [D1] el sandbox de este humo ES su propio aislamiento: la runner (run_all)
+# exporta DB_PATH/DATA_DIR/etc. hacia su dir de corrida; aquí se NEUTRALIZAN
+# para que el uvicorn interno use los defaults del sandbox (backend/data).
+unset DB_PATH DATA_DIR OUTPUT_DIR TMP_DIR PROJECTS_DIR MUSIC_DIR TEMP_DIR
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 SANDBOX="${TMPDIR:-/tmp}/yt_boot_smoke_$$"
 PORT=${BOOT_SMOKE_PORT:-8765}

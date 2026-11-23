@@ -57,60 +57,17 @@ BACKEND_DIR = REPO_ROOT / "backend"
 # ─────────────────────────────────────────────────────────────────────────
 # (a) Baterías standalone excluidas de la recolección pytest
 # ─────────────────────────────────────────────────────────────────────────
-# Rutas RELATIVAS a tests/. Convención del repo: estas baterías son scripts
-# autoejecutables (ejecutan la batería completa a nivel de módulo y cierran
-# con sys.exit(...) — con o sin guard __main__, pero SIEMPRE con todo el
-# flujo ya ejecutado en el import) y se corren con ``python3
-# tests/run_all.py``, que las lanza en subprocess aislados. Bajo pytest un
-# ``sys.exit`` a nivel de módulo produce SystemExit durante la recolección
-# → INTERNALERROR. La fuente de verdad sigue siendo run_all.py; aquí SOLO
-# se excluyen del modo pytest (no se convierten, no se tocan).
-STANDALONE_BATTERIES = [
-    # ── 16 detectadas en la auditoría (worklog REPO-SYNC-2026-10-27) ──
-    "security/test_config_security.py",      # sys.exit tras batería a nivel de módulo
-    "security/test_csrf.py",
-    "security/test_docs_auth.py",
-    "security/test_input_limits.py",
-    "security/test_job_identity.py",
-    "security/test_project_isolation.py",
-    "security/test_project_path_security.py",
-    "security/test_ssrf.py",
-    "test_burn_subtitles_resilience.py",
-    "test_gobernanza.py",
-    "test_hands.py",
-    "test_hands_chaos.py",
-    "test_hands_contract.py",
-    "test_hands_operators.py",
-    "test_security_hardening.py",
-    "test_typography.py",
-    # ── adicionales detectadas por FIX-A (patrón distinto, misma naturaleza:
-    #    registradas en BATERIAS de run_all.py y rompen la recolección) ──
-    "test_int028_general_agent.py",  # sys.exit(resumen()) SIN guard __main__
-                                     # a nivel de módulo (65 checks).
-    "test_live_boot.py",             # levanta uvicorn REAL vía subprocess bash
-                                     # (timeout 300 s por script) a nivel de
-                                     # módulo + sys.exit sin guard; el propio
-                                     # README la excluye del modo pytest.
-    # ── scripts sin NINGÚN test pytest (0 funciones test_*) que envenenan
-    #    estado del proceso al IMPORTARSE (colección) ──
-    "test_10_escenas.py",            # batería standalone (run_all): parchea
-                                     # config a SU tmp a nivel de módulo; bajo
-                                     # pytest deja config.DB_PATH/OUTPUT_DIR/
-                                     # DATA_DIR/TMP_DIR apuntando a su tmp para
-                                     # TODA la suite (fallo cascada en
-                                     # golden_fixture/int058/doctors).
-    "test_live_execution.py",        # script LIVE de la máquina del usuario
-                                     # (REPO_ROOT = D:/PROYECTOS/... hardcodeado,
-                                     # 0 funciones test_*): fija
-                                     # os.environ["FLOW_MCP_ENABLED"] al importarse.
-    "test_live_execution_2.py",      # ídem (env a nivel de módulo).
-    "test_live_execution_c1.py",     # INT-080: faltaba aquí — al importarlo fijaba
-                                     # config.FLOW_MCP_ENABLED=True en el proceso pytest
-                                     # y recolectaba 0 tests.
-    "test_live_execution_c2.py",     # ídem (env + config.FLOW_MCP_ENABLED=True
-                                     # a nivel de módulo). Vía LIVE correcta:
-                                     # python3 tests/test_live_execution*.py.
-]
+# [D6 · registro único] La fuente de verdad vive en tests/run_all.py
+# (PYTEST_IGNORADAS). Rutas RELATIVAS a tests/: son scripts autoejecutables
+# (ejecutan la batería completa a nivel de módulo y cierran con sys.exit(...)
+# — con o sin guard __main__, pero SIEMPRE con todo el flujo ya ejecutado en
+# el import). Bajo pytest un ``sys.exit`` a nivel de módulo produce
+# SystemExit durante la recolección → INTERNALERROR. La fuente de verdad de
+# la ejecución sigue siendo run_all.py; aquí SOLO se excluyen del modo pytest
+# (no se convierten, no se tocan).
+import run_all as _run_all_registro  # noqa: E402 — registro canónico (D6)
+
+STANDALONE_BATTERIES: list[str] = list(_run_all_registro.PYTEST_IGNORADAS)
 collect_ignore = list(STANDALONE_BATTERIES)
 
 # ─────────────────────────────────────────────────────────────────────────
