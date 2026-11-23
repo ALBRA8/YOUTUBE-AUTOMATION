@@ -61,6 +61,54 @@
 
 ---
 
+## Sesión 2026-11-23 · CIERRE: verificación independiente de puertas + PUSH a GitHub
+
+- **Base**: `ebd561f` (linaje cierre D1-D8/V9-V15 intacto, working tree
+  limpio, `origin/main` aún en `29f0e90`). Objetivo de la sesión: re-verificar
+  TODAS las puertas de forma independiente tras el reciclaje del sandbox
+  (deps de dev reinstaladas: `ruff`, `edge-tts`, `google-genai`) y SUBIR el
+  cierre a GitHub para que la máquina del dueño pueda hacer pull.
+- **Zonas prohibidas verificadas intactas** (sin tocar, solo lectura de
+  código): C1 `_path_contenida` (main.py:385-408, allowlist `_MEDIA_EXT` +
+  exclusión `data/backups/**`); C2 `complete()` (flow_jobs.py:512, I/O fuera
+  del lock en :617-672 — PIL/ffprobe jamás dentro de la transacción); C4
+  `progress_allowed` (execution_contract.py:657, CLAIMED→DONE sigue
+  bloqueado); C8 `factory_scheduler.arrancar()` (main.py:110); A1 badge
+  (main.py:3352, `safe_filename`); A5 CORS por `EXTENSION_IDS` (main.py:261);
+  A6/411 guard (main.py:248-253).
+- **Resultados literales medidos HOY** (sandbox Linux, Python 3.12.16):
+  - `python -m compileall backend tools tests` → exit 0.
+  - `ruff check backend tools tests --select F821,E9,F63,F7,F82` → "All
+    checks passed!".
+  - `tests/security/test_auditoria_repairs.py` standalone → **44 OK · 0
+    fallos**.
+  - `npm test` (tools/GoogleFlowMCP) → **28 pass · 0 fail** (320 ms).
+  - pytest COMPLETO → **953 passed · 0 failed** (140.53 s).
+  - `python tests/run_all.py` serial → **2951 OK · 0 fallos · 0 SKIP en 70
+    baterías**.
+  - **D1**: sha256+mtime de `backend/data/yt_automation.db` IDÉNTICOS antes y
+    después de la corrida completa (`909d1e2a…`, mtime 1795415045.0, size
+    106496).
+- **PUSH**: `main` → `origin/main` con las 4 confirmaciones del cierre
+  (453a690 · 9ae8790 · 9655adf · ebd561f) + la de esta sesión. Token usado
+  SOLO como credencial efímera de git (no persistido en remotos, config ni
+  ficheros del repo).
+- **Honestidad POSIX (no ejecutable en este sandbox Linux)**: la rama
+  Windows de `apply_env_acl` (icacls), el kill de árbol vía `taskkill` y la
+  materialización byte-idéntica en NTFS/CRLF se compilan y están cubiertos
+  por las baterías POSIX (A6 → 0600, D4 → kill de árbol POSIX, V13 →
+  byte-identidad), pero su ejecución REAL solo ocurre en la máquina del
+  dueño; ver `docs/informe_reparacion_optimizacion.md` (A6/P0.6) y
+  `ESTADO_REAL.md §3` para los límites que siguen sin demostrarse (E2E con
+  Flow real, HANDS físico, controles reales de Flow).
+- **Commit**: ver `git log -1` (hash en el cierre de la sesión).
+
+---
+
+- **Commit**: ver `git log -1` (hash en el cierre de la sesión).
+
+---
+
 ## Sesión 2026-11-23 · CIERRE D1-D8 + V9-V15 (operatividad 100%)
 
 - **Base declarada**: `29f0e90`. Hallazgo material de la sesión: el clone del
