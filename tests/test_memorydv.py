@@ -298,16 +298,18 @@ def main() -> int:
     check("sandbox hermético: solo JSONL de memorydv bajo MEMORY_DIR parcheado "
           "(creación perezosa, 0 ficheros extraños)",
           set(nombres) <= esperados and nucleo <= set(nombres)
-          and str(mem.MEMORY_DIR.resolve()).startswith(str(_TMP)),
-          str(nombres))
+          and Path(mem.MEMORY_DIR).resolve().is_relative_to(Path(_TMP).resolve()),
+          f"{nombres} · dir={Path(mem.MEMORY_DIR).resolve()} vs "
+          f"tmp={Path(_TMP).resolve()}")
     # v2.19 · NOTA: los ganchos de producción (orchestrator/flow_jobs) escriben
     # por diseño en backend/data/memorydv (gitignored) cuando corren SIN
     # parche — este battery parchea, así que sus registros van al sandbox:
     # se comprueba que TODO registro de ESTA batería vive bajo _TMP.
     st_iso = mem.stats()
     check("todos los registros de la batería viven bajo el sandbox",
-          str(st_iso.get("dir", "")).startswith(str(_TMP.resolve()))
-          or str(st_iso.get("dir", "")).startswith(str(_TMP)), st_iso.get("dir"))
+          bool(st_iso.get("dir"))
+          and Path(st_iso["dir"]).resolve().is_relative_to(Path(_TMP).resolve()),
+          f"dir={st_iso.get('dir')} vs tmp={Path(_TMP).resolve()}")
 
     print("── 12. stats(): shape del snapshot")
     st = mem.stats()
@@ -319,7 +321,10 @@ def main() -> int:
           and st["per_status"].get("retired", 0) >= 1
           and st["corrupted_lines"] >= 1, str(st)[:160])
     check("stats(): candidates_active == 1 y dir apunta al sandbox",
-          st["candidates_active"] == 1 and st["dir"].startswith(str(_TMP)))
+          st["candidates_active"] == 1
+          and bool(st.get("dir"))
+          and Path(st["dir"]).resolve().is_relative_to(Path(_TMP).resolve()),
+          f"dir={st.get('dir')} vs tmp={Path(_TMP).resolve()}")
 
     print(f"\n═══ {OK} OK · {FAIL} fallos ═══")
     return 1 if FAIL else 0

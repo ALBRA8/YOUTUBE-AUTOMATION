@@ -133,7 +133,7 @@ def main() -> int:
           marcada is not None and marcada["last_validated"] is not None)
     check("state file escrito bajo el sandbox",
           Path(skills.STATE_PATH).exists()
-          and str(Path(skills.STATE_PATH)).startswith(str(_TMP)))
+          and Path(skills.STATE_PATH).resolve().is_relative_to(Path(_TMP).resolve()))
     check("identidad desconocida → None (nunca lanza)",
           skills.mark_validated("SKILL_QUE_NO_EXISTE", True) is None)
     skills.mark_validated("RUN_VIDEO_QA", True)          # 2º ok
