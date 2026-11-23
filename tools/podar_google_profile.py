@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+r"""
 P5.2 · PODAR backend/data/google_profile_global (254,7 MB → ~20 MB).
 
 Borra SOLO cachés REGENERABLES de Chrome dentro del perfil global del MCP.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+r"""
 P5.3 · DEDUPLICAR data/biblioteca vs data/output (referencias en vez de copias).
 
 Las copias legacy de la biblioteca (MP4 que `archive()` duplicaba antes del

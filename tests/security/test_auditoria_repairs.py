@@ -363,6 +363,19 @@ db.update_project(borrable, meta={"keep": True})
 plan2 = retention.plan(_n)
 check("meta.keep=true salva el proyecto",
       len(plan2["borrables"]) == 1, str(len(plan2['borrables'])))
+# [F5 · V11] top-N por defecto y DRY-RUN IDEMPOTENTE (dos veces seguidas):
+plan2b = retention.plan(_n)
+check("dry-run idempotente: plan dos veces = mismo informe (mismos borrables "
+      "y mismos MB, nada borrado)",
+      [p["id"] for p in plan2["borrables"]] == [p["id"] for p in plan2b["borrables"]]
+      and plan2["liberables_bytes"] == plan2b["liberables_bytes"]
+      and (_cfg.OUTPUT_DIR / borrable2).exists())
+plan10 = retention.plan(None)  # None → LIMITS["OUTPUT_RETENTION_PROJECTS"]
+check("default N=10 (config.LIMITS) y conserva EXACTAMENTE los 10 más "
+      "recientes (+ marcados/job activo)",
+      plan10["n"] == 10
+      and sum(1 for p in plan10["conservar"] if p["motivo"].startswith("reciente")) == 10,
+      f"n={plan10['n']} recientes={sum(1 for p in plan10['conservar'] if p['motivo'].startswith('reciente'))}")
 r_noc = retention.purge(_n, confirm=False)
 check("sin confirm=true NO borra nada (política explícita)",
       r_noc["ok"] is False and (_cfg.OUTPUT_DIR / borrable2).exists())

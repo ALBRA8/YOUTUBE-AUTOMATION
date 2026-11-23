@@ -47,9 +47,28 @@ ok = 0
 fail = 0
 for script, desc in SCRIPTS:
     print(f"── {script}: {desc}")
-    proc = subprocess.run(["bash", str(TESTS_DIR / script)],
-                          cwd=str(TESTS_DIR.parent),
-                          capture_output=True, text=True, timeout=300)
+    # [F7 · V13] Fin de línea IRRELEVANTE para la ejecución: bash no tolera
+    # CRLF (`$'do\r'` → syntax error). El árbol de trabajo del dueño puede
+    # tener los .sh materializados en CRLF (checkout histórico con
+    # core.autocrlf=true previo a la higiene X3) sin que `git status` lo
+    # muestre; la batería NO puede depender de CÓMO se hizo el checkout.
+    # Solución: copia LF-normalizada HERMANA del original (mismo dirname).
+    src = TESTS_DIR / script
+    script_path, _tmp_copy = src, None
+    try:
+        if b"\r\n" in src.read_bytes():
+            # hermana del original (mismo dirname): los scripts derivan el
+            # repo desde `$(dirname "$0")/..` — un tmp global rompería las rutas
+            _tmp_copy = TESTS_DIR / f".{script}.lf_norm.tmp"
+            _tmp_copy.write_bytes(src.read_bytes().replace(b"\r\n", b"\n"))
+            _tmp_copy.chmod(0o755)
+            script_path = _tmp_copy
+        proc = subprocess.run(["bash", str(script_path)],
+                              cwd=str(TESTS_DIR.parent),
+                              capture_output=True, text=True, timeout=300)
+    finally:
+        if _tmp_copy is not None:
+            _tmp_copy.unlink(missing_ok=True)
     sys.stdout.write(proc.stdout)
     if proc.stderr.strip():
         sys.stderr.write(proc.stderr)

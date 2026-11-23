@@ -231,10 +231,13 @@ BATERIAS = [
     "security/test_sqli.py",     # AUDITORÍA 2026-11: SQLi por nombre de
                                  # columna — lista blanca por tabla (22)
     "security/test_auditoria_repairs.py",  # REPARACIONES P0-P2 (2026-11-20):
-                                 # C1 env.bak, C4 CLAIMED→DONE, C5 claim→fail
-                                 # →claim, A10 UNVERIFIABLE terminal, C8
-                                 # scheduler, A7 zip-bomb/411, A1 badge, A16
-                                 # dialog, A6 ACL, A14 gate subs, P5.4 (44)
+                                           # C1 env.bak, C4 CLAIMED→DONE, C5 claim→
+                                           # claim, A10 UNVERIFIABLE terminal, C8
+                                           # scheduler, A7 zip-bomb/411, A1 badge, A16
+                                           # dialog, A6 ACL, A14 gate subs, P5.4 (44)
+    "security/test_lock_drift.py",  # F1: guardia «declarado == instalado» —
+                                    # lockfile vs venv real (incidente P4.2:
+                                    # opencv declarado y NO instalado)
     "test_harness.py",           # YOUTUBE HARNESS CONTRACT V1: contrato
                                  # estricto, permisos, libro idempotente,
                                  # estados §9, puente legacy del chat
@@ -551,6 +554,7 @@ PYTEST_IGNORADAS: tuple[str, ...] = (
     "security/test_config_security.py",
     "security/test_sqli.py",                 # AUDITORÍA 2026-11: batería standalone SQLi
     "security/test_auditoria_repairs.py",    # REPARACIONES P0-P2 (2026-11-20)
+    "security/test_lock_drift.py",           # F1: guardia lockfile vs venv (standalone)
     "security/test_csrf.py",
     "security/test_docs_auth.py",
     "security/test_input_limits.py",

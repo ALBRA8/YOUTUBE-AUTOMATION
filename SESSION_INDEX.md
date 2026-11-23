@@ -5,6 +5,62 @@
 
 ---
 
+## Sesión 2026-11-23 · CIERRE F1-F10 (últimos huecos, lipo, CRLF y CI Windows)
+
+- **Base**: `c3de757` (main, árbol limpio). Mandato: cerrar los ÚLTIMOS huecos
+  para declarar el sistema 100% operativo (F1-F10). Entorno: clon Linux del
+  sandbox (Python 3.12.16); los 860 MB de la lipo viven SOLO en la máquina del
+  dueño — mecanismo probado aquí + comandos exactos entregados.
+- **F1**: guardia NUEVA `tests/security/test_lock_drift.py` (30 checks) — los
+  27 pins del lockfile vs `importlib.metadata` del intérprete EN EJECUCIÓN;
+  negativo demostrado con lockfile sintético («✗ paquete-fantasma==9.9.9 —
+  FALTA en el venv», exit 1). Registro: BATERIAS + PYTEST_IGNORADAS → 71
+  baterías. El propio sandbox tenía drift (av/ctranslate2/onnxruntime/
+  faster-whisper/google-* sin instalar) — la guardia lo habría cazado.
+  Aceptación con uvicorn VIVO y BD aislada por env: badge/callout/
+  studio-preview/circle-pip → HTTP 200 con PNGs (`\x89PNG`); hash de la BD
+  REAL idéntico antes/después. `.gitignore` + `backend/static/studio_previews/`.
+- **F2**: `.venv_3.14_roto` AUSENTE en el clon; alcance del mandato
+  (launchers/workflows/md raíz/backend py-txt) → 0 referencias; en todo el
+  repo solo se auto-referencian los 2 docs del borrado.
+- **F3**: `podar_google_profile.py` probado con perfil sintético (29,6 MB):
+  dry-run no borra; Singleton* → REFUSIDO exit 2; `--ejecutar` −29,6 MB con la
+  sesión íntegra. Fix cosmético: docstring raw (SyntaxWarning \P eliminado,
+  también en dedup_biblioteca).
+- **F4**: `dedup_biblioteca.py` probado con duplicado hash-idéntico (3,0 MB):
+  dry-run → --ejecutar → `.ref.json` + copia borrada; `library.tree()` SIGUE
+  listando por referencia (`ref: true`).
+- **F5**: §12 de `test_auditoria_repairs.py` ampliada (+2): default N=10
+  conserva EXACTAMENTE los 10 recientes + marcados; dry-run idempotente
+  (plan×2 = mismo informe, nada borrado). 44 → 46 checks.
+- **F6**: import de backend 536/535/523 ms (< 5000 ms, 3 medidas).
+- **F7**: experimento CRLF — árbol con 515 ficheros LF→CRLF + autocrlf=true
+  (estado tipo-dueño); `git status` 513 M-fantasma con `git diff` vacío;
+  suite en ese árbol: única dependencia `test_live_boot` (bash no ejecuta
+  CRLF, 4 fallos) → FIX: copia LF-normalizada HERMANA del .sh (los scripts
+  derivan el repo de `$(dirname "$0")/..`); live_boot 34 OK en el árbol CRLF.
+  Checkout fresco: status limpio.
+- **F8**: `ci.yml` `ci-windows` REAL — windows-latest / Python 3.13 / sin
+  continue-on-error / pytest xdist + `run_all.py --hermetic` (69 baterías).
+  3.13 y no 3.14: numpy==2.1.3 no publica wheels cp314 (evidencia PyPI
+  medida: av/opencv abi3, ctranslate2/onnxruntime cp313).
+- **F9**: `generate_ecommerce_badge` sin `out_path` → TypeError literal
+  (keyword-only V15 ya en el linaje); endpoint 200 medido.
+- **F10**: `--workers 6` medido — 2983 OK · 0 fallos · 71 baterías ·
+  real 2m13.5s (serie 2m57.4s). Paralelo seguro; default sigue serie.
+- **Resultados literales**: run_all serie **2983 OK · 0 fallos · 0 SKIP en 71
+  baterías (2m57.4s)** · D1 hash+mtime de la BD idénticos (`9afa69dd…`) ·
+  pytest 953 passed / 0 failed · npm test 28/28 · ruff limpio · compileall OK ·
+  test_auditoria_repairs 46 OK · test_lock_drift 30 OK · live_boot en árbol
+  CRLF 34 OK. Informe completo: `docs/informe_cierre_F1-F10.md`.
+- **Pendiente del dueño** (documentado en el informe §honesto): borrados
+  físicos de la lipo (−483 MB venv roto, −234 MB cachés perfil, −122 MB
+  biblioteca), verificación connect-all-google tras podar, corrida verde de
+  ci-windows (se dispara con este push).
+- **Commit**: ver `git log -1` (hash en el cierre de la sesión).
+
+---
+
 ## Sesión 2026-11-23 · CIERRE D1-D8 + V9-V15 (operatividad 100%)
 
 - **Base declarada**: `29f0e90`. Hallazgo material de la sesión: el clone del

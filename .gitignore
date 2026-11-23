@@ -117,6 +117,8 @@ backend/data/nichos/
 # Scratch temporary files
 scratch/
 backend/static/assets/
+# F1: previews del studio (/api/product/studio-preview) — runtime, nunca en el repo
+backend/static/studio_previews/
 
 # INT-089: telemetría HF — datos de runtime, nunca en el repo
 backend/data/hf_telemetry.json
