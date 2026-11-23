@@ -140,12 +140,19 @@ CREATE TABLE IF NOT EXISTS flow_jobs (    -- Flow Bridge: cola de assets para la
     updated_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_flow_jobs_project ON flow_jobs(project_id, status);
--- [V10 · P6/A9] caminos calientes sin SCAN: claim_next global filtra por
--- status y ordena por kind/scene/part; el barrido de leases vencidos
--- (recover_expired, corre EN CADA claim y en el listado de estado) filtra
--- por status='claimed' AND lease_until < ?.
-CREATE INDEX IF NOT EXISTS idx_flow_jobs_claim ON flow_jobs(status, kind, scene_number, part, created_at);
-CREATE INDEX IF NOT EXISTS idx_flow_jobs_lease ON flow_jobs(status, lease_until);
+-- [A9/V10 · P2.3] índices de los caminos calientes de la cola (EXPLAIN
+-- QUERY PLAN verificado: cero «SCAN flow_jobs» en claim global, barrido de
+-- leases (recover_expired corre EN CADA claim y en el listado de estado),
+-- dedupe de enqueue y conteo de pendientes de complete()):
+--  · claim global (status + orden kind/scene/part/created_at).
+--  · barrido de leases vencidos: (status, lease_until).
+--  · dedupe/pendientes por proyecto: (project_id, kind, scene_number, part).
+CREATE INDEX IF NOT EXISTS idx_flow_jobs_claim
+    ON flow_jobs(status, kind, scene_number, part, created_at);
+CREATE INDEX IF NOT EXISTS idx_flow_jobs_status_lease
+    ON flow_jobs(status, lease_until);
+CREATE INDEX IF NOT EXISTS idx_flow_jobs_kind_scene
+    ON flow_jobs(project_id, kind, scene_number, part);
 CREATE TABLE IF NOT EXISTS brand_profiles (  -- INT-042: Identidad persistente de marca / canal
     id             TEXT PRIMARY KEY,
     name           TEXT NOT NULL,
@@ -294,7 +301,25 @@ def create_project(**fields) -> dict:
     marks = ", ".join("?" for _ in fields)
     with connect() as con:
         con.execute(f"INSERT INTO projects({cols}) VALUES({marks})", tuple(fields.values()))
-    return get_project(pid)
+    project = get_project(pid)
+    _registro_post_creacion(project)   # Q1 · best-effort, jamás lanza
+    return project
+
+
+def _registro_post_creacion(project: dict | None) -> None:
+    """Q1 · ÚNICO punto de paso del registro de producciones: todo proyecto
+    creado vía create_project (API, A2A, clipper, MCP, agente, scheduler,
+    arnés…) queda registrado sin parchear cada llamada. Best-effort: el
+    hook interno ya captura sus fallos tipados; aquí solo se defiende la
+    disponibilidad del import (sin ciclo a nivel de módulo)."""
+    if not project:
+        return
+    try:
+        from services import registro_produccion  # import tardío (sin ciclo)
+        registro_produccion.registrar_proyecto_creado(project)
+    except ImportError:
+        log.warning("registro post-creación no disponible para %s "
+                    "(services no importable)", project.get("id"))
 
 
 def get_project(pid: str) -> dict | None:

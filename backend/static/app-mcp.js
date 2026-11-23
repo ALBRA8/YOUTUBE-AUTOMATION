@@ -28,29 +28,14 @@ function mcpBadgeHTML(state) {
 }
 
 function mcpSvcHTML(svc, label, hint) {
-  const isNblm = svc === 'notebooklm';
-  // INT-025 · dropdown dinámico en lugar del input crudo: se autorellena al
-  // conectar notebooklm (mcpListNotebooks silent) o con «🔄 Listar».
-  const nidBlock = isNblm ? `<div class="mcp-row">
-      <label for="nblm-nid-sel">Notebook activo</label>
-      <select id="nblm-nid-sel" onchange="mcpPickNotebook(this.value)">
-        <option value="">— conecta NotebookLM para listar los tuyos —</option>
-        <option value="__manual__">✍️ Pegar ID manual…</option>
-      </select>
-      <input id="nblm-nid" type="text" placeholder="ej. 9a1b2c3d… (vacío = auto-descubrir en [0/3])"
-             value="${esc(localStorage.getItem(NID_KEY) || '')}" oninput="mcpSaveId()"
-             style="display:none; margin-top:6px">
-    </div>
-    <div class="mcp-row btns">
-      <button class="btn ghost" id="nblm-list-btn" onclick="mcpListNotebooks()">🔄 Listar / refrescar notebooks</button>
-    </div>` : '';
+  // U4 · el selector de nicho/cuaderno vive en la TARJETA PRINCIPAL
+  // (ecoNichoNidHTML); esta tarjeta (Avanzado) queda para diagnóstico.
   return `<div class="mcp-svc">
     <div class="mcp-svc-head">
       <h3>${label}</h3>
       <span id="mcp-${svc}-badge">${mcpBadgeHTML('disconnected')}</span>
     </div>
     <p class="hintline">${hint}</p>
-    ${nidBlock}
     <div class="mcp-row btns">
       <button class="btn" id="mcp-${svc}-connect" onclick="mcpConnect('${svc}')">🔌 Conectar</button>
       <button class="btn ghost" id="mcp-${svc}-disc" onclick="mcpDisconnect('${svc}')">⏏️ Desconectar</button>
@@ -65,18 +50,7 @@ function renderMCP() {
   <div class="card">
     <h2 class="sec">🔌 MCP Connection Manager <span class="hint">servidores MCP stdio gestionados por el backend</span></h2>
     ${mcpGsessHTML()}
-    ${mcpSvcHTML('google-flow', '🎬 Google Flow MCP',
-      'Servidor tools/GoogleFlowMCP (Node). Con el login unificado se engancha POR CDP al Chrome del perfil ' +
-      'compartido (<code>GOOGLE_PROFILE_GLOBAL</code>, puerto <code>FLOW_CDP_PORT</code>) y hereda la sesión — ' +
-      'sin login separado. Sin el login global, usa su Chrome dedicado de siempre. Requiere ' +
-      '<code>FLOW_MCP_ENABLED=1</code> en backend/.env.')}
-    ${mcpSvcHTML('notebooklm', '📚 NotebookLM MCP',
-      'Servidor <code>notebooklm-mcp</code> (uv tool install "notebooklm-py[browser]"). Autenticación: ' +
-      '«🔑 Login Google» + «📥 Capturar sesión» (arriba) escribe el <code>storage_state.json</code> desde el ' +
-      'MISMO login — o <code>notebooklm login</code> clásico. El notebook se elige del DROPDOWN (se rellena ' +
-      'solo al conectar); si lo dejas vacío, el pre-flight [0/3] intenta auto-descubrirlo y, si no puede, ' +
-      'aborta con <code>PRE_FLIGHT_MISSING_NOTEBOOK_ID</code>.')}
-    <div class="mcp-svc" id="pipe-card">
+        <div class="mcp-svc" id="pipe-card">
       <div class="mcp-svc-head">
         <h3>🚀 Pipeline completo (NotebookLM → Agente → Flow)</h3>
         <span id="pipe-stage-badge"></span>
@@ -101,20 +75,42 @@ function renderMCP() {
         <a class="btn ghost" id="pipe-dl-link" style="display:none" href="#" download>⬇️ Descargar MP4</a>
         <button class="btn ghost" onclick="pipeRefresh()">🔄 Actualizar</button>
       </div>
+      <p class="hintline" id="pipe-block-reason" style="display:none"></p>
       <div class="mcp-row" id="pipe-force-wrap" style="display:none">
         <label class="hintline"><input type="checkbox" id="pipe-force-ph"> forzar placeholders en escenas fallidas (clip de color con su narración — el testeo nunca se deadlocka)</label>
       </div>
       <div id="pipe-progress"></div>
       <pre class="mcp-log" id="pipe-log" style="display:none"></pre>
     </div>
-    <div class="mcp-row btns" style="margin-top:14px">
-      <button class="btn" onclick="mcpTest('')">🧪 Test Pipeline (ambos)</button>
-      <button class="btn ghost" onclick="mcpRefresh()">🔄 Refrescar estado</button>
-    </div>
-    <pre class="mcp-log" id="mcp-log">Estado en vivo…</pre>
+    <details class="mcp-adv" id="mcp-advanced">
+      <summary>⚙️ Avanzado — tarjetas por servicio, reparar, pruebas y consola</summary>
+      <p class="hintline">Todo lo de aquí es de diagnóstico: no hace falta
+        abrirlo para usar el ecosistema. El volcado crudo de la consola
+        vive SOLO aquí dentro.</p>
+      ${mcpSvcHTML('google-flow', '🎬 Google Flow MCP',
+        'Servidor tools/GoogleFlowMCP (Node). Con el login unificado se engancha POR CDP al Chrome del perfil ' +
+        'compartido (<code>GOOGLE_PROFILE_GLOBAL</code>, puerto <code>FLOW_CDP_PORT</code>) y hereda la sesión — ' +
+        'sin login separado. Sin el login global, usa su Chrome dedicado de siempre. Requiere ' +
+        '<code>FLOW_MCP_ENABLED=1</code> en backend/.env.')}
+      ${mcpSvcHTML('notebooklm', '📚 NotebookLM MCP',
+        'Servidor <code>notebooklm-mcp-server</code> v0.1.15 (comandos <code>notebooklm-mcp</code> y ' +
+        '<code>notebooklm-mcp-auth</code>; <code>uv tool list</code> lo confirma). Autenticación: ' +
+        '«🔑 Login Google» + «📥 Capturar sesión» escribe el <code>storage_state.json</code> desde el ' +
+        'MISMO login. El notebook se elige del DROPDOWN (se rellena solo al conectar y se ' +
+        'recuerda por nicho); si lo dejas vacío, el pre-flight [0/3] intenta auto-descubrirlo y, si no puede, ' +
+        'aborta con <code>PRE_FLIGHT_MISSING_NOTEBOOK_ID</code>.')}
+      <div class="mcp-row btns" style="margin-top:14px">
+        <button class="btn" onclick="mcpTest('')">🧪 Test Pipeline (ambos)</button>
+        <button class="btn ghost" onclick="mcpRefresh()">🔄 Refrescar estado</button>
+        <button class="btn ghost" onclick="gsessOpenWindow()">🪟 Abrir ventana de Chrome</button>
+        <button class="btn ghost" onclick="gsessRepairProfile()">🔧 Reparar perfil</button>
+      </div>
+      <pre class="mcp-log" id="mcp-log">Estado en vivo…</pre>
+    </details>
   </div>`;
   mcpRefresh();
   gsessRefresh(true);   // INT-025 · estado de la sesión unificada sin ruido
+  mcpNichosCargar();    // U4 · nichos + cuaderno recordado
 }
 
 function mcpSaveId() { const el = $('#nblm-nid'); if (el) localStorage.setItem(NID_KEY, el.value.trim()); }
@@ -136,25 +132,105 @@ const G_LOGO_SVG = '<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden=
 let gsessPollTimer = null;
 
 function mcpGsessHTML() {
+  /* U2 · LA tarjeta principal: semáforo REAL por fila (fuente: U1
+     /api/mcp/resumen) + botón primario «Conectar todo». */
   return `<div class="mcp-svc ghub" id="gsess-card">
     <div class="mcp-svc-head">
       <h3>${G_LOGO_SVG}<span>Ecosistema Google</span></h3>
-      <span id="gsess-badge"><span class="mcp-badge mcp-b-gray">SIN VERIFICAR</span></span>
+      <span id="gsess-badge"><span class="mcp-badge mcp-b-gray">COMPROBANDO…</span></span>
     </div>
-    <div id="gsess-body"><p class="hintline">Comprobando ecosistema…</p></div>
+    <div id="gsess-profile"></div>
+    <div id="gsess-rows"><p class="hintline">Comprobando el estado real del ecosistema…</p></div>
+    <div class="mcp-row btns" style="margin-top:10px">
+      <button class="btn" id="gsess-connect-all" onclick="gsessConnectAll()">🚀 Conectar todo</button>
+      <button class="btn ghost" onclick="gsessRefresh()">🔄 Refrescar estado</button>
+    </div>
+    <p class="hintline" id="gsess-connectall-nota" style="display:none"></p>
+    <p class="hintline" id="eco-aviso" style="display:none"></p>
+    ${ecoNichoNidHTML()}
   </div>`;
+}
+
+/* U4 · selector de NICHO + CUADERNO en la tarjeta principal. Al conectar
+   NotebookLM el desplegable se rellena solo (list-notebooks) y la
+   elección se RECUERDA por nicho en el registro de nichos (Q4:
+   POST /api/registro/nicho — UN cuaderno por nicho, nunca por
+   historia). Los vacíos dicen qué hacer, no «conecta NotebookLM» si ya
+   está conectado. */
+const NICHOS_KEY = 'yta-eco-nicho';
+
+function ecoNichoNidHTML() {
+  return `<div class="mcp-row eco-nicho">
+    <label for="nblm-nicho-sel">Nicho (recuerda tu cuaderno)</label>
+    <select id="nblm-nicho-sel" onchange="mcpNichoChange(this.value)">
+      <option value="">— sin nicho: la elección no se recuerda —</option>
+    </select>
+    <label for="nblm-nid-sel">Notebook activo</label>
+    <select id="nblm-nid-sel" onchange="mcpPickNotebook(this.value)">
+      <option value="">— conecta NotebookLM para listar los tuyos —</option>
+      <option value="__manual__">✍️ Pegar ID manual…</option>
+    </select>
+    <input id="nblm-nid" type="text" placeholder="ej. 9a1b2c3d… (vacío = auto-descubrir en [0/3])"
+           value="${esc(localStorage.getItem(NID_KEY) || '')}" oninput="mcpSaveId()"
+           style="display:none; margin-top:6px">
+    <div class="mcp-row btns">
+      <button class="btn ghost" id="nblm-list-btn" onclick="mcpListNotebooks()">🔄 Listar / refrescar notebooks</button>
+    </div>
+  </div>`;
+}
+
+/* U4 · rellena el selector de nichos (GET /api/niches/templates) y
+   restaura el nicho recordado + su cuaderno del registro. */
+async function mcpNichosCargar() {
+  const sel = $('#nblm-nicho-sel');
+  if (!sel) return;
+  try {
+    const nbs = await api('/niches/templates');
+    const cur = localStorage.getItem(NICHOS_KEY) || '';
+    sel.innerHTML = '<option value="">— sin nicho: la elección no se recuerda —</option>' +
+      (nbs || []).map(n =>
+        `<option value="${esc(n.id)}">${esc((n.emoji ? n.emoji + ' ' : '') + (n.name || n.id))}</option>`).join('');
+    if (cur) { sel.value = cur; if (sel.value === cur) await mcpNichoChange(cur, true); }
+  } catch (e) { /* sin nichos registrados: el selector queda honesto */ }
+}
+
+/* U4 · al cambiar de nicho, carga su cuaderno recordado (si lo hay) y
+   preselecciona en el desplegable; 404 = aún sin cuaderno (silencio). */
+async function mcpNichoChange(nicho, silencioso) {
+  nicho = (nicho || '').trim();
+  localStorage.setItem(NICHOS_KEY, nicho);
+  if (!nicho) return;
+  try {
+    const js = await api('/registro/nicho/' + encodeURIComponent(nicho));
+    const nid = (js && js.notebook_id) || '';
+    if (!nid) return;
+    const el = $('#nblm-nid'), sel = $('#nblm-nid-sel');
+    if (el) el.value = nid;
+    mcpSaveId();
+    if (sel) {
+      const hit = Array.from(sel.options).find(o => o.value === nid);
+      sel.value = hit ? nid : '__manual__';
+      if (el) el.style.display = (sel.value === '__manual__') ? '' : 'none';
+    }
+    if (!silencioso) toast('Cuaderno del nicho cargado: ' + (js.nombre_cuaderno || nid), 'ok');
+    gsessRefresh(true);
+  } catch (e) { /* nicho sin cuaderno todavía — se elige al listar */ }
 }
 
 async function gsessStart() {
   const btn = $('#gsess-gbtn');
   const lbl = btn ? btn.querySelector('span') : null;
-  if (btn) { btn.disabled = true; if (lbl) lbl.textContent = 'Abriendo Chrome…'; }
+  if (btn) { btn.disabled = true; if (lbl) lbl.textContent = 'Abriendo Google…'; }
   try {
+    // Abre directamente desde el navegador nativo (cero bloqueos del SO)
+    window.open('https://flow.google.com', '_blank');
     await api('/mcp/google-sso', { method: 'POST', body: {} });
-    toast('Chrome abierto en el selector de cuentas — elige tu cuenta y conectamos el ecosistema solo', 'info');
+    toast('Pestaña de Google Flow abierta en tu navegador. Sincronizando sesión...', 'info');
     await gsessRefresh(true);
+    await mcpRefresh(true);
   } catch (e) {
     toast('Continuar con Google: ' + e.message, 'err');
+  } finally {
     if (btn) { btn.disabled = false; if (lbl) lbl.textContent = 'Continuar con Google'; }
   }
 }
@@ -168,75 +244,67 @@ function gsessNameFromEmail(email) {
 
 function gsessSvcState(s) { return s && s.state === 'connected'; }
 
-function gsessDisconnectedHTML(js) {
-  const storage = (js && js.notebooklm_storage) || {};
-  const timeout = js && js.sso_phase === 'timeout';
-  const extra = storage.exists
-    ? `Tienes un storage_state capturado (${Math.round((storage.size_bytes || 0) / 1024)} KB) — si tu sesión sigue viva, la conexión será directa.`
-    : 'El backend detecta la sesión cada 2 s y conecta Google Flow + NotebookLM automáticamente.';
-  return `<div class="ghub-disconnected">
-    <p class="ghub-sub">Inicia sesión <b>una sola vez</b> para conectar automáticamente
-      <b>Google Flow</b> (VideoFX/ImageFX), <b>NotebookLM</b> (Investigación y Studio)
-      y tu <b>Google Drive</b>.</p>
-    <button class="gbtn" id="gsess-gbtn" onclick="gsessStart()">
-      ${G_LOGO_SVG}<span>Continuar con Google</span>
-    </button>
-    <p class="hintline" style="margin-top:10px">${extra}</p>
-    ${timeout ? '<p class="hintline">⌛ Tiempo de espera agotado sin login — pulsa el botón cuando quieras reintentar.</p>' : ''}
-    <div class="ghub-foot">
-      <button class="btn ghost" onclick="gsessOpenWindow()">🪟 Abrir ventana de Chrome</button>
-      <button class="btn ghost" onclick="gsessRepairProfile()">🔧 Reparar perfil</button>
-      <button class="btn ghost" onclick="gsessRefresh()">🔄 Refrescar estado</button>
-    </div>
-  </div>`;
+/* U2 · fila del semáforo REAL: cada fila toma su estado de U1
+   (/api/mcp/resumen) — nada de deducciones locales que puedan mentir. */
+function ecoRowHTML(etiqueta, pieza) {
+  const p = pieza || { ok: false, detalle: 'sin dato', accion_siguiente: '' };
+  return `<div class="eco-row ${p.ok ? 'eco-ok' : 'eco-ko'}">` +
+    `<div class="eco-row-head"><span class="eco-dot">${p.ok ? '🟢' : '🔴'}</span>` +
+    `<b>${esc(etiqueta)}</b><span class="hintline">${esc(p.detalle || '')}</span></div>` +
+    (p.accion_siguiente ? `<p class="eco-accion">→ ${esc(p.accion_siguiente)}</p>` : '') +
+    `</div>`;
 }
 
-function gsessWaitingHTML(js) {
-  const poll = (js && js.poll_s) || 2;
-  return `<div class="ghub-waiting">
-    <div class="ghub-pulse"></div>
-    <p><b>Esperando tu inicio de sesión…</b></p>
-    <p class="hintline">Chrome se abrió en el <b>selector de cuentas de Google</b> con Flow y NotebookLM.
-      Elige tu cuenta una vez: detectamos la cookie de sesión cada ${poll} s y conectamos
-      Flow + NotebookLM automáticamente.</p>
-    <p class="hintline">Puedes cerrar esta pestaña sin problema — la vigilancia sigue en el backend.</p>
-  </div>`;
-}
-
-function gsessConnectedHTML(js) {
-  const acc = (js && js.account) || {};
-  const email = acc.email || 'Cuenta Google';
-  const name = acc.name || gsessNameFromEmail(email);
-  const ini = (acc.initial || name[0] || 'G').toUpperCase();
-  const st = (js && js.services) || {};
-  const pill = (ok, label, extra) =>
-    `<span class="ghub-pill ${ok ? 'on' : 'off'}"><span class="ghub-dot"></span> ${label}${extra ? ' · ' + esc(extra) : ''}</span>`;
-  const flowExtra = js.cdp_port ? 'CDP ' + js.cdp_port : '';
-  const nbExtra = st.notebooklm && st.notebooklm.tools ? st.notebooklm.tools + ' tools' : '';
-  return `<div class="ghub-connected">
-    <div class="ghub-profile">
-      <div class="ghub-avatar">${esc(ini)}</div>
-      <div class="ghub-id">
-        <div class="ghub-name">${esc(name)}</div>
-        <div class="ghub-email">${esc(email)}</div>
-      </div>
-      <span class="mcp-badge mcp-b-green">🟢 Ecosistema Google Conectado</span>
-    </div>
-    <div class="ghub-pills">
-      ${pill(gsessSvcState(st.flow), '🟢 Google Flow', flowExtra)}
-      ${pill(gsessSvcState(st.notebooklm), '🟢 NotebookLM MCP', nbExtra)}
-      ${pill(st.workspace && st.workspace.state === 'connected', '🟢 Google Workspace & Gemini', 'misma sesión')}
-    </div>
-    <div class="ghub-actions">
-      <button class="btn" onclick="gsessOpenNotebooks()">📂 Ver mis Notebooks</button>
-      <button class="btn ghost" onclick="gsessOpenChrome()">🌐 Abrir Chrome</button>
-      <button class="btn ghost" onclick="gsessLogout()">🚪 Cambiar cuenta / Desconectar</button>
-    </div>
-    <div class="ghub-foot">
-      <button class="btn ghost" onclick="gsessRepairProfile()">🔧 Reparar perfil</button>
-      <button class="btn ghost" onclick="gsessRefresh()">🔄 Refrescar</button>
-    </div>
-  </div>`;
+/* U2/W2 · botón primario: 1 clic → POST /api/mcp/connect-all-google.
+   Muestra el resultado REAL de la respuesta: si chrome_up es false,
+   mensaje de error con la acción siguiente («Chrome no abrió: pulsa
+   «Abrir ventana de Chrome» en Avanzado»); NUNCA un «listo» genérico. */
+async function gsessConnectAll() {
+  const btn = $('#gsess-connect-all');
+  const chromeOk = !!(S.eco && S.eco.piezas && S.eco.piezas.chrome &&
+                      S.eco.piezas.chrome.ok);
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Conectando…'; }
+  if (!chromeOk) toast('Se va a abrir una ventana de Chrome: INICIA SESIÓN con tu cuenta de Google en la ventana que se abre.', 'info');
+  try {
+    const res = await api('/mcp/connect-all-google', { method: 'POST', body: {} });
+    const nota = $('#gsess-connectall-nota');
+    if (!res || res.chrome_up === false) {
+      const errDetalle = (res && res.chrome_error) ? (' (' + res.chrome_error + ')') : '';
+      if (nota) {
+        nota.style.display = '';
+        // X4: el detalle del error va en el texto VISIBLE, no solo en el toast:
+        // «Chrome no abrió (no respondió en el puerto CDP 9333 tras 30 s): pulsa …»
+        nota.textContent = 'Chrome no abrió' + errDetalle + ': pulsa «Abrir ventana de Chrome» en Avanzado.';
+      }
+      toast('Chrome no abrió: pulsa «Abrir ventana de Chrome» en Avanzado' + errDetalle, 'err');
+    } else {
+      if (nota) {
+        if (!chromeOk) {
+          nota.style.display = '';
+          nota.textContent = 'Chrome estaba apagado: inicia sesión en la ventana que se abrió y pulsa «Refrescar estado».';
+        } else {
+          nota.style.display = 'none';
+        }
+      }
+      if (res.ok) {
+        toast('Ecosistema Google conectado correctamente ✅', 'ok');
+      } else {
+        toast(chromeOk ? 'Chrome activo pero servicios pendientes: verifica sesión o pulsa «Refrescar estado».' :
+          'Chrome se abrió: si te pide login, INICIA SESIÓN en esa ventana y pulsa «Refrescar estado».', 'info');
+      }
+    }
+  } catch (e) {
+    // X4: si la llamada misma falla (red/backend), el detalle también queda visible
+    const nota = $('#gsess-connectall-nota');
+    if (nota) {
+      nota.style.display = '';
+      nota.textContent = 'Conectar todo falló (' + e.message + '). Revisa el backend y pulsa «Refrescar estado».';
+    }
+    toast('Conectar todo: ' + e.message, 'err');
+  }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '🚀 Conectar todo'; } }
+  await gsessRefresh(true);
+  await mcpRefresh(true);
 }
 
 async function gsessRepairProfile() {
@@ -268,33 +336,50 @@ async function gsessOpenWindow() {
   } catch (e) { toast('Abrir ventana: ' + e.message, 'err'); }
 }
 
-function gsessApply(js) {
-  const badge = $('#gsess-badge'), body = $('#gsess-body');
-  if (!body) return;
-  const phase = (js && js.sso_phase) || 'idle';
-  const auth = !!(js && js.session_auth);
-  const st = (js && js.services) || {};
-  const connected = gsessSvcState(st.flow) && gsessSvcState(st.notebooklm);
+/* U2 · el badge verde del ecosistema SOLO aparece si U1 confirma
+   todo_conectado (TODAS las piezas ok). Con cualquier pieza caída se
+   pinta INCOMPLETO con el contador real — fin del estado mentiroso. */
+function gsessApply(eco, sso) {
+  const badge = $('#gsess-badge'), rows = $('#gsess-rows');
+  if (!rows) return;
+  eco = eco || {}; sso = sso || {};
+  const piezas = eco.piezas || {};
+  const nOk = Object.values(piezas).filter(p => p && p.ok).length;
   if (badge) {
-    if (connected) badge.innerHTML = '<span class="mcp-badge mcp-b-green">ECOSISTEMA CONECTADO</span>';
-    else if (phase === 'watching') badge.innerHTML = '<span class="mcp-badge mcp-b-yellow">ESPERANDO LOGIN…</span>';
-    else if (phase === 'connecting') badge.innerHTML = '<span class="mcp-badge mcp-b-yellow">CONECTANDO…</span>';
-    else if (auth) badge.innerHTML = '<span class="mcp-badge mcp-b-yellow">SESIÓN SIN MCP</span>';
-    else badge.innerHTML = '<span class="mcp-badge mcp-b-gray">DESCONECTADO</span>';
+    badge.innerHTML = eco.todo_conectado
+      ? '<span class="mcp-badge mcp-b-green">ECOSISTEMA CONECTADO</span>'
+      : `<span class="mcp-badge mcp-b-gray">ECOSISTEMA INCOMPLETO · ${nOk}/4</span>`;
   }
-  if (connected) {
-    body.innerHTML = gsessConnectedHTML(js);
-    gsessStopPoll();
-    mcpRefresh(true);          // pills globales del header en verde
-    return;
+  const esperando = (sso.sso_phase === 'watching' || sso.sso_phase === 'connecting')
+    ? `<p class="hintline">⏳ Esperando tu inicio de sesión en la ventana de Chrome — conectamos al ver la sesión (vigilancia cada ${(sso.poll_s || 2)} s)…</p>`
+    : '';
+  const cuaderno = piezas.cuaderno || {};
+  rows.innerHTML = esperando +
+    ecoRowHTML('Chrome (CDP 9333)', piezas.chrome) +
+    ecoRowHTML('Google Flow', piezas.flow) +
+    ecoRowHTML('NotebookLM', piezas.notebooklm) +
+    `<p class="hintline eco-cuaderno">${cuaderno.ok ? '🟢' : '🔴'} Cuaderno: ${esc(cuaderno.detalle || 'sin dato')}` +
+    (cuaderno.accion_siguiente ? ` — ${esc(cuaderno.accion_siguiente)}` : '') + `</p>`;
+  const prof = $('#gsess-profile');
+  if (prof) {
+    const acc = sso.account || {};
+    if (acc.email) {
+      prof.innerHTML = `<div class="ghub-profile ghub-mini">
+        <div class="ghub-id">
+          <div class="ghub-name">${esc(acc.name || gsessNameFromEmail(acc.email))}</div>
+          <div class="ghub-email">${esc(acc.email)}</div>
+        </div>
+        <div class="ghub-actions">
+          <button class="btn ghost" onclick="gsessOpenChrome()">🌐 Abrir Chrome</button>
+          <button class="btn ghost" onclick="gsessLogout()">🚪 Cambiar cuenta</button>
+        </div>
+      </div>`;
+    } else if (!esperando) {
+      prof.innerHTML = `<button class="gbtn" id="gsess-gbtn" onclick="gsessStart()">${G_LOGO_SVG}<span>Continuar con Google</span></button>`;
+    } else prof.innerHTML = '';
   }
-  if (phase === 'watching' || phase === 'connecting') {
-    body.innerHTML = gsessWaitingHTML(js);
-    gsessStartPoll();
-    return;
-  }
-  body.innerHTML = gsessDisconnectedHTML(js);
-  gsessStopPoll();
+  if (sso.sso_phase === 'watching' || sso.sso_phase === 'connecting') gsessStartPoll();
+  else gsessStopPoll();
 }
 
 /* Polling del Hub: 2 s mientras el backend vigila el login; sin poll en
@@ -310,11 +395,26 @@ function gsessStopPoll() {
   if (gsessPollTimer) { clearInterval(gsessPollTimer); gsessPollTimer = null; }
 }
 
+/* U2 · fuente de verdad = U1: el semáforo del ecosistema sale SIEMPRE
+   de /api/mcp/resumen (agregador solo lectura); el estado SSO aporta
+   solo el perfil (cuenta) y la fase de vigilancia del login. */
 async function gsessRefresh(silent) {
   try {
-    const js = await api('/mcp/google-sso/status');
-    gsessApply(js);
-    return js;
+    const nid = mcpNid();
+    const nicho = (localStorage.getItem(NICHOS_KEY) || '').trim();
+    const q = new URLSearchParams();
+    if (nicho) q.set('nicho_id', nicho);
+    if (nid) q.set('notebook_id', nid);
+    const qs = q.toString() ? ('?' + q.toString()) : '';
+    const [eco, sso] = await Promise.all([
+      qs ? api('/mcp/resumen' + qs) : api('/mcp/resumen'),
+      api('/mcp/google-sso/status').catch(() => ({})),
+    ]);
+    S.eco = eco;
+    gsessApply(eco, sso);
+    pipeGateApply();      // U5 · habilita/deshabilita Run con motivo
+    mcpRefresh(true);
+    return eco;
   } catch (e) { if (!silent) toast('Estado ecosistema: ' + e.message, 'err'); return null; }
 }
 
@@ -395,16 +495,62 @@ function mcpPickNotebook(id) {
   if (!id) return;
   if (el) { el.value = id; el.style.display = 'none'; mcpSaveId(); }
   if (sel) sel.value = id;
-  toast('Notebook fijado ✅ ' + id.slice(0, 8) + '… — ya puedes lanzar el pipeline');
+  // U4 · UN cuaderno por nicho: se guarda en el registro (Q4) si hay
+  // nicho elegido; sin nicho no hay memoria (se avisa con qué hacer).
+  const nicho = (localStorage.getItem(NICHOS_KEY) || '').trim();
+  const titulo = (sel && sel.selectedIndex >= 0)
+    ? String(sel.options[sel.selectedIndex].text.split(' · ')[0] || '') : '';
+  if (nicho) {
+    api('/registro/nicho', { method: 'POST', body: {
+      nicho_id: nicho, notebook_id: id,
+      nombre_cuaderno: titulo || ('Cuaderno del nicho ' + nicho) } })
+      .then(() => {
+        toast('Notebook fijado ✅ y recordado para el nicho «' + nicho + '» — ya puedes lanzar el pipeline', 'ok');
+        gsessRefresh(true);
+      })
+      .catch(e => {
+        toast('Notebook fijado ✅ (no se pudo recordar por nicho: ' + e.message + ')', 'info');
+        gsessRefresh(true);
+      });
+  } else {
+    toast('Notebook fijado ✅ ' + id.slice(0, 8) + '… — elige un nicho arriba para que se recuerde');
+    gsessRefresh(true);
+  }
 }
 
-function mcpZoneHTML(st) {
+/* U3 · traducción HUMANA de avisos conocidos de la consola (p. ej.
+   «fastmcp desactualizado»): una línea que dice que NO afecta. El
+   volcado crudo sigue SOLO en Avanzado. */
+function avisoHumanoDe(services) {
+  const joined = Object.values(services || {})
+    .map(v => ((v && v.stderr_tail) || []).join('\n')).join('\n');
+  if (/fastmcp/i.test(joined))
+    return 'ℹ Aviso conocido de FastMCP (framework interno del servidor MCP): ' +
+           'aunque la consola lo marque desactualizado, NO afecta a tus ' +
+           'herramientas ni al pipeline.';
+  return '';
+}
+
+function mcpZoneHTML(svc, st) {
   let h = '';
   if (st.auth_detail) h += `<p class="hintline">🔐 ${esc(st.auth_detail)}</p>`;
   if (st.last_error) h += `<p class="hintline" style="color:var(--err)">⚠ ${esc(st.last_error)}</p>`;
-  if (st.server_info && st.server_info.name)
-    h += `<p class="hintline">Servidor: <b>${esc(st.server_info.name)}</b> v${esc(st.server_info.version || '?')}` +
-         (st.pid ? ` · PID ${st.pid} · ${st.uptime_s || 0}s` : '') + `</p>`;
+  if (st.server_info && st.server_info.name) {
+    if (svc === 'notebooklm') {
+      // U6 · honestidad de paquete: el server real es notebooklm-mcp-server
+      // v0.1.15 (comandos notebooklm-mcp / notebooklm-mcp-auth); la versión
+      // de server_info es del FRAMEWORK FastMCP — nunca se presenta como
+      // versión del paquete.
+      h += `<p class="hintline">Paquete: <b>notebooklm-mcp-server v0.1.15</b>` +
+           ` (comandos <code>notebooklm-mcp</code> · <code>notebooklm-mcp-auth</code>)` +
+           (st.pid ? ` · PID ${st.pid} · ${st.uptime_s || 0}s` : '') + `</p>`;
+      h += `<p class="hintline">Versión de server_info: ${esc(st.server_info.version || '?')} ` +
+           `(framework <b>FastMCP</b>, NO la versión del paquete)</p>`;
+    } else {
+      h += `<p class="hintline">Servidor: <b>${esc(st.server_info.name)}</b> v${esc(st.server_info.version || '?')}` +
+           (st.pid ? ` · PID ${st.pid} · ${st.uptime_s || 0}s` : '') + `</p>`;
+    }
+  }
   if (st.tools && st.tools.length)
     h += `<details class="mcp-tools"><summary>🔧 ${st.tools.length} tools expuestas</summary><ul>` +
          st.tools.map(t => `<li><b>${esc(t.name)}</b>${t.description ? ' — ' + esc(t.description) : ''}</li>`).join('') +
@@ -414,8 +560,12 @@ function mcpZoneHTML(st) {
     h += `<p class="hintline">Chrome CDP (${st.cdp_port || ''}): ${st.browser_up ? '✅ arriba' : '❌ no responde — abre el Chrome dedicado'}</p>`;
   if (st.notebook_id_valid !== undefined && st.notebook_id)
     h += `<p class="hintline">notebookId «${esc(st.notebook_id)}»: ${st.notebook_id_valid ? '✅ válido' : '❌ inválido'}</p>`;
-  if (st.stderr_tail && st.stderr_tail.length)
+  if (st.stderr_tail && st.stderr_tail.length) {
+    const humano = avisoHumanoDe({ solo: st });
+    if (humano) h += `<p class="hintline">${esc(humano)}</p>`;
+    // volcado crudo: SOLO visible aquí (la zona vive dentro de «Avanzado»)
     h += `<pre class="mcp-log">${esc(st.stderr_tail.join('\n'))}</pre>`;
+  }
   return h || '<p class="hintline">Sin información adicional.</p>';
 }
 
@@ -426,11 +576,25 @@ function mcpApplyStatus(services) {
     const badge = $('#mcp-' + svc + '-badge');
     if (badge) badge.innerHTML = mcpBadgeHTML(st.state || 'disconnected');
     const zone = $('#mcp-' + svc + '-zone');
-    if (zone) zone.innerHTML = mcpZoneHTML(st);
+    if (zone) zone.innerHTML = mcpZoneHTML(svc, st);
     const btnC = $('#mcp-' + svc + '-connect'), btnD = $('#mcp-' + svc + '-disc');
     if (btnC) { btnC.disabled = st.state === 'connecting'; btnC.textContent = st.state === 'connecting' ? '⏳ Conectando…' : '🔌 Conectar'; }
     if (btnD) btnD.disabled = st.state === 'connecting' || st.state === 'disconnected';
   });
+  // U3 · aviso conocido (p. ej. FastMCP) como línea humana en la tarjeta
+  // principal — NUNCA el volcado crudo fuera de «Avanzado».
+  const aviso = avisoHumanoDe(services);
+  const elAviso = $('#eco-aviso');
+  if (elAviso) { elAviso.style.display = aviso ? '' : 'none'; if (aviso) elAviso.textContent = aviso; }
+  // U4 · el texto del vacío dice qué hacer: si NotebookLM ya está
+  // conectado, NO puede seguir diciendo «conecta NotebookLM».
+  const op0 = ($('#nblm-nid-sel') || {}).querySelector ?
+    $('#nblm-nid-sel').querySelector('option[value=""]') : null;
+  if (op0 && op0.textContent !== '— elige notebook —') {
+    op0.textContent = (S.mcp && (S.mcp.notebooklm || {}).state === 'connected')
+      ? 'NotebookLM conectado: pulsa «🔄 Listar / refrescar notebooks» para cargar tus cuadernos'
+      : '— conecta NotebookLM para listar los tuyos —';
+  }
   updatePills();
 }
 
@@ -458,12 +622,14 @@ async function mcpConnect(svc) {
       mcpListNotebooks({ silent: true });
   } catch (e) { toast('Conexión: ' + e.message, 'err'); }
   mcpRefresh(true);
+  gsessRefresh(true);
 }
 
 async function mcpDisconnect(svc) {
   try { await api('/mcp/disconnect', { method: 'POST', body: { service: svc } }); toast('Desconectado'); }
   catch (e) { toast('Desconexión: ' + e.message, 'err'); }
   mcpRefresh(true);
+  gsessRefresh(true);
 }
 
 async function mcpTest(svc) {
@@ -567,6 +733,32 @@ function pipeStepsHTML(run) {
   return h;
 }
 
+/* U5 · «Run Full Pipeline» deshabilitado mientras U1 diga
+   listo_para_pipeline=false, mostrando el motivo EXACTO (pieza rota +
+   detalle). Sin datos de U1 NO bloquea por adivinanza; si la corrida
+   está activa, sigue bloqueado como siempre. */
+function pipeGateApply() {
+  const btn = $('#pipe-run-btn');
+  const motivo = $('#pipe-block-reason');
+  if (!btn) return;
+  const corriendo = pipeActive(S.pipeRun);
+  const eco = S.eco || {};
+  if (eco.listo_para_pipeline === false) {
+    btn.disabled = true;
+    btn.title = 'Pendiente: ' + (eco.siguiente_paso || 'ecosistema incompleto');
+    if (motivo) {
+      const rota = Object.entries(eco.piezas || {}).find(([, p]) => p && !p.ok);
+      motivo.textContent = '⛔ Run Full Pipeline bloqueado — ' +
+        (rota ? rota[0] + ': ' + rota[1].detalle
+              : (eco.siguiente_paso || 'ecosistema incompleto'));
+      motivo.style.display = '';
+    }
+    return;
+  }
+  if (motivo) { motivo.style.display = 'none'; motivo.textContent = ''; }
+  btn.disabled = corriendo;   // sin bloqueo de U1: como siempre
+}
+
 function pipeApply(run) {
   const badge = $('#pipe-stage-badge');
   if (badge) badge.innerHTML = pipeBadgeHTML(run);
@@ -589,6 +781,7 @@ function pipeApply(run) {
   if (rbtn) rbtn.style.display = (run && run.failed_scene_ids && run.failed_scene_ids.length && !pipeActive(run)) ? '' : 'none';
   const rbtn2 = $('#pipe-run-btn');
   if (rbtn2) rbtn2.disabled = pipeActive(run);
+  pipeGateApply();          // U5 · la última palabra la tiene U1
   // INT-024 · botón de render final + flag de placeholders + descarga MP4
   const render = (run && run.render) || {};
   const rbtnR = $('#pipe-render-btn');
@@ -639,6 +832,13 @@ async function pipeRun() {
   const body = { idea: idea.trim(), format: ($('#pipe-fmt') || {}).value || 'short' };
   if (nid) body.notebook_id = nid;
   if (!body.idea) { toast('Escribe la idea del video primero', 'err'); return; }
+  // U5 · defensa en profundidad: si U1 dice que NO está listo, no se
+  // lanza (antes fallaba después del clic).
+  if (S.eco && S.eco.listo_para_pipeline === false) {
+    toast('No listo: ' + (S.eco.siguiente_paso || 'ecosistema incompleto'), 'err');
+    pipeGateApply();
+    return;
+  }
   if (!nid) toast('notebook_id vacío: [0/3] intentará auto-descubrirlo (list tool); si no hay, aborta con PRE_FLIGHT_MISSING_NOTEBOOK_ID');
   try {
     const js = await api('/pipeline/run', { method: 'POST', body });

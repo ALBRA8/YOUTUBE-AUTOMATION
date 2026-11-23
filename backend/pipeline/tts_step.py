@@ -66,7 +66,7 @@ async def synthesize_scenes(project: dict, scenes: list[dict], on_progress=None,
         wav = out_dir / f"scene_{i:02d}.wav"
         text = _text_of(sc)
         meta = sc.get("meta") or {}
-        dur = tts_service.probe_duration(wav)
+        dur = await tts_service.probe_duration_async(wav)
         if dur >= MIN_SCENE_DUR and meta.get("tts_hash") == _hash_of(text):
             durations[i] = dur
             used_per_scene[i] = meta.get("tts") or "cache"
@@ -196,7 +196,7 @@ async def _synthesize_batched(project: dict, scenes: list[dict], todo: list[int]
         try:
             pcm = await gemini_client.tts_pcm("\n\n".join(texts), voice)
             chunk_wav.write_bytes(pcm)
-            chunk_dur = tts_service.probe_duration(chunk_wav)
+            chunk_dur = await tts_service.probe_duration_async(chunk_wav)
             if chunk_dur < 1.0:
                 raise RuntimeError("audio del lote demasiado corto")
 
@@ -214,7 +214,7 @@ async def _synthesize_batched(project: dict, scenes: list[dict], todo: list[int]
                 st, en = bounds[k]
                 scene_wav = out_dir / f"scene_{i:02d}.wav"
                 _ffmpeg_cut(chunk_wav, scene_wav, st, en - st)
-                dur = tts_service.probe_duration(scene_wav)
+                dur = await tts_service.probe_duration_async(scene_wav)
                 if dur < MIN_SCENE_DUR:
                     raise RuntimeError(f"split escena {i + 1} demasiado corto")
                 durations[i] = dur
@@ -352,8 +352,17 @@ async def build_full_track(project: dict, durations: list[float]) -> Path:
         f"concat=n={len(durations)}:v=0:a=1[out]"
     cmd = ["ffmpeg", "-y", *inputs, "-filter_complex", chain, "-map", "[out]",
            "-ar", "24000", "-ac", "1", str(full)]
-    p = await asyncio.to_thread(
-        lambda: subprocess.run(cmd, capture_output=True, text=True))
+    # [M · P2.4] TOPE de tiempo: un ffmpeg colgado (disco lleno, AV antivirus)
+    # congelaba la etapa TTS para siempre. El proceso corre en hilo (to_thread);
+    # subprocess.TimeoutExpired corta a los 180 s y el pipeline registra fallo.
+    try:
+        p = await asyncio.to_thread(
+            lambda: subprocess.run(cmd, capture_output=True, text=True,
+                                   timeout=180))
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            "concat de audio excedió 180s (ffmpeg colgado; proceso abortado)"
+        ) from None
     if p.returncode != 0:
         log.error("concat audio: %s", p.stderr[-400:])
         raise RuntimeError("No se pudo unir el audio")

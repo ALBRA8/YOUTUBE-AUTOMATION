@@ -3,6 +3,11 @@ YOUTUBE AUTOMATION v2.0 — TTS dual
 Primario:  Gemini TTS (voz premium, prosodia natural)
 Fallback:  edge-tts (100% gratuito e ilimitado, voces neuronales)
 Devuelve (ruta_wav, duración_segundos) siempre en WAV 24kHz mono.
+
+[AUDITORÍA 2026-11 · event loop] ffmpeg/ffprobe desde funciones async van
+SIEMPRE por asyncio.create_subprocess_exec (Proactor en Windows, lo fuerza
+start.bat): un subprocess.run síncrono dentro de una corrutina congelaba
+todo el servidor (health, dashboard, jobs) durante cada conversión.
 """
 import asyncio
 import logging
@@ -19,13 +24,29 @@ SAMPLE_RATE = 24000
 
 
 def _mp3_to_wav(src: Path, dst: Path) -> None:
+    """SÍNCRONA — solo para código no-async (los llamadores async usan
+    _mp3_to_wav_async)."""
     subprocess.run(
         ["ffmpeg", "-y", "-i", str(src), "-ar", str(SAMPLE_RATE),
          "-ac", "1", str(dst)],
         check=True, capture_output=True)
 
 
+async def _mp3_to_wav_async(src: Path, dst: Path) -> None:
+    """ffmpeg mp3→wav SIN bloquear el event loop (create_subprocess_exec)."""
+    proc = await asyncio.create_subprocess_exec(
+        "ffmpeg", "-y", "-i", str(src), "-ar", str(SAMPLE_RATE),
+        "-ac", "1", str(dst),
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    _, err = await proc.communicate()
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"ffmpeg mp3→wav falló ({proc.returncode}): "
+            f"{err.decode(errors='replace')[-300:]}")
+
+
 def wav_duration(path: Path) -> float:
+    """SÍNCRONA — solo para código no-async (probe síncrono, threads)."""
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration",
          "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
@@ -34,10 +55,30 @@ def wav_duration(path: Path) -> float:
     return float(out.stdout.strip())
 
 
+async def wav_duration_async(path: Path, timeout: float = 30.0) -> float:
+    """ffprobe de duración SIN bloquear el event loop. Conserva el timeout
+    de INT-080 (30 s) pero ahora el proceso se MATA al vencer y el resto
+    del servidor (health, dashboard, jobs) sigue vivo durante la espera."""
+    proc = await asyncio.create_subprocess_exec(
+        "ffprobe", "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", str(path),
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        try:
+            await proc.communicate()  # cosechar el proceso (sin zombie)
+        except Exception:  # noqa: BLE001
+            pass
+        raise TimeoutError(f"ffprobe excedió {timeout:.0f}s (proceso muerto)") from None
+    return float(out.decode().strip())
+
+
 async def synth_gemini(text: str, out_path: Path, voice: str | None = None) -> float:
     wav_bytes = await gemini_client.tts_pcm(text, voice or config.GEMINI_TTS_VOICE)
     out_path.write_bytes(wav_bytes)
-    return wav_duration(out_path)
+    return await wav_duration_async(out_path)
 
 
 async def synth_edge(text: str, out_path: Path,
@@ -48,9 +89,9 @@ async def synth_edge(text: str, out_path: Path,
     mp3 = out_path.with_suffix(".mp3")
     communicate = edge_tts.Communicate(text, voice, rate=rate)
     await communicate.save(str(mp3))
-    _mp3_to_wav(mp3, out_path)
+    await _mp3_to_wav_async(mp3, out_path)
     mp3.unlink(missing_ok=True)
-    return wav_duration(out_path)
+    return await wav_duration_async(out_path)
 
 
 async def synthesize(text: str, out_path: Path, provider: str | None = None,
@@ -69,7 +110,9 @@ async def synthesize(text: str, out_path: Path, provider: str | None = None,
         dur = await primary(text, out_path, voice)
         used = provider
     except Exception as e:  # noqa: BLE001
-        log.warning("TTS primario '%s' falló (%s) → fallback edge/gemini", provider, e)
+        # _sanitize_error: el fallo del proveedor puede ecoar la API key
+        log.warning("TTS primario '%s' falló (%s) → fallback edge/gemini",
+                    provider, gemini_client._sanitize_error(e))
         if provider == "gemini":
             dur = await fallback(text, out_path, config.EDGE_TTS_VOICE)
         else:
@@ -81,8 +124,20 @@ async def synthesize(text: str, out_path: Path, provider: str | None = None,
 
 
 def probe_duration(path: Path) -> float:
+    """SÍNCRONA (semántica best-effort: 0.0 ante cualquier fallo) — solo
+    para código no-async; los llamadores async usan probe_duration_async."""
     try:
         return wav_duration(Path(path))
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+async def probe_duration_async(path: Path) -> float:
+    """Duración best-effort SIN bloquear el event loop (0.0 ante cualquier
+    fallo, igual que probe_duration). Mismo timeout y misma clemencia,
+    ejecutando el probe síncrono en un hilo del pool."""
+    try:
+        return await asyncio.to_thread(wav_duration, Path(path))
     except Exception:  # noqa: BLE001
         return 0.0
 

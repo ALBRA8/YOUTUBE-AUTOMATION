@@ -16,7 +16,7 @@ export PIP_NO_INPUT=1
 export PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring
 FRESH=0
 [ "${1:-}" = "--fresh" ] && FRESH=1
-cd "$(dirname "$0")/backend"
+cd "$(dirname "$0")/../backend"
 
 # ── verify_deps: 14 módulos de arranque vía find_spec (instantáneo) ──
 verify_deps() {

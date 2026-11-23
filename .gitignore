@@ -57,6 +57,7 @@ backend/data/avatars/voz_narradora/*
 !backend/data/avatars/voz_narradora/descripcion.json
 # INT-086: workspaces de usuario (vista organizada) — runtime, nunca repo
 backend/data/projects/
+backend/data/pipeline_runs/
 backend/data/whisper/
 *.mp4
 *.mp3
@@ -110,6 +111,8 @@ backend/data/biblioteca/
 __pycache__/
 # Perfil Chrome unificado (runtime local, cookies y cache)
 backend/data/google_profile_global/
+backend/data/registro_nichos.json
+backend/data/nichos/
 
 # Scratch temporary files
 scratch/
@@ -117,3 +120,20 @@ backend/static/assets/
 
 # INT-089: telemetría HF — datos de runtime, nunca en el repo
 backend/data/hf_telemetry.json
+
+.server_*.txt
+
+
+# ── [P5.5] raíz limpia: basura de ejecución local que nunca va al repo ──
+# artefactos de pruebas y runs (sc1_*.mp4, scene_*.wav, test_*.mp3…)
+sc1_*.mp4
+sc1_lip.mp4
+sc2_broll.mp4
+sc3_raw.mp4
+scene_*.wav
+test_*.mp3
+.server_stdout.txt
+.server_stderr.txt
+
+# [P5.5] residuo histórico: un test escribe un fichero literal «-»
+-

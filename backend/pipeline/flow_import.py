@@ -46,18 +46,36 @@ def import_flow_zip(project_id: str, data: bytes, output_dir: Path,
     - Videos (video_*.mp4/webm): se guardan como assets en flow/ para uso directo
       futura (el render actual anima imágenes, no concatena clips de video).
 
+    [A7 · P2.8] BadZipFile/EOF se convierten en ValueError (→ 400, nunca 500)
+    y CADA entrada valida su ratio de compresión: un zip-bomb 1000:1 por
+    archivo ya no se cuela aunque el total declarado pase el tope.
+
     Devuelve: {imported, mapped, missing, videos_saved, ignored, total_files}
     """
-    zf = zipfile.ZipFile(io.BytesIO(data))
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(data))
+    except (zipfile.BadZipFile, EOFError, OSError) as e:
+        raise ValueError(f"ZIP inválido o corrupto: {e}") from e
     # [PHASE 1 · A7] anti zip-bomb: nº de entradas y tamaño DESCOMPRIMIDO
     # declarado se validan ANTES de leer un solo byte (el tamaño comprimido
     # ya se topa en el endpoint con streaming). Un 42.zip agotaba RAM.
     import config as _cfg
     _lim = _cfg.LIMITS
-    infos = [i for i in zf.infolist() if not i.is_dir()]
+    try:
+        infos = [i for i in zf.infolist() if not i.is_dir()]
+    except (zipfile.BadZipFile, EOFError, OSError) as e:
+        raise ValueError(f"ZIP inválido (cabeceras dañadas): {e}") from e
     if len(infos) > int(_lim.get("MAX_ZIP_FILES", 300)):
         raise ValueError(f"ZIP con demasiadas entradas "
                          f"({len(infos)} > {_lim.get('MAX_ZIP_FILES', 300)})")
+    _ratio_max = int(_lim.get("MAX_ZIP_RATIO", 1000))
+    for _i in infos:
+        if _i.compress_size > 0 \
+                and _i.file_size // _i.compress_size > _ratio_max:
+            raise ValueError(
+                f"ZIP con entrada sospechosa de descompresión explosiva "
+                f"({_i.filename}: {_i.file_size // max(1, _i.compress_size)}:1 "
+                f"> {_ratio_max}:1) — posible zip-bomb")
     _total = sum(i.file_size for i in infos)
     if _total > int(_lim.get("MAX_ZIP_UNCOMPRESSED_BYTES", 600 * 1024 * 1024)):
         raise ValueError("ZIP descomprimido demasiado grande "
@@ -90,7 +108,11 @@ def import_flow_zip(project_id: str, data: bytes, output_dir: Path,
         if Path(fname).suffix.lower() not in (IMG_EXT | VID_EXT):
             ignored += 1
             continue
-        buckets.setdefault(scene_no, []).append((fname, zf.read(info)))
+        try:
+            content = zf.read(info)
+        except (zipfile.BadZipFile, EOFError, OSError) as e:
+            raise ValueError(f"ZIP corrupto al leer '{fname}': {e}") from e
+        buckets.setdefault(scene_no, []).append((fname, content))
 
     if not buckets:
         raise ValueError("No se encontraron carpetas Escena_XX / Scene_XX en el ZIP")

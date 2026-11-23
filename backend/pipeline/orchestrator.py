@@ -67,6 +67,27 @@ def _record_duration_deviations(project_id: str) -> None:
         log.warning("production_json: registro de desviaciones falló: %s", e)
 
 
+def _disparar_sync_registro(project_id: str) -> None:
+    """Q3 · La fase Flow de una producción también empieza aquí (vía
+    inline del orquestador, PASO 3.5 de start_pipeline): dispara la
+    sincronización registro↔Flow EXACTAMENTE por el mismo punto de paso
+    que la vía de la cola de la extensión (flow_jobs.enqueue_project).
+
+    Fire-and-forget: nunca bloquea ni hace fallar la producción; con
+    FLOW_REGISTRO_SYNC apagado (default) no programa nada. Import tardío
+    para no crear círculo de imports con flow_jobs. Solo se capturan
+    excepciones tipadas (trinquete P2-2): ImportError del módulo y
+    RuntimeError del scheduling de hilos — un fallo del propio disparo
+    muere dentro del hilo worker (disparo_sync_flow ya lo anota)."""
+    try:
+        from services.flow_jobs import _programar_disparo_sync
+        _programar_disparo_sync(project_id)
+    except (ImportError, RuntimeError, AttributeError) as exc:
+        log.warning("disparo de sync registro↔Flow no programado para %s "
+                    "(%s: %s) — la producción sigue", project_id,
+                    type(exc).__name__, exc)
+
+
 # ── Control de concurrencia de renders (blindaje CPU) ──────────────────
 # FFmpeg (zoompan + xfade) usa todos los núcleos: si 2+ proyectos renderizan
 # a la vez, el servidor se queda sin CPU y el resto de peticiones sufre.
@@ -268,6 +289,20 @@ def _preflight_lanzamiento(project_id: str) -> None:
     )
 
 
+def _subs_no_quemados(project_id: str) -> bool:
+    """[A14 · P1.7] True si subs_status.json declara burned=False (el render
+    cayó al fallback silencioso de copiar el raw SIN subtítulos). Ausente o
+    ilegible → False (no bloquea: proyectos legacy sin el archivo)."""
+    import json as _json
+    f = OUTPUT_DIR / project_id / "subs_status.json"
+    if not f.is_file():
+        return False
+    try:
+        return _json.loads(f.read_text(encoding="utf-8")).get("burned") is False
+    except (OSError, ValueError):
+        return False
+
+
 async def start_pipeline(project_id: str, autopublish: bool = False) -> str:
     project = db.get_project(project_id)
     if not project:
@@ -338,6 +373,9 @@ async def _run_flow_render(job_id: str, project_id: str) -> None:
         if faltan_img:
             raise RuntimeError(f"Escenas sin imagen de Flow: {faltan_img}. "
                                "Importa el ZIP de Escena_XX primero.")
+        # P1-5: el render con assets Flow importados TAMBIÉN respeta el
+        # umbral de placeholders (el orquestador MCP entra por aquí).
+        _gate_imagenes_reales(project_id, scenes)
         db.update_project(project_id, status="render", error=None,
                           step_label="Render Flow", progress=50)
         await _emit(job_id, project_id, "tts", 50, "Sintetizando voz (assets Flow)…")
@@ -446,7 +484,8 @@ async def _run_flow_render(job_id: str, project_id: str) -> None:
 # con 1 escena degradada de N).
 
 def _gate_imagenes_reales(project_id: str, scenes: list[dict]) -> None:
-    """Falla si TODAS las escenas quedaron con imagen placeholder PIL."""
+    """P2-1: Falla si las escenas placeholder superan MAX_ALLOWED_PLACEHOLDERS (defecto 1).
+    Evita entregar videos de tarjetas planas cuando la mayoría de escenas fallaron."""
     metodos: list[str] = []
     for sc in scenes:
         p = sc.get("image_path")
@@ -454,24 +493,29 @@ def _gate_imagenes_reales(project_id: str, scenes: list[dict]) -> None:
             continue
         sf = Path(str(p)).with_suffix(".style.json")
         try:
-            # [FIX-ENC-WIN] encoding explícito (Windows: cp1252 por defecto)
             metodo = (json.loads(sf.read_text(encoding="utf-8")) or {}).get("method") or "?"
-        except Exception:  # noqa: BLE001 — sin style.json no se puede saber
+        except Exception as _ex:  # P2-2: un style.json corrupto OCULTA un
+            # placeholder del gate — visible siempre
+            log.warning("style.json ilegible (%s): método desconocido para %s",
+                        _ex, sf)
             metodo = "?"
         metodos.append(metodo)
     if not metodos:
         return
     n_ph = sum(1 for m in metodos if m == "placeholder")
-    if n_ph == len(metodos):
+    max_allowed = config.max_allowed_placeholders()  # P1-5: fuente única
+    if n_ph > max_allowed:
+        db.update_project(project_id, status="failed",
+                          error=f"Preflight de calidad: {n_ph}/{len(metodos)} imágenes son placeholder (máximo permitido: {max_allowed}). Calidad insuficiente para entrega.",
+                          step_label="Error")
         raise RuntimeError(
-            f"Preflight de producto: TODAS las imágenes ({len(metodos)}) son "
-            "placeholder — el video sería un degradado sin contenido real. "
-            "Causas posibles: GEMINI_API_KEY ausente/inválida o sin cuota, "
-            "CLI z-ai no instalado y sin capturas de la extensión. Configura "
-            "un proveedor de imágenes real y relanza el proyecto.")
+            f"Preflight de calidad: {n_ph}/{len(metodos)} imágenes son placeholder "
+            f"(máximo permitido: {max_allowed}). "
+            "El video sería un degradado sin contenido real. "
+            "Configura un proveedor de imágenes real (Flow MCP/Gemini) y relanza el proyecto.")
     if n_ph:
         log.warning("preflight imágenes: degradación parcial %d/%d placeholder "
-                    "(el render continúa)", n_ph, len(metodos))
+                    "(dentro del umbral permitido <= %d)", n_ph, len(metodos), max_allowed)
 
 
 def _gate_voz_real(project_id: str, scenes: list[dict]) -> None:
@@ -703,6 +747,31 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
         await imgs.generate_all(db.get_project(project_id), scenes, img_prog,
                                 is_cancelled(job_id))
         scenes = db.get_scenes(project_id)
+
+        # P2-1: Si hay placeholders por encima del umbral, reintentar esas escenas con Flow/Gemini antes del gate
+        max_ph_allowed = config.max_allowed_placeholders()  # P1-5: fuente única
+        cur_methods = []
+        for sc in scenes:
+            p_img = sc.get("image_path")
+            sf = Path(str(p_img)).with_suffix(".style.json") if p_img else None
+            try:
+                cur_methods.append((json.loads(sf.read_text(encoding="utf-8")) or {}).get("method") if sf and sf.is_file() else "?")
+            except Exception as _ex:  # P2-2: visible, no silenciar
+                log.warning("style.json ilegible (%s) en reintento P2-1: %s",
+                            _ex, sf)
+                cur_methods.append("?")
+        cur_ph = sum(1 for m in cur_methods if m == "placeholder")
+        if cur_ph > max_ph_allowed:
+            log.warning("P2-1: Detectados %d/%d placeholders (> umbral %d). Reintentando escenas fallidas...", cur_ph, len(scenes), max_ph_allowed)
+            proj_dict = db.get_project(project_id)
+            for idx, sc in enumerate(scenes):
+                if cur_methods[idx] == "placeholder":
+                    try:
+                        await imgs.generate_scene_image(sc, proj_dict, idx)
+                    except Exception as ex_re:
+                        log.warning("Reintento de escena %d falló: %s", idx, ex_re)
+            scenes = db.get_scenes(project_id)
+
         _gate_imagenes_reales(project_id, scenes)
 
         # PASO 3 — TTS + alineación
@@ -736,6 +805,10 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
                 OUTPUT_DIR / project_id, list(range(len(scenes)))
             )
             if flow_mcp_client.available():
+                # Q3 · aquí arranca de verdad la fase Flow inline: dispara
+                # la sync registro↔Flow (mismo punto de paso que enqueue);
+                # fire-and-forget, jamás bloquea ni tumba el pipeline.
+                _disparar_sync_registro(project_id)
                 await _emit(job_id, project_id, "flow_video", 73, "Generando videos de escena en Google Flow…")
                 total_scenes = len(scenes)
                 for idx, sc in enumerate(scenes):
@@ -828,6 +901,13 @@ async def _run(job_id: str, project_id: str, autopublish: bool) -> None:
             if (meta_now.get("qa_final") or {}).get("worst") == "error":
                 await _emit(job_id, project_id, "ready", 100,
                             "Listo (autopublish OMITIDO: QA final con errores)")
+            elif _subs_no_quemados(project_id):
+                # [A14 · P1.7] autopublish TAMBIÉN respeta el gate de
+                # subtítulos: el fallback silencioso (copiado sin quemar)
+                # jamás llega a YouTube por accidente.
+                await _emit(job_id, project_id, "ready", 100,
+                            "Listo (autopublish OMITIDO: subtítulos no quemados — "
+                            "publica manualmente o re-renderiza)")
             else:
                 await _emit(job_id, project_id, "publishing", 97, "Subiendo a YouTube…")
                 jid_pub = db.create_job(project_id, kind="publish")
@@ -901,13 +981,13 @@ def _memoria_episodio(job_id: str, project_id: str, origen: str) -> None:
             evidence=[{"kind": "job", "ref": job_id},
                       {"kind": "project", "ref": project_id}],
             confidence=1.0)
-    except Exception:  # noqa: BLE001 — nunca crítico
-        pass
+    except Exception as exc:  # noqa: BLE001
+        log.warning("memorydv.record_episode falló (%s): %s", project_id, exc)
     try:
         from services import metrics as _metrics
         _metrics.persist_snapshot()
-    except Exception:  # noqa: BLE001 — nunca crítico
-        pass
+    except Exception as exc:  # noqa: BLE001
+        log.warning("metrics.persist_snapshot falló (%s): %s", project_id, exc)
 
 
 def _description(result: dict, project: dict) -> str:

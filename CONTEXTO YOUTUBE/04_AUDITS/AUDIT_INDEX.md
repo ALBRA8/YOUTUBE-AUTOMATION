@@ -43,3 +43,9 @@
 - **Estado:** IMPLEMENTACIÓN Y PRUEBAS AISLADAS PASS; LIVE TEST PENDIENTE.
 - **Resultado reportado:** 21/21 pruebas del puente, regresión mock F5.1 PASS, harness backend 55 OK y pruebas del paquete MCP 3/3 PASS.
 - **Diseño:** `FLOW_MCP_ENABLED=0` por defecto; generación condicional; validación binaria del archivo y fallback a proveedores existentes.
+
+## AUD-008 — Auditoría Técnica y Remediación Integral (P0, P1, P2, P3)
+- **Estado:** CLOSED / PASS (P0 a P3-3 implementados con pruebas de regresión herméticas; GAP-002 estrictamente NOT_DEMONSTRATED).
+- **Referencia detallada:** [`AUD-008_AUDITORIA_TECNICA_REMEDIACION_P0_P3.md`](./AUD-008_AUDITORIA_TECNICA_REMEDIACION_P0_P3.md).
+- **Alcance:** SSRF en imágenes, hermeticidad y accounting en CI/runner, orden Starlette de CORS/auth, mitigación DNS rebinding, hermeticidad viral clipper, robustez int088, umbral placeholders con reintento, cadena de video de alta calidad (+5.01 dB PSNR), audio -14 LUFS, Ken Burns sin jitter con tope 4K, faststart MP4, routers modulares (Fase 1 niches) y migración a lifespan.
+- **Resultado de pruebas:** 40/40 tests PASS en suites de auditoría.

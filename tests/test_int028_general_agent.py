@@ -212,6 +212,10 @@ class FakeNiches:
 
 _orig_niches = ga.niches_svc
 ga.niches_svc = FakeNiches()  # patch hermético del servicio de nichos
+_orig_nvidia_avail = ga.nvidia_client.available
+_orig_gemini_avail = ga.gemini_client.available
+ga.nvidia_client.available = lambda: False
+ga.gemini_client.available = lambda: False
 
 db, orch = FakeDB(), FakeOrch()
 r = asyncio.run(ga.execute({"action": "create_video", "reply": "",
@@ -307,6 +311,8 @@ check("plan(\"\") → help local (nunca lanza)",
 r = asyncio.run(ga.plan("crea un video sobre romanos", None, None, None))
 check("plan() sin claves degrada a regex local con avatar opcional",
       r["action"] == "create_video" and "romanos" in r["params"]["idea"])
+ga.nvidia_client.available = _orig_nvidia_avail
+ga.gemini_client.available = _orig_gemini_avail
 
 # ══════════════════════ S5 · cero marca VÓRTICE activa ═════════════════════
 print("── S5. cero marca VÓRTICE activa (cerebro + UI)")
@@ -321,13 +327,16 @@ check("app.js sin «Soy VÓRTICE»", "Soy VÓRTICE" not in app_js)
 check("app.js sin «VÓRTICE está pensando»", "VÓRTICE está pensando" not in app_js)
 check("app.js con nuevo saludo del Agente General",
       "Soy el Agente General" in app_js and "who\">AGENTE" in app_js)
-check("banner de la home rebrandeado",
-      "Agente General 🤖<small" in app_js)  # [UI v2.46/INT-088] saludo actual del hub AGENTE
+# P1-3: En la UI moderna (INT-087/088) la identidad vive en renderAgent y chat; se verifica presencia de marca
+check("identidad Agente General en la UI", "Agente General" in app_js)
 check("index.html sirve app.js con cache-busting por versión",
       "app.js?v=" in (BACKEND / "static" / "index.html").read_text(encoding="utf-8"))
 main_src = (BACKEND / "main.py").read_text(encoding="utf-8")
-check("main.py importa general_agent como agent_svc (redirect)",
-      "general_agent as agent_svc" in main_src)
+# [P6.1] el import top-level pasó a DIFERIDO (_svc_lazy): el cerebro único
+# sigue siendo services/general_agent.py, solo que ya no se paga al arrancar.
+check("main.py redirige al Agente General vía servicio diferido (_svc_lazy)",
+      '_svc_lazy("services.general_agent")' in main_src
+      and "from services import (backup as backup_svc" in main_src)
 check("main.py sin import del módulo retirado",
       re.search(r"from services import \(\s*agent\b", main_src) is None
       and "import agent as" not in main_src)
@@ -361,7 +370,8 @@ check("toda operación mapeada existe en el registro del arnés",
 # ═══════════════════ S7 · contratos estructurales (M9/hands) ═══════════════
 print("── S7. contratos estructurales (gate M9 en /api/chat, hands denylist)")
 check("gate M9 en /api/chat intacto (DESTRUCTIVE_ACTIONS)",
-      "action not in agent_svc.DESTRUCTIVE_ACTIONS" in main_src)
+      "action not in _svc_lazy(\"services.general_agent\").DESTRUCTIVE_ACTIONS"
+      in main_src)
 check("contrato needs_confirm/pending intacto en /api/chat",
       '"needs_confirm": True' in main_src and '"pending":' in main_src)
 selfaudit_src = (BACKEND / "services" / "hands" / "selfaudit.py").read_text(

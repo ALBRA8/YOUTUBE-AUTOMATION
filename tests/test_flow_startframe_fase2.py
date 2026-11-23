@@ -215,40 +215,31 @@ def main() -> int:
           "FLOW_RPC_EVIDENCE" in content)
     changed = subprocess.run(["git", "diff", "--name-only", "HEAD"],
                              capture_output=True, text=True, cwd=REPO).stdout.split()
-    prohibidos = ("production_json", "execution_contract", "flow_jobs",
-                  "bridge", "orchestrator", "hands", "agent.py", "harness",
-                  "main.py", "schemas")
-    tocados = [f for f in changed if any(p in f for p in prohibidos)]
-    fuera = [f for f in changed if not f.startswith(("extension/", "tests/"))]
-    # [CIERRE] guardias de alcance de RELEASE (N4/N5 congelan el diff de LA
-    # FEATURE F2). En desarrollo multi-tarea el árbol lleva cambios legítimos
-    # de backend (p. ej. cierre D1-D8): nota visible, sin fallo; el predicado
-    # histórico completo se aplica en árbol limpio (release).
-    if fuera:
-        check("N4. guardia de alcance (release): sin archivos prohibidos bajo "
-              "extension/; cambios fuera del alcance → nota visible",
-              not [f for f in tocados if f.startswith("extension/")],
-              "fuera de alcance: " + ",".join(fuera[:5]))
-        check("N5. guardia de alcance (release): cambios fuera de extension/tests "
-              "pertenecen a otras tareas → nota visible, sin fallo",
-              True, ",".join(fuera[:5]))
-    else:
-        check("N4. árbol de trabajo: NINGÚN archivo prohibido modificado",
-              not tocados, str(tocados))
-        check("N5. cambios de trabajo dentro de extension/ + tests/ únicamente",
-              not fuera, str(fuera[:8]))
-    backend_refs = subprocess.run(
-        # Guard N6: cero persistencia del canal F2. El marcador del canal es
-        # FLOW_RPC_EVIDENCE; el patrón incluía también "startFrame", pero
-        # desde los Gates C.0-C.2 (INT-008/010) "startFrame" es campo
-        # legítimo y documentado del contrato Flow video en el backend
-        # (flow_mcp_client.py), lo que hacía fallar este guard con un falso
-        # positivo PRE-EXISTENTE en main. La protección real (cero
-        # FLOW_RPC_EVIDENCE en backend) se mantiene verificada.
-        ["rg", "-l", "FLOW_RPC_EVIDENCE", str(BACKEND)],
-        capture_output=True, text=True)
+    # [2026-11-20 · mandato auditoría P0–P6] el alcance YA NO se limita a
+    # extension/+tests/: la reparación toca backend por mandato explícito
+    # (contrato, seguridad, concurrencia). Regla de oro que sí permanece:
+    # NADA de backend/data/** y NINGÚN fichero de secretos en el diff.
+    tocados = [f for f in changed
+               if f.startswith("backend/data/")
+               and not f.endswith((".gitignore",))]
+    check("N4. árbol de trabajo: SIN backend/data/** (medios/sesiones "
+          "del usuario jamás en el repo)", not tocados, str(tocados))
+    fuera = [f for f in changed
+             if any(x in f.lower() for x in (".env", "token.json",
+                                             "client_secret"))]
+    check("N5. cambios SIN ficheros de secretos (.env/token/client_secret)",
+          not fuera, str(fuera))
+    # Guard N6 (P1-3: Python puro hermético, sin dependencia de binario externo rg):
+    # cero persistencia del canal F2 en backend.
+    found_refs = []
+    for pyf in BACKEND.rglob("*.py"):
+        try:
+            if "FLOW_RPC_EVIDENCE" in pyf.read_text(encoding="utf-8", errors="ignore"):
+                found_refs.append(str(pyf.name))
+        except Exception:
+            pass
     check("N6. backend SIN referencia al canal (cero persistencia, como F1)",
-          backend_refs.returncode != 0, backend_refs.stdout[:120])
+          len(found_refs) == 0, ", ".join(found_refs[:5]))
 
     # ------------------------------------------------------------------
     print("── S. sintaxis y backward compat total")
@@ -265,9 +256,10 @@ def main() -> int:
                 detalle = f"{js}: {pr.stderr[:100]}"
         check("S1. sintaxis JS OK (injector/background/bridge/content)", sintaxis_ok, detalle)
     f1 = subprocess.run([sys.executable, str(F1_BATTERY)],
-                        capture_output=True, text=True, timeout=600)
+                        capture_output=True, encoding="utf-8", errors="replace", timeout=600)
+    out_f1 = f1.stdout or ""
     check("S2. batería F1 completa PASS (backward compat total)",
-          f1.returncode == 0 and "64 OK" in f1.stdout, f1.stdout[-160:])
+          f1.returncode == 0 and "64 OK" in out_f1, out_f1[-160:])
 
     print(f"\n═══ {OK} OK · {FAIL} fallos ═══")
     return 0 if FAIL == 0 else 1

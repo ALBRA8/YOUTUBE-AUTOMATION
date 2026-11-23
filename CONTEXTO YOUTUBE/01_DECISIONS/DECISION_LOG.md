@@ -42,3 +42,16 @@
 - **No hacer:** no crear un motor o agente separado por línea; no forzar todas las líneas a una gramática única; no declarar schemas, selector, runtime o integración como implementados sin evidencia.
 - **Siguiente paso:** formalizar schemas/validación, registro y selector de línea, pruebas de contrato e integración segura con el pipeline existente.
 - **Documento:** `00_MASTER/PRODUCTION_FRAMEWORK_BLUEPRINTS.md`.
+
+
+## D-010 — HANDS en reserva: dormido, desconectado, no se amplía
+- **Estado:** VIGENTE (2026-11-06). HANDS pasa de motor a plan B.
+- **Decisión:** HANDS (control manual del PC) queda EN RESERVA, desconectado del orquestador. No se amplía ni se conecta salvo que aparezca una herramienta SIN MCP y SIN API que solo se pueda manejar a mano. Sus pruebas siguen corriendo (baterías `test_hands*.py` en `tests/run_all.py` y en CI) para que el código dormido no se pudra en silencio.
+- **Racional:** el aislamiento ya está verificado por test (HANDS no importa nada del orquestador); el control físico viene apagado por defecto con triple candado; mantenerlo casi no cuesta y cubre el escenario de herramientas sin API/MCP.
+- **No hacer:** no conectar HANDS al pipeline por conveniencia; no usarlo como atajo cuando exista MCP/API; no borrar su código ni sus pruebas.
+
+## D-011 — Memoria del proyecto = LEEME_PRIMERO.md + ROADMAP.md
+- **Estado:** VIGENTE (2026-11-06).
+- **Decisión:** la memoria de 5 minutos para cualquier LLM sin contexto son `LEEME_PRIMERO.md` (reglas de oro + mapa del repo) y `ROADMAP.md` (AHORA/SIGUIENTE/DESPUÉS/RESERVA/HECHO, máximo 2 tareas en AHORA). Todo constructor (humano o LLM) los lee PRIMERO y los actualiza al CERRAR sesión: mover lo hecho a HECHO, anotar lo que falló, y añadir una línea en "Última sesión" de LEEME_PRIMERO.md.
+- **Racional:** el estado vivo no puede vivir solo en la cabeza del dueño ni en chats; los documentos únicos y obligatorios evitan derivas y trabajos duplicados.
+- **No hacer:** no duplicar esta memoria en otros archivos (un solo ROADMAP, un solo LEEME); no declarar AHORA con más de 2 tareas; no adornar resultados.

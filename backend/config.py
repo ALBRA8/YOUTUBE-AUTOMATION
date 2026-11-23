@@ -24,15 +24,32 @@ for d in (DATA_DIR, OUTPUT_DIR, PROJECTS_DIR, TMP_DIR):
 DB_PATH = Path(os.getenv("DB_PATH") or (DATA_DIR / "yt_automation.db")).resolve()
 ENV_PATH = BASE_DIR / ".env"
 load_dotenv(ENV_PATH)
+# En runtime (no en tests herméticos), la clave explícita de .env tiene
+# prioridad sobre variables residuales del entorno de usuario de Windows:
+if ENV_PATH.exists() and "PYTEST_CURRENT_TEST" not in os.environ:
+    from dotenv import dotenv_values
+    _env_vals = dotenv_values(ENV_PATH)
+    if _env_vals.get("GEMINI_API_KEY"):
+        os.environ["GEMINI_API_KEY"] = _env_vals["GEMINI_API_KEY"]
 
 # ── Claves API (todas opcionales: el sistema degrada con gracia) ──────────
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
 FLOW_MCP_ENABLED = os.getenv("FLOW_MCP_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+# PASO 3.1 minidramas: crear/vincular el proyecto de Flow del registro
+# (APAGADO por defecto — solo el dueño lo activa en su máquina).
+FLOW_REGISTRO_SYNC = os.getenv("FLOW_REGISTRO_SYNC", "0").strip().lower() in ("1", "true", "yes")
+# R5 · Informe guardado de la sonda INT-093 (SOLO LECTURA para el registro):
+# lo genera el dueño con  python tools/sonda_capacidades_nombres.py --salida
+# sonda_nombres.json  en la raíz del repo. Si no existe, el veredicto es
+# NOT_DEMONSTRATED y el nombre del proyecto NO se envía a Flow.
+SONDA_NOMBRES_JSON = Path(os.getenv(
+    "SONDA_NOMBRES_JSON",
+    str(BASE_DIR.parent / "sonda_nombres.json")))
 FLOW_MCP_VIDEO_ENABLED = os.getenv("FLOW_MCP_VIDEO_ENABLED", "0").strip().lower() in ("1", "true", "yes")
 FLOW_MCP_DIR = Path(os.getenv("FLOW_MCP_DIR", str(BASE_DIR.parent / "tools" / "GoogleFlowMCP"))).resolve()
 FLOW_MCP_MODEL = os.getenv("FLOW_MCP_MODEL", "2").strip()
-FLOW_MCP_TIMEOUT = float(os.getenv("FLOW_MCP_TIMEOUT", "120.0"))
+FLOW_MCP_TIMEOUT = float(os.getenv("FLOW_MCP_TIMEOUT", "300.0"))
 
 # ── MCP Connection Manager (INT-022) — panel ↔ servidores MCP stdio ──────
 # Puerto CDP del Chrome DEDICADO de GoogleFlowMCP (debe coincidir con
@@ -54,6 +71,10 @@ NOTEBOOKLM_HOME = os.getenv("NOTEBOOKLM_HOME", "").strip()
 # Perfil activo de notebooklm-py (vacío = "default"; estructura verificada:
 # <home>/profiles/<profile>/storage_state.json con fallback legacy <home>/).
 NOTEBOOKLM_PROFILE = os.getenv("NOTEBOOKLM_PROFILE", "").strip()
+# Host base y build label de Google Notebook
+NOTEBOOKLM_BASE_URL = os.getenv("NOTEBOOKLM_BASE_URL", "https://notebook.google.com").strip()
+DEFAULT_NOTEBOOKLM_BL = "boq_labs-tailwind-frontend_20261117.07_p0"
+NOTEBOOKLM_BL = os.getenv("NOTEBOOKLM_BL", DEFAULT_NOTEBOOKLM_BL).strip()
 
 # ── 🔐 INT-069 · session hardening — refresh automático de cookies ──────
 # Si el preflight del MCP de NotebookLM detecta AUTH_REQUIRED (cookies
@@ -93,6 +114,7 @@ GOOGLE_LOGIN_URL = os.getenv(
 # FLOW_CDP_PORT para que Flow se enganche a este Chrome (sesión compartida).
 GOOGLE_LOGIN_CDP_PORT = int(os.getenv(
     "GOOGLE_LOGIN_CDP_PORT", str(FLOW_CDP_PORT)))
+MCP_CONNECT_ALL_CDP_TIMEOUT_S = float(os.getenv("MCP_CONNECT_ALL_CDP_TIMEOUT_S", "30.0"))
 # Binario Chrome explícito (vacío = autodetección: chrome/google-chrome/
 # chromium/edge/brave según plataforma).
 MCP_LOGIN_CHROME_BIN = os.getenv("MCP_LOGIN_CHROME_BIN", "").strip()
@@ -123,7 +145,7 @@ GOOGLE_SSO_TIMEOUT_S = int(os.getenv("GOOGLE_SSO_TIMEOUT_S", "900"))
 # Tool de solo-lectura del servidor notebooklm-mcp que extrae la bíblia de
 # investigación (Stage 1). Si el servidor no la expone, el error llega a la
 # UI con la lista real de tools disponibles (TOOL_UNKNOWN).
-NOTEBOOKLM_CONTEXT_TOOL = os.getenv("NOTEBOOKLM_CONTEXT_TOOL", "chat_ask").strip()
+NOTEBOOKLM_CONTEXT_TOOL = os.getenv("NOTEBOOKLM_CONTEXT_TOOL", "notebook_query").strip()
 # Consulta enviada junto al notebookId (plantilla editable por .env).
 NOTEBOOKLM_CONTEXT_QUERY = os.getenv(
     "NOTEBOOKLM_CONTEXT_QUERY",
@@ -133,6 +155,8 @@ NOTEBOOKLM_CONTEXT_QUERY = os.getenv(
     "rasgos) reutilizable en todas las escenas.").strip()
 # Máximo de contexto inyectado al generador (protege los tokens del LLM).
 PIPELINE_CONTEXT_MAX_CHARS = int(os.getenv("PIPELINE_CONTEXT_MAX_CHARS", "6000"))
+# Origen del contexto para Stage 1: "" / "notebooklm" (default) o "local" (data/nichos/<nicho_id>/contexto.md)
+PIPELINE_CONTEXT_SOURCE = os.getenv("PIPELINE_CONTEXT_SOURCE", "").strip()
 # Asset de referencia de personaje en Flow: se sube UNA vez y todas las
 # escenas lo referencian como @{personaje} (consistencia inter-escena).
 FLOW_REF_ASSET_NAME = os.getenv("FLOW_REF_ASSET_NAME", "personaje").strip()
@@ -150,10 +174,10 @@ RENDER_MUSIC_DUCK_DB = float(os.getenv("RENDER_MUSIC_DUCK_DB", "-20"))
 # INT-070 (opt-in, adaptado de estudio-video-ia): ducking DINÁMICO de la cama
 # con sidechaincompress (cede cuando habla la voz). "0" = ducking fijo de siempre.
 RENDER_MUSIC_SIDECAN = os.getenv("RENDER_MUSIC_SIDECAN", "0").strip()
-# INT-070 (opt-in): normalización de loudness a -14 LUFS (TP=-1, LRA=11), el
-# estándar de YouTube, tras la mezcla. "0" = nivel de mezcla sin tocar.
-RENDER_LOUDNORM = os.getenv("RENDER_LOUDNORM", "0").strip()
-# INT-085 (default ON): masterización broadcast del audio FINAL en
+# INT-070 / P2-3 (default ON): normalización de loudness a -14 LUFS (TP=-1, LRA=11), el
+# estándar de YouTube, tras la mezcla.
+RENDER_LOUDNORM = os.getenv("RENDER_LOUDNORM", "1").strip()
+# INT-085 / P2-3 (default ON): masterización broadcast del audio FINAL en
 # pipeline.video.mux_audio_music — loudnorm I=-14:LRA=11:TP=-1.0:dual_mono
 # + 48 kHz + AAC 192k (estándar YouTube/TikTok/Reels). "0" = mezcla legacy.
 AUDIO_MASTER_BROADCAST = os.getenv("AUDIO_MASTER_BROADCAST", "1").strip()
@@ -166,7 +190,23 @@ RENDER_SUBTITLES = os.getenv("RENDER_SUBTITLES", "burn").strip().lower()
 # Timeout por comando ffmpeg del ensamblador (segundos) y calidad H.264.
 RENDER_FFMPEG_TIMEOUT = float(os.getenv("RENDER_FFMPEG_TIMEOUT", "900"))
 RENDER_X264_PRESET = os.getenv("RENDER_X264_PRESET", "veryfast").strip()
-RENDER_CRF = int(os.getenv("RENDER_CRF", "20"))
+RENDER_CRF = int(os.getenv("RENDER_CRF", "18"))
+# P2-2: Configuración de calidad de video y codificación única / intermedios sin pérdida
+VIDEO_CRF = int(os.getenv("VIDEO_CRF", str(RENDER_CRF)))
+
+# P1-5 · Umbral de placeholders permitidos antes de fallar el render
+# (fuente ÚNICA; antes duplicado con os.getenv en orchestrator.py x2 y video_qa.py).
+# Leer con max_allowed_placeholders() para respetar overrides de .env en caliente.
+MAX_ALLOWED_PLACEHOLDERS = int(os.getenv("MAX_ALLOWED_PLACEHOLDERS", "1"))
+
+
+def max_allowed_placeholders() -> int:
+    """Umbral vigente de placeholders (respeta MAX_ALLOWED_PLACEHOLDERS del entorno)."""
+    return int(os.getenv("MAX_ALLOWED_PLACEHOLDERS", str(MAX_ALLOWED_PLACEHOLDERS)))
+VIDEO_PRESET = os.getenv("VIDEO_PRESET", RENDER_X264_PRESET).strip()
+INTERMEDIATE_CRF = int(os.getenv("INTERMEDIATE_CRF", "10"))
+INTERMEDIATE_PRESET = os.getenv("INTERMEDIATE_PRESET", "ultrafast").strip()
+ENABLE_NVENC = os.getenv("ENABLE_NVENC", "0").strip().lower() in ("1", "true", "yes")
 # INT-070: realineación de timestamps Whisper contra silencios reales
 # (silencedetect + premio de puntuación + reparto por peso de palabra).
 # Mejora el karaoke palabra-a-palabra (INT-045) junto a las pausas; "0" = crudo.
@@ -186,9 +226,13 @@ NVIDIA_FALLBACK_MODELS = [
         "deepseek-ai/deepseek-v4.1-flash,moonshotai/kimi-k2.6").split(",") if m.strip()]
 
 # ── Modelos Gemini ────────────────────────────────────────────────────────
-# gemini-2.5-flash: modelo REAL con generosa cuota gratuita (el default
-# anterior "gemini-3.6-flash" no existe en la API → HTTP 404 Model Not Found)
-GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-2.5-flash")
+DEFAULT_GEMINI_FALLBACKS = "gemini-flash-latest,gemini-3.8-flash,gemini-2.5-flash"
+GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-3.8-flash")
+GEMINI_TEXT_MODEL_FALLBACKS = [
+    m.strip()
+    for m in os.getenv("GEMINI_TEXT_MODEL_FALLBACKS", DEFAULT_GEMINI_FALLBACKS).split(",")
+    if m.strip()
+]
 GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
 GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
 
@@ -213,7 +257,7 @@ SHORT_W, SHORT_H = 1080, 1920     # 9:16
 LONG_W, LONG_H = 1920, 1080       # 16:9
 
 # INT-080 · única fuente de verdad de versión (FastAPI + /api/health)
-APP_VERSION = "2.46.0"   # INT-093: coherencia de color oscuro/claro — tokens de estado con override claro
+APP_VERSION = "2.47.0"   # U1: GET /api/mcp/resumen — agregador de estado solo lectura del ecosistema Google
 MUSIC_VOLUME = 0.18
 MUSIC_DIR = DATA_DIR / "music"
 MUSIC_DIR.mkdir(exist_ok=True)
@@ -252,12 +296,25 @@ LIMITS = {
     "MAX_ZIP_COMPRESSED_BYTES": _lim("MAX_ZIP_COMPRESSED_BYTES", 150 * 1024 * 1024),  # A7
     "MAX_ZIP_UNCOMPRESSED_BYTES": _lim("MAX_ZIP_UNCOMPRESSED_BYTES", 600 * 1024 * 1024),  # A7
     "MAX_ZIP_FILES": _lim("MAX_ZIP_FILES", 300),                        # A7
+    "MAX_ZIP_RATIO": _lim("MAX_ZIP_RATIO", 1000),                       # A7/P2.8 bomba 1000:1
     "MAX_IMAGE_PIXELS": _lim("MAX_IMAGE_PIXELS", 40_000_000),           # M10 bomba descompresión
     "MAX_PRODUCTION_UNITS": _lim("MAX_PRODUCTION_UNITS", 40),           # A9 (≈ guion_json MAX_ESCENAS)
     "FLOW_JOB_BODY_BYTES": _lim("FLOW_JOB_BODY_BYTES", 64 * 1024 * 1024),      # complete binario
     "FLOW_JOBS_RETENTION_DAYS": _lim("FLOW_JOBS_RETENTION_DAYS", 30),   # M11 done/dead
     "LEDGER_MAX_LINES": _lim("LEDGER_MAX_LINES", 5000),                 # M11 ledger adaptación
+    "OUTPUT_RETENTION_PROJECTS": _lim("OUTPUT_RETENTION_PROJECTS", 10), # P5.4 retención media
 }
+
+# [A5 · P0.4] IDs de extensión Chrome CONOCIDAS para CORS (separadas por comas).
+# Vacío (default) → regex histórico chrome-extension://[a-p]+ y aviso en
+# /api/auth/status. Con valor, SOLO esas IDs cruzan CORS.
+EXTENSION_IDS = [x.strip() for x in os.getenv("EXTENSION_IDS", "").split(",")
+                 if x.strip()]
+
+# [A16 · P0.3] raíces del explorador in-browser (separadas por «;»). Vacío →
+# default PROJECTS_DIR (destino legítimo de workspaces). El selector NATIVO de
+# Windows (pick-folder) no pasa por aquí: es un diálogo local, no una API web.
+DIALOG_ROOTS = os.getenv("DIALOG_ROOTS", "")
 
 
 def ffmpeg() -> str:
@@ -318,11 +375,12 @@ SECRET_KEYS = {"GEMINI_API_KEY", "NVIDIA_API_KEY", "PEXELS_API_KEY",
 def reload() -> None:
     """Relee .env y actualiza las variables globales de este módulo.
     Permite cambiar claves/ajustes desde el dashboard SIN reiniciar."""
-    global GEMINI_API_KEY, GEMINI_TEXT_MODEL, GEMINI_IMAGE_MODEL
+    global GEMINI_API_KEY, GEMINI_TEXT_MODEL, GEMINI_TEXT_MODEL_FALLBACKS, GEMINI_IMAGE_MODEL
     global GEMINI_TTS_MODEL, GEMINI_TTS_VOICE, TTS_PROVIDER, EDGE_TTS_VOICE
     global TTS_RATE, WHISPER_MODEL, WHISPER_DEVICE, FPS
     global NVIDIA_API_KEY, NVIDIA_MODEL, NVIDIA_BASE_URL
     global FLOW_MCP_ENABLED, FLOW_MCP_DIR, FLOW_MCP_MODEL, FLOW_MCP_TIMEOUT, FLOW_MCP_VIDEO_ENABLED
+    global NOTEBOOKLM_BL
     load_dotenv(ENV_PATH, override=True)
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
@@ -330,7 +388,7 @@ def reload() -> None:
     FLOW_MCP_VIDEO_ENABLED = os.getenv("FLOW_MCP_VIDEO_ENABLED", "0").strip().lower() in ("1", "true", "yes")
     FLOW_MCP_DIR = Path(os.getenv("FLOW_MCP_DIR", str(BASE_DIR.parent / "tools" / "GoogleFlowMCP"))).resolve()
     FLOW_MCP_MODEL = os.getenv("FLOW_MCP_MODEL", "2").strip()
-    FLOW_MCP_TIMEOUT = float(os.getenv("FLOW_MCP_TIMEOUT", "120.0"))
+    FLOW_MCP_TIMEOUT = float(os.getenv("FLOW_MCP_TIMEOUT", "300.0"))
     NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()
     NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "moonshotai/kimi-k3").strip()
     NVIDIA_BASE_URL = os.getenv(
@@ -339,7 +397,13 @@ def reload() -> None:
         m.strip() for m in os.getenv(
             "NVIDIA_FALLBACK_MODELS",
             "deepseek-ai/deepseek-v4.1-flash,moonshotai/kimi-k2.6").split(",") if m.strip()]
-    GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-2.5-flash")
+    GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-3.8-flash")
+    GEMINI_TEXT_MODEL_FALLBACKS = [
+        m.strip()
+        for m in os.getenv("GEMINI_TEXT_MODEL_FALLBACKS", DEFAULT_GEMINI_FALLBACKS).split(",")
+        if m.strip()
+    ]
+    NOTEBOOKLM_BL = os.getenv("NOTEBOOKLM_BL", DEFAULT_NOTEBOOKLM_BL).strip()
     GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
     GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
     GEMINI_TTS_VOICE = os.getenv("GEMINI_TTS_VOICE", "Fenrir")

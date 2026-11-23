@@ -5,7 +5,9 @@ de espera (o las inventa según el nicho), ejecuta el pipeline completo y
 opcionalmente autopublica en YouTube.
 """
 import asyncio
+import json
 import logging
+import sqlite3
 from datetime import datetime
 
 import database as db
@@ -61,9 +63,27 @@ def add_idea(idea: str) -> list[str]:
 
 
 def pop_idea() -> str | None:
-    ideas = get_ideas()
-    idea = ideas.pop(0) if ideas else None
-    db.kv_set("factory.ideas", ideas)
+    """[M · P2.7] SACAR la idea es una escritura de cola: read-modify-write
+    de kv bajo BEGIN IMMEDIATE. Antes, dos ciclos de fábrica concurrentes
+    (cron + manual) podían leer la misma cabeza y consumir la misma idea
+    dos veces (vídeo duplicado)."""
+    idea: str | None = None
+    con = db.connect()
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        ideas = db.kv_get("factory.ideas", []) or []
+        if ideas:
+            idea = ideas.pop(0)
+            con.execute("UPDATE kv SET value=? WHERE key='factory.ideas'",
+                        (json.dumps(ideas, ensure_ascii=False),))
+        con.commit()
+    except sqlite3.Error:
+        # solo fallos de BD hacen rollback aquí; otros bugs propagan sin
+        # rollback (SQLite descarta la tx no confirmada al cerrar conexión)
+        con.rollback()
+        raise
+    finally:
+        con.close()
     return idea
 
 
@@ -112,21 +132,37 @@ async def invent_idea(niche: str) -> str | None:
         return None
 
 
-# ── scheduler ─────────────────────────────────────────────────────────────
+# ── scheduler ─────────────────────────────────────────────────
 _scheduler = None
+
+
+def _configure(sched, cfg: dict) -> None:
+    """[C8 · P2.5] timezone ANTES de los triggers + anti-tempestad:
+    coalesce=True (retrasos acumulados → UN ciclo, no N),
+    max_instances=1 (un ciclo largo no se solapa consigo mismo),
+    misfire_grace_time=300 (arranque tardío ≤5 min sigue corriendo)."""
+    from apscheduler.triggers.cron import CronTrigger
+    tz = cfg.get("timezone") or FACTORY_TIMEZONE
+    for t in cfg["times"]:
+        try:
+            hh, mm = t.split(":")
+            sched.add_job(
+                _scheduled_tick,
+                CronTrigger(hour=int(hh), minute=int(mm), timezone=tz),
+                id=f"factory-{t}", replace_existing=True,
+                coalesce=True, max_instances=1, misfire_grace_time=300)
+        except ValueError:
+            log.warning("hora de fábrica inválida: %s", t)
 
 
 def _get_scheduler():
     global _scheduler
     if _scheduler is None:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
-        from apscheduler.triggers.cron import CronTrigger
-        _scheduler = AsyncIOScheduler()
-        for t in get_config()["times"]:
-            hh, mm = t.split(":")
-            _scheduler.add_job(
-                _scheduled_tick, CronTrigger(hour=int(hh), minute=int(mm)),
-                id=f"factory-{t}", replace_existing=True)
+        cfg = get_config()
+        _scheduler = AsyncIOScheduler(timezone=cfg.get("timezone")
+                                      or FACTORY_TIMEZONE)
+        _configure(_scheduler, cfg)
     return _scheduler
 
 
@@ -142,23 +178,26 @@ async def _scheduled_tick():
 
 def reschedule() -> None:
     """Relee configuración (horas) y reprograma los triggers."""
-    global _scheduler
-    if _scheduler is not None:
-        _scheduler.remove_all_jobs()
     sched = _get_scheduler()
-    from apscheduler.triggers.cron import CronTrigger
-    for t in get_config()["times"]:
-        try:
-            hh, mm = t.split(":")
-            sched.add_job(_scheduled_tick, CronTrigger(hour=int(hh), minute=int(mm)),
-                          id=f"factory-{t}", replace_existing=True)
-        except ValueError:
-            log.warning("hora de fábrica inválida: %s", t)
+    sched.remove_all_jobs()
+    _configure(sched, get_config())
     if not sched.running:
-        sched.configure(timezone=get_config().get("timezone") or FACTORY_TIMEZONE)
         sched.start()
         log.info("Fábrica programada en %s (tz %s)", get_config()["times"],
                  get_config().get("timezone"))
+
+
+def arrancar() -> dict:
+    """[C8 · P2.5] arranque del scheduler desde lifespan. Idempotente:
+    llamadas repetidas no duplican triggers (replace_existing + guard).
+    Antes el scheduler SOLO arrancaba al guardar Ajustes → una máquina
+    recién instalada jamás generaba los vídeos/día programados."""
+    sched = _get_scheduler()
+    if not sched.running:
+        sched.start()
+        log.info("Fábrica programada en %s (tz %s)", get_config()["times"],
+                 get_config().get("timezone"))
+    return status()
 
 
 def status() -> dict:

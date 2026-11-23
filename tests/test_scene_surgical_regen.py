@@ -52,13 +52,22 @@ class FakeManager:
 
     async def execute(self, target, tool, args, timeout=None, notebook_id=None):
         self.calls.append((target, tool, args))
+        # D2 (calentamiento CDP) y todos los tools: el manager real devuelve
+        # "ok": True en las respuestas — el doble debe reflejarlo o la
+        # corrutina _stage3 corta con FLOW_CDP_SLOW antes de despachar.
         if tool == "flow_generate_image":
-            return {"text": f"Saved image to /tmp/fake_flow_{len(self.calls)}.png"}
+            path = str(Path(tempfile.gettempdir()) / f"fake_flow_{len(self.calls)}.png")
+            Path(path).write_bytes(b"fake png")  # A13/P1.6: el tool REAL deja el archivo en disco
+            return {"ok": True, "text": f"Saved image to {path}"}
         if tool == "flow_generate_video":
-            return {"text": f"Saved video to /tmp/fake_flow_{len(self.calls)}.mp4"}
+            path = str(Path(tempfile.gettempdir()) / f"fake_flow_{len(self.calls)}.mp4")
+            Path(path).write_bytes(b"fake mp4")  # A13/P1.6: _stage3 exige video_file en disco
+            return {"ok": True, "text": f"Saved video to {path}"}
         if tool == "flow_upload_file":
-            return {"text": "Uploaded asset fake_asset"}
-        return {"text": "ok"}
+            return {"ok": True, "text": "Uploaded asset fake_asset"}
+        if tool == "flow_list_assets":
+            return {"ok": True, "text": "[]"}
+        return {"ok": True, "text": "ok"}
 
 
 def _setup_test_run(orch: po.PipelineOrchestrator) -> str:

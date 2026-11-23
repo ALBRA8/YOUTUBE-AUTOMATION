@@ -35,6 +35,9 @@ const BRIDGE_CFG = {
   workerId: '',
 };
 const BRIDGE_CFG_KEY = 'flow_bridge_cfg_v1';            // clave en chrome.storage.local
+const BRIDGE_APIKEY_SESSKEY = 'flow_bridge_aesk_v1';    // clave AES-GCM en chrome.storage.session (SOLO memoria, jamás disco)
+const BRIDGE_APIKEY_ENC_PREFIX = 'enc:v1:';             // apiKey cifrada en storage.local: enc:v1:<iv>:<ct> (base64url)
+const BRIDGE_ACTIVE_KEY = 'flow_bridge_active_v1';       // [A15 · P3.3] job activo persistido (id/token/claimedAt)
 const BRIDGE_API_BASE = '/api/extension/flow/jobs';     // raíz común del contrato
 const BRIDGE_HEARTBEAT_MS = 30000;                      // latido mientras hay job activo
 const BRIDGE_KEEPALIVE_ALARM = 'flow-bridge-keepalive'; // reactiva el bucle tras suspensión MV3
@@ -48,107 +51,10 @@ self.__bridgeCfg = null;      // cache de configuración
 self.__bridgeLastResult = null;
 self.__bridgeLog = [];        // últimas líneas, visibles vía BRIDGE_STATUS
 
-/* ------------------------ Outbox Buffer & JSON-RPC Transport State -------- */
-const BRIDGE_PING_INTERVAL_MS = 5000;
-self.__bridgeOutbox = [];
-self.__bridgeSocketState = 'CLOSED'; // 'CLOSED' | 'CONNECTING' | 'OPEN'
-let __bridgePingTimer = null;
-let __bridgeLastPong = Date.now();
-
-function bridgeSafeJsonRpcSerialize(id, result, error) {
-  try {
-    const payload = { jsonrpc: '2.0', id: id !== undefined ? id : null };
-    if (error) {
-      payload.error = typeof error === 'object' && error !== null ? error : { code: -32603, message: String(error) };
-    } else {
-      payload.result = result !== undefined ? result : null;
-    }
-    return JSON.stringify(payload);
-  } catch (err) {
-    bridgeLog('Error serializando respuesta JSON-RPC: ' + (err && err.message));
-    return JSON.stringify({
-      jsonrpc: '2.0',
-      id: null,
-      error: { code: -32603, message: 'Internal JSON-RPC serialization error' }
-    });
-  }
-}
-
-function bridgeSafeJsonRpcParse(raw) {
-  try {
-    return { ok: true, data: typeof raw === 'string' ? JSON.parse(raw) : raw };
-  } catch (err) {
-    bridgeLog('Error parseando JSON-RPC: ' + (err && err.message));
-    return {
-      ok: false,
-      error: { code: -32700, message: 'Parse error: invalid JSON' }
-    };
-  }
-}
-
-function bridgeEnqueueOutbox(msg) {
-  if (self.__bridgeSocketState === 'OPEN') {
-    return { queued: false, sent: true };
-  }
-  self.__bridgeOutbox.push(msg);
-  bridgeLog('Mensaje almacenado en outbox (estado ' + self.__bridgeSocketState + '). En cola: ' + self.__bridgeOutbox.length);
-  return { queued: true, queueLength: self.__bridgeOutbox.length };
-}
-
-function bridgeFlushOutbox() {
-  if (self.__bridgeSocketState !== 'OPEN' || self.__bridgeOutbox.length === 0) return 0;
-  const count = self.__bridgeOutbox.length;
-  self.__bridgeOutbox = [];
-  bridgeLog('Outbox vaciado exitosamente (' + count + ' mensajes procesados)');
-  return count;
-}
-
-function bridgeSetSocketState(state) {
-  self.__bridgeSocketState = state;
-  if (state === 'OPEN') {
-    bridgeFlushOutbox();
-  }
-}
-
-function bridgeStartPingPong() {
-  if (__bridgePingTimer) clearInterval(__bridgePingTimer);
-  __bridgeLastPong = Date.now();
-  __bridgePingTimer = setInterval(async () => {
-    try {
-      const cfg = await bridgeEnsureCfg();
-      if (!cfg.enabled) return;
-      const res = await bridgeFetch(
-        bridgeUrl(cfg, '/ping?worker=' + encodeURIComponent(cfg.workerId || '')),
-        { method: 'GET' },
-        3000
-      );
-      if (res && res.ok) {
-        __bridgeLastPong = Date.now();
-        bridgeSetSocketState('OPEN');
-      } else {
-        if (Date.now() - __bridgeLastPong > 10000) {
-          bridgeLog('Heartbeat 5s perdido: forzando reconexión limpia');
-          bridgeSetSocketState('CLOSED');
-          __bridgeLastPong = Date.now();
-        }
-      }
-    } catch (_) {
-      if (Date.now() - __bridgeLastPong > 10000) {
-        bridgeLog('Conexión muerta detectada: reconexión automática');
-        bridgeSetSocketState('CLOSED');
-      }
-    }
-  }, BRIDGE_PING_INTERVAL_MS);
-}
-
-function bridgeStopPingPong() {
-  if (__bridgePingTimer) {
-    clearInterval(__bridgePingTimer);
-    __bridgePingTimer = null;
-  }
-}
-
-
+/* [A15 · P3.5] transporte muerto ELIMINADO (0 llamadores verificados:
+ * bridgeStartPingPong/bridgeStopPingPong/__bridgeOutbox/__bridgeSocketState
+ * + helpers JSON-RPC sin uso). Eran un ping HTTP cada 5 s que nadie
+ * consumía: latidos de red gratis y superficie de ataque de más. */
 function bridgeLog(msg) {
   const line = new Date().toISOString().slice(11, 19) + ' ' + String(msg);
   self.__bridgeLog.push(line);
@@ -168,6 +74,96 @@ function bridgeActiveSummary() {
 /* ----------------------------- Configuración ------------------------------ */
 /* BRIDGE_CFG se guarda en chrome.storage.local bajo flow_bridge_cfg_v1.
    workerId se genera UNA vez (w-<8hex>) y se persiste. */
+
+/* ── [AUDITORÍA 2026-11] apiKey CIFRADA AES-256-GCM ──────────────────────────
+   La apiKey (X-API-Key contra el backend) ANTES vivía EN CLARO en
+   chrome.storage.local: cualquier lector del perfil (otra persona en el
+   equipo, malware con acceso a disco, un backup) obtenía la credencial.
+   Ahora storage.local guarda SOLO ciphertext ('enc:v1:<iv>:<ct>', base64url)
+   y la clave AES-GCM vive en chrome.storage.session — memoria del navegador
+   que MV3 nunca escribe a disco y se borra al cerrar Chrome. Si el entorno
+   no ofrece cripto o storage.session se degrada HONESTAMENTE: la apiKey
+   queda solo en memoria volátil (se pide de nuevo tras reiniciar el SW) o,
+   como último recurso, legacy en claro CON aviso en el log. */
+function bridgeB64FromBytes(bytes) {
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function bridgeBytesFromB64(s) {
+  const b64 = String(s || '').replace(/-/g, '+').replace(/_/g, '/');
+  const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+  const bin = atob(b64 + pad);
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
+
+async function bridgeAesKey() {
+  /* Clave AES-GCM de la apiKey: 1) cache de módulo, 2) storage.session
+     (persiste entre reinicios del SW, muere al cerrar el navegador),
+     3) generarla NON-extractable y guardarla. null si no hay crypto. */
+  if (self.__bridgeAesKey) return self.__bridgeAesKey;
+  if (!(typeof crypto !== 'undefined' && crypto.subtle && crypto.getRandomValues)) return null;
+  try {
+    const o = await chrome.storage.session.get(BRIDGE_APIKEY_SESSKEY);
+    if (o && o[BRIDGE_APIKEY_SESSKEY]) {
+      self.__bridgeAesKey = o[BRIDGE_APIKEY_SESSKEY];
+      return self.__bridgeAesKey;
+    }
+  } catch (_) { /* storage.session no disponible: solo memoria */ }
+  const key = await crypto.subtle.generateKey(
+    { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  self.__bridgeAesKey = key;
+  try { await chrome.storage.session.set({ [BRIDGE_APIKEY_SESSKEY]: key }); } catch (_) {}
+  return key;
+}
+
+async function bridgeEncryptApiKey(plain) {
+  const key = await bridgeAesKey();
+  if (!key) return null; // sin cripto disponible: no se puede cifrar
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv }, key, new TextEncoder().encode(String(plain)));
+  return BRIDGE_APIKEY_ENC_PREFIX + bridgeB64FromBytes(iv) + ':'
+    + bridgeB64FromBytes(new Uint8Array(ct));
+}
+
+async function bridgeDecryptApiKey(stored) {
+  const raw = String(stored == null ? '' : stored);
+  if (!raw.startsWith(BRIDGE_APIKEY_ENC_PREFIX)) return raw; // legado en claro (migración)
+  const partes = raw.slice(BRIDGE_APIKEY_ENC_PREFIX.length).split(':');
+  if (partes.length !== 2 || !partes[0] || !partes[1]) return ''; // formato corrupto
+  try {
+    const key = await bridgeAesKey();
+    if (!key) return ''; // clave perdida (memoria/session muertos) → pedir de nuevo
+    const pt = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: bridgeBytesFromB64(partes[0]) },
+      key, bridgeBytesFromB64(partes[1]));
+    return new TextDecoder().decode(pt);
+  } catch (_) {
+    return ''; // ciphertext alterado o clave distinta: vacío, jamás basura
+  }
+}
+
+async function bridgePersistableCfg(cfg) {
+  /* Versión SEGURA para disco: sin apiKey en claro; apiKeyEnc con IV fresco
+     en cada guardado. Fallback explícito (sin crypto): legacy en claro + log. */
+  const persist = Object.assign({}, cfg);
+  delete persist.apiKey;
+  if (cfg.apiKey) {
+    const enc = await bridgeEncryptApiKey(cfg.apiKey);
+    if (enc) {
+      persist.apiKeyEnc = enc;
+    } else {
+      persist.apiKey = cfg.apiKey; // último recurso: storage sin crypto.subtle
+      bridgeLog('AVISO: no hay crypto.subtle — apiKey guardada EN CLARO (fallback)');
+    }
+  } else {
+    delete persist.apiKeyEnc;
+  }
+  return persist;
+}
+
 async function bridgeEnsureCfg() {
   if (self.__bridgeCfg) return self.__bridgeCfg;
   let stored = null;
@@ -175,15 +171,17 @@ async function bridgeEnsureCfg() {
     const o = await chrome.storage.local.get(BRIDGE_CFG_KEY);
     stored = o && o[BRIDGE_CFG_KEY];
   } catch (_) { /* storage no disponible: usa defaults */ }
-  const cfg = Object.assign({}, BRIDGE_CFG, (stored && typeof stored === 'object') ? stored : {});
+  const raw = (stored && typeof stored === 'object') ? stored : {};
+  const cfg = Object.assign({}, BRIDGE_CFG, raw);
   cfg.baseUrl = bridgeNormalizeBaseUrl(cfg.baseUrl);
-  cfg.apiKey = String(cfg.apiKey || '');
+  cfg.apiKey = await bridgeDecryptApiKey(
+    raw.apiKeyEnc != null ? raw.apiKeyEnc : raw.apiKey); // descifra; legacy pasa tal cual
   cfg.pollIntervalMs = bridgeClampPoll(cfg.pollIntervalMs);
   cfg.enabled = !!cfg.enabled;
   if (!/^w-[0-9a-f]{8}$/.test(String(cfg.workerId || ''))) {
     const bytes = crypto.getRandomValues(new Uint8Array(4));
     cfg.workerId = 'w-' + Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
-    try { await chrome.storage.local.set({ [BRIDGE_CFG_KEY]: cfg }); } catch (_) {}
+    try { await chrome.storage.local.set({ [BRIDGE_CFG_KEY]: await bridgePersistableCfg(cfg) }); } catch (_) {}
   }
   self.__bridgeCfg = cfg;
   return cfg;
@@ -198,12 +196,13 @@ async function bridgeSetCfg(partial) {
   next.enabled = !!next.enabled;
   if (!/^w-[0-9a-f]{8}$/.test(String(next.workerId || ''))) next.workerId = cur.workerId; // nunca regenerar por accidente
   try {
-    await chrome.storage.local.set({ [BRIDGE_CFG_KEY]: next });
+    await chrome.storage.local.set({ [BRIDGE_CFG_KEY]: await bridgePersistableCfg(next) });
   } catch (e) {
     throw new Error('no se pudo guardar la configuración del bridge: ' + String((e && e.message) || e));
   }
   self.__bridgeCfg = next;
-  bridgeLog('cfg guardada: ' + next.baseUrl + ' enabled=' + next.enabled);
+  bridgeLog('cfg guardada: ' + next.baseUrl + ' enabled=' + next.enabled
+    + (next.apiKey ? ' apiKey=cifrada(AES-GCM)' : ' sin apiKey'));
   return next;
 }
 
@@ -262,6 +261,14 @@ async function bridgeClaimNext() {
     BRIDGE_HTTP_TIMEOUT_MS
   );
   if (res.status === 204) return null;
+  /* [A15 · P3.3] sin apiKey válida NO hay bucle de 401: se desactiva el
+   * bridge (enabled=false persistido) y se avisa al popup UNA vez. Antes,
+   * enabled=true con apiKey vacía/invalidada significaba claim→401→sleep
+   * →claim→401 para siempre, cada pollIntervalMs. */
+  if (res.status === 401) {
+    await bridgeDisablePorAuth('HTTP 401 del claim: apiKey ausente o inválida — puente desactivado');
+    return null;
+  }
   if (!res.ok) throw new Error(await bridgeHttpError(res));
   const data = await res.json();
   if (!data || !data.ok || !data.job) return null;
@@ -456,6 +463,40 @@ function bridgeRunJob(job) {
   });
 }
 
+/* [A15 · P3.3] desactivación por auth: enabled=false persistido + aviso al
+ * popup (el popup muestra el mensaje en el estado del bridge). */
+async function bridgeDisablePorAuth(motivo) {
+  bridgeLog(motivo);
+  try {
+    const cfg = await bridgeEnsureCfg();
+    cfg.enabled = false;
+    self.__bridgeCfg = cfg;
+    await chrome.storage.local.set({ [BRIDGE_CFG_KEY]:
+      await bridgePersistableCfg(cfg) });
+    try { chrome.runtime.sendMessage({ type: 'BRIDGE_AUTH_DISABLED',
+      error: String(motivo).slice(0, 200) }).catch(() => {}); } catch (_) {}
+  } catch (_) { /* jamás tumba el bucle por un fallo de notificación */ }
+}
+
+/* [A15 · P3.3] al despertar el SW: si había un job ACTIVO persistido, se
+ * FALLA limpio (el backend reencola por attempts; 409 si ya estaba
+ * resuelto o reclamado por otro). NUNCA se re-adopta en memoria: el blob
+ * se perdió con el SW. */
+async function bridgeRecuperarJobActivo() {
+  try {
+    const o = await chrome.storage.local.get(BRIDGE_ACTIVE_KEY);
+    const act = o && o[BRIDGE_ACTIVE_KEY];
+    if (!act || !act.id) return;
+    await chrome.storage.local.remove(BRIDGE_ACTIVE_KEY);
+    bridgeLog('SW reiniciado con job en curso (' + act.id + ') → fail limpio '
+      + '(el backend reencola; lease alternativa: expira por sí sola)');
+    try {
+      await bridgeFail({ id: act.id, job_token: act.job_token },
+        'service worker reiniciado a mitad del job (asset no descargado)');
+    } catch (_) { /* 409 esperable si ya estaba resuelto */ }
+  } catch (_) { /* la recuperación jamás bloquea el arranque */ }
+}
+
 /* ------------------------------- Bucle worker ------------------------------ */
 /* Un tick = claim → (delegar + heartbeat) → complete | fail. Si ya hay un job
    en curso (self.__bridgeActive) NO reclama otro. Los errores de red nunca
@@ -472,6 +513,17 @@ async function bridgeTick() {
   if (!claimed || !claimed.job) return; // 204: nada que hacer
   const job = claimed.job;
   self.__bridgeActive = job; // marca en memoria mientras esté en curso
+  /* [A15 · P3.3] el job ACTIVO se persiste (id+token+claimedAt): si el SW
+   * muere a mitad de job, el siguiente despertar puede FALLARLO limpio
+   * (bridgeFail → attempts+1, backend reencola) en vez de esperar el ciclo
+   * de lease zombie. 409 harmless si ya terminó/otro worker lo recuperó. */
+  try {
+    await chrome.storage.local.set({ [BRIDGE_ACTIVE_KEY]: {
+      id: job.id, job_token: job.job_token || '', kind: job.kind,
+      scene_number: job.scene_number, project_id: job.project_id || '',
+      claimedAt: Date.now(),
+    } });
+  } catch (_) {}
   bridgeLog('job reclamado ' + job.id + ' (escena ' + job.scene_number + ' ' + job.kind + ')');
   try {
     const res = await bridgeRunJob(job);
@@ -511,6 +563,7 @@ async function bridgeTick() {
     try { await bridgeFail(job, err); } catch (_) {}
   } finally {
     self.__bridgeActive = null; // SIEMPRE liberar, con o sin éxito
+    try { await chrome.storage.local.remove(BRIDGE_ACTIVE_KEY); } catch (_) {}
   }
 }
 
@@ -542,16 +595,48 @@ async function bridgeLoop() {
 /* ------------------- Mensajes internos del bridge (popup) ------------------ */
 /* Listener propio de bridge.js (registrado ANTES del router de background.js
    porque importScripts corre arriba). Los BRIDGE_* que aquí no se atienden los
-   gestiona background.js (BRIDGE_JOB); el resto de mensajes no se tocan. */
+   gestiona background.js (BRIDGE_JOB); el resto de mensajes no se tocan.
+   [A15 · P3.4] ORIGEN Y ESQUEMA validados:
+     · sender.id DEBE ser el propio runtime.id (mensajes forjados mueren);
+     · BRIDGE_GET_CFG/BRIDGE_STATUS SOLO devuelven la apiKey DESENCRYPTADA al
+       POPUP de la extensión (sender.url termina en /popup.html): desde
+       cualquier otro contexto la apiKey va MASCARADA (apiKeySet=true) — un
+       content script de flow.google.com jamás lee la credencial;
+     · BRIDGE_SET_CFG SOLO desde el popup (evita que un content script
+       apunte el bridge a un backend suyo o lo active). */
+function __bridgeSenderEsPopup(sender) {
+  return !!(sender && sender.id === chrome.runtime.id
+            && !sender.tab
+            && String(sender.url || '').endsWith('/popup.html'));
+}
+function __bridgeCfgEnmascarada(cfg) {
+  const c = Object.assign({}, cfg);
+  c.apiKey = '';
+  c.apiKeySet = !!(cfg && cfg.apiKey);
+  return c;
+}
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const type = msg && msg.type;
   if (type !== 'BRIDGE_GET_CFG' && type !== 'BRIDGE_SET_CFG' && type !== 'BRIDGE_STATUS') {
     return false; // no es del bridge: lo atienden los listeners existentes
   }
   try {
+    if (!msg || typeof msg.type !== 'string'
+        || !(sender && sender.id === chrome.runtime.id)) {
+      sendResponse({ ok: false, error: 'mensaje bridge rechazado (origen/esquema)' });
+      return false;
+    }
+    const esPopup = __bridgeSenderEsPopup(sender);
+    if ((type === 'BRIDGE_SET_CFG') && !esPopup) {
+      sendResponse({ ok: false, error: 'BRIDGE_SET_CFG solo desde el popup de la extensión' });
+      return false;
+    }
     if (type === 'BRIDGE_GET_CFG') {
       bridgeEnsureCfg()
-        .then((cfg) => sendResponse({ ok: true, cfg, running: !!self.__bridgeRunning, active: bridgeActiveSummary() }))
+        .then((cfg) => sendResponse({
+          ok: true,
+          cfg: esPopup ? cfg : __bridgeCfgEnmascarada(cfg), // [P3.4] apiKey fuera del popup: enmascarada
+          running: !!self.__bridgeRunning, active: bridgeActiveSummary() }))
         .catch((e) => sendResponse({ ok: false, error: String((e && e.message) || e) }));
       return true; // respuesta asíncrona
     }
@@ -571,7 +656,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const cfg = await bridgeEnsureCfg();
       return {
         ok: true,
-        cfg,
+        cfg: esPopup ? cfg : __bridgeCfgEnmascarada(cfg), // [P3.4]
         running: !!self.__bridgeRunning,
         active: bridgeActiveSummary(),
         lastResult: self.__bridgeLastResult,
@@ -596,7 +681,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }).catch(() => {});
 });
 
-/* Arranque: al despertar el SW, si el puente estaba activado se reanuda. */
-bridgeEnsureCfg().then((cfg) => {
+/* Arranque: al despertar el SW, se recupera (fail limpio) el job activo
+   persistido y, si el puente estaba activado, se reanuda. */
+bridgeRecuperarJobActivo().then(() => bridgeEnsureCfg()).then((cfg) => {
   if (cfg.enabled) bridgeLoop();
 }).catch(() => {});

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Waiter del lanzador dev (start.bat / start.sh) — ALBRA.
+Waiter del lanzador dev (launchers/start.bat / launchers/start.sh) — ALBRA.
 Espera a que /api/health responda y abre el dashboard en el navegador.
 
 Se ejecuta en un proceso APARTE (ventana minimizada en Windows), por lo que

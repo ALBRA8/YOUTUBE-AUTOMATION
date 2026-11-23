@@ -26,6 +26,13 @@ const RATE_LIMIT_COOLDOWN_MS = 90000; // pausa ante "too quickly"
 const POLL_INTERVAL_MS = 3000;     // sondeo DOM
 const KEEPALIVE_ALARM = 'flow-keepalive';
 const SESSION_KEY = 'flow_ext_state_v2';
+/* [C6/C7 · P3.1/P3.2] espejo PERSISTENTE de la cola en storage.local:
+ * storage.session muere con el navegador, así que el lote nocturno se
+ * perdía al reiniciar Chrome. El espejo solo contiene trabajo (queue),
+ * NUNCA running=true (un Chrome recién arrancado no tiene pestaña viva:
+ * el operador re-anuda con Iniciar; el backend recupera los leases). */
+const LOCAL_MIRROR_KEY = 'flow_ext_mirror_v1';
+let __hydrated = false; // [C6 · P3.1] el evento de watchdog ANTES de hidratar se difiere
 const MAX_PROMPT_MATCH_LEN = 80;
 
 /* --- Fase 1 (hardening): watchdog + reintentos + worker tab (patrones
@@ -166,6 +173,15 @@ function serializeState() {
 function persistState() {
   try {
     chrome.storage.session.set({ [SESSION_KEY]: serializeState() }).catch(() => {});
+    /* [C7 · P3.2] espejo en storage.local (sobrevive al reinicio del
+     * navegador): solo el TRABAJO, jamás running (ver LOCAL_MIRROR_KEY). */
+    const o = serializeState();
+    chrome.storage.local.set({ [LOCAL_MIRROR_KEY]: {
+      queue: Array.isArray(o.queue) ? o.queue : [],
+      mode: o.mode, imagesPerScene: o.imagesPerScene,
+      fallbackRoot: o.fallbackRoot, provider: o.provider,
+      savedAt: Date.now(),
+    } }).catch(() => {});
   } catch (_) { /* silencioso */ }
 }
 
@@ -205,6 +221,10 @@ async function loadState() {
     if (queue.some((i) => i.status === STATUS.RATE_LIMITED) && !rateLimitRestoreTimer) {
       armRateLimitRestore();
     }
+    /* [C6 · P3.1] re-armar el watchdog SIEMPRE al hidratar — con o sin
+     * running: si el SW murió con escenas IN_PROGRESS, el alarm debe existir
+     * al despertar (antes quedaba desarmado hasta el próximo tick). */
+    rearmWatchdog();
     if (running) {
       startPollingIfNeeded();
       ensureKeepalive();
@@ -216,9 +236,24 @@ async function loadState() {
       tickSoon(1000);
     }
   } catch (_) { /* primera ejecucion */ }
+  finally { __hydrated = true; } // [C6 · P3.1] el watchdog ya puede juzgar
 }
 
-chrome.runtime.onStartup.addListener(() => { loadState(); });
+chrome.runtime.onStartup.addListener(async () => {
+  /* [C7 · P3.2] al arrancar Chrome, storage.session está vacío: la cola se
+   * restaura desde el ESPEJO en storage.local con running=false (no hay
+   * pestaña viva que continuar; el operador re-lanza con Iniciar y el
+   * backend recupera por lease los jobs que estaban en vuelo). */
+  try {
+    const o = await chrome.storage.local.get(LOCAL_MIRROR_KEY);
+    const m = o && o[LOCAL_MIRROR_KEY];
+    if (m && Array.isArray(m.queue) && m.queue.length) {
+      hydrateState({ ...m, running: false });
+      persistState();
+    }
+  } catch (_) { /* sin espejo: primera instalación */ }
+  loadState();
+});
 chrome.runtime.onInstalled.addListener(() => { loadState(); });
 loadState(); // cada despertar del Service Worker
 
@@ -1567,7 +1602,10 @@ function watchdogBudgetMs() {
 
 function rearmWatchdog() {
   try { chrome.alarms.clear(SCENE_WATCHDOG_ALARM).catch(() => {}); } catch (_) {}
-  if (!running) return;
+  /* [C6 · P3.1] SIN guard de running: el re-arme depende de la cola (items
+   * IN_PROGRESS con startedAt), no del flag. Antes, hidratar con running=false
+   * dejaba el watchdog DESARMADO aunque hubiera escenas en vuelo. */
+  if (!__hydrated) return;
   const budget = watchdogBudgetMs();
   const now = Date.now();
   let earliest = Infinity;
@@ -1584,7 +1622,15 @@ function rearmWatchdog() {
 }
 
 function watchdogCheck() {
-  if (!running) return;
+  /* [C6 · P3.1] el SW MV3 puede DESPERTAR directamente por el alarm, ANTES
+   * de que loadState hidrate la cola: un check sobre cola vacía consumiría
+   * el evento y el watchdog quedaría mudo para siempre. Si aún no hay
+   * hidratación, se difiere el evento 30 s (se re-programa, no se pierde). */
+  if (!__hydrated) {
+    try { chrome.alarms.create(SCENE_WATCHDOG_ALARM, { delayInMinutes: 0.5 }); } catch (_) {}
+    return;
+  }
+  if (!running) { rearmWatchdog(); return; }
   const budget = watchdogBudgetMs();
   const now = Date.now();
   let expired = false;
@@ -2257,9 +2303,34 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 /* --------------------------- Router de mensajes --------------------------- */
+/* [A15 · P3.4] validación de ORIGEN de mensajes:
+ *  · todo mensaje debe venir del PROPIO extension ID (sender.id === runtime.id)
+ *    y llevar un type string — mensajes forjados desde otras extensiones
+ *    (externally_connectable) mueren aquí;
+ *  · los mensajes de EVIDENCIA (FLOW_* y META_*) vienen de content scripts
+ *    (sender.tab presente) → permitidos;
+ *  · los de CONTROL (cola/bridge/reset) SOLO desde contextos de la propia
+ *    extensión SIN pestaña (popup/página de opciones) — un script de
+ *    flow.google.com jamás puede iniciar/parar la cola. */
+function __senderOk(sender) {
+  return !!(sender && sender.id === chrome.runtime.id
+            && (typeof sender.id === 'string' && sender.id.length >= 32));
+}
+function __senderEsExtension(sender) {
+  return __senderOk(sender) && !sender.tab;
+}
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   try {
-    switch (msg && msg.type) {
+    if (!__senderOk(sender) || !msg || typeof msg.type !== 'string') {
+      sendResponse({ ok: false, error: 'mensaje rechazado (origen/esquema inválido)' });
+      return false;
+    }
+    const CONTROL_TYPES = new Set(['START_QUEUE', 'STOP_QUEUE', 'RESET', 'RETRY_SCENE', 'GET_STATE']);
+    if (CONTROL_TYPES.has(msg.type) && !__senderEsExtension(sender)) {
+      sendResponse({ ok: false, error: 'control de cola solo desde la extensión (popup)' });
+      return false;
+    }
+    switch (msg.type) {
       case 'BATCH_DETECTED':
         handleBatchResponse(msg.data);
         sendResponse({ ok: true });

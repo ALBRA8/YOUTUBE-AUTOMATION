@@ -150,14 +150,14 @@ function renderQuickCreateModal() {
 
         ${inputField}
 
-        <!-- INT-091 · libre elección de carpeta destino (diálogo nativo Windows) -->
+        <!-- INT-091 · libre elección de carpeta destino (diálogo nativo de Windows) -->
         <div class="field" style="margin-bottom:14px;">
-          <label style="font-size:13px; font-weight:700; margin-bottom:6px; display:block;">📂 Carpeta de destino en tu PC <small style="color:var(--muted); font-weight:400;">(opcional — vacío = carpeta estándar del servidor)</small></label>
+          <label style="font-size:13px; font-weight:700; margin-bottom:6px; display:block;">📂 Carpeta donde guardarás este video en tu PC <small style="color:var(--muted); font-weight:400;">(tú decides la ubicación exacta)</small></label>
           <div style="display:flex; gap:8px; align-items:center;">
-            <input type="text" id="qc-destino" readonly value="${esc(QC_STATE.destino || '')}" placeholder="D:\\PROYECTOS\\FRUTINOVELAS\\Mi_Video" style="flex:1; border-radius:10px; padding:10px; font-size:12px; color:var(--muted);">
-            <button type="button" class="btn" style="padding:10px 14px; font-size:12px; white-space:nowrap;" onclick="qcPickDestino()" title="Abre el diálogo nativo de Windows para elegir la carpeta exacta">🔍 Examinar en mi PC</button>
+            <input type="text" id="qc-destino" value="${esc(QC_STATE.destino || '')}" oninput="QC_STATE.destino=this.value.trim()" placeholder="Haz clic en Examinar o escribe la ruta donde guardarás este video..." style="flex:1; border-radius:10px; padding:10px; font-size:12px; color:var(--text); background:var(--bg); border:1px solid var(--border);">
+            <button type="button" class="btn" style="padding:10px 16px; font-size:12px; white-space:nowrap; background:#4f46e5; color:#fff;" onclick="qcPickDestino()" title="Abre el explorador de tu computador">🔍 Examinar en mi PC</button>
           </div>
-          <small style="color:var(--muted); display:block; margin-top:5px;">marca.json, guion/ y out/ nacen DIRECTAMENTE en la carpeta que elijas (INT-091).</small>
+          <small style="color:var(--muted); display:block; margin-top:5px;">El proyecto se creará y guardará todos sus archivos en la carpeta que elijas en tu explorador.</small>
         </div>
 
         <!-- INT-092: grid mínimo — SOLO Formato + Voz (la barra de Perfil
@@ -315,8 +315,42 @@ async function pickDestinoFolder() {
 }
 
 async function qcPickDestino() {
-  const p = await pickDestinoFolder();
-  if (p) { QC_STATE.destino = p; renderQuickCreateModal(); }
+  const btn = document.querySelector('button[onclick="qcPickDestino()"]');
+  const inp = document.getElementById('qc-destino');
+  const original = btn ? btn.innerHTML : '🔍 Examinar en mi PC';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Abriendo...'; }
+  try {
+    // Patrón 100% probado de la Extensión (popup.js vincularProyecto):
+    // Chrome abre la ventana nativa de Windows en primer plano de inmediato.
+    if ('showDirectoryPicker' in window) {
+      try {
+        const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+        if (handle && handle.name) {
+          toast('Carpeta elegida: ' + handle.name, 'info');
+          const r = await api('/dialog/resolve-folder-path?name=' + encodeURIComponent(handle.name));
+          const fullPath = (r && r.path) ? r.path : handle.name;
+          QC_STATE.destino = fullPath;
+          if (inp) inp.value = fullPath;
+          toast('📂 Carpeta asignada: ' + fullPath, 'ok');
+          return;
+        }
+      } catch (err) {
+        if (err && err.name === 'AbortError') {
+          // El usuario simplemente cerró la ventana sin elegir
+          return;
+        }
+        console.warn('showDirectoryPicker:', err);
+      }
+    }
+    // Fallback: Diálogo del servidor
+    const p = await pickDestinoFolder();
+    if (p) {
+      QC_STATE.destino = p;
+      if (inp) inp.value = p;
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = original; }
+  }
 }
 
 window.openQuickCreateModal = openQuickCreateModal;
@@ -1292,3 +1326,90 @@ async function generateABVariantsModal(prodName) {
 }
 
 
+
+
+let currentBrowsePath = '';
+
+async function toggleFolderBrowser() {
+  const panel = document.getElementById('qc-browser-panel');
+  if (!panel) return;
+  if (panel.style.display === 'none') {
+    panel.style.display = 'block';
+    loadBrowseDir(QC_STATE.destino || 'D:\\PROYECTOS\\CANALES DE YOUTUBE Y TIKTOK\\NICHOS');
+  } else {
+    panel.style.display = 'none';
+  }
+}
+
+async function loadBrowseDir(path = '') {
+  const pathLabel = document.getElementById('qc-browser-path');
+  const listEl = document.getElementById('qc-browser-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<div style="font-size:11px; color:var(--muted); padding:8px;">Cargando carpetas...</div>';
+  try {
+    const res = await api('/dialog/browse-dirs?path=' + encodeURIComponent(path));
+    if (!res.ok && res.error) {
+      return loadBrowseDir('');
+    }
+    currentBrowsePath = res.current || '';
+    if (pathLabel) pathLabel.textContent = currentBrowsePath || 'Este equipo (unidades de disco)';
+    if (!res.dirs || res.dirs.length === 0) {
+      listEl.innerHTML = '<div style="font-size:11px; color:var(--muted); padding:8px;">(Carpeta vacía)</div>';
+      return;
+    }
+    listEl.innerHTML = res.dirs.map(d => `
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:5px 8px; border-radius:6px; cursor:pointer; background:var(--bg); border:1px solid var(--border);" onclick="loadBrowseDir('${d.path.replace(/\\/g, '\\\\')}')">
+        <span style="font-size:12px; font-weight:600;">📁 ${esc(d.name)}</span>
+        <button type="button" class="btn small ghost" style="padding:2px 6px; font-size:10px;" onclick="event.stopPropagation(); selectBrowseFolder('${d.path.replace(/\\/g, '\\\\')}')">Elegir</button>
+      </div>
+    `).join('');
+  } catch (e) {
+    listEl.innerHTML = `<div style="font-size:11px; color:var(--err); padding:8px;">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+function browserGoUp() {
+  if (!currentBrowsePath) return;
+  const parent = currentBrowsePath.substring(0, currentBrowsePath.lastIndexOf('\\'));
+  loadBrowseDir(parent || '');
+}
+
+function selectBrowseFolder(path) {
+  QC_STATE.destino = path;
+  const inp = document.getElementById('qc-destino');
+  if (inp) inp.value = path;
+  toast('📂 Carpeta seleccionada: ' + path, 'ok');
+  const panel = document.getElementById('qc-browser-panel');
+  if (panel) panel.style.display = 'none';
+}
+
+function browserSelectCurrent() {
+  if (currentBrowsePath) selectBrowseFolder(currentBrowsePath);
+  else toast('Abre primero una carpeta para seleccionarla', 'err');
+}
+
+async function browserNewFolder() {
+  if (!currentBrowsePath) return toast('Entra primero a una unidad o carpeta para crear una nueva', 'err');
+  const name = prompt('Nombre de la nueva carpeta para este proyecto/video:');
+  if (!name || !name.trim()) return;
+  const newPath = currentBrowsePath.replace(/\\+$/, '') + '\\' + name.trim();
+  try {
+    const r = await api('/dialog/create-dir', { method: 'POST', body: { path: newPath } });
+    if (r.ok) {
+      toast('Carpeta creada ✔', 'ok');
+      await loadBrowseDir(newPath);
+      selectBrowseFolder(newPath);
+    } else {
+      toast('No se pudo crear: ' + (r.error || 'error'), 'err');
+    }
+  } catch (e) {
+    toast('Error al crear carpeta: ' + e.message, 'err');
+  }
+}
+
+window.toggleFolderBrowser = toggleFolderBrowser;
+window.loadBrowseDir = loadBrowseDir;
+window.browserGoUp = browserGoUp;
+window.selectBrowseFolder = selectBrowseFolder;
+window.browserSelectCurrent = browserSelectCurrent;
+window.browserNewFolder = browserNewFolder;

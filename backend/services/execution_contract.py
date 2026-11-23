@@ -387,6 +387,15 @@ def validate_asset_contract(spec: dict, *, actual: dict,
     no_verificados: list[str] = []
     obs = observed if isinstance(observed, dict) else {}
 
+    # [A10 · P1.1] probe_asset que no midió NADA (ffprobe ausente/crash)
+    # NO es un crash del validador: TODOS los checks required quedan
+    # UNVERIFICABLES → veredicto global UNVERIFIABLE (que flow_jobs
+    # trata como terminal). Antes un actual=None reventaba con
+    # AttributeError y el endpoint respondía 500 sin veredicto.
+    if not isinstance(actual, dict):
+        actual = {"duration": None, "width": None, "height": None,
+                  "has_audio": None}
+
     # ── duration ─────────────────────────────────────────────────────────
     dur_spec = spec.get("duration") or {}
     req = dur_spec.get("requested")
@@ -600,17 +609,31 @@ TERMINAL_EXEC_STATES = {
     EXEC_STATE_ASSET_INVALID, EXEC_STATE_DEAD,
 }
 
+# [C4 · P1.2] Estados POST-GATE: solo se alcanzan desde CONTROLS_VERIFIED
+# (o más adelante en la línea). DONE/CONTRACT_OK jamás por reporte del
+# cliente (los aplica complete() en servidor); OBSERVED/DOWNLOADED/ASSET_OK
+# exigen que la generación pasó por el consentimiento del gate (§7.1).
+POST_GATE_EXEC_STATES = {
+    EXEC_STATE_OBSERVED, EXEC_STATE_DOWNLOADED, EXEC_STATE_ASSET_OK,
+    EXEC_STATE_CONTRACT_OK, EXEC_STATE_DONE,
+}
+
 # Progreso lineal permitido (desde → hacia). El progreso NUNCA retrocede
 # (un informe antiguo de un intento previo jamás rebobina el estado — §12:
 # evidencia por intento, sin mezcla).
+# [C4 · P1.2] Desde CLAIMED SOLO estados de descubrimiento/configuración
+# (el par CLAIMED→DONE que antes colaba por el escape `or idx_tgt > 0` es
+# imposible). El salto CAPS→SUBMITTED (evidencia tardía de un intento) se
+# conserva: es el único atajo legal y el gate §7.1 de flow_jobs lo veta
+# server-side para videos con controles required.
 _EXEC_PROGRESO = {
     None: {EXEC_STATE_QUEUED, EXEC_STATE_TAB_READY, EXEC_STATE_CAPS,
-           EXEC_STATE_CONFIGURED, EXEC_STATE_VERIFIED, EXEC_STATE_SUBMITTED,
-           EXEC_STATE_OBSERVED, EXEC_STATE_DOWNLOADED, EXEC_STATE_ASSET_OK},
+           EXEC_STATE_CONFIGURED, EXEC_STATE_VERIFIED, EXEC_STATE_SUBMITTED},
     EXEC_STATE_QUEUED: {EXEC_STATE_CLAIMED, EXEC_STATE_TAB_READY,
                         EXEC_STATE_CAPS, EXEC_STATE_CONFIGURED,
                         EXEC_STATE_VERIFIED, EXEC_STATE_SUBMITTED},
-    EXEC_STATE_CLAIMED: {EXEC_STATE_TAB_READY},
+    EXEC_STATE_CLAIMED: {EXEC_STATE_TAB_READY, EXEC_STATE_CAPS,
+                         EXEC_STATE_CONFIGURED, EXEC_STATE_VERIFIED},
     EXEC_STATE_TAB_READY: {EXEC_STATE_CAPS},
     EXEC_STATE_CAPS: {EXEC_STATE_CONFIGURED, EXEC_STATE_VERIFIED,
                       EXEC_STATE_SUBMITTED},
@@ -637,6 +660,14 @@ def progress_allowed(current: str | None, target: str) -> bool:
     Permite saltos hacia adelante (la extensión puede reportar tarde, p. ej.
     CAPABILITIES_CAPTURED→GENERATION_SUBMITTED) y estados terminales de
     configuración/fallo desde CUALQUIER estado no terminal. Jamás retrocede.
+
+    [C4 · P1.2] Dos reglas duras añadidas (el escape `or idx_tgt > 0` que
+    colaba CLAIMED→DONE queda eliminado):
+      1. El target SIEMPRE debe pertenecer al conjunto explícito de
+         `permitidos` — la membresía ES la política, no hay "orden basta".
+      2. Los estados POST-GATE (OBSERVED/DOWNLOADED/ASSET_OK/CONTRACT_OK/
+         DONE) exigen estar en CONTROLS_VERIFIED o más adelante: sin gate
+         verificado no hay evidencia post-generación que reportar.
     """
     if target in TERMINAL_EXEC_STATES or target == EXEC_STATE_DEAD:
         return True
@@ -652,7 +683,10 @@ def progress_allowed(current: str | None, target: str) -> bool:
         return False
     idx_cur = orden.index(current) if current else -1
     idx_tgt = orden.index(target)
-    return idx_tgt > idx_cur and (target in permitidos or idx_tgt > 0)
+    if target in POST_GATE_EXEC_STATES and idx_cur < orden.index(
+            EXEC_STATE_VERIFIED):
+        return False  # post-gate sin VERIFIED: sin consentimiento no hay evidencia
+    return idx_tgt > idx_cur and target in permitidos
 
 
 def is_config_terminal(exec_state: str | None) -> bool:

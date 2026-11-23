@@ -5,6 +5,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { generateImages, generateVideo, newProject, uploadFile, listAssets, ASPECTS, DEFAULT_OUT } from './flow.js';
+import { generatedImagesText } from './assets.js';
 import { withFlowLock } from './lock.js';
 
 const server = new McpServer({ name: 'srz-google-flow-mcp', version: '1.0.1' });
@@ -33,12 +34,15 @@ server.registerTool('flow_upload_file', {
 });
 
 server.registerTool('flow_list_assets', {
-  description: 'List the names of the images in the current Google Flow project (uploaded files and generations). Any of them can be referenced in a prompt as @{name}.',
+  description: 'List the images in the current Google Flow project (uploaded files and generations), one per line as "- <name> [id:<mediaId>]". '
+    + 'Any of them can be referenced in a prompt as @{name}; the id disambiguates when two assets share a name.',
   inputSchema: {},
 }, async () => {
   try {
     const assets = await serial(() => listAssets());
-    return text(assets.length ? assets.map((a) => `- ${a.name}`).join('\n') : 'The project has no images yet.');
+    return text(assets.length
+      ? assets.map((a) => `- ${a.name} [id:${a.mediaId}]`).join('\n')
+      : 'The project has no images yet.');
   } catch (err) { return fail('Listing assets', err); }
 });
 
@@ -46,7 +50,9 @@ server.registerTool('flow_generate_image', {
   description: 'Generate images with Google Flow (Nano Banana) in the user\'s signed-in Chrome and save them to disk; returns the local file paths. Images do not consume Flow credits. '
     + 'To use reference images, upload them first with flow_upload_file and write @{name} in the prompt where the image should be attached: '
     + 'each @{name} becomes a reference chip to that asset (e.g. "Image 1 -> Avatar: @{avatar}"). Any other "@" (like "@Image 1") stays as plain text. '
-    + 'Multi-line prompts are kept as written.',
+    + 'Multi-line prompts are kept as written. '
+    + 'The answer lists every created asset as an "Asset: <name> [id:<mediaId>]" line BEFORE the file paths (the LAST line is always a file path): '
+    + 'use "id:<mediaId>" as flow_generate_video startFrame to reference a generated image without ambiguity.',
   inputSchema: {
     prompt: z.string().min(1).describe('What to generate. Use @{name} to reference uploaded assets'),
     aspect: z.enum(ASPECTS).default('1:1'),
@@ -57,7 +63,9 @@ server.registerTool('flow_generate_image', {
 }, async ({ prompt, aspect, count, model, outDir }) => {
   try {
     const r = await serial(() => generateImages({ prompt, aspect, count, model, outDir: outDir || DEFAULT_OUT }));
-    return text(`Generated ${r.files.length} image(s) in ${r.seconds}s with ${r.model} (${r.aspect}):\n${r.files.join('\n')}`);
+    // BJ2: líneas "Asset: <name> [id:<mediaId>]" por imagen ANTES de las rutas;
+    // la ÚLTIMA línea sigue siendo la ruta del archivo.
+    return text(generatedImagesText(r));
   } catch (err) { return fail('Flow generation', err); }
 });
 
@@ -73,11 +81,11 @@ server.registerTool('flow_new_project', {
 
 server.registerTool('flow_generate_video', {
   description: 'Generate a video from a start frame image using Google Flow (Fotogramas) in the user\'s signed-in Chrome and save it to disk. '
-    + 'The start frame must be an asset already present in the project (use flow_upload_file first). '
-    + 'Returns the local MP4 file path.',
+    + 'The start frame must be an asset already present in the project: pass "id:<mediaId>" (preferred, from the "Asset:" lines of flow_generate_image or flow_list_assets) or the exact asset name. '
+    + 'Returns the local MP4 file path and which asset was used.',
   inputSchema: {
     prompt: z.string().min(1).describe('Video animation prompt describing motion and camera behavior'),
-    startFrame: z.string().min(1).describe('Name of the Flow asset to use as Start Frame (e.g. "crystal_orb")'),
+    startFrame: z.string().min(1).describe('Flow asset as "id:<mediaId>" (unambiguous) or exact asset name (case-insensitive; first match wins), e.g. "id:9f2c-..." or "crystal_orb"'),
     aspect: z.enum(ASPECTS).default('9:16').describe('Aspect ratio: 9:16, 16:9, etc.'),
     outDir: z.string().optional().describe(`Folder to save into (default ${DEFAULT_OUT})`),
     outFile: z.string().optional().describe('Specific destination file path for the MP4 video'),
@@ -85,7 +93,11 @@ server.registerTool('flow_generate_video', {
 }, async ({ prompt, startFrame, aspect, outDir, outFile }) => {
   try {
     const r = await serial(() => generateVideo({ prompt, startFrame, aspect, outDir: outDir || DEFAULT_OUT, outFile }));
-    return text(`Generated video in ${r.seconds}s (${r.bytes} bytes, ${r.aspect}) with startFrame "${r.startFrame}":\n${r.file}`);
+    // BJ3: la salida indica qué asset se usó (nombre + mediaId) cuando se resolvió.
+    const used = r.usedAsset
+      ? ` (asset "${r.usedAsset.name}"${r.usedAsset.mediaId ? ` [id:${r.usedAsset.mediaId}]` : ''})`
+      : '';
+    return text(`Generated video in ${r.seconds}s (${r.bytes} bytes, ${r.aspect}) with startFrame "${r.startFrame}"${used}:\n${r.file}`);
   } catch (err) { return fail('Flow video generation', err); }
 });
 

@@ -17,6 +17,7 @@ Uso:  python tests/test_registro_baterias.py
 """
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -141,10 +142,32 @@ print("D7 OK: externo bloqueado + loopback permitido")
           ((r.stderr or "") + (r.stdout or ""))[-220:])
 
 
+
+
+def _minidramas():
+    """[PASO 0.2] baterías de minidrama: registradas, herméticas y con
+    resumen parseable cuando corren como script standalone."""
+    print("── D. PASO 0.2: baterías de minidrama registradas y parseables ──")
+    for nombre in ("test_minidrama_clip_validator.py", "test_observador_piloto.py"):
+        check(f"{nombre} ∈ BATERIAS y existe en disco",
+              nombre in ra.BATERIAS and (TESTS_DIR / nombre).is_file())
+        check(f"{nombre} no es NON_HERMETIC (hermética)",
+              nombre not in ra.NON_HERMETIC_BATTERIES)
+        r = subprocess.run(
+            [sys.executable, str(TESTS_DIR / nombre)], cwd=str(REPO_ROOT),
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=300, stdin=subprocess.DEVNULL)
+        m = re.findall(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos", r.stdout or "")
+        ok, fallos = (int(n) for n in m[-1]) if m else (0, -1)
+        check(f"{nombre} standalone: {ok} OK · {fallos} fallos (resumen parseable)",
+              r.returncode == 0 and fallos == 0 and ok > 0,
+              ((r.stderr or "") + (r.stdout or ""))[-160:])
+
 def main() -> int:
     _guardian_registro()
     _guardian_timeout()
     _guardian_hermetica()
+    _minidramas()
     print(f"\n═══ {OK} OK · {FAIL} fallos ═══")
     return 0 if FAIL == 0 else 1
 

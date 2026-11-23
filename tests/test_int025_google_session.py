@@ -112,8 +112,10 @@ def chrome_bin_tests():
     finally:
         r()
     orig_which = mcpm.shutil.which
+    orig_isfile = mcpm.os.path.isfile
     try:
         mcpm.shutil.which = lambda name: None
+        mcpm.os.path.isfile = lambda p: False
         r = _cfg_overrides(MCP_LOGIN_CHROME_BIN="")
         try:
             try:
@@ -124,11 +126,13 @@ def chrome_bin_tests():
                       e.code == "CHROME_NOT_FOUND" and "MCP_LOGIN_CHROME_BIN" in str(e))
         finally:
             r()
+        mcpm.os.path.isfile = orig_isfile
         mcpm.shutil.which = lambda name: f"/usr/bin/{name}" if name == "google-chrome" else None
         check("which encuentra google-chrome",
               m._find_chrome_bin() == "/usr/bin/google-chrome")
     finally:
         mcpm.shutil.which = orig_which
+        mcpm.os.path.isfile = orig_isfile
 
 
 # ─────────────────────── S3 · launch_google_login ──
@@ -189,10 +193,15 @@ async def launch_tests():
         async def up_true(port):
             return True
         m._cdp_up = up_true
-        js2 = await m.launch_google_login()
-        check("CDP ya arriba → already_up y NO relanza",
-              js2.get("already_up") is True and js2.get("pid") is None
-              and len(spawned) == 1, (js2, len(spawned)))
+        orig_win_state = m._windows_visible_state
+        m._windows_visible_state = lambda prof: True
+        try:
+            js2 = await m.launch_google_login()
+            check("CDP ya arriba → already_up y NO relanza",
+                  js2.get("already_up") is True and js2.get("pid") is None
+                  and len(spawned) == 1, (js2, len(spawned)))
+        finally:
+            m._windows_visible_state = orig_win_state
     finally:
         m._cdp_up = orig_up
         m._spawn_chrome = orig_spawn
@@ -203,11 +212,13 @@ async def launch_tests():
     r2 = _cfg_overrides(GOOGLE_PROFILE_GLOBAL=str(tmp / "p2"),
                         MCP_LOGIN_CHROME_BIN="")
     orig_up2, orig_which = m2._cdp_up, mcpm.shutil.which
+    orig_isfile2 = mcpm.os.path.isfile
     try:
         async def up_false2(port):
             return False
         m2._cdp_up = up_false2
         mcpm.shutil.which = lambda name: None
+        mcpm.os.path.isfile = lambda p: False
         try:
             await m2.launch_google_login()
             check("sin Chrome en la máquina → CHROME_NOT_FOUND", False)
@@ -217,6 +228,7 @@ async def launch_tests():
     finally:
         m2._cdp_up = orig_up2
         mcpm.shutil.which = orig_which
+        mcpm.os.path.isfile = orig_isfile2
         r2()
 
 
@@ -337,10 +349,10 @@ async def capture_tests():
         names = [c["name"] for c in data["cookies"]]
         check("dedupe por (name,domain,path)", names.count("SID") == 1, names)
         mode = stat.S_IMODE(modern.stat().st_mode)
-        check("storage_state con permisos 0600", mode == 0o600, oct(mode))
+        check("storage_state con permisos 0600", mode == 0o600 if sys.platform != "win32" else True, oct(mode))
         check("legacy también escrito y 0600",
               json.loads(legacy.read_text(encoding="utf-8"))["cookies"][0]["name"] == "SID"
-              and stat.S_IMODE(legacy.stat().st_mode) == 0o600)
+              and (stat.S_IMODE(legacy.stat().st_mode) == 0o600 if sys.platform != "win32" else True))
 
         # (e) layout preexistente → SOLO se actualiza el existente
         home2 = tmp / "nblm-home2"
@@ -385,7 +397,8 @@ async def status_tests():
     tmp = Path(tempfile.mkdtemp(prefix="int025_st_"))
     m = mcpm.MCPClientManager()
     r = _cfg_overrides(GOOGLE_PROFILE_GLOBAL=str(tmp / "prof"),
-                       GOOGLE_LOGIN_CDP_PORT=9777, FLOW_CDP_PORT=9777)
+                       GOOGLE_LOGIN_CDP_PORT=9777, FLOW_CDP_PORT=9777,
+                       NOTEBOOKLM_HOME=str(tmp / "nblm"))
     orig_up = m._cdp_up
     try:
         async def up_true(port):
@@ -602,13 +615,13 @@ def ui_tests():
                       for f in ("app-mcp.js", "app-core.js", "app-projects.js",
                                 "app-wizard.js", "app-player.js"))
     index = (static / "index.html").read_text(encoding="utf-8")
-    # [UI v2.46] el par gsessLogin/gsessCapture de INT-025 fue absorbido por
-    # el hub SSO «Ecosistema Google» (gsessStart → /mcp/google-sso con
-    # vigilancia de cookies en el backend, INT-090): el contrato verifica el
-    # flujo ACTUAL, no el histórico.
+    # P1-3: Modernizado para reflejar la UI activa modular (INT-088 + INT-092
+    # Ecosistema Google). El par gsessLogin/gsessCapture de INT-025 fue
+    # absorbido por el hub SSO (gsessStart → /mcp/google-sso con vigilancia
+    # de cookies en el backend): el contrato verifica el flujo ACTUAL.
     for sym in ("mcpGsessHTML", "gsessStart", "gsessOpenChrome", "gsessRefresh",
                 "gsessApply", "mcpPopulateNotebooks", "gsess-card"):
-        check(f"app.js define {sym}", sym in appjs)
+        check(f"app-mcp.js define {sym}", sym in appjs)
     check("dropdown de notebooks dinámico presente (#nblm-nid-sel)",
           'id="nblm-nid-sel"' in appjs)
     _mc = appjs[appjs.index("async function mcpConnect"):

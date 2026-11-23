@@ -168,4 +168,4 @@ def test_chat_vacio_sigue_400(client):
 # ═══════════════ 4 · contrato de versión (INT-080) ══════════════════════
 
 def test_version_2_39_0():
-    assert config.APP_VERSION == "2.46.0"   # INT-092: limpieza de UI + tema coherente
+    assert config.APP_VERSION == "2.47.0"   # U1: agregador /api/mcp/resumen

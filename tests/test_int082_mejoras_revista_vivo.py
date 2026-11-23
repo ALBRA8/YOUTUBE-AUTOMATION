@@ -159,9 +159,12 @@ def test_nosniff_en_respuestas_json_incluso_404(client):
 
 
 def test_docs_sin_csp_swagger_sigue_funcionando(client):
-    """/docs queda fuera de la CSP: el Swagger UI de FastAPI carga scripts CDN."""
+    """/docs en modo local → 404 (P0.4/A5: la documentación y el schema
+    abierto NO se exponen sin clave maestra). El 404 pasa por el middleware
+    externo: lleva nosniff y SIN CSP (la CSP solo aplica al HTML real del
+    panel; DOCS_ENABLED=1 la reactiva para desarrolladores)."""
     res = client.get("/docs")
-    assert res.status_code == 200
+    assert res.status_code == 404
     assert "content-security-policy" not in res.headers
     assert res.headers["x-content-type-options"] == "nosniff"
 

@@ -239,9 +239,14 @@ def main() -> int:
     fj.fail(jq["id"], jq["job_token"], "limpieza")  # re-encola para §7
 
     print("── 7. carrera zombie: lease vencido + viejo complete tarde")
-    with db.connect() as con:
+    con = db.connect()
+    try:
         con.execute("UPDATE flow_jobs SET lease_until='2000-01-01T00:00:00+00:00' "
                     "WHERE id=?", (jq["id"],))
+        con.commit()
+    finally:
+        con.close()
+    del con
     jz = fj.claim_next("w-nuevo", pid=jq["project_id"])  # recuperación perezosa
     check("zombie re-asignado al worker nuevo",
           jz and jz["id"] == jq["id"] and jz["worker"] == "w-nuevo")
@@ -251,6 +256,8 @@ def main() -> int:
           bool(fj.complete(jz["id"], jz["job_token"], _png())))
 
     print("── 8. limpieza")
+    import gc
+    gc.collect()
     shutil.rmtree(_TMP, ignore_errors=True)
     check("tmp eliminado", not _TMP.exists())
 

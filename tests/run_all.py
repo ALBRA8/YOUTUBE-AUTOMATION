@@ -82,7 +82,6 @@ BATERIAS = [
                                  # RUNTIME NOT_DEMONSTRATED (38)
     "test_concurrencia.py",      # concurrencia: raza de claims, multi-proyecto,
                                  # token de una sola era, completes paralelos
-                                 # (+ D2: completes con carga de CPU 3/3)
     "test_chaos.py",             # chaos: reinicio REAL de proceso, rollback,
                                  # doble complete, asset corrupto, zombie
     "test_10_escenas.py",        # ESCALA: proyecto de 10 escenas (19 jobs),
@@ -229,6 +228,13 @@ BATERIAS = [
                                  # unidades, JSON anidado, PIL, ledger (17)
     "security/test_config_security.py",  # A2/M6: .env newline injection +
                                  # system-owned metadata (16)
+    "security/test_sqli.py",     # AUDITORÍA 2026-11: SQLi por nombre de
+                                 # columna — lista blanca por tabla (22)
+    "security/test_auditoria_repairs.py",  # REPARACIONES P0-P2 (2026-11-20):
+                                 # C1 env.bak, C4 CLAIMED→DONE, C5 claim→fail
+                                 # →claim, A10 UNVERIFIABLE terminal, C8
+                                 # scheduler, A7 zip-bomb/411, A1 badge, A16
+                                 # dialog, A6 ACL, A14 gate subs, P5.4 (44)
     "test_harness.py",           # YOUTUBE HARNESS CONTRACT V1: contrato
                                  # estricto, permisos, libro idempotente,
                                  # estados §9, puente legacy del chat
@@ -251,13 +257,78 @@ BATERIAS = [
                                  # {mediaIdPresent, fingerprint}, ids por
                                  # huella, cropCoordinates, startImage hist.,
                                  # VAL malformado diagnóstico, T1..T10 (67)
-    "test_registro_baterias.py", # [D6/D4/D7] GUARDIÁN del registro canónico:
-                                 # cada tests/**/test_*.py ∈ BATERIAS ∪
-                                 # EXCLUDED_BATTERIES (motivo escrito) +
-                                 # aceptación D4 (timeout mata árbol) +
-                                 # mecanismo D7 (red externa bloqueada,
-                                 # loopback permitido)
+    # ── MINIDRAMAS (PASO 0.2) — tests pytest-nativos registrados como
+    # baterías: su __main__ imprime el resumen "N OK · M fallos" que este
+    # runner parsea (plugin de conteo). Herméticas (sin DNS ni internet).
+    "test_minidrama_clip_validator.py",  # Validador editorial Fase E (43):
+                                 # dialogue estructurado {personaje,texto}
+                                 # como fuente de verdad, heurística rayas/
+                                 # verbo de habla, aviso DIALOGO_SIN_COMILLAS,
+                                 # párrafo único, MAYÚSCULAS, duración
+    "test_observador_piloto.py", # Observador del piloto mínimo Gate 0/3 (12):
+                                 # veredicto PASS/FAIL/NOT_DEMONSTRATED
+                                 # honesto, MP4 con ffprobe local,
+                                 # barrido de secretos con redacción
+    # ── U-SERIES · PANEL MCP HONESTO (U1-U7) — herméticas con dobles ──
+    "test_u1_mcp_resumen.py",    # U1: GET /api/mcp/resumen — agregador solo
+                                 # lectura del ecosistema Google; todo_
+                                 # conectado SOLO con las 4 piezas ok (14)
+    "test_u_panel_ecosistema.py", # U2-U5: tarjeta única con semáforo de U1,
+                                 # Conectar todo, bloque Avanzado, cuaderno
+                                 # por nicho y gate del Run Full Pipeline
+    "test_u6_catalogo_contrato.py", # U6/S2: contrato del paquete REAL
+                                 # notebooklm-mcp-server v0.1.15 + trinquete
+                                 # de tools del código vs catálogo real
+    "test_w3_rutas_verificadas.py", # W3: guardia estática de rutas verificadas
+                                 # por el dueño en su máquina (4)
+    "test_bb_stage1_notebook_query.py", # BB1-BB2: default notebook_query, fallback
+                                 # y parsing status/answer (7)
+    "test_bb5_pipeline_guards.py", # BB5: aborto BLUEPRINT_DEMO, max_scenes trimming
+                                 # y validación/escritura atómica de _sync_auth_json (5)
+    "test_bc_contexto_local.py",  # BC: Contexto local de respaldo por nicho,
+                                 # fallback de auth error y PIPELINE_CONTEXT_SOURCE=local (5)
+    "test_bd_gemini_models_and_bl.py", # BD: Filtrado de cookies BASE_URL, build label
+                                 # vivo y cadena de modelos Gemini con fallback ante 404 (6)
+    "test_be_flow_cdp_stability.py",   # BE: Flags CDP de fondo, calentamiento de Stage 3
+                                 # y reintento acotado ante connectOverCDP: Timeout (5)
+    "test_bg_gemini_errors_and_external_blueprint.py", # BG1-BG2: resiliencia Gemini
+                                 # (429 sin retry mismo modelo → fallbacks, 503 con
+                                 # esperas 5/15 s, 404 inmediato) + mensaje honesto en
+                                 # BLUEPRINT_DEMO ("Gemini falló: <motivo real>", sin
+                                 # la sugerencia fija) + puerta DECLARADA de blueprint
+                                 # externo (validación estricta INVALID_BLUEPRINT,
+                                 # etapa 2 sin Gemini, engine "external:<label>",
+                                 # blueprint_source "external") (39)
+    "test_bh_rutas_windows_espacios.py",  # BH1-BH2: rutas Flow con espacios/
+                                 # unidad Windows en _last_path + respaldo outDir
+                                 # (ancla/start-frame/video) + escape ffmpeg de
+                                 # la etapa 4 (ass=/fontsdir= con comillas,
+                                 # concat demuxer, badge sin ruta en filtro)
+    "test_bj_startframe_mediaid.py",  # BJ1-BJ4: assets Flow SIN ambigüedad —
+                                 # línea "Asset: <name> [id:<mediaId>]" del
+                                 # tool (BJ2) parseada en Python → video con
+                                 # startFrame="id:<mediaId>" (BJ3/BJ4); sin
+                                 # línea → respaldo flow_upload_file
+                                 # f"{run_id}-{scene_id}" con warning; subida
+                                 # fallida → error claro; nombres duplicados
+                                 # desambiguados por id; retry reutiliza el
+                                 # start-frame (por id o nombre) sin
+                                 # regenerar imagen; ancla intacta (11)
+    "test_registro_baterias.py", # [D6/D4/D7] GUARDIÁN del registro canónico
+                                 # (todo test_*.py ∈ BATERIAS ∪ EXCLUDED) +
+                                 # baterías de minidrama registradas con
+                                 # resumen parseable (PASO 0.2) + aceptación
+                                 # D4 (timeout mata árbol) + mecanismo D7
 ]
+
+# ── [P6.2] baterías NO herméticas: bajo --hermetica/--hermetic se
+# reportan como SKIP visible y NO se les inyecta la guardia de red
+# (necesitan red/host reales: uvicorn vivo, sesiones del operador).
+NON_HERMETIC_BATTERIES = {
+    # test_live_boot.py arranca uvicorn real y ejecuta scripts bash (.sh)
+    # contra puertos de red del sistema; requiere entorno de host.
+    "test_live_boot.py",
+}
 
 # ── [D6] Registro canónico de baterías EXCLUIDAS de run_all ─────────────────
 # Cada tests/**/test_*.py del árbol DEBE estar aquí (con motivo escrito) o en
@@ -390,6 +461,8 @@ EXCLUDED_BATTERIES: dict[str, str] = {
 # proceso de colección. (La lista histórica vive aquí desde el cierre D6.)
 PYTEST_IGNORADAS: tuple[str, ...] = (
     "security/test_config_security.py",
+    "security/test_sqli.py",                 # AUDITORÍA 2026-11: batería standalone SQLi
+    "security/test_auditoria_repairs.py",    # REPARACIONES P0-P2 (2026-11-20)
     "security/test_csrf.py",
     "security/test_docs_auth.py",
     "security/test_input_limits.py",
@@ -557,9 +630,13 @@ def main(argv=None) -> int:
     ap.add_argument("-t", "--timeout-seg", type=int, default=None,
                     help="timeout por batería (default env "
                          "RUN_ALL_BATTERY_TIMEOUT_S o 300 s)")
-    ap.add_argument("--hermetica", action="store_true",
+    ap.add_argument("--hermetica", "--hermetic", action="store_true",
                     help="bloquea la red externa de los hijos vía "
-                         "sitecustomize (loopback permitido)")
+                         "sitecustomize (loopback permitido). Sin selección "
+                         "explícita de baterías, corre SOLO las baterías "
+                         "standalone excluidas de pytest (P0-2/HANDS, el "
+                         "subconjunto hermético del CI); las "
+                         "NON_HERMETIC_BATTERIES se omiten con SKIP visible")
     ap.add_argument("--serial", action="store_true",
                     help="alias histórico: la ejecución YA es serie por defecto")
     ap.add_argument("--conservar-tmp", action="store_true",
@@ -571,7 +648,23 @@ def main(argv=None) -> int:
     timeout_seg = args.timeout_seg if args.timeout_seg is not None \
         else int(os.getenv("RUN_ALL_BATTERY_TIMEOUT_S", "300") or "300")
     workers = max(1, args.workers)
+    if args.hermetica and not args.baterias and not args.bateria_ruta:
+        # [P0-2/CI] semántica heredada del runner P6.2: --hermetic sin
+        # selección corre SOLO las baterías standalone excluidas de pytest
+        # (seguridad/HANDS/gobernanza/...), menos las NON_HERMETIC y los
+        # scripts LIVE de la máquina del dueño.
+        args.baterias = [
+            p for p in PYTEST_IGNORADAS
+            if p not in NON_HERMETIC_BATTERIES
+            and not p.startswith("test_live_execution")]
     rutas = _seleccionar(args)
+    if args.hermetica:
+        omitidas = [r.name for r in rutas
+                    if r.relative_to(TESTS_DIR).as_posix() in NON_HERMETIC_BATTERIES]
+        rutas = [r for r in rutas
+                 if r.relative_to(TESTS_DIR).as_posix() not in NON_HERMETIC_BATTERIES]
+        if omitidas:
+            print(f"[run_all] --hermetica: OMITIDAS (NON_HERMETIC): {', '.join(omitidas)}")
     rundir = Path(tempfile.mkdtemp(prefix="runall_d1_"))
     modo = f"serie" if workers == 1 else f"paralelo ({workers} workers)"
     print(f"[run_all] {len(rutas)} baterías · {modo} · timeout {timeout_seg}s "

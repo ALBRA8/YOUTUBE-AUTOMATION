@@ -7,6 +7,14 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 
 export const CDP_PORT = Number(process.env.FLOW_CDP_PORT || 9333);
+// BJ1: la conexión CDP EN FRÍO tarda 32-40 s y el timeout por defecto de
+// Playwright (30 s) se queda corto → el primer uso del día fallaba. Timeout
+// PROPIO para connectOverCDP: 120000 ms por defecto, configurable con la
+// variable de entorno FLOW_CDP_CONNECT_TIMEOUT_MS.
+export const FLOW_CDP_CONNECT_TIMEOUT_MS = (() => {
+  const n = Number(process.env.FLOW_CDP_CONNECT_TIMEOUT_MS);
+  return Number.isFinite(n) && n > 0 ? n : 120000;
+})();
 // INT-074: Google migró Flow al dominio canónico https://flow.google.com/
 // (labs.google/fx/tools/flow redirige allí). Default actualizado y siempre
 // normalizado con slash final para que `${FLOW_URL}project/${id}` siga siendo válido.

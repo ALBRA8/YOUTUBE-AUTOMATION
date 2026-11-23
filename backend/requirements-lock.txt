@@ -1,0 +1,53 @@
+# ── YOUTUBE AUTOMATION v2.0 — LOCKFILE (P4.2/P4.3) ──────────────────────────
+# Pins EXACTOS verificados en una instalación verde (pytest 870/0 ·
+# run_all hermético OK). Propósito:
+#   1. La máquina local y el CI instalan EXACTAMENTE lo mismo:
+#        pip install -r backend/requirements-lock.txt
+#      (mismo comando local y en CI — P4.3).
+#   2. Elimina la clase de incidente «opencv-python-headless estaba en
+#      requirements y NO estaba instalado» (P4.2): con el lockfile, un
+#      `pip install -r` ya no deja endpoints de e-commerce rotos.
+#   3. av se mantiene <19 (metadata_errors; ver requirements.txt) aunque
+#      PyAV 19 ya exista: el pin evita que un pip upgrade rompa
+#      faster-whisper a mitad del pipeline.
+# Regenerar tras ACTUALIZAR a propósito:  pip freeze > requirements-lock.txt
+# (y mover las líneas nuevas a requirements.txt solo tras suite verde).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# núcleo HTTP / API
+fastapi==0.128.0
+starlette==0.50.0
+pydantic==2.12.5
+uvicorn==0.44.0
+websockets==16.0
+python-multipart==0.0.24
+python-dotenv==1.2.2
+anyio==4.13.0
+httpx==0.28.1
+
+# IA
+google-genai==3.6.1
+edge-tts==7.3.1
+gradio_client==2.0.3
+yt-dlp==2026.10.26
+
+# video / audio / imágenes
+pillow==11.3.0
+numpy==2.1.3
+opencv-python-headless==4.13.0.90
+
+# subtítulos palabra a palabra (faster-whisper) — PIN av<19 obligatorio
+faster-whisper==1.2.1
+ctranslate2==4.9.0
+onnxruntime==1.32.0
+av==18.1.0
+
+# modo fábrica
+APScheduler==3.11.2
+psutil==7.2.2
+
+# autopublish YouTube
+google-api-python-client==2.202.0
+google-auth==2.62.2
+google-auth-oauthlib==1.5.0
+cachetools==7.0.5

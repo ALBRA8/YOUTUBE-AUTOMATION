@@ -908,3 +908,26 @@ code.mini { background: var(--bg2); border: 1px solid var(--border); border-radi
 .ghub-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .ghub-foot { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; opacity: .75; }
 .ghub-foot .btn { font-size: 12px; padding: 5px 11px; }
+
+/* ── U2 · filas del semáforo REAL del «Ecosistema Google» (fuente:
+      GET /api/mcp/resumen). Verde/rojo por pieza + línea de acción. ── */
+.eco-row { padding: 7px 0; border-bottom: 1px dashed var(--border); }
+.eco-row:last-of-type { border-bottom: none; }
+.eco-row-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.eco-row-head b { min-width: 150px; flex: 0 0 auto; }
+.eco-row-head .hintline { flex: 1 1 200px; margin: 0; }
+.eco-accion { margin: 4px 0 0 27px; color: var(--warn); font-size: 12.5px; }
+.eco-cuaderno { margin-top: 9px; }
+.ghub-mini { justify-content: space-between; margin: 2px 0 8px; }
+.ghub-mini .ghub-actions { margin-top: 0; }
+
+/* ── U3 · bloque plegado «Avanzado»: diagnóstico fuera del camino ── */
+details.mcp-adv { margin-top: 14px; border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; background: var(--soft); }
+details.mcp-adv > summary { cursor: pointer; font-weight: 600; opacity: .85; user-select: none; }
+details.mcp-adv > summary:hover { opacity: 1; }
+details.mcp-adv[open] > summary { margin-bottom: 10px; }
+
+/* ── U4 · selector nicho+cuaderno en la tarjeta principal ── */
+.eco-nicho { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.eco-nicho label { font-size: 12px; opacity: .75; }
+.eco-nicho select { width: 100%; }

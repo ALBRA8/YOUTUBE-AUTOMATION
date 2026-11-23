@@ -411,3 +411,14 @@ Esta sesión consolidó y confirmó como referencia canónica el diseño descrit
 La conversación de origen no equivale a implementación de software. Estado documental: **DISEÑO CONCEPTUAL v1.0**. Los JSON Schemas/validadores, selector de línea y conexión de runtime solo podrán marcarse implementados tras comprobar archivos, pruebas y ejecución reales.
 
 Continuidad de trabajo: seguir desde el documento canónico existente; no reconstruir los Blueprints desde cero, no duplicar motores y no confundir diseño guardado con código implementado.
+
+
+---
+
+## 19. Remediación Técnica Quirúrgica de Auditoría (P0 - P3) y Gobernanza del Repo — 2026-11-06
+
+Se completó la remediación de la auditoría técnica externa bajo el principio de no declarar nada como terminado sin un test en el repositorio y mantener cero afirmaciones ficticias de E2E:
+1. **Seguridad y CI (P0):** Protección SSRF en `images.py` con `security.safe_fetch_bytes`, inclusión de baterías standalone herméticas en `.github/workflows/ci.yml`, corrección en el orden de middlewares de Starlette (CORS y cabeceras de seguridad externos; preflight exento de autenticación) y mitigación de DNS rebinding con allowlist de host.
+2. **Estabilidad de Pruebas (P1):** Hermetización de pruebas de viral clipper (socket mock para DNS), aserción estructural y robusta de funciones en `test_int088` (189 funciones, cero colisiones), y modernización de `test_int025`, `test_int028` y `test_flow_startframe_fase2`.
+3. **Calidad de Video Real (P2):** Umbral configurable de placeholders (`MAX_ALLOWED_PLACEHOLDERS = 1`) con reintentos en Flow (timeout 300 s) y Gemini, bloqueo terminal y alerta en `video_qa.py`. Cadena de video con intermedios casi sin pérdida (CRF 10 ultrafast) y un único pase final CRF 18 con evaluación dinámica de NVENC (+5.01 dB PSNR medidos en benchmark empírico). Activación por defecto de audio broadcast (-14 LUFS, 48 kHz). Medición empírica de jitter de Ken Burns zoompan y factor de escala controlado para 4K. Inclusión de `-movflags +faststart` con verificación binaria. El Start Frame de Flow (GAP-002) se mantiene honestamente como `NOT_DEMONSTRATED` con checklist de captura real documentado.
+4. **Mantenibilidad y Gobernanza (P3):** Modularización en APIRouter iniciada con `backend/routers/niches.py`, migración a `lifespan` en FastAPI, unificación documental (`LEEME_PRIMERO.md`, `ROADMAP.md`, `ESTADO_REAL.md` con 53 baterías y `PROJECT_STATE.md`), reubicación de lanzadores a `launchers/` y registro de decisiones D-010 (HANDS en reserva) y D-011 (memoria del repo).

@@ -11,9 +11,11 @@ Servicios soportados:
                 con CDP persistente (FLOW_CDP_PORT + user-data-dir propio de
                 la herramienta); Chrome sobrevive al proceso, así que la
                 sesión de Google persiste entre ejecuciones (§2 del mandato).
-  notebooklm  : servidor `notebooklm-mcp` (uv tool install
-                "notebooklm-py[browser]==0.8.5" — pin recomendado: el upstream
-                renombró tools/parámetros entre versiones)
+  notebooklm  : servidor `notebooklm-mcp-server` v0.1.15 (comandos
+                `notebooklm-mcp` y `notebooklm-mcp-auth`; `uv tool list`
+                lo confirma en la máquina del dueño, U6 2026-11-07).
+                OJO: la versión que llega en server_info (p. ej. 2.14.5)
+                es la del FRAMEWORK FastMCP, no la del paquete.
                 — sesión vía storage_state.json (0600) en NOTEBOOKLM_HOME;
                 el expirar de cookies se detecta en preflight → AUTH_REQUIRED
                 e intenta UN refresh automático (`notebooklm auth refresh
@@ -45,6 +47,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from collections import deque
 from pathlib import Path
@@ -67,11 +70,25 @@ ST_ERROR = "error"                    # rojo (fallo técnico)
 _PROTO = "2024-11-05"
 _NOTEBOOK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{5,63}$")
 _AUTHISH_RE = re.compile(r"not signed in|auth|sign[- ]?in|login|cookie|credential|unauthor|401|403", re.I)
+_BL_RE = re.compile(r"boq_labs-tailwind-frontend_\d{8}\.\d+_p\d+")
+
+
+def extract_build_label(html_or_text: str) -> str | None:
+    """Extrae el build label de NotebookLM del HTML o texto (ej: boq_labs-tailwind-frontend_20261117.07_p0)."""
+    m = _BL_RE.search(html_or_text or "")
+    return m.group(0) if m else None
 _UUID_RE = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
-# Tools de listado del servidor NotebookLM MCP (HOTFIX INT-023.4): no requieren
-# notebook_id y son la fuente del auto-descubrimiento / dropdown del panel.
+# Tools de listado del servidor NotebookLM MCP (HOTFIX INT-023.4)
 _LIST_NOTEBOOK_TOOLS = ("notebook_list", "list_notebooks")
+# AA1 · Herramientas de solo lectura con reintento seguro tras PROCESS_DEAD
+RETRYABLE_READ_TOOLS = frozenset({
+    "flow_list_assets", "notebook_query", "notebook_list", "notebook_get"
+})
+# AA1 · Herramientas con mutación/generación que NUNCA deben auto-reintentarse
+NON_RETRYABLE_FLOW_TOOLS = frozenset({
+    "flow_generate_image", "flow_generate_video", "flow_new_project", "flow_upload_file"
+})
 # Tools que NO aceptan notebook/notebook_id en absoluto (v0.8.5:
 # notebook_create solo toma `title`; usada por el Studio Bridge INT-069).
 _NO_NOTEBOOK_TOOLS = frozenset({"notebook_create"})
@@ -96,6 +113,44 @@ def parse_notebook_list(text: str) -> list[dict]:
             out.append({"id": nid,
                         "title": re.sub(r"[\s\-—–|,;:]+$", "",
                                         (title or "").strip())[:120]})
+
+    if raw.startswith(")]}'"):
+        try:
+            chunks = []
+            for chunk_line in raw[4:].strip().split("\n"):
+                chunk_line = chunk_line.strip()
+                if not chunk_line:
+                    continue
+                try:
+                    int(chunk_line)
+                    continue
+                except ValueError:
+                    pass
+                try:
+                    chunks.append(json.loads(chunk_line))
+                except (json.JSONDecodeError, ValueError):
+                    pass
+            for chunk in chunks:
+                if isinstance(chunk, list):
+                    for item in chunk:
+                        if isinstance(item, list) and len(item) >= 3 and item[0] == "wrb.fr" and item[1] == "wXbhsf":
+                            payload = item[2]
+                            if isinstance(payload, str):
+                                try:
+                                    payload = json.loads(payload)
+                                except (json.JSONDecodeError, ValueError):
+                                    pass
+                            nb_list = payload[0] if (isinstance(payload, list) and len(payload) > 0 and isinstance(payload[0], list)) else payload
+                            if isinstance(nb_list, list):
+                                for nb in nb_list:
+                                    if isinstance(nb, list) and len(nb) >= 3:
+                                        t_title = nb[0] if isinstance(nb[0], str) else "Untitled"
+                                        t_id = nb[2] if isinstance(nb[2], str) else ""
+                                        _add(t_id, t_title)
+            if out:
+                return out
+        except (KeyError, TypeError, IndexError, ValueError):
+            pass
 
     try:
         data = json.loads(raw)
@@ -254,11 +309,22 @@ class _Conn:
 
     async def _read_loop(self) -> None:
         assert self.proc and self.proc.stdout
-        while True:
-            line = await self.proc.stdout.readline()
-            if not line:
-                break
-            self._on_line(line.decode("utf-8", errors="replace").strip())
+        try:
+            while True:
+                line = await self.proc.stdout.readline()
+                if not line:
+                    break
+                self._on_line(line.decode("utf-8", errors="replace").strip())
+        finally:
+            # Resiliencia: si el proceso cierra stdout (EOF) o cae, despertar inmediatamente
+            # a todos los futures pendientes con PROCESS_DEAD en vez de esperar el timeout completo de 30s/60s.
+            tail = " · ".join(list(self.stderr_tail)[-3:]) if self.stderr_tail else ""
+            err_msg = f"el proceso MCP de {self.service} cerró la conexión (EOF)"
+            if tail:
+                err_msg += f": {tail}"
+            for rid, fut in list(self._pending.items()):
+                if not fut.done():
+                    fut.set_exception(MCPManagerError(err_msg, "PROCESS_DEAD"))
 
     async def _stderr_loop(self) -> None:
         assert self.proc and self.proc.stderr
@@ -377,6 +443,7 @@ class MCPClientManager:
     def __init__(self) -> None:
         self._conns: dict[str, _Conn] = {}
         self._lifecycle = asyncio.Lock()  # serializa connect/disconnect entre requests
+        self._live_bl: str | None = None
         # INT-071 · Google One-Tap Hub: estado del watcher de login SSO.
         # "task" guarda la referencia fuerte al asyncio task del watchdog
         # (nunca se serializa hacia la UI: los endpoints la omiten).
@@ -441,6 +508,18 @@ class MCPClientManager:
             home = str(_cfg("NOTEBOOKLM_HOME", "") or "").strip()
             if home:
                 env["NOTEBOOKLM_HOME"] = home
+            base_url = str(_cfg("NOTEBOOKLM_BASE_URL", "https://notebook.google.com") or "").strip()
+            if base_url:
+                env["NOTEBOOKLM_BASE_URL"] = base_url
+            bl = (
+                self._live_bl
+                or os.environ.get("NOTEBOOKLM_BL")
+                or getattr(config, "NOTEBOOKLM_BL", "")
+                or getattr(config, "DEFAULT_NOTEBOOKLM_BL", "boq_labs-tailwind-frontend_20261117.07_p0")
+            ).strip()
+            if bl:
+                env["NOTEBOOKLM_BL"] = bl
+                log.info("[notebooklm] usando build label: %s", bl)
         try:
             proc = await asyncio.create_subprocess_exec(
                 *argv, cwd=cwd, env=env,
@@ -467,6 +546,16 @@ class MCPClientManager:
             if old:
                 await old.close()
                 self._conns.pop(service, None)
+            if service == "notebooklm":
+                try:
+                    port = int(_cfg("GOOGLE_LOGIN_CDP_PORT", 9333))
+                    if await self._cdp_up(port):
+                        tokens = await self._cdp_fetch_notebooklm_tokens(port)
+                        cookies = await self._cdp_fetch_cookies_raw(port)
+                        if cookies:
+                            self._sync_auth_json(cookies, tokens=tokens)
+                except (OSError, asyncio.TimeoutError):
+                    pass
             conn = await self._spawn(service)
             self._conns[service] = conn
             try:
@@ -508,6 +597,42 @@ class MCPClientManager:
             out[svc].update(await self._availability(svc))
         return {"services": out}
 
+    async def tools_catalog(self, service: str, auto_connect: bool = True) -> dict:
+        """SOLO LECTURA · catálogo de tools del servicio tal como lo devolvió
+        `tools/list` del handshake MCP: {service, server_info,
+        tools:[{name, description, inputSchema}]}.
+
+        auto_connect=True (default, vía histórica de la sonda --modo-local):
+        conecta si no hay conexión viva.
+        auto_connect=False (Y1, endpoint GET /api/mcp/catalogo/{service}):
+        NUNCA conecta ni lanza procesos — si el servicio no está conectado
+        levanta MCPManagerError NOT_CONNECTED («conecta primero desde el
+        panel»). En ambos modos NUNCA ejecuta ninguna tool (la sonda de
+        capacidades es quien decide qué hacer con el catálogo)."""
+        if service not in SERVICES:
+            raise MCPManagerError("servicio desconocido", "BAD_SERVICE")
+        conn = self._conns.get(service)
+        if not conn or conn.state != ST_CONNECTED:
+            if not auto_connect:
+                raise MCPManagerError(
+                    f"{service}: sin conexión activa (se lee SOLO la conexión "
+                    "ya levantada por el backend)", "NOT_CONNECTED")
+            await self.connect(service)
+            conn = self._conns.get(service)
+        if not conn or conn.state != ST_CONNECTED:
+            raise MCPManagerError(f"{service}: sin conexión activa",
+                                  "NOT_CONNECTED")
+        return {
+            "service": service,
+            "server_info": dict(conn.server_info or {}),
+            "tools": [
+                {"name": t.get("name"),
+                 "description": t.get("description", ""),
+                 "inputSchema": dict(t.get("inputSchema") or {})}
+                for t in (conn.tools or []) if isinstance(t, dict)
+            ],
+        }
+
     async def execute(self, service: str, tool: str, arguments: dict | None,
                       timeout: float | None = None,
                       notebook_id: str | None = None,
@@ -544,39 +669,72 @@ class MCPClientManager:
                     f"si la sesión Google no es válida usa «🔑 Vincular Sesión "
                     f"Google (Login Único)» + «📥 Capturar sesión».",
                     "MISSING_NOTEBOOK_ID")
-        conn = self._conns.get(service)
-        if not conn or conn.state != ST_CONNECTED or not conn.proc or conn.proc.returncode is not None:
-            if not auto_connect:
-                raise MCPManagerError(f"{service} no está conectado", "DISCONNECTED")
-            await self.connect(service)
-            conn = self._conns.get(service)
-            if not conn or conn.state != ST_CONNECTED:
-                raise MCPManagerError(f"{service} no se pudo conectar", "DISCONNECTED")
-        names = {t.get("name") for t in conn.tools}
-        if names and tool not in names:
-            raise MCPManagerError(
-                f"el servidor no expone '{tool}' (tools: {', '.join(sorted(n for n in names if n))})",
-                "TOOL_UNKNOWN")
-        if service == "notebooklm":
-            # INT-069/069.1: v0.8.5 nombra los parámetros `notebook` (antes
-            # notebook_id) y `question` (antes query en la tool de contexto del
-            # orquestador); espejar claves legacy según el inputSchema REAL
-            # (ver _mirror_notebook_arg / _mirror_query_arg).
-            self._mirror_notebook_arg(conn, tool, arguments)
-            self._mirror_query_arg(conn, tool, arguments)
         t0 = time.time()
-        try:
-            text = await conn.call(tool, arguments, float(
-                timeout if timeout is not None else
-                (_cfg("NOTEBOOKLM_MCP_TIMEOUT", 60.0) if service == "notebooklm"
-                 else _cfg("FLOW_MCP_TIMEOUT", 120.0))))
-        except MCPManagerError as e:
-            if e.code in ("TIMEOUT", "PROCESS_DEAD"):
-                conn.state = ST_ERROR
-                conn.last_error = str(e)
-                await conn.close()
-                self._conns.pop(service, None)
-            raise
+        call_timeout = float(
+            timeout if timeout is not None else
+            (_cfg("NOTEBOOKLM_MCP_TIMEOUT", 60.0) if service == "notebooklm"
+             else _cfg("FLOW_MCP_TIMEOUT", 120.0)))
+
+        max_attempts = 2 if auto_connect else 1
+        last_exc: Exception | None = None
+        text: str = ""
+
+        for attempt in range(1, max_attempts + 1):
+            conn = self._conns.get(service)
+            if not conn or conn.state != ST_CONNECTED or not conn.proc or conn.proc.returncode is not None:
+                if not auto_connect:
+                    raise MCPManagerError(f"{service} no está conectado", "DISCONNECTED")
+                await self.connect(service)
+                conn = self._conns.get(service)
+                if not conn or conn.state != ST_CONNECTED:
+                    raise MCPManagerError(f"{service} no se pudo conectar", "DISCONNECTED")
+            names = {t.get("name") for t in conn.tools}
+            if names and tool not in names:
+                raise MCPManagerError(
+                    f"el servidor no expone '{tool}' (tools: {', '.join(sorted(n for n in names if n))})",
+                    "TOOL_UNKNOWN")
+            if service == "notebooklm":
+                # INT-069/069.1: v0.8.5 nombra los parámetros `notebook` (antes
+                # notebook_id) y `question` (antes query en la tool de contexto del
+                # orquestador); espejar claves legacy según el inputSchema REAL
+                # (ver _mirror_notebook_arg / _mirror_query_arg).
+                self._mirror_notebook_arg(conn, tool, arguments)
+                self._mirror_query_arg(conn, tool, arguments)
+            try:
+                text = await conn.call(tool, arguments, call_timeout)
+                last_exc = None
+                break
+            except MCPManagerError as e:
+                last_exc = e
+                # D3: Excepción acotada a regla AA1: si flow_generate_image, flow_generate_video,
+                # flow_new_project o flow_upload_file fallan con error conteniendo "connectOverCDP: Timeout",
+                # permitir UN reintento precedido de calentamiento con log.warning. Cualquier otro error no se reintenta.
+                if attempt < max_attempts and service == "google-flow" and tool in NON_RETRYABLE_FLOW_TOOLS and "connectOverCDP: Timeout" in str(e):
+                    log.warning("[%s] connectOverCDP: Timeout en '%s'; calentando CDP y reintentando una vez...", service, tool)
+                    try:
+                        await conn.call("flow_list_assets", {}, 15.0)
+                    except MCPManagerError:
+                        pass
+                    continue
+                if e.code in ("TIMEOUT", "PROCESS_DEAD"):
+                    conn.state = ST_ERROR
+                    conn.last_error = str(e)
+                    await conn.close()
+                    self._conns.pop(service, None)
+                    # AA1: NUNCA reintentar herramientas que generen o muten en Flow
+                    if e.code == "PROCESS_DEAD" and tool in NON_RETRYABLE_FLOW_TOOLS:
+                        raise MCPManagerError(
+                            "la herramienta pudo ejecutarse; verifica en Flow antes de reintentar",
+                            "PROCESS_DEAD",
+                        )
+                    # AA1: Auto-reintento SOLO para herramientas de lectura seguras
+                    if attempt < max_attempts and e.code == "PROCESS_DEAD" and tool in RETRYABLE_READ_TOOLS:
+                        log.warning("[%s] proceso cerró la conexión durante call() de lectura '%s'; reintentando una vez...", service, tool)
+                        continue
+                raise
+
+        if last_exc:
+            raise last_exc
         log.info("[mcp-exec] %s::%s ok en %.1fs", service, tool, time.time() - t0)
         return {"ok": True, "service": service, "tool": tool, "text": text,
                 "elapsed_s": round(time.time() - t0, 2),
@@ -640,6 +798,11 @@ class MCPClientManager:
                 text = await conn.call(t, {}, timeout=25.0)
             except MCPManagerError as e:
                 if _AUTHISH_RE.search(str(e)):
+                    port = int(_cfg("GOOGLE_LOGIN_CDP_PORT", 9333))
+                    cdp_nbs = await self._cdp_list_notebooks_direct(port)
+                    if cdp_nbs:
+                        return {"ok": True, "tool": "cdp_direct", "notebooks": cdp_nbs,
+                                "first_id": cdp_nbs[0]["id"]}
                     raise MCPManagerError(
                         f"sesión Google no válida al listar notebooks: {e}",
                         "AUTH_REQUIRED") from e
@@ -649,6 +812,23 @@ class MCPClientManager:
             if nbs:
                 return {"ok": True, "tool": t, "notebooks": nbs,
                         "first_id": nbs[0]["id"]}
+
+        # ── Resilient Fallback: CDP Direct ──
+        # Si la tool de FastMCP falló o retornó lista vacía, consultamos
+        # directamente la pestaña activa de Chrome vía CDP:
+        port = int(_cfg("GOOGLE_LOGIN_CDP_PORT", 9333))
+        cdp_nbs = await self._cdp_list_notebooks_direct(port)
+        if cdp_nbs:
+            try:
+                tokens = await self._cdp_fetch_notebooklm_tokens(port)
+                cookies = await self._cdp_fetch_cookies_raw(port)
+                if cookies:
+                    self._sync_auth_json(cookies, tokens=tokens)
+            except (OSError, asyncio.TimeoutError):
+                pass
+            return {"ok": True, "tool": "cdp_direct", "notebooks": cdp_nbs,
+                    "first_id": cdp_nbs[0]["id"]}
+
         raise MCPManagerError(
             "listado de notebooks vacío o ilegible"
             + (f" ({last_err})" if last_err else ""), "LIST_EMPTY")
@@ -765,11 +945,39 @@ class MCPClientManager:
     @staticmethod
     def kill_profile_processes(profile_path: Path | str | None = None) -> list[int]:
         """Busca y termina cualquier proceso Chrome huérfano/zombi que esté bloqueando
-        profile_path para permitir que el nuevo Chrome con CDP se enlace sin conflictos."""
-        import sys
+        profile_path para permitir que el nuevo Chrome con CDP se enlace sin conflictos.
+
+        [P6.3] psutil en vez del PowerShell Get-CimInstance (la consulta WMI
+        costaba 1-3 s por llamada y se ejecutaba en el event loop): psutil
+        enumera procesos + cmdline en <100 ms y es multiplataforma. Fallback
+        al camino PowerShell histórico si psutil no está instalado."""
         p_str = str(profile_path if profile_path else _cfg("GOOGLE_PROFILE_GLOBAL", ""))
         p_name = Path(p_str).name
         killed = []
+        try:
+            import psutil  # P6.3: enumeración rápida, sin WMI
+            me = psutil.Process()
+            for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+                try:
+                    info = proc.info
+                    if (info["name"] or "").lower() not in ("chrome.exe", "chrome"):
+                        continue
+                    cmdline = " ".join(info["cmdline"] or [])
+                    if p_name and p_name not in cmdline:
+                        continue
+                    if proc.pid == me.pid:
+                        continue
+                    proc.kill()  # SIGKILL / TerminateProcess
+                    killed.append(proc.pid)
+                except (psutil.NoSuchProcess, psutil.AccessDenied,
+                        psutil.ZombieProcess):
+                    continue
+            if killed:
+                log.info("[mcp-profile] Procesos zombis de Chrome purgados en %s: %s",
+                         p_str, killed)
+            return killed
+        except ImportError:
+            pass  # sin psutil → camino clásico PowerShell (solo Windows)
         if sys.platform == "win32":
             try:
                 ps_cmd = (
@@ -789,7 +997,8 @@ class MCPClientManager:
                                        capture_output=True, timeout=8)
                         killed.append(pid)
                 if killed:
-                    log.info("[mcp-profile] Procesos zombis de Chrome purgados en %s: %s", p_str, killed)
+                    log.info("[mcp-profile] Procesos zombis de Chrome purgados en %s (ps): %s",
+                             p_str, killed)
             except Exception as e:
                 log.warning("[mcp-profile] Error al purgar procesos de %s: %s", p_str, e)
         return killed
@@ -849,7 +1058,6 @@ class MCPClientManager:
         start_new_session → sobrevive al reinicio de uvicorn; el perfil
         compartido hace el resto (Chrome singleton reenvía a la instancia
         viva si ya existía). Devuelve el pid."""
-        import sys
         # Auto-heal profile si --user-data-dir está en argv
         for a in argv:
             if a.startswith("--user-data-dir="):
@@ -904,7 +1112,6 @@ class MCPClientManager:
         o PowerShell falló → estado desconocido: el llamador NUNCA mata nada).
         Una sola pasada PowerShell: Win32_Process (CommandLine = perfil) +
         Get-Process (MainWindowHandle del top-level). $0.00, sin dependencias."""
-        import sys
         if sys.platform != "win32":
             return None
         p_name = Path(str(profile_path if profile_path
@@ -1004,19 +1211,23 @@ class MCPClientManager:
             #   MainWindowHandle==0) o None EN WINDOWS (PowerShell colgado/error →
             #   se asume SIN ventana visible, nunca se confía en un fantasma).
             #   En no-Windows None es estructural (no hay comprobación) y no purga.
-            import sys as _sys
-            on_windows = _sys.platform == "win32"
+            on_windows = sys.platform == "win32"
             if force_window:
-                killed_pids = self.kill_profile_processes(profile)
+                # [A7 · P2.2] purga/sondeo FUERA del event loop (to_thread):
+                # el PowerShell/psutil de la purga bloqueaba health/jobs 1-3 s.
+                killed_pids = await asyncio.to_thread(
+                    self.kill_profile_processes, profile)
                 heal_res = self.heal_chrome_profile(profile)  # borra Singleton* + repara
                 already_up = False
                 relaunched = True
                 log.warning("[mcp] force_window=True: purgados %s zombis del perfil "
                             "→ spawn de ventana interactiva garantizada", killed_pids or "[]")
             else:
-                window_state = self._windows_visible_state(profile)
+                window_state = await asyncio.to_thread(
+                    self._windows_visible_state, profile)
                 if window_state is False or (window_state is None and on_windows):
-                    killed_pids = self.kill_profile_processes(profile)
+                    killed_pids = await asyncio.to_thread(
+                        self.kill_profile_processes, profile)
                     heal_res = self.heal_chrome_profile(profile)
                     already_up = False
                     relaunched = True
@@ -1026,7 +1237,7 @@ class MCPClientManager:
         if not already_up:
             # Purgar SIEMPRE procesos huérfanos/zombis en profile antes del spawn (tanto CDP como sin CDP)
             # para evitar que una instancia fantasma capture la petición silenciosamente sin abrir ventana visible.
-            killed = self.kill_profile_processes(profile)
+            killed = await asyncio.to_thread(self.kill_profile_processes, profile)
             if killed:
                 heal_res = self.heal_chrome_profile(profile)
             chrome = self._find_chrome_bin()
@@ -1037,8 +1248,11 @@ class MCPClientManager:
                     "--no-first-run", "--no-default-browser-check",
                     "--disable-session-crashed-bubble",
                     "--hide-crash-restore-bubble",
-                    "--disable-features=SessionCrashedBubble",
-                    "--disable-blink-features=AutomationControlled"]
+                    "--disable-features=SessionCrashedBubble,IntensiveWakeUpThrottling,CalculateNativeWinOcclusion",
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-background-timer-throttling",
+                    "--disable-renderer-backgrounding",
+                    "--disable-backgrounding-occluded-windows"]
             if cdp:
                 argv.insert(2, f"--remote-debugging-port={port}")
             argv += pages
@@ -1063,7 +1277,8 @@ class MCPClientManager:
                     log.warning("[mcp] Chrome lanzado (pid=%s) pero CDP %s NO "
                                 "responde tras 3 s — posible fantasma nuevo", pid, port)
                 if spawn_confirmed:
-                    window_state_after_spawn = self._windows_visible_state(profile)
+                    window_state_after_spawn = await asyncio.to_thread(
+                        self._windows_visible_state, profile)
                     if window_state_after_spawn is False:
                         log.warning("[mcp] CDP %s arriba pero SIN ventana visible "
                                     "(MainWindowHandle==0) — revisar sesión de Windows", port)
@@ -1102,36 +1317,68 @@ class MCPClientManager:
                "notebooklm_storage": self.nb_storage_state()}
         return out
 
-    async def connect_all_google(self) -> dict:
-        """🚀 Conexión Google en 1 solo clic:
-        1. Purgar procesos zombis y sanear el perfil FlowImageChrome.
-        2. Si Chrome no está activo en puerto 9333, levantarlo en modo interactivo (--new-window).
-        3. Esperar a que el puerto 9333 esté listo.
-        4. Si NotebookLM no tiene storage_state.json capturado, capturar cookies del Chrome activo.
-        5. Conectar servidores MCP de Google Flow y NotebookLM.
+    async def connect_all_google(self, cdp_timeout_s: float | None = None) -> dict:
+        """🚀 Conexión Google en 1 solo clic (W1 + X2):
+        1. Primero comprueba si Chrome ya está SANO: puerto CDP arriba Y con
+           ventana visible (X2: un Chrome sano NUNCA se mata ni se relanza).
+        2. SOLO si está caído o es zombi (puerto abierto sin ventana visible):
+           purga procesos del perfil (kill_profile_processes), auto-heal del
+           perfil y relanza con force_window=True (misma ruta robusta que
+           «Abrir ventana de Chrome»), esperando hasta cdp_timeout_s segundos
+           (por defecto 30) sondeando cada 0.5 s.
+        3. Si Chrome no sube: no disimular con ok; devolver chrome_up=False y motivo explícito.
+        4. Si Chrome está activo: captura preventiva de storage_state si falta,
+           y conectar servidores MCP.
         """
         port = int(_cfg("FLOW_CDP_PORT", 9333))
         profile = Path(str(_cfg("GOOGLE_PROFILE_GLOBAL", "")))
+        timeout_s = float(cdp_timeout_s if cdp_timeout_s is not None
+                          else _cfg("MCP_CONNECT_ALL_CDP_TIMEOUT_S", 30.0))
 
-        # 1. Purga defensiva y auto-heal
-        killed = self.kill_profile_processes(profile)
-        heal_res = self.heal_chrome_profile(profile)
-        if killed:
-            heal_res.setdefault("actions", []).insert(0, f"{len(killed)} procesos zombis terminados")
+        heal_actions: list[str] = []
 
-        # 2. Verificar o levantar Chrome
+        # 1. Comprobar si ya está arriba Y tiene ventana visible (Chrome sano)
         is_up = await self._cdp_up(port)
-        if not is_up:
+        is_zombie = False
+        if is_up:
+            w_state = self._windows_visible_state(profile)
+            if w_state is False:
+                is_zombie = True
+                log.warning("[connect_all_google] Puerto CDP %s abierto pero sin ventana visible "
+                            "(zombie) → purga, saneo y relanzamiento forzado", port)
+
+        launch_res = {}
+        chrome_error = None
+        if not is_up or is_zombie:
+            # 2. SOLO Chrome caído o zombi: purga defensiva y auto-heal (X2).
+            #    Un Chrome sano y visible jamás llega aquí: no se mata ni se relanza.
+            killed = self.kill_profile_processes(profile)
+            heal_res = self.heal_chrome_profile(profile)
+            heal_actions = list(heal_res.get("actions", []))
+            if killed:
+                heal_actions.insert(0, f"{len(killed)} procesos zombis terminados")
+
             pages = [
                 "https://labs.google/fx/tools/flow",
                 "https://notebooklm.google.com/"
             ]
-            await self.launch_google_login(pages, cdp=True)
-            for _ in range(12):
-                await asyncio.sleep(0.5)
+            try:
+                launch_res = await self.launch_google_login(pages, cdp=True, force_window=True)
+            except Exception as e:
+                chrome_error = f"Error al lanzar Chrome: {e}"
+                log.warning("[connect_all_google] %s", chrome_error)
+
+            # Sondear hasta timeout_s cada 0.5 s
+            is_up = False
+            steps = max(1, int(timeout_s / 0.5))
+            for _ in range(steps):
                 if await self._cdp_up(port):
                     is_up = True
                     break
+                await asyncio.sleep(0.5)
+
+            if not is_up and not chrome_error:
+                chrome_error = f"Chrome no respondió en el puerto CDP {port} tras {int(timeout_s)} s"
 
         # 3. Captura preventiva si falta storage_state de NotebookLM
         nb_storage = self.nb_storage_state()
@@ -1141,15 +1388,19 @@ class MCPClientManager:
             except Exception as e:
                 log.debug("[connect_all_google] auto-captura omitida: %s", e)
 
-        # 4. Conectar ambos servicios MCP
+        # 4. Conectar ambos servidores MCP
         flow_st = {}
         flow_err = None
-        try:
-            flow_st = await self.connect("google-flow")
-        except Exception as e:
-            flow_err = str(e)
-            conn = self._conns.get("google-flow")
-            flow_st = self._conn_status(conn) if conn else {"service": "google-flow", "state": ST_ERROR, "last_error": flow_err}
+        if is_up:
+            try:
+                flow_st = await self.connect("google-flow")
+            except Exception as e:
+                flow_err = str(e)
+                conn = self._conns.get("google-flow")
+                flow_st = self._conn_status(conn) if conn else {"service": "google-flow", "state": ST_ERROR, "last_error": flow_err}
+        else:
+            flow_err = chrome_error or f"Chrome no responde en el puerto CDP {port}"
+            flow_st = {"service": "google-flow", "state": ST_ERROR, "last_error": flow_err}
 
         nb_st = {}
         nb_err = None
@@ -1160,63 +1411,74 @@ class MCPClientManager:
             conn = self._conns.get("notebooklm")
             nb_st = self._conn_status(conn) if conn else {"service": "notebooklm", "state": ST_ERROR, "last_error": nb_err}
 
+        ok = bool(is_up and flow_st.get("state") == ST_CONNECTED and nb_st.get("state") == ST_CONNECTED)
         return {
-            "ok": (flow_st.get("state") == ST_CONNECTED and nb_st.get("state") == ST_CONNECTED),
+            "ok": ok,
             "chrome_up": is_up,
+            "chrome_error": chrome_error if not is_up else None,
             "cdp_port": port,
             "flow": flow_st,
             "notebooklm": nb_st,
             "flow_error": flow_err,
             "notebooklm_error": nb_err,
-            "heal_actions": heal_res.get("actions", []),
+            "heal_actions": heal_actions,
+            "launch_result": launch_res,
         }
 
-    async def _cdp_fetch_cookies_raw(self, port: int, timeout: float = 4.0) -> list[dict]:
-        """Consulta cookies reales del Chrome vía CDP WebSocket (Storage.getCookies o Network.getAllCookies).
-        Usa aiohttp nativo si está disponible, o fallback a Playwright sync en thread."""
+    async def _cdp_fetch_cookies_raw(self, port: int, timeout: float = 4.0, target_url: str | None = None) -> list[dict]:
+        """Consulta cookies reales del Chrome vía CDP WebSocket usando Network.getCookies con urls=[BASE_URL].
+        Solo obtiene cookies aplicables a BASE_URL (NOTEBOOKLM_BASE_URL)."""
+        base_url = (target_url or str(_cfg("NOTEBOOKLM_BASE_URL", "https://notebook.google.com") or "https://notebook.google.com")).strip()
         try:
             import aiohttp
             async with aiohttp.ClientSession() as session:
                 ws_url = None
                 try:
-                    async with session.get(f"http://127.0.0.1:{port}/json/version",
+                    async with session.get(f"http://127.0.0.1:{port}/json",
                                            timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
                         if resp.status == 200:
-                            data = await resp.json()
-                            ws_url = data.get("webSocketDebuggerUrl")
-                except Exception:
+                            targets = await resp.json()
+                            nb_tab = next((t for t in targets if "notebook" in t.get("url", "") and t.get("type") == "page"), None)
+                            if nb_tab and nb_tab.get("webSocketDebuggerUrl"):
+                                ws_url = nb_tab["webSocketDebuggerUrl"]
+                            elif targets:
+                                ws_url = next((t["webSocketDebuggerUrl"] for t in targets if t.get("webSocketDebuggerUrl")), None)
+                except (aiohttp.ClientError, OSError, asyncio.TimeoutError):
                     pass
 
                 if not ws_url:
                     try:
-                        async with session.get(f"http://127.0.0.1:{port}/json/list",
+                        async with session.get(f"http://127.0.0.1:{port}/json/version",
                                                timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
                             if resp.status == 200:
-                                targets = await resp.json()
-                                for t in targets:
-                                    if t.get("webSocketDebuggerUrl"):
-                                        ws_url = t["webSocketDebuggerUrl"]
-                                        break
-                    except Exception:
+                                data = await resp.json()
+                                ws_url = data.get("webSocketDebuggerUrl")
+                    except (aiohttp.ClientError, OSError, asyncio.TimeoutError):
                         pass
 
                 if ws_url:
                     async with session.ws_connect(ws_url, timeout=timeout) as ws:
-                        await ws.send_json({"id": 1, "method": "Storage.getCookies"})
+                        # 2A: Network.getCookies con urls=[base_url]
+                        await ws.send_json({"id": 1, "method": "Network.getCookies", "params": {"urls": [base_url]}})
                         msg = await ws.receive_json(timeout=timeout)
                         cookies = msg.get("result", {}).get("cookies", [])
                         if cookies:
                             return cookies
-                        await ws.send_json({"id": 2, "method": "Network.getAllCookies"})
+                        await ws.send_json({"id": 2, "method": "Storage.getCookies"})
+                        msg = await ws.receive_json(timeout=timeout)
+                        cookies = msg.get("result", {}).get("cookies", [])
+                        if cookies:
+                            return cookies
+                        await ws.send_json({"id": 3, "method": "Network.getAllCookies"})
                         msg = await ws.receive_json(timeout=timeout)
                         return msg.get("result", {}).get("cookies", [])
-        except Exception as e:
+        except (aiohttp.ClientError, OSError, asyncio.TimeoutError) as e:
             log.debug("[mcp] _cdp_fetch_cookies_raw via aiohttp falló (%s)", e)
 
         # Fallback a Playwright si aiohttp no obtuvo cookies
         try:
             return await self._cdp_fetch_google_cookies_impl(port)
-        except Exception as e:
+        except (ImportError, RuntimeError, OSError) as e:
             log.debug("[mcp] fallback playwright falló: %s", e)
             return []
 
@@ -1237,6 +1499,104 @@ class MCPClientManager:
         if has_auth:
             return True, "Sesión activa (cookies Google válidas en CDP)"
         return False, "Sesión no iniciada: falta cookie __Secure-1PSID / SID en FlowImageChrome"
+
+    async def _cdp_fetch_notebooklm_tokens(self, port: int = 9333, timeout: float = 4.0) -> dict:
+        """Extrae tokens activos de NotebookLM (SNlM0e CSRF, FdrFJe session_id, cfb2h build_label)
+        directamente de window.WIZ_global_data en la pestaña notebook.google.com de Chrome."""
+        if not await self._cdp_up(port):
+            return {}
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"http://127.0.0.1:{port}/json",
+                                       timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+                    if resp.status != 200:
+                        return {}
+                    tabs = await resp.json()
+
+            nb_tab = next((t for t in tabs if "notebook" in t.get("url", "") and t.get("type") == "page"), None)
+            if not nb_tab or not nb_tab.get("webSocketDebuggerUrl"):
+                return {}
+
+            ws_url = nb_tab["webSocketDebuggerUrl"]
+            async with aiohttp.ClientSession() as session:
+                async with session.ws_connect(ws_url, timeout=timeout) as ws:
+                    expr = (
+                        "(() => {"
+                        "  const wiz = window.WIZ_global_data || {};"
+                        "  const html = document.documentElement ? document.documentElement.outerHTML : '';"
+                        "  const m = html.match(/boq_labs-tailwind-frontend_\\d{8}\\.\\d+_p\\d+/);"
+                        "  return {"
+                        "    csrf_token: wiz.SNlM0e || '',"
+                        "    session_id: wiz.FdrFJe || '',"
+                        "    build_label: (m ? m[0] : '') || wiz.cfb2h || wiz.KjTSIf || ''"
+                        "  };"
+                        "})()"
+                    )
+                    await ws.send_json({"id": 1, "method": "Runtime.evaluate",
+                                        "params": {"expression": expr, "returnByValue": True}})
+                    msg = await ws.receive_json(timeout=timeout)
+                    val = msg.get("result", {}).get("result", {}).get("value", {})
+                    if isinstance(val, dict) and val.get("build_label"):
+                        bl_extracted = str(val["build_label"]).strip()
+                        if _BL_RE.match(bl_extracted):
+                            self._live_bl = bl_extracted
+                            os.environ["NOTEBOOKLM_BL"] = bl_extracted
+                            log.info("[mcp] build label derivado en vivo: %s", bl_extracted)
+                    return val if isinstance(val, dict) else {}
+        except (OSError, json.JSONDecodeError, asyncio.TimeoutError,
+                TypeError, KeyError, ValueError) as e:
+            log.debug("[mcp] _cdp_fetch_notebooklm_tokens falló: %s", e)
+            return {}
+
+    async def _cdp_list_notebooks_direct(self, port: int = 9333, timeout: float = 8.0) -> list[dict]:
+        """Consulta directamente la lista de cuadernos desde la pestaña activa de
+        notebook.google.com en Chrome vía CDP si el MCP falló o no tiene tokens frescos."""
+        if not await self._cdp_up(port):
+            return []
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"http://127.0.0.1:{port}/json",
+                                       timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+                    if resp.status != 200:
+                        return []
+                    tabs = await resp.json()
+
+            nb_tab = next((t for t in tabs if "notebook" in t.get("url", "") and t.get("type") == "page"), None)
+            if not nb_tab or not nb_tab.get("webSocketDebuggerUrl"):
+                return []
+
+            def_bl = getattr(config, "NOTEBOOKLM_BL", getattr(config, "DEFAULT_NOTEBOOKLM_BL", "boq_labs-tailwind-frontend_20261117.07_p0"))
+            ws_url = nb_tab["webSocketDebuggerUrl"]
+            async with aiohttp.ClientSession() as session:
+                async with session.ws_connect(ws_url, timeout=timeout) as ws:
+                    expr = (
+                        "(async () => {"
+                        "  const wiz = window.WIZ_global_data || {};"
+                        f"  const bl = wiz.cfb2h || wiz.KjTSIf || '{def_bl}';"
+                        "  const sid = wiz.FdrFJe || '';"
+                        "  const at = wiz.SNlM0e || '';"
+                        "  const url = `/_/LabsTailwindUi/data/batchexecute?rpcids=wXbhsf&source-path=%2F&bl=${bl}&hl=en&rt=c&f.sid=${sid}`;"
+                        "  const reqPayload = JSON.stringify([[[\"wXbhsf\", JSON.stringify([null, 1, null, [2]]), null, \"generic\"]]]);"
+                        "  const res = await fetch(url, {"
+                        "    method: 'POST',"
+                        "    headers: {'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8', 'X-Same-Domain': '1'},"
+                        "    body: new URLSearchParams({'f.req': reqPayload, 'at': at})"
+                        "  });"
+                        "  return await res.text();"
+                        "})()"
+                    )
+                    await ws.send_json({"id": 1, "method": "Runtime.evaluate",
+                                        "params": {"expression": expr, "awaitPromise": True, "returnByValue": True}})
+                    msg = await ws.receive_json(timeout=timeout)
+                    text = msg.get("result", {}).get("result", {}).get("value", "")
+                    if text:
+                        return parse_notebook_list(text)
+        except (OSError, json.JSONDecodeError, asyncio.TimeoutError,
+                TypeError, KeyError, ValueError) as e:
+            log.debug("[mcp] _cdp_list_notebooks_direct falló: %s", e)
+        return []
 
     async def _cdp_fetch_google_cookies_impl(self, port: int) -> list[dict]:
         """Extrae cookies de dominios Google del Chrome de login vía
@@ -1337,11 +1697,121 @@ class MCPClientManager:
             except OSError:
                 pass
             written.append(str(p))
+        tokens = await self._cdp_fetch_notebooklm_tokens(port)
+        self._sync_auth_json(cookies, tokens=tokens)
         log.info("[google-login] storage_state capturado: %d cookies → %s",
                  len(cookies), ", ".join(written))
         return {"ok": True, "cookies": len(cookies),
                 "storage_paths": written,
                 "chrome_up": True, "cdp_port": port}
+
+    @staticmethod
+    def _filter_and_dedupe_cookies(cookies: list[dict], base_url: str | None = None) -> dict[str, str]:
+        """Filtra y desduplica cookies para BASE_URL:
+        - Excluye dominios que no pertenezcan a google.com o gstatic.com.
+        - Excluye explícitamente 'accounts.google.com' y otros hosts no aplicables.
+        - Desduplica nombres de cookie dando prioridad al host más específico (ej: notebook.google.com > .google.com).
+        """
+        def _specificity(dom: str) -> tuple[int, int]:
+            clean = dom.lstrip(".")
+            return (len(clean.split(".")), len(clean))
+
+        selected: dict[str, tuple[str, str]] = {}  # name -> (value, domain)
+
+        for c in cookies or []:
+            if not isinstance(c, dict):
+                continue
+            name = c.get("name")
+            value = c.get("value")
+            if not name or value is None:
+                continue
+            raw_dom = c.get("domain")
+            domain = str(raw_dom).strip().lower() if raw_dom else ".google.com"
+
+            # 2A: sin cookies de accounts.google.com ni de otros hosts fuera de google
+            if "accounts.google.com" in domain:
+                continue
+            if not (domain.endswith("google.com") or domain.endswith("gstatic.com")):
+                continue
+
+            if name not in selected:
+                selected[name] = (value, domain)
+            else:
+                existing_dom = selected[name][1]
+                if _specificity(domain) > _specificity(existing_dom):
+                    selected[name] = (value, domain)
+
+        return {k: v[0] for k, v in selected.items()}
+
+    def _sync_auth_json(self, cookies: list[dict], target_path: Path | None = None,
+                        tokens: dict | None = None) -> bool:
+        """Sincroniza las cookies Google en ~/.notebooklm-mcp/auth.json
+        para que notebooklm-mcp-server comparta la sesión sin desincronización.
+
+        BB5 / 2A:
+          · No escribe si cookies está vacío o no trae cookie de sesión de Google (SID o __Secure-1PSID).
+          · Escribe solo cookies aplicables a BASE_URL (sin accounts.google.com ni duplicados, gana el host más específico).
+          · Escritura atómica (archivo temporal + os.replace).
+          · chmod 600 donde aplique (POSIX).
+          · log.warning en lugar del pass silencioso ante errores.
+        """
+        if not cookies:
+            log.warning("[_sync_auth_json] cookies está vacío — no se escribe auth.json")
+            return False
+
+        cookies_dict = self._filter_and_dedupe_cookies(cookies)
+        if not ("SID" in cookies_dict or "__Secure-1PSID" in cookies_dict):
+            log.warning(
+                "[_sync_auth_json] cookies no trae cookie de sesión de Google "
+                "(SID o __Secure-1PSID) — no se escribe auth.json"
+            )
+            return False
+
+        p_mcp = target_path if target_path is not None else (Path.home() / ".notebooklm-mcp" / "auth.json")
+        try:
+            p_mcp.parent.mkdir(parents=True, exist_ok=True)
+            tok = tokens or {}
+            auth_payload = {
+                "cookies": cookies_dict,
+                "csrf_token": tok.get("csrf_token") or "",
+                "session_id": tok.get("session_id") or "",
+                "extracted_at": time.time(),
+            }
+            if p_mcp.is_file():
+                try:
+                    old_auth = json.loads(p_mcp.read_text(encoding="utf-8"))
+                    if not auth_payload["csrf_token"]:
+                        auth_payload["csrf_token"] = old_auth.get("csrf_token", "")
+                    if not auth_payload["session_id"]:
+                        auth_payload["session_id"] = old_auth.get("session_id", "")
+                except (json.JSONDecodeError, OSError) as e:
+                    log.warning("[_sync_auth_json] error leyendo auth.json previo (%s) — se sobreescribirá", e)
+
+            fd, tmp_path_str = tempfile.mkstemp(
+                prefix="auth_", suffix=".tmp", dir=str(p_mcp.parent)
+            )
+            tmp_path = Path(tmp_path_str)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(auth_payload, f, indent=2)
+                if hasattr(os, "chmod"):
+                    try:
+                        os.chmod(tmp_path, 0o600)
+                    except OSError as ce:
+                        log.debug("[_sync_auth_json] os.chmod no soportado o falló: %s", ce)
+                os.replace(tmp_path, p_mcp)
+                return True
+            except OSError as e:
+                log.warning("[_sync_auth_json] error en escritura atómica de auth.json: %s", e)
+                if tmp_path.is_file():
+                    try:
+                        tmp_path.unlink()
+                    except OSError:
+                        pass
+                return False
+        except OSError as e:
+            log.warning("[_sync_auth_json] error preparando directorio/archivo auth.json: %s", e)
+            return False
 
     # ── INT-071 · Google One-Tap Hub — [G] Continuar con Google ────────
     async def google_sso_start(self, urls: list[str] | None = None) -> dict:
@@ -1513,10 +1983,19 @@ class MCPClientManager:
         nb_conn = self._conns.get("notebooklm")
         nb_st = self._conn_status(nb_conn) or {}
         phase = str(self._sso.get("phase") or "idle")
-        if phase in ("idle", "timeout") and has_auth \
-                and flow_st.get("state") == ST_CONNECTED \
-                and nb_st.get("state") == ST_CONNECTED:
-            phase = "connected"
+
+        acc = self._sso.get("account")
+        if not acc and (has_auth or flow_st.get("state") == ST_CONNECTED):
+            try:
+                acc = await self.google_account_info(port)
+                if acc:
+                    self._sso["account"] = acc
+            except Exception:
+                pass
+
+        if phase in ("idle", "timeout") and (has_auth or flow_st.get("state") == ST_CONNECTED):
+            if flow_st.get("state") == ST_CONNECTED or nb_st.get("state") == ST_CONNECTED or acc:
+                phase = "connected"
         return {"cdp_port": base.get("cdp_port"),
                 "chrome_up": base.get("chrome_up"),
                 "profile_dir": base.get("profile_dir"),

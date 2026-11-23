@@ -182,10 +182,13 @@ with tempfile.TemporaryDirectory() as tmp:
     _fuera.mkdir()
     (_fuera / "secreto.txt").write_text("x")
     _link = ws.workspace / "puente"
-    _link.symlink_to(_fuera)
-    check("boundary bloquea escape por symlink", expect_error(
-        lambda: _b.resolve_within(_link / "secreto.txt"),
-        ErrorCode.PERMISSION_DENIED))
+    try:
+        _link.symlink_to(_fuera)
+        check("boundary bloquea escape por symlink", expect_error(
+            lambda: _b.resolve_within(_link / "secreto.txt"),
+            ErrorCode.PERMISSION_DENIED))
+    except OSError:
+        check("boundary escape por symlink omitido (sin privilegio Win32)", True)
 
 # ══ 5. SESIONES AUDITABLES (§19) ═════════════════════════════════════════
 print("── 5. Sesiones auditables (§19)")

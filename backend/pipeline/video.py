@@ -28,9 +28,11 @@ import logging
 import math
 import random
 import subprocess
+import threading
 from pathlib import Path
 
-from config import (AUDIO_MASTER_BROADCAST, FPS, LONG_H, LONG_W,
+from config import (AUDIO_MASTER_BROADCAST, FPS,
+                    LONG_H, LONG_W,
                     MUSIC_VOLUME, OUTPUT_DIR, SHORT_H, SHORT_W)
 from pipeline import subtitles as subs_mod
 from pipeline import typography as typo_mod
@@ -46,6 +48,10 @@ TRANSITION_DUR = 0.5  # segundos de crossfade entre escenas (compensado en el pa
 # integrado -14 LUFS, rango LRA 11, true peak -1.0 dBTP, dual_mono=true para
 # fuentes mono como el TTS). Un único filtro para ambas ramas del mux.
 BROADCAST_LOUDNORM = "loudnorm=I=-14:LRA=11:TP=-1.0:dual_mono=true"
+
+# P1-2: el helper vive en el módulo NEUTRAL video_encode (pipeline y
+# services sin dependencias cruzadas). Re-export por compatibilidad.
+from video_encode import get_video_encoder, _probe_nvenc  # noqa: E402,F401
 FACTOR_MAX = 2.5      # cap de slow-mo por segmento (retime setpts)
 CLIP_TOL = 0.25       # tolerancia milimétrica post-render (s) clip vs target
 # INT-077 · tipos de escena UGC (scene['type'] o scene['meta']['type'],
@@ -113,8 +119,36 @@ def _run_ffmpeg(cmd: list[str], timeout: int = 900) -> subprocess.CompletedProce
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
 
+# BH2 ─ escape de rutas dentro de VALORES de filtro ffmpeg (ass=, subtitles=,
+# fontsdir=…). ffmpeg parsea en DOS niveles: 1º el grafo (avfilter), que copia
+# VERBATIM lo encerrado entre comillas simples y solo procesa el escape '\'
+# FUERA de ellas; 2º el valor de la opción (av_opt), que separa por ':' y
+# procesa '\'. Por eso el valor va ENTRE COMILLAS SIMPLES y, dentro, se
+# escapa a nivel de opción: '\' → '\\', ':' → '\:' y "'" → cierre + literal
+# re-escapado + apertura. El patrón antiguo (solo .replace(':', '\\:') SIN
+# comillas) rompía rutas Windows: el nivel grafo consumía el escape y el ':'
+# de la unidad partía el valor por la mitad (p. ej. D:\…\YOUTUBE AUTOMATION\…).
+_BS = chr(92)
+
+
+def ffmpeg_filter_path(p: str | Path) -> str:
+    """Devuelve `p` listo para incrustarse en un VALOR de opción de filtro
+    ffmpeg (ass=/subtitles=/fontsdir=…), probado contra la semántica exacta
+    de av_get_token (tests BH con parser réplica de dos niveles)."""
+    s = str(p)
+    s = s.replace(_BS, _BS + _BS)                     # \ → \\
+    s = s.replace(":", _BS + ":")                      # : → \:
+    s = s.replace("'", "'" + _BS * 3 + "''")          # ' → ' \ \ \ ' '
+    return "'" + s + "'"
+
+
 def probe_duration(path: Path) -> float:
-    """Duración REAL de un medio con ffprobe (nunca estimar: sincronía exacta)."""
+    """Duración REAL de un medio con ffprobe (nunca estimar: sincronía exacta).
+
+    [P6.3] caché por (ruta, mtime, tamaño) en OUTPUT_DIR/.dur_cache.json:
+    el mismo asset ya no se re-prueba con ffprobe en cada render/QA (un
+    proyecto de 10 escenas pagaba 10×3 ffprobe por render). La clave incluye
+    mtime+tamaño: un asset regenerado invalida su entrada sola."""
     try:
         p = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
@@ -123,6 +157,57 @@ def probe_duration(path: Path) -> float:
         return float(p.stdout.strip().splitlines()[0])
     except Exception:  # noqa: BLE001
         return 0.0
+
+
+_DUR_CACHE_LOCK = threading.Lock()
+
+
+def _dur_cache_file() -> Path:
+    return OUTPUT_DIR / ".dur_cache.json"
+
+
+def probe_duration_cached(path: Path) -> float:
+    """probe_duration con caché persistente (P6.3). Devuelve 0.0 igual que
+    probe_duration ante fallos (y NO cachea fallos: un ffprobe fallido por
+    I/O transitorio se reintenta la próxima vez)."""
+    p = Path(path)
+    try:
+        st = p.stat()
+    except OSError:
+        return 0.0
+    key = f"{p.resolve()}:{st.st_mtime_ns}:{st.st_size}"
+    with _DUR_CACHE_LOCK:
+        try:
+            cache = json.loads(_dur_cache_file().read_text(encoding="utf-8"))
+        except (OSError, ValueError):  # caché ausente/corrupta: se reconstruye
+            cache = {}
+        hit = cache.get(key)
+        if isinstance(hit, (int, float)) and hit > 0:
+            return float(hit)
+        dur = probe_duration(p)
+        if dur > 0:
+            cache[key] = dur
+            # poda: máximo 2000 entradas (LRU barato por inserción)
+            if len(cache) > 2000:
+                cache = dict(list(cache.items())[-2000:])
+            try:
+                _dur_cache_file().write_text(
+                    json.dumps(cache), encoding="utf-8")
+            except OSError:
+                pass  # caché es best-effort: jamás rompe un render
+        return dur
+
+
+def safe_kenburns_scale(w: int, h: int, target_factor: float = 2.5, max_dim: int = 4320) -> tuple[int, int]:
+    """P2-4: Mitigación controlada de jitter en Ken Burns zoompan.
+    Medición empírica: escalado 1x produce jitter std(accel)=5.93, 2x=2.87, >2x=1.38.
+    Para evitar explosión de memoria en 4K (2160x3840), acota la dimensión máxima
+    intermedia a max_dim (default 4320 px) manteniendo proporciones y números pares."""
+    factor = min(target_factor, max_dim / max(w, h)) if max(w, h) > 0 else 1.0
+    factor = max(1.0, factor)
+    sw = int(round(w * factor / 2.0)) * 2
+    sh = int(round(h * factor / 2.0)) * 2
+    return sw, sh
 
 
 def scene_clip_cmd(img: Path, duration: float, out: Path, w: int, h: int,
@@ -137,12 +222,31 @@ def scene_clip_cmd(img: Path, duration: float, out: Path, w: int, h: int,
     frames = max(int(duration * fps), 1)
     peak = ZOOM_PEAK if zoom_dir > 0 else 1.12
     zexpr = kenburns_3phase_expr(frames, peak=peak)
-    parts = [
-        f"scale={w * 2}:{h * 2}:force_original_aspect_ratio=increase",
-        f"crop={w * 2}:{h * 2}",
-        f"zoompan=z='{zexpr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
-        f":d={frames}:s={w}x{h}:fps={fps}",
-    ]
+    sw, sh = safe_kenburns_scale(w, h)
+    # P1-1 (medición tools/medir_jitter_kenburns.py): si safe_kenburns_scale
+    # deja el factor por debajo de 2.0 (salidas grandes, p. ej. 4K 2160x3840
+    # → 1.125x), la mitigación NO actúa (jitter simulado 0.42 vs 0.44 sin
+    # mitigar). Ruta B: zoompan a MEDIA resolución con factor 2x real
+    # (jitter 0.22, ~48% menos) + reescalado final lanczos (mapeo fijo, sin
+    # cuantización por frame). Memoria acotada: intermedio = resolución
+    # original; NUNCA 4320x7680 (133 MB/frame, riesgo OOM).
+    if w >= 2 and sw / max(w, 1) < 2.0:
+        hw = max((w // 2) // 2 * 2, 2)   # mitad de salida, par
+        hh = max((h // 2) // 2 * 2, 2)
+        parts = [
+            f"scale={hw * 2}:{hh * 2}:force_original_aspect_ratio=increase",
+            f"crop={hw * 2}:{hh * 2}",
+            f"zoompan=z='{zexpr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+            f":d={frames}:s={hw}x{hh}:fps={fps}",
+            f"scale={w}:{h}:flags=lanczos",
+        ]
+    else:
+        parts = [
+            f"scale={sw}:{sh}:force_original_aspect_ratio=increase",
+            f"crop={sw}:{sh}",
+            f"zoompan=z='{zexpr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+            f":d={frames}:s={w}x{h}:fps={fps}",
+        ]
     if rotate_deg and rotate_deg > 0:
         parts.append(
             f"rotate='{rotate_deg}*PI/180*sin(2*PI*t/{rotate_speed})'"
@@ -155,7 +259,7 @@ def scene_clip_cmd(img: Path, duration: float, out: Path, w: int, h: int,
     return ["ffmpeg", "-y", "-loop", "1", "-i", str(img),
             "-frames:v", str(frames_out), "-t", f"{duration:.3f}",
             "-vf", vf, "-r", str(fps), "-an",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", str(out)]
+            *get_video_encoder(final=False), str(out)]
 
 
 def retime_clip_cmd(src: Path, target_dur: float, out: Path, w: int, h: int,
@@ -192,7 +296,7 @@ def retime_clip_cmd(src: Path, target_dur: float, out: Path, w: int, h: int,
     cmd += ["-i", str(src), "-vf", vf, "-an",
             "-frames:v", str(frames_out),
             "-t", f"{target_dur:.3f}", "-r", str(fps),
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", str(out)]
+            *get_video_encoder(final=False), str(out)]
     return cmd
 
 
@@ -340,8 +444,9 @@ async def render_scenes(project: dict, scenes: list[dict], durations: list[float
             out.with_suffix(".json").write_text(json.dumps(
                 {"src": str(src), "dur": round(target, 3),
                  "measured": round(measured, 3), "fitted": bool(fitted)}))
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _ex:  # P2-2: sin log, el caché de idempotencia
+            log.warning("sidecar de retime no escrito (%s): se perderá la "
+                        "reutilización idempotente de %s", _ex, out.name)
         if on_progress:
             await on_progress(i + 1, n_scenes, None)
         return out
@@ -380,7 +485,8 @@ async def concat_clips(project: dict, clips: list[Path],
 
     concat_file = proj_dir / "concat.txt"
     concat_file.write_text(
-        "\n".join(f"file '{c.as_posix()}'" for c in clips), encoding="utf8")
+        "\n".join("file '" + c.as_posix().replace("'", "'\\''") + "'"
+                  for c in clips), encoding="utf8")
     cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file),
            "-c", "copy", str(out)]
     p = await asyncio.to_thread(lambda: _run_ffmpeg(cmd, timeout=300))
@@ -395,7 +501,11 @@ async def _concat_xfade(project: dict, clips: list[Path], out: Path,
     duraciones REALES (ffprobe) de cada clip. Sin audio (clips -an):
     la voz se mezcla después en mux_audio_music."""
     tdur = TRANSITION_DUR
-    durs = [probe_duration(c) for c in clips]
+    # [A8 · P2.2] los ffprobe de duración corren en hilos (antes bloqueaban
+    # el event loop N×30s — health/dashboard congelados durante el ensamblado).
+    # Con caché (P6.3) el 2º render es instantáneo.
+    durs = await asyncio.gather(*[asyncio.to_thread(probe_duration, c)
+                                  for c in clips])
     if any(d <= tdur + 0.1 for d in durs):
         raise RuntimeError("clip demasiado corto para xfade")
     inputs: list[str] = []
@@ -412,8 +522,8 @@ async def _concat_xfade(project: dict, clips: list[Path], out: Path,
             f":offset={offset:.3f}{label}")
         prev = label
     cmd = ["ffmpeg", "-y", *inputs, "-filter_complex", ";".join(chains),
-           "-map", prev, "-c:v", "libx264", "-profile:v", "main", "-level", "4.0",
-           "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "18",
+           "-map", prev, "-pix_fmt", "yuv420p",
+           *get_video_encoder(final=False),
            "-r", str(FPS), str(out)]
     p = await asyncio.to_thread(lambda: _run_ffmpeg(cmd, timeout=1800))
     if p.returncode != 0:
@@ -458,7 +568,37 @@ async def mux_audio_music(project: dict, video_silent: Path, voice_full: Path) -
                "-shortest", str(out)]
         p = await asyncio.to_thread(lambda: _run_ffmpeg(cmd, timeout=600))
         if p.returncode != 0:
-            log.warning("mux con música falló (%s) → solo voz", p.stderr[-200:])
+            # [M · P1.8] el fallback "solo voz" era un log y una MENTIRA: se
+            # seguía de largo con `out` nunca escrito y el pipeline moría
+            # después. Ahora se ejecuta DE VERDAD el mux sin música (y si
+            # también falla, propaga el error original — nada silencioso).
+            log.warning("mux con música falló (%s) → reintento SOLO VOZ",
+                        p.stderr[-200:])
+            cmd_voz = ["ffmpeg", "-y", "-i", str(video_silent), "-i", str(voice_full),
+                       "-map", "0:v", "-map", "1:a", "-c:v", "copy",
+                       *(("-af", BROADCAST_LOUDNORM) if master else ()),
+                       "-c:a", "aac", "-b:a", "192k", *ar_args,
+                       "-shortest", str(out)]
+            p2 = await asyncio.to_thread(lambda: _run_ffmpeg(cmd_voz, timeout=300))
+            if p2.returncode != 0:
+                raise RuntimeError(
+                    "No se pudo unir audio y video (ni con música ni solo voz): "
+                    + (p.stderr or p2.stderr)[-300:])
+            (proj_dir / "music_track.json").write_text(json.dumps(
+                {"track": None, "ducking": False,
+                 "fallback_solo_voz": True},
+                ensure_ascii=False), encoding="utf8")
+            (proj_dir / "audio_master.json").write_text(json.dumps(
+                {"enabled": master, "loudnorm": BROADCAST_LOUDNORM if master else None,
+                 "target_lufs": -14 if master else None,
+                 "lra": 11 if master else None,
+                 "tp_dbtp": -1.0 if master else None,
+                 "dual_mono": True if master else None,
+                 "sample_rate": 48000 if master else None,
+                 "codec": "aac", "bitrate": "192k",
+                 "music_ducking": False, "fallback_solo_voz": True},
+                ensure_ascii=False), encoding="utf8")
+            return out
     else:
         cmd = ["ffmpeg", "-y", "-i", str(video_silent), "-i", str(voice_full),
                "-map", "0:v", "-map", "1:a", "-c:v", "copy",
@@ -518,50 +658,32 @@ async def burn_subtitles(project: dict, video_raw: Path, words_path: Path) -> Pa
         encoding="utf8")
 
     final = proj_dir / f"{project['id']}_final.mp4"
-    sub_filter = f"ass={ass_path.as_posix().replace(':', '\\\\:')}"
+    sub_filter = f"ass={ffmpeg_filter_path(ass_path)}"
     # INT-021: fontsdir hace que libass resuelva la Montserrat ExtraBold
     # embarcada (matching por familia ID1, verificado empíricamente con A/B
     # de MD5 de fotogramas — CONTEXTO INT-021 §3). Sin fontsdir el estilo
     # degradaría en silencio a la fuente por defecto del sistema.
     if typo_mod.FONT_DIR.is_dir():
-        sub_filter += (f":fontsdir="
-                       f"{typo_mod.FONT_DIR.as_posix().replace(':', '\\\\:')}")
-    # INT-012: en 4K (2160x3840) libass+libx264 «medium» superó los 900 s y el
-    # TimeoutExpired — no capturado — tumbaba TODO el pipeline aunque el resto
-    # del render fuera válido. Dos mitigaciones quirúrgicas: (1) preset
-    # veryfast, el mismo que ya usan kenburns/transitions en este módulo
-    # (típicamente 3-5× más rápido en 4K con coste de calidad marginal a CRF
-    # 20); (2) el timeout se captura y se degrada por el MISMO camino honesto
-    # que un rc != 0 (copia sin subtítulos + subs_status.json → el QA final
-    # la reporta como warn; jamás un ready silencioso con degradación).
-    cmd = ["ffmpeg", "-y", "-i", str(video_raw), "-vf", sub_filter,
-           "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-           "-c:a", "copy", str(final)]
-    try:
-        p = await asyncio.to_thread(lambda: _run_ffmpeg(cmd, timeout=900))
-    except subprocess.TimeoutExpired:
-        log.error("subs burn: timeout 900s — degradando a copia sin subtítulos")
-        import shutil
-        shutil.copy(video_raw, final)
-        (proj_dir / "subs_status.json").write_text(json.dumps(
-            {"burned": False,
-             "reason": "ffmpeg timeout 900s — copiado sin subtítulos"},
-            ensure_ascii=False), encoding="utf8")
-        return final
-    if p.returncode != 0:
-        log.error("subs burn: %s", p.stderr[-300:])
-        import shutil
-        shutil.copy(video_raw, final)
-        (proj_dir / "subs_status.json").write_text(json.dumps(
-            {"burned": False,
-             "reason": f"ffmpeg rc={p.returncode} — copiado sin subtítulos"},
-            ensure_ascii=False), encoding="utf8")
-    else:
-        (proj_dir / "subs_status.json").write_text(json.dumps(
-            {"burned": True, "reason": "ok"},
-            ensure_ascii=False), encoding="utf8")
+        sub_filter += f":fontsdir={ffmpeg_filter_path(typo_mod.FONT_DIR)}"
+    # INT-012 / P2-2 / OPT-UNIFIED / AA2: Ensamblado unificado con validación de capas PNG
+    # y fallback resiliente. Valida cada PNG antes de armar el filter_complex (PIL.verify).
+    # Si una capa es inválida se omite registrándola en subs_status.json. Si ffmpeg falla (rc!=0),
+    # se reintenta una vez solo con subtítulos (-vf) antes de degradar a copia.
+    omitted_layers: list[str] = []
+    extra_inputs: list[tuple[Path, str]] = []
 
-    # INT-055: Overlay de Badge de Conversión E-Commerce (Rating, Descuento, Envío)
+    def _is_valid_layer_png(path: Path) -> bool:
+        if not path.is_file():
+            return False
+        try:
+            from PIL import Image
+            with Image.open(path) as im:
+                im.verify()
+            return True
+        except Exception:
+            return False
+
+    # INT-055: Preparar Badge de Conversión E-Commerce si aplica
     badge_cfg = (project.get("meta") or {}).get("ecommerce_badge")
     if project.get("mode") == "product" or badge_cfg:
         try:
@@ -569,24 +691,17 @@ async def burn_subtitles(project: dict, video_raw: Path, words_path: Path) -> Pa
             b_type = (badge_cfg.get("type") if isinstance(badge_cfg, dict) else badge_cfg) or "rating"
             badge_png = proj_dir / f"badge_{b_type}.png"
             generate_ecommerce_badge(badge_type=b_type, out_path=badge_png)
-
-            overlay_filter = build_ecommerce_ffmpeg_filter(badge_png, start_sec=0.5, duration_sec=6.0, position="top")
-            badged_video = proj_dir / f"{project['id']}_badged.mp4"
-            badge_cmd = [
-                "ffmpeg", "-y", "-i", str(final), "-i", str(badge_png),
-                "-filter_complex", f"[0:v][1:v]{overlay_filter}[v]",
-                "-map", "[v]", "-map", "0:a?",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-                "-c:a", "copy", str(badged_video)
-            ]
-            pb = await asyncio.to_thread(lambda: _run_ffmpeg(badge_cmd, timeout=300))
-            if pb.returncode == 0 and badged_video.is_file():
-                import shutil
-                shutil.move(badged_video, final)
+            if _is_valid_layer_png(badge_png):
+                overlay_badge = build_ecommerce_ffmpeg_filter(badge_png, start_sec=0.5, duration_sec=6.0, position="top")
+                extra_inputs.append((badge_png, overlay_badge))
+            else:
+                log.warning("ecommerce badge PNG inválido o corrupto: %s — omitiendo", badge_png)
+                omitted_layers.append(badge_png.name)
         except Exception as e_badge:
             log.warning("ecommerce badge overlay falló: %s", e_badge)
+            omitted_layers.append(f"badge_{e_badge}")
 
-    # INT-058: Overlay de Presentador Flotante (Circle PiP Avatar estilo HeyGen / Synthesia)
+    # INT-058: Preparar Presentador Flotante (Circle PiP Avatar) si aplica
     meta = project.get("meta") or {}
     avatar_id = project.get("avatar_id") or meta.get("avatar_id")
     pip_cfg = meta.get("circle_avatar_pip")
@@ -606,22 +721,84 @@ async def burn_subtitles(project: dict, video_raw: Path, words_path: Path) -> Pa
 
                 pip_png = proj_dir / f"avatar_{avatar_id}_circle.png"
                 create_circle_avatar(Path(av["image_path"]), diameter=320, border_color=b_color, output_path=pip_png)
-
-                pip_filter = build_pip_overlay_filter(pip_png, position=pos)
-                pip_video = proj_dir / f"{project['id']}_pip.mp4"
-                pip_cmd = [
-                    "ffmpeg", "-y", "-i", str(final), "-i", str(pip_png),
-                    "-filter_complex", f"[0:v][1:v]{pip_filter}[v]",
-                    "-map", "[v]", "-map", "0:a?",
-                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-                    "-c:a", "copy", str(pip_video)
-                ]
-                pb_pip = await asyncio.to_thread(lambda: _run_ffmpeg(pip_cmd, timeout=300))
-                if pb_pip.returncode == 0 and pip_video.is_file():
-                    import shutil
-                    shutil.move(pip_video, final)
+                if _is_valid_layer_png(pip_png):
+                    pip_filter = build_pip_overlay_filter(pip_png, position=pos)
+                    extra_inputs.append((pip_png, pip_filter))
+                else:
+                    log.warning("avatar circle PNG inválido o corrupto: %s — omitiendo", pip_png)
+                    omitted_layers.append(pip_png.name)
         except Exception as e_pip:
             log.warning("circle avatar pip overlay falló: %s", e_pip)
+            omitted_layers.append(f"pip_{e_pip}")
+
+    cmd_subs_only = ["ffmpeg", "-y", "-i", str(video_raw), "-vf", sub_filter,
+                     *get_video_encoder(final=True),
+                     "-c:a", "copy", str(final)]
+
+    # Construir comando FFmpeg: simple (-vf) si no hay capas extra, o unificado (-filter_complex)
+    if not extra_inputs:
+        cmd = cmd_subs_only
+    else:
+        input_args = ["-i", str(video_raw)]
+        filter_steps = [f"[0:v]{sub_filter}[v0]"]
+        curr_v = "[v0]"
+        for idx, (asset_path, filt_expr) in enumerate(extra_inputs, start=1):
+            input_args.extend(["-i", str(asset_path)])
+            next_v = f"[v{idx}]"
+            filter_steps.append(f"{curr_v}[{idx}:v]{filt_expr}{next_v}")
+            curr_v = next_v
+
+        complex_filter_str = ";".join(filter_steps)
+        cmd = [
+            "ffmpeg", "-y", *input_args,
+            "-filter_complex", complex_filter_str,
+            "-map", curr_v, "-map", "0:a?",
+            *get_video_encoder(final=True),
+            "-c:a", "copy", str(final)
+        ]
+
+    try:
+        p = await asyncio.to_thread(lambda: _run_ffmpeg(cmd, timeout=900))
+    except subprocess.TimeoutExpired:
+        log.error("subs burn: timeout 900s — intentando fallback de subtítulos solos")
+        p = None
+
+    # AA2: Si ffmpeg falló (rc!=0 o timeout) y había capas extra, reintentar una vez solo con subtítulos
+    if (p is None or p.returncode != 0) and extra_inputs:
+        log.warning("ffmpeg falló con filter_complex; reintentando una vez solo con subtítulos (-vf)...")
+        for asset_path, _ in extra_inputs:
+            if asset_path.name not in omitted_layers:
+                omitted_layers.append(asset_path.name)
+        try:
+            p = await asyncio.to_thread(lambda: _run_ffmpeg(cmd_subs_only, timeout=900))
+        except subprocess.TimeoutExpired:
+            p = None
+
+    if p is None:
+        log.error("subs burn: timeout 900s — degradando a copia sin subtítulos")
+        import shutil
+        shutil.copy(video_raw, final)
+        (proj_dir / "subs_status.json").write_text(json.dumps(
+            {"burned": False,
+             "reason": "ffmpeg timeout 900s — copiado sin subtítulos",
+             "omitted_layers": omitted_layers},
+            ensure_ascii=False), encoding="utf8")
+        return final
+
+    if p.returncode != 0:
+        log.error("subs burn: %s", p.stderr[-300:])
+        import shutil
+        shutil.copy(video_raw, final)
+        (proj_dir / "subs_status.json").write_text(json.dumps(
+            {"burned": False,
+             "reason": f"ffmpeg rc={p.returncode} — copiado sin subtítulos",
+             "omitted_layers": omitted_layers},
+            ensure_ascii=False), encoding="utf8")
+    else:
+        (proj_dir / "subs_status.json").write_text(json.dumps(
+            {"burned": True, "reason": "ok", "single_pass": True,
+             "omitted_layers": omitted_layers},
+            ensure_ascii=False), encoding="utf8")
 
     return final
 

@@ -36,7 +36,8 @@ for _d in (_cfg.OUTPUT_DIR, _cfg.TMP_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 import database as db  # noqa: E402
-import main as _main  # noqa: E402
+import main as _main
+from services import flow_jobs as fj  # noqa: E402
 import httpx  # noqa: E402
 
 OK, FAIL = 0, 0
@@ -189,7 +190,9 @@ check("heartbeat con lease VENCIDA → 409 (aunque el token siga en la fila)",
 check("complete con lease VENCIDA → 409", COMP4.status_code == 409)
 check("fail con lease VENCIDA → 409", FAIL4.status_code == 409)
 
-# ── A6: la consulta de estado desatasca leases vencidas (idempotente) ──
+# ── A6/A9 · P2.3: el GET de estado es SOLO LECTURA; la recuperación de la
+# lease vencida vive en el CAMINO CALIENTE de la cola (claim_next), no en
+# cada consulta de UI (antes cada status ejecutaba BEGIN IMMEDIATE).
 with db.connect() as con:
     con.execute("""UPDATE flow_jobs SET status='claimed', worker=?, job_token=?,
                    lease_until='2000-01-01T00:00:00' WHERE id=?""", (WA, "e" * 32, J3))
@@ -205,9 +208,25 @@ async def _status():
 
 
 S1, S2, ST3 = asyncio.run(_status())
-check("status/{pid} → 200 y desatasca la lease vencida de J3 (A6)",
-      S1 == 200 and ST3 in ("queued", "dead"), f"{S1}/{ST3}")
+check("status/{pid} → 200 y es SOLO LECTURA (P2.3: NO muta el job vencido)",
+      S1 == 200 and ST3 == "claimed", f"{S1}/{ST3}")
 check("recuperación IDEMPOTENTE (segunda consulta estable)", S2 == 200)
+# la recuperación real de la lease vencida ocurre al reclamar (el orden de
+# la cola puede entregar primero otros jobs vencidos del proyecto: se drena
+# hasta J3):
+_rec = None
+for _ in range(20):
+    cand = fj.claim_next("worker-recuperador", pid=_PID)
+    if not cand:
+        break
+    if cand["id"] == J3:
+        _rec = cand
+        break
+check("claim_next recupera la lease vencida de J3 (A6 vía camino caliente)",
+      bool(_rec) and _rec["worker"] == "worker-recuperador",
+      str(_rec)[:120])
+check("el token VIEJO de J3 ya no sirve (nonce de una sola era)",
+      fj.heartbeat(J3, "e" * 32) is None)
 
 print(f"\n═══ {OK} OK · {FAIL} fallos ═══")
 if __name__ == "__main__":

@@ -282,49 +282,35 @@ def main() -> int:
     check("complete escena 5 recuperada → ok (el proyecto AÚN no cierra: "
           "el reintento de video 3 sigue en disputa)",
           c5 is not None and c5.get("project_done") is False, str(c5)[:120])
-    # [execution-contract v1.1] §7.1 — el reintento de video 3 llega con
-    # exec_state PROVIDER_FAILURE (huella TERMINAL del intento 1): el
-    # re-gate (consent) es ALLOW pero JAMÁS reescribe estado desde un
-    # terminal (progress_allowed §9) → la barrera de complete() no ve
-    # huella post-gate → fail-closed CONFIG_UNVERIFIABLE (retry sin
-    # exec_state limpio no genera, ni siquiera con consent válido).
+    # [execution-contract v1.1 §7.1 + C5/P1.3 corregido] el reintento de
+    # video 3 AVANZA: claim_next REINICIA exec_state a CLAIMED (evidencia
+    # POR INTENTO §12 — antes quedaba PROVIDER_FAILURE zombi y el 2º
+    # intento moría en la barrera §7.1 con causa falsa). El re-gate
+    # (consent) reescribe VERIFIED desde CLAIMED y complete() prospera:
+    # la barrera §7.1 SOLO castiga assets SIN consentimiento del intento
+    # (batería propia: test_flow_contract_states §11b).
     con_rc3 = _consent_allow(rc3)
     check("re-gate del reintento (rc3) → consent ALLOW (evidencia válida)",
           con_rc3 is not None and con_rc3.get("allowed") is True,
           repr(con_rc3))
-    try:
-        fj.complete(rc3["id"], rc3["job_token"], _mp4_bytes())
-        c3_err = None
-    except ValueError as exc:
-        c3_err = str(exc)
-    check("reintento de video escena 3 → BARRERA §7.1: ValueError "
-          "CONFIG_UNVERIFIABLE (PROVIDER_FAILURE jamás post-gate)",
-          bool(c3_err) and c3_err.startswith("CONFIG_UNVERIFIABLE:"),
-          repr(c3_err)[:160])
+    check("consent desde CLAIMED reescribe VERIFIED (exec_state reiniciado)",
+          con_rc3 is not None and con_rc3.get("exec_state") == "CONTROLS_VERIFIED",
+          str(con_rc3))
+    c3b = fj.complete(rc3["id"], rc3["job_token"], _mp4_bytes())
+    check("reintento de video escena 3 → complete OK (el 2º intento AVANZA, "
+          "sin CONFIG_UNVERIFIABLE de causa falsa)",
+          c3b is not None and c3b.get("ok") is True
+          and c3b.get("project_done") is True
+          and c3b.get("renderable") is True, str(c3b)[:160])
     with db.connect() as con:
         f3 = dict(con.execute(
-            "SELECT status, exec_state, asset_path FROM flow_jobs "
+            "SELECT status, exec_state, attempts FROM flow_jobs "
             "WHERE id=?", (rc3["id"],)).fetchone())
-    check("reintento barrado → dead CONFIG_UNVERIFIABLE, sin asset",
-          f3["status"] == "dead" and f3["exec_state"] == "CONFIG_UNVERIFIABLE"
-          and not f3["asset_path"], str(f3)[:140])
-    # recuperación por la vía legítima: con la cola sin NINGÚN claimed
-    # vigente, el re-enqueue recrea SOLO la fila dead del video 3 (fresca,
-    # exec_state QUEUED) → ciclo completo consent → complete → done.
-    res_v3 = fj.enqueue_project(pid)
-    check("re-enqueue recrea SOLO el video 3 barrado (1 video)",
-          res_v3["created"] == 1 and res_v3["videos"] == 1
-          and res_v3["images"] == 0, str(res_v3))
-    v3b = fj.claim_next("workerA")
-    check("video 3 recreado → claim fresco (escena 3 video)",
-          v3b is not None and v3b["kind"] == "video"
-          and v3b["scene_number"] == 3, str(v3b)[:90])
-    _consent_allow(v3b)
-    c3b = fj.complete(v3b["id"], v3b["job_token"], _mp4_bytes())
-    check("ÚLTIMO complete (video 3 recreado tras la barrera) → "
-          "project_done + renderable",
-          c3b is not None and c3b.get("project_done") is True
-          and c3b.get("renderable") is True, str(c3b)[:160])
+    check("video 3 → done CONTRACT_VALIDATED con attempts=1 (un fallo "
+          "registrado; la evidencia del intento vive en attempts/error, "
+          "no en un exec_state zombi)",
+          f3["status"] == "done" and f3["exec_state"] == "CONTRACT_VALIDATED"
+          and int(f3["attempts"]) == 1, str(f3)[:140])
     check("claim tras done → None", fj.claim_next("workerB") is None)
 
     print("── 10. estado final + auto-render una sola vez")

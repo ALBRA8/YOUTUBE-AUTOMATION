@@ -1,14 +1,17 @@
+from contextlib import asynccontextmanager
 """
 YOUTUBE AUTOMATION v2.0 — Servidor principal (FastAPI)
 Dashboard en http://127.0.0.1:8000  ·  progreso por SSE  ·  coste $0/video
 """
 import asyncio
+import os
 import time
 import io
 import json
 import logging
 import re
 import shutil
+import subprocess
 import zipfile
 from pathlib import Path
 from typing import Optional
@@ -16,84 +19,274 @@ from typing import Optional
 import config
 import database as db
 import security
+
+# [P4.1] HIGIENE REPRODUCIBLE · UTF-8 SIEMPRE: en Windows, el stdout por
+# defecto es cp1252 y cada «falló»/«Escena_NN» salía mojado (fallÃ³). El
+# log, stdout y stderr van en UTF-8 desde el primer import.
+logging.basicConfig(
+    level=logging.INFO,
+    encoding="utf-8",  # NO-OP seguro en Python < 3.9 (kwargs tolerado)
+    format="%(asctime)s %(name)s %(levelname)s %(message)s")
+import sys as _sys  # noqa: E402
+for _stream in (_sys.stdout, _sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):  # capturas no-texto en tests
+        pass
+
+log = logging.getLogger("main")
 from config import DATA_DIR, HOST, OUTPUT_DIR, PORT, TMP_DIR
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
                                Response, StreamingResponse)
 from fastapi.staticfiles import StaticFiles
-from pipeline import images as imgs_pipeline
 from pipeline import orchestrator
 from pipeline import project_workspace  # INT-086: workspace modular
 from pipeline import video as video_pipeline
 from pipeline.subtitles import words_to_srt
-from services import (general_agent as agent_svc,  # INT-028: cerebro único (ex-VÓRTICE)
-                      backup as backup_svc, camera_recipes,
+from services import (backup as backup_svc, camera_recipes,
                       doctor as doctor_svc,
                       gemini_client, guion_json as guion_svc,
                       library as library_svc,
-                      niches as niches_svc, nvidia_client,
+                      niches as niches_svc,
                       niche_templates as ntpl_svc,  # INT-086: catálogo
                       production_json as prod_svc, scheduler,
                       trend_research as trends_svc,
-                      tts_service, universos,  # INT-090: blindaje de universos
-                      url_mode, whisper_service, youtube_publish)
+                      universos,  # INT-090: blindaje de universos
+                      url_mode, youtube_publish)
+
+# [P6.1] IMPORT DIFERIDO de servicios que SOLO consumen endpoints concretos:
+# general_agent (141 ms), nvidia_client, whisper_service, tts_service y
+# pipeline.images ya no se pagan al ARRANCAR (en Windows: segundos de disco
+# lento + antivirus por import). El primer uso de cada endpoint los carga
+# una vez y quedan cacheados (_svc). NUNCA se elimina verificación, solo
+# trabajo redundante de importación en rutas que no se usan en el arranque.
+import importlib as _importlib
+_LAZY_MODS: dict = {}
+
+
+def _svc_lazy(mod_name: str):
+    """Import perezoso cacheado (P6.1): el arranque de main.py no paga los
+    módulos de servicios que solo usan endpoints individuales."""
+    m = _LAZY_MODS.get(mod_name)
+    if m is None:
+        m = _importlib.import_module(mod_name)
+        _LAZY_MODS[mod_name] = m
+    return m
 from services import avatar_schema
+from routers import niches as niches_router
+from routers import registro as registro_router
 from services.themes import STYLES, get_style
 
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s %(name)s %(levelname)s %(message)s")
-log = logging.getLogger("main")
+# logging ya configurado UTF-8 arriba ([P4.1]) — basicConfig es idempotente
+# y el getLogger reutiliza el mismo logger "main".
 
-app = FastAPI(title="YT Automation v2.0", version=config.APP_VERSION)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """P3-2: Gestor unificado del ciclo de vida (migración de @app.on_event)."""
+    # 1. Seguridad fail-closed (INT-080): HOST no-loopback sin MASTER_API_KEY
+    import os as _os
+    host = (_os.getenv("HOST") or str(HOST or "127.0.0.1")).strip().lower()
+    if host not in {"127.0.0.1", "localhost", "::1", "[::1]"} \
+            and not security.enabled() \
+            and _os.getenv("ALLOW_OPEN_LAN", "").strip() != "1":
+        raise RuntimeError(
+            "HOST no-loopback sin MASTER_API_KEY: la API quedaría abierta a la "
+            "LAN. Define MASTER_API_KEY en backend/.env o fuerza con "
+            "ALLOW_OPEN_LAN=1 si asumes el riesgo.")
+    try:
+        env_file = Path(config.__file__).resolve().parent / ".env"
+        if env_file.is_file():
+            # [A6 · P0.6] chmod no hace NADA en NTFS: en Windows la ACL real
+            # se fija con icacls (herencia quitada, solo el usuario actual).
+            security.apply_env_acl(env_file)
+    except Exception as exc:
+        log.warning("no se pudo fijar permisos 0600/ACL a .env: %s", exc)
 
-# [flow-bridge v1.1] CORS endurecido (fusión con la línea 2.2 del repo):
-# solo la extensión Chrome (chrome-extension:// con ID válido de 32 chars a-p)
-# y clientes locales (localhost/127.0.0.1). El fetch del Service Worker con
-# host_permissions del manifest 2.2 pasa sin CORS; el popup y un worker
-# remoto local sí lo necesitan. Sin credenciales.
-from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
-app.add_middleware(
-    CORSMiddleware,
-    allow_origin_regex=r"^(chrome-extension://[a-p]+|https?://(localhost|127\.0\.0\.1)(:\d+)?)$",
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-)
+    # [C8 · P2.5] el scheduler de la FÁBRICA arranca en lifespan (antes solo
+    # arrancaba al guardar Ajustes → sin guardar una vez, 0 vídeos/día).
+    try:
+        from services import scheduler as factory_scheduler
+        factory_scheduler.arrancar()
+    except (ImportError, RuntimeError, ValueError, OSError) as exc:
+        log.warning("scheduler de fábrica no arrancó: %s", exc)
+
+    # 2. Backups al arrancar y arranque de scheduler (v2.12.2)
+    try:
+        r = await asyncio.to_thread(backup_svc.create_backup, "arranque")
+        if r:
+            log.info("backup de arranque: %s (%.1f KB)", r["name"], r["size"] / 1024)
+    except Exception as e:
+        log.warning("backup de arranque falló: %s", str(e)[:120])
+    backup_svc.start_scheduler()
+
+    yield
+
+    # Shutdown si aplica
+
+
+# [P6.1] el schema OpenAPI de FastAPI es LAZY (se construye al primer
+# /openapi.json, jamás al arrancar) y auth_guard responde 404 a /docs y
+# /openapi.json en modo local (A5/P0.4) → en local el schema NUNCA se
+# genera. Las rutas DEBEN existir para que, con MASTER_API_KEY activada,
+# la documentación sirva (200) — por eso openapi_url queda por defecto.
+app = FastAPI(title="YT Automation v2.0", version=config.APP_VERSION,
+              lifespan=lifespan)
+# P3-1: Routers modulares (Fase 1: Nichos)
+app.include_router(niches_router.router)
+# PASO 3.2 minidramas: registro de producciones (SOLO LECTURA)
+app.include_router(registro_router.router)
 
 # PHASE 1 · M10 — techo global anti bomba de descompresión (Pillow)
 security.harden_pil(config.LIMITS["MAX_IMAGE_PIXELS"])
 
 
-@app.on_event("startup")
-async def _startup_tasks():
-    """v2.12.2 · hallazgo de la auditoría: la DB moría sin réplica.
-    Backup al arrancar (consistente, WAL-safe) + loop cada BACKUP_INTERVAL_H."""
-    try:
-        r = await asyncio.to_thread(backup_svc.create_backup, "arranque")
-        if r:
-            log.info("backup de arranque: %s (%.1f KB)", r["name"], r["size"] / 1024)
-    except Exception as e:  # noqa: BLE001
-        log.warning("backup de arranque falló: %s", str(e)[:120])
-    backup_svc.start_scheduler()
+# [P3-2] _startup_tasks migrado a lifespan
 
 AVATARS_DIR = DATA_DIR / "avatars"
 VALID_PLATFORMS = ("youtube", "tiktok", "instagram", "facebook")
 
 
+# ── PILA DE MIDDLEWARES (P0-4: en Starlette/FastAPI el ÚLTIMO declarado
+#    es el más EXTERNO y envuelve a todos los anteriores).
+#    Orden de capas (exterior → interior):
+#      1. security_headers (nosniff en TODAS las respuestas, incluidas 401/403)
+#      2. CORSMiddleware   (preflight OPTIONS y headers CORS en respuestas 401/403)
+#      3. auth_guard       (exige MASTER_API_KEY; exime preflight OPTIONS)
+#      4. csrf_guard       (rechaza mutaciones con origen cross-site no permitido)
+#      5. no_cache_ui      (revalida recursos estáticos del panel)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.middleware("http")
+async def no_cache_ui(request, call_next):
+    """El dashboard (HTML/JS/CSS) siempre se revalida: evita que el navegador
+    se quede con una versión vieja de la interfaz sin claves ni botones nuevos."""
+    resp = await call_next(request)
+    p = request.url.path
+    if p.startswith("/static") or p in ("/", "/app", "/app/"):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+@app.middleware("http")
+async def auth_guard(request, call_next):
+    """Blindaje opcional del panel (auditoría externa: «cero autenticación»).
+    Si MASTER_API_KEY está definida en backend/.env, TODAS las rutas /api/*
+    exigen la clave vía header X-API-Key, Bearer o cookie (SSE).
+    v2.19 · también cubre /mcp.
+    P0-4 · exime métodos OPTIONS (preflight de navegadores jamás lleva credenciales).
+    En modo local (sin clave definida) no bloquea nada: cero ruptura."""
+    # P0-4: Preflights OPTIONS no deben exigir credenciales
+    if request.method.upper() == "OPTIONS":
+        return await call_next(request)
+
+    _p = request.url.path
+    # PHASE 1 · M1: la documentación y el schema abierto exigen clave.
+    # [A5 · P0.4] EN MODO LOCAL TAMBIÉN quedan protegidos: sin MASTER_API_KEY
+    # no hay quién «pase» la clave, así que /docs,/redoc,/openapi.json
+    # responden 404 (no revelan superficie interna) salvo DOCS_ENABLED=1.
+    _is_docs = (_p in ("/docs", "/redoc", "/openapi.json")
+                or _p.startswith("/docs/") or _p.startswith("/redoc/"))
+    if _is_docs and not security.enabled() \
+            and os.getenv("DOCS_ENABLED", "").strip() not in ("1", "true", "yes"):
+        return JSONResponse(status_code=404,
+                            content={"detail": "documentación deshabilitada en "
+                                               "modo local (DOCS_ENABLED=1 para activar)"})
+    if security.enabled() and (_p.startswith("/api/") or _p.startswith("/mcp")
+                               or _is_docs) \
+            and _p not in security.PUBLIC_PATHS:
+        provided = request.headers.get("X-API-Key", "")
+        if not provided:
+            auth = request.headers.get("Authorization", "")
+            provided = auth[7:] if auth.startswith("Bearer ") else ""
+        if not provided:
+            provided = request.cookies.get(security.COOKIE_NAME, "")
+        if not security.verify(provided):
+            return JSONResponse(status_code=401,
+                                content={"detail": "clave maestra requerida "
+                                                   "(X-API-Key / MASTER_API_KEY)"})
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def csrf_guard(request, call_next):
+    """PHASE 1 · M2 / P0-5 — política CSRF para mutaciones + anti DNS rebinding + tope de body.
+
+    POST/PUT/PATCH/DELETE con Origin o Referer PRESENTE deben pasar la
+    política security.origin_allowed (mismo host confiable, cliente local o la
+    extensión Chrome); un origen externo (p. ej. https://evil.example que
+    lanza fetch no-cors/sendBeacon) → 403. Sin Origin/Referer (curl, API
+    clients, workers internos) se PERMITE: los navegadores siempre envían
+    Origin en mutaciones cross-site, así que la ausencia implica cliente
+    no-navegador. Además, Content-Length por encima del tope global → 413
+    (nunca consumir bodies ilimitados — A7/DoS).
+    P0-5 · si no hay MASTER_API_KEY (modo local abierto), el Host DEBE pertenecer
+    a la allowlist local (localhost, 127.0.0.1, [::1], testserver o ALLOWED_HOSTS)."""
+    # P0-5: Validación de Host anti DNS rebinding cuando no hay clave maestra
+    if not security.enabled():
+        req_host = request.headers.get("Host", "")
+        if req_host and not security.is_trusted_host(req_host):
+            return JSONResponse(status_code=403,
+                                content={"detail": "Host no permitido en modo local (anti DNS rebinding)"})
+
+    m = request.method.upper()
+    if m in ("POST", "PUT", "PATCH", "DELETE"):
+        source = (request.headers.get("Origin")
+                  or request.headers.get("Referer") or "")
+        if source and not security.origin_allowed(
+                source, request.headers.get("Host", "")):
+            return JSONResponse(status_code=403,
+                                content={"detail": "origen no permitido para "
+                                                   "mutaciones (política CSRF)"})
+    cl = request.headers.get("content-length") or ""
+    if cl.isdigit() and int(cl) > config.LIMITS["MAX_BODY_BYTES"]:
+        return JSONResponse(status_code=413, content={"detail": "body demasiado grande"})
+    # [A7 · P0.5] tope de body REAL: el único caso SIN límite es
+    # Transfer-Encoding: chunked (RFC 9112 §6: sin CL y sin TE el body es 0
+    # bytes — DELETE/POST sin body son legítimos y jamás llevan tope).
+    # Un body chunked por el que el cliente declara longitud desconocida
+    # (streaming ilimitado) se rechaza 411 en mutaciones.
+    if m in ("POST", "PUT", "PATCH", "DELETE") \
+            and not cl \
+            and (request.headers.get("transfer-encoding")
+                 or "").strip().lower() not in ("", "identity"):
+        return JSONResponse(status_code=411,
+                            content={"detail": "Content-Length requerido "
+                                               "(no se aceptan bodies chunked sin tope)"})
+    return await call_next(request)
+
+
+# [flow-bridge v1.1] CORS endurecido (P0-4: declarado EXTERNO a auth_guard y csrf_guard
+# para que los preflights OPTIONS y las respuestas 401/403 reciban cabeceras CORS)
+# [A5 · P0.4] CORS por IDs de extensión CONOCIDOS: si EXTENSION_IDS está en
+# .env (separada por comas), solo esas IDs pueden cruzar CORS; sin ella se
+# conserva el regex histórico [a-p]+ (compatibilidad) y /api/auth/status lo avisa.
+import re as _re_cors  # noqa: E402
+if config.EXTENSION_IDS:
+    _ext_ids = "|".join(_re_cors.escape(i.strip()) for i in config.EXTENSION_IDS if i.strip())
+    _ext_regex = rf"chrome-extension://({_ext_ids})"
+else:
+    _ext_regex = r"chrome-extension://[a-p]+"
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=rf"^({_ext_regex}|https?://(localhost|127\.0\.0\.1)(:\d+)?)$",
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
+
+
 @app.middleware("http")
 async def security_headers(request, call_next):
-    """INT-082 · cabeceras de seguridad HTTP (mejora 7 del informe de revisión
-    en vivo). Blindaje por si el panel se expone por LAN o detrás de un proxy:
-    · X-Content-Type-Options: nosniff → en TODAS las respuestas (inofensivo
-      en JSON/MP4, decisivo en HTML subido por error).
-    · X-Frame-Options: DENY + CSP con frame-ancestors 'none' → anti
-      clickjacking del panel.
-    · CSP básica SOLO en el HTML del panel: 'unsafe-inline' en script/style
-      es imprescindible (el panel usa onclick inline y estilos dinámicos),
-      pero sigue bloqueando <script src> externo. /docs y /redoc quedan
-      fuera de la CSP: el Swagger UI de FastAPI carga scripts de CDN.
-    Definido PRIMERO ⇒ es el middleware MÁS EXTERNO: estampa cabeceras
-    también en las respuestas 401/403 que generan auth_guard/csrf_guard."""
+    """INT-082 / P0-4 · cabeceras de seguridad HTTP.
+
+    En Starlette/FastAPI, el middleware declarado al FINAL es el más EXTERNO
+    en la pila de ejecución: envuelve todas las llamadas y estampa cabeceras
+    también en las respuestas 401/403/CORS generadas internamente por auth_guard/csrf_guard:
+    · X-Content-Type-Options: nosniff → en TODAS las respuestas.
+    · X-Frame-Options: DENY + CSP con frame-ancestors 'none' → anti clickjacking.
+    · CSP básica SOLO en el HTML del panel."""
     resp = await call_next(request)
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     ct = resp.headers.get("content-type", "")
@@ -113,77 +306,6 @@ async def security_headers(request, call_next):
                                 "frame-ancestors 'none'; "
                                 "base-uri 'self'; form-action 'self'")
     return resp
-
-
-@app.middleware("http")
-async def no_cache_ui(request, call_next):
-    """El dashboard (HTML/JS/CSS) siempre se revalida: evita que el navegador
-    se quede con una versión vieja de la interfaz sin claves ni botones nuevos."""
-    resp = await call_next(request)
-    p = request.url.path
-    if p.startswith("/static") or p in ("/", "/app", "/app/"):
-        resp.headers["Cache-Control"] = "no-cache"
-    return resp
-
-
-@app.middleware("http")
-async def auth_guard(request, call_next):
-    """Blindaje opcional del panel (auditoría externa: «cero autenticación»).
-    Si MASTER_API_KEY está definida en backend/.env, TODAS las rutas /api/*
-    exigen la clave vía header X-API-Key, Bearer, cookie (SSE) o ?api_key=.
-    v2.19 · también cubre /mcp (antes el servidor MCP quedaba FUERA del
-    guard incluso con clave maestra: exponía lanzar_proyecto, cancelar
-    y doctor fix sin autenticación). En modo local (sin clave definida)
-    no bloquea nada: cero ruptura."""
-    _p = request.url.path
-    # PHASE 1 · M1: la documentación y el schema abierto también exigen
-    # clave (/docs, /redoc, /openapi.json — /mcp/* ya quedaba cubierto).
-    _is_docs = (_p in ("/docs", "/redoc", "/openapi.json")
-                or _p.startswith("/docs/") or _p.startswith("/redoc/"))
-    if security.enabled() and (_p.startswith("/api/") or _p.startswith("/mcp")
-                               or _is_docs) \
-            and _p not in security.PUBLIC_PATHS:
-        provided = request.headers.get("X-API-Key", "")
-        if not provided:
-            auth = request.headers.get("Authorization", "")
-            provided = auth[7:] if auth.startswith("Bearer ") else ""
-        if not provided:
-            provided = request.cookies.get(security.COOKIE_NAME, "")
-        # INT-080: el vector ?api_key= fue eliminado — la clave en la query
-        # termina en access-logs de uvicorn, historial del navegador y proxies.
-        # Para SSE/EventSource la cookie (mismo origen) hace ese papel.
-        if not security.verify(provided):
-            return JSONResponse(status_code=401,
-                                content={"detail": "clave maestra requerida "
-                                                   "(X-API-Key / MASTER_API_KEY)"})
-    return await call_next(request)
-
-
-@app.middleware("http")
-async def csrf_guard(request, call_next):
-    """PHASE 1 · M2 — política CSRF para mutaciones + tope de body.
-
-    POST/PUT/PATCH/DELETE con Origin o Referer PRESENTE deben pasar la
-    política security.origin_allowed (mismo host, cliente local o la
-    extensión Chrome); un origen externo (p. ej. https://evil.example que
-    lanza fetch no-cors/sendBeacon) → 403. Sin Origin/Referer (curl, API
-    clients, workers internos) se PERMITE: los navegadores siempre envían
-    Origin en mutaciones cross-site, así que la ausencia implica cliente
-    no-navegador. Además, Content-Length por encima del tope global → 413
-    (nunca consumir bodies ilimitados — A7/DoS)."""
-    m = request.method.upper()
-    if m in ("POST", "PUT", "PATCH", "DELETE"):
-        source = (request.headers.get("Origin")
-                  or request.headers.get("Referer") or "")
-        if source and not security.origin_allowed(
-                source, request.headers.get("Host", "")):
-            return JSONResponse(status_code=403,
-                                content={"detail": "origen no permitido para "
-                                                   "mutaciones (política CSRF)"})
-    cl = request.headers.get("content-length") or ""
-    if cl.isdigit() and int(cl) > config.LIMITS["MAX_BODY_BYTES"]:
-        return JSONResponse(status_code=413, content={"detail": "body demasiado grande"})
-    return await call_next(request)
 
 
 # ── PHASE 1 · helpers centralizados de seguridad de endpoints ──────────
@@ -256,13 +378,39 @@ def _to_float(v, default: float, name: str) -> float:
         raise HTTPException(400, f"'{name}' debe ser numérico")
 
 
+# [C1 · P0.1] extensiones que _path_contenida considera SERVIBLES: media
+# únicamente (imágenes/vídeo/audio). data/backups/** (env.bak con
+# GEMINI_API_KEY y HF_TOKEN en claro, token.json.bak, .db) y cualquier
+# binario/sistema (.env, .json, .db, .py…) queda FUERA por construcción.
+_MEDIA_EXT = {
+    ".mp4", ".mov", ".webm", ".mkv", ".avi",
+    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp",
+    ".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus",
+}
+
+
 def _path_contenida(raw: str) -> "Path | None":
     """INT-080 · M5 para rutas arbitrarias: devuelve la ruta RESUELTA solo si
     vive bajo una raíz segura del backend (data/, tmp/, static/, output/).
     Bloquea leer/servir archivos fuera de ellas (p.ej. backend/.env) aunque un
-    endpoint reciba una ruta absoluta del cliente."""
+    endpoint reciba una ruta absoluta del cliente.
+
+    [C1 · P0.1] dos candados añadidos (data/backups contiene env.bak con
+    GEMINI_API_KEY/HF_TOKEN en claro, token.json.bak y los .db):
+      1. SOLO extensiones de media (_MEDIA_EXT) — un .env/.bak/.db/.json ya
+         no es servible aunque alguien lo copie bajo data/.
+      2. data/backups/** EXCLUIDO SIEMPRE — fail-closed incluso si mañana
+         se añade una extensión nueva a la lista."""
     try:
         rp = Path(raw).resolve()
+    except (OSError, ValueError):
+        return None
+    if rp.suffix.lower() not in _MEDIA_EXT:
+        return None
+    try:
+        backups = (DATA_DIR / "backups").resolve()
+        if rp == backups or rp.is_relative_to(backups):
+            return None
     except (OSError, ValueError):
         return None
     for root in (DATA_DIR, TMP_DIR, STATIC_DIR, OUTPUT_DIR,
@@ -275,43 +423,57 @@ def _path_contenida(raw: str) -> "Path | None":
     return None
 
 
-# ──────────────────────────────────────────────────────── básicos ──
-@app.on_event("startup")
-async def _int080_security_guard():
-    """INT-080 · fail-closed: HOST no-loopback sin MASTER_API_KEY = API abierta
-    a toda la LAN (lectura de .env, RCE vía MCP). No arrancar salvo escape
-    explícito ALLOW_OPEN_LAN=1. Además, best-effort: .env a 0600."""
-    import os as _os  # INT-080: main.py importa os de forma diferida
-    host = (_os.getenv("HOST") or str(HOST or "127.0.0.1")).strip().lower()
-    if host not in {"127.0.0.1", "localhost", "::1", "[::1]"} \
-            and not security.enabled() \
-            and _os.getenv("ALLOW_OPEN_LAN", "").strip() != "1":
-        raise RuntimeError(
-            "HOST no-loopback sin MASTER_API_KEY: la API quedaría abierta a la "
-            "LAN. Define MASTER_API_KEY en backend/.env o fuerza con "
-            "ALLOW_OPEN_LAN=1 si asumes el riesgo.")
+_MP4_MAGIC = (b"ftyp",)
+
+
+def _es_video_real(p: Path) -> bool:
+    """[C1 · P0.1] ¿es un vídeo REAL y no un disfraz? Magic bytes primero
+    (barato: mp4/mov 'ftyp' en offset 4, webm/mkv EBML); si no casan,
+    ffprobe corto decide. Solo-lectura, sin excepciones hacia arriba."""
     try:
-        env_file = Path(config.__file__).resolve().parent / ".env"
-        if env_file.is_file() and (env_file.stat().st_mode & 0o077):
-            env_file.chmod(0o600)
-    except Exception:  # noqa: BLE001 — best-effort, nunca tumba el arranque
-        pass
+        with open(p, "rb") as f:
+            head = f.read(12)
+        if len(head) >= 8 and head[4:8] in _MP4_MAGIC:
+            return True
+        if head.startswith(b"\x1aE\xdf\xa3"):  # EBML (webm/mkv)
+            return True
+    except OSError:
+        return False
+    # dudoso → ffprobe decide (probe_duration devuelve 0.0 ante cualquier
+    # fallo interno; jamás lanza, no necesita try propio)
+    from pipeline.video import probe_duration  # diferido (subprocess)
+    return probe_duration(p) > 0.05
+
+
+# ──────────────────────────────────────────────────────── básicos ──
+# [P3-2] _int080_security_guard migrado a lifespan
 
 
 @app.get("/api/health")
 async def health():
     return {"ok": True, "version": config.APP_VERSION, "gemini": gemini_client.available(),
-            "nvidia": nvidia_client.available(),
-            "nvidia_model": nvidia_client.last_model(),
-            "whisper": whisper_service.available(),
+            "nvidia": _svc_lazy("services.nvidia_client").available(),
+            "nvidia_model": _svc_lazy("services.nvidia_client").last_model(),
+            "whisper": _svc_lazy("services.whisper_service").available(),
             "youtube": youtube_publish.configured(),
             "canales": False}  # puente WhatsApp/Telegram pendiente de re-cosecha (v2.11.2)
 
 
 @app.get("/api/auth/status")
 async def auth_status():
-    """El dashboard consulta esto al cargar: si hay clave maestra, pide login."""
-    return {"auth_required": security.enabled()}
+    """El dashboard consulta esto al cargar: si hay clave maestra, pide login.
+    [A5 · P0.4] aviso honesto en modo local: sin MASTER_API_KEY el panel está
+    abierto en 127.0.0.1 (modelo OBS/Jupyter) y CORS admite CUALQUIER ID de
+    extensión chrome-extension:// mientras no se configure EXTENSION_IDS."""
+    avisos = []
+    if not security.enabled():
+        avisos.append("modo local SIN clave maestra: define MASTER_API_KEY en "
+                      "backend/.env para proteger el panel (obligatorio si "
+                      "expones el puerto fuera de 127.0.0.1)")
+    if not config.EXTENSION_IDS:
+        avisos.append("CORS sin EXTENSION_IDS configurada: se acepta cualquier "
+                      "ID de extensión chrome-extension:// (regex [a-p]+)")
+    return {"auth_required": security.enabled(), "avisos": avisos}
 
 
 @app.get("/api/styles")
@@ -362,7 +524,7 @@ async def settings():
     return {
         "gemini_key": gemini_client.available(),
         "tts_provider": config.TTS_PROVIDER,
-        "whisper": whisper_service.available(),
+        "whisper": _svc_lazy("services.whisper_service").available(),
         "youtube_configured": youtube_publish.configured(),
         "youtube_token": youtube_publish.has_token(),
         "edge_voices": [
@@ -495,7 +657,7 @@ async def get_config():
         "env_exists": config.ENV_PATH.exists(),
         "gemini_key_set": gemini_client.available(),
         "gemini_key_masked": _mask(config.GEMINI_API_KEY),
-        "nvidia_key_set": nvidia_client.available(),
+        "nvidia_key_set": _svc_lazy("services.nvidia_client").available(),
         "nvidia_key_masked": _mask(config.NVIDIA_API_KEY),
         "nvidia_model": config.NVIDIA_MODEL,
         "tts_provider": config.TTS_PROVIDER,
@@ -504,7 +666,7 @@ async def get_config():
         "tts_rate": config.TTS_RATE,
         "whisper_model": config.WHISPER_MODEL,
         "whisper_device": config.WHISPER_DEVICE,
-        "whisper_available": whisper_service.available(),
+        "whisper_available": _svc_lazy("services.whisper_service").available(),
         "fps": config.FPS,
         "youtube_configured": youtube_publish.configured(),
         "youtube_token": youtube_publish.has_token(),
@@ -776,11 +938,11 @@ async def avatars_image(aid: str):
             import urllib.parse
             encoded = urllib.parse.quote(prompt[:300])
             url = f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true"
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                if resp.status == 200:
-                    out.write_bytes(resp.read())
-                    method = "pollinations_ai"
+            # P0-2: descarga también por la guardia central (host fijo
+            # image.pollinations.ai, tope 15 MB)
+            out.write_bytes(security.safe_fetch_bytes(
+                url, timeout=30, max_bytes=15 * 1024 * 1024))
+            method = "pollinations_ai"
         except Exception as e2:  # noqa: BLE001
             log.warning("Retrato Pollinations falló: %s", str(e2)[:120])
     if method == "placeholder":
@@ -864,11 +1026,11 @@ async def avatars_image_get(aid: str):
 async def cerebros_list():
     """v2.12.1 · CEREBROS: catálogo de modelos NVIDIA con estado vivo
     (ok/fail/untested + latencia del último uso) y el activo."""
-    if not nvidia_client.available():
+    if not _svc_lazy("services.nvidia_client").available():
         return {"activo": None, "cerebros": [], "aviso": "sin NVIDIA_API_KEY"}
-    act = nvidia_client.active_cerebro()
+    act = _svc_lazy("services.nvidia_client").active_cerebro()
     return {"activo": act["alias"], "modelo": act["model"],
-            "cerebros": nvidia_client.list_cerebros()}
+            "cerebros": _svc_lazy("services.nvidia_client").list_cerebros()}
 
 
 _IMAGE_RE = re.compile(
@@ -879,10 +1041,10 @@ _IMAGE_RE = re.compile(
 async def cerebros_pick(body: dict):
     """Elige el cerebro del Agente General (persistente en .env, aplica al instante)."""
     alias = str((body or {}).get("alias") or "").strip()
-    c = nvidia_client.find_cerebro(alias)
+    c = _svc_lazy("services.nvidia_client").find_cerebro(alias)
     if not c:
         raise HTTPException(400, "cerebro desconocido: " + alias)
-    nvidia_client.set_preferred(alias)
+    _svc_lazy("services.nvidia_client").set_preferred(alias)
     config.save_env({"NVIDIA_MODEL": c["model"]})
     return {"ok": True, "activo": c["alias"], "model": c["model"],
             "name": c["name"], "vision": c["vision"],
@@ -899,11 +1061,11 @@ async def chat(body: dict):
     confirm = body.get("confirm") or None
     if confirm:
         action = str(confirm.get("action") or "")
-        if action not in agent_svc.DESTRUCTIVE_ACTIONS:
+        if action not in _svc_lazy("services.general_agent").DESTRUCTIVE_ACTIONS:
             raise HTTPException(400, "acción no confirmable")
         plan_out = {"action": action, "params": confirm.get("params") or {},
                     "reply": "", "engine": "confirm"}
-        result = await agent_svc.execute(plan_out, db, orchestrator, db.list_avatars())
+        result = await _svc_lazy("services.general_agent").execute(plan_out, db, orchestrator, db.list_avatars())
         result["engine"] = "confirm"
         return result
     # INT-084 · mejora 6: alias «mensaje» ≡ «message» (integraciones ES/EN);
@@ -919,13 +1081,13 @@ async def chat(body: dict):
         raise HTTPException(400, "imagen inválida (usa data URL o http(s))")
     if image and len(image) > 5_500_000:
         raise HTTPException(413, "imagen demasiado grande (máx ~4MB)")
-    cinfo = nvidia_client.find_cerebro(prefer) if prefer else None
+    cinfo = _svc_lazy("services.nvidia_client").find_cerebro(prefer) if prefer else None
     if image and cinfo and not cinfo["vision"]:
         raise HTTPException(400, f"el cerebro {cinfo['name']} no ve imágenes — "
                                  "cambia a uno con visión (👁️)")
-    plan_out = await agent_svc.plan(message, history, db.list_avatars(), db,
+    plan_out = await _svc_lazy("services.general_agent").plan(message, history, db.list_avatars(), db,
                                     prefer=prefer, image=image)
-    if plan_out.get("action") in agent_svc.DESTRUCTIVE_ACTIONS:
+    if plan_out.get("action") in _svc_lazy("services.general_agent").DESTRUCTIVE_ACTIONS:
         what = (plan_out.get("params", {}).get("name")
                 or plan_out.get("params", {}).get("project_name") or "").strip()
         if plan_out["action"] == "cleanup_failed":
@@ -937,38 +1099,16 @@ async def chat(body: dict):
                 "pending": {"action": plan_out["action"],
                             "params": plan_out.get("params", {})},
                 "engine": plan_out.get("engine", "local")}
-    result = await agent_svc.execute(plan_out, db, orchestrator, db.list_avatars())
+    result = await _svc_lazy("services.general_agent").execute(plan_out, db, orchestrator, db.list_avatars())
     result["engine"] = plan_out.get("engine", "local")
     return result
 
 
-# ─────────────────────────── backups (v2.12.2 · resiliencia) ──
-@app.get("/api/backups")
-async def backups_list():
-    """Backups disponibles (DB + token.json + .env) — el más nuevo primero."""
-    return {"dir": str(backup_svc.BACKUP_DIR), "keep": backup_svc.KEEP,
-            "interval_h": backup_svc.INTERVAL_H, "backups": backup_svc.list_backups()}
-
-
-@app.post("/api/backups")
-async def backups_create():
-    """Crea un backup ahora mismo (manual)."""
-    r = await asyncio.to_thread(backup_svc.create_backup, "manual")
-    if not r:
-        raise HTTPException(500, "el backup falló — revisa el log del servidor")
-    return {"ok": True, "backup": r, "message": "Backup creado ✅"}
-
-
-@app.post("/api/backups/restore")
-async def backups_restore(body: dict):
-    """Restaura un backup (antes deja uno de seguridad pre-restore)."""
-    name = str((body or {}).get("name") or "")
-    try:
-        r = await asyncio.to_thread(backup_svc.restore_backup, name)
-    except (ValueError, FileNotFoundError) as e:
-        raise HTTPException(400, str(e))
-    return {"ok": True, **r,
-            "message": f"Restaurado {name} — reinicia el servidor para recargar todo"}
+# ─────────────────────────── backups + retención (v2.12.2 / P5.4) ──
+# [P6.4·entrega 1] dominio MANTENIMIENTO extraído a routers/maintenance.py:
+# mismas rutas, mismas respuestas (cero ruptura para UI y baterías).
+from routers.maintenance import router as maintenance_router  # noqa: E402
+app.include_router(maintenance_router)
 
 
 # ──────────────────────────────────────────────────────── proyectos ──
@@ -1040,6 +1180,29 @@ def _post_create_init(project: dict, tpl: dict | None,
         project["workspace"] = str(ws)
     except Exception:  # noqa: BLE001
         log.warning("post-create init falló para %s (no fatal)",
+                    project.get("id"), exc_info=True)
+    # R4 · Conexión REAL del registro local (siempre activa, sin red)
+    try:
+        from services import registro_produccion
+        pid = project.get("id")
+        if pid and not registro_produccion.leer(pid):
+            nicho = project.get("niche") or (tpl.get("id") if tpl else None) or "general"
+            titulo = project.get("title") or "Sin título"
+            reg = registro_produccion.crear(
+                production_id=pid,
+                nicho_id=nicho,
+                titulo_historia=titulo,
+            )
+            try:
+                registro_produccion.propaga_notebook(pid)
+            except (ValueError, OSError) as exc:
+                # Q4 · propaga_notebook DEJA DE CALLAR: el aviso queda en el
+                # log (antes «except Exception: pass» — silencio total).
+                log.warning("propaga_notebook falló para %s (aviso, no "
+                            "fatal): %s: %s", pid, type(exc).__name__, exc)
+            project["registro"] = reg
+    except Exception:  # noqa: BLE001
+        log.warning("registro_produccion.crear falló para %s (no fatal)",
                     project.get("id"), exc_info=True)
     return project
 
@@ -1370,16 +1533,27 @@ def _pick_folder_dialog() -> tuple[bool, str]:
     titulo = "Selecciona la carpeta para tu proyecto"
     try:
         if _os.name == "nt":
-            ps = ("(New-Object -ComObject Shell.Application).BrowseForFolder("
-                  f"0, '{titulo}', 0, 0).Self.Path")
-            r = subprocess.run(
-                ["powershell.exe", "-NoProfile", "-STA", "-NonInteractive",
-                 "-Command", ps],
-                capture_output=True, text=True, timeout=1800,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            ruta = (r.stdout or "").strip().strip('"').strip()
-            # carpeta VIRTUAL (p. ej. «Este equipo») → .Self.Path vacío:
-            # se trata como cancelado para no crear workspaces sin ruta real
+            # Abre el diálogo nativo de Windows acoplado a la ventana activa (GetForegroundWindow)
+            # para garantizar que salga al frente de Chrome y nunca detrás
+            ps_script = Path(__file__).resolve().parent / "pick_folder.ps1"
+            if ps_script.exists():
+                r = subprocess.run(
+                    ["powershell.exe", "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass",
+                     "-File", str(ps_script)],
+                    capture_output=True, text=True, timeout=1800)
+            else:
+                script = (
+                    "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
+                    "Add-Type -AssemblyName System.Windows.Forms; "
+                    "$f = New-Object System.Windows.Forms.FolderBrowserDialog; "
+                    f"$f.Description = '{titulo}'; "
+                    "$f.ShowNewFolderButton = $true; "
+                    "if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.SelectedPath }"
+                )
+                r = subprocess.run(
+                    ["powershell.exe", "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script],
+                    capture_output=True, text=True, timeout=1800)
+            ruta = (r.stdout or "").strip().replace("/", "\\")
             if r.returncode == 0 and ruta:
                 return True, ruta
             return False, ""
@@ -1404,6 +1578,48 @@ def _pick_folder_dialog() -> tuple[bool, str]:
     return False, ""
 
 
+@app.get("/api/dialog/resolve-folder-path")
+async def dialog_resolve_folder_path(name: str):
+    """Resuelve el nombre de carpeta elegido en showDirectoryPicker (patrón de la extensión)
+    a la ruta física absoluta real en el PC de Johan."""
+    import os
+    from pathlib import Path
+    clean = (name or "").strip().strip('"').lower()
+    if not clean:
+        return {"ok": False, "error": "Nombre vacío"}
+    roots = [
+        Path(r"D:\PROYECTOS\CANALES DE YOUTUBE Y TIKTOK\NICHOS"),
+        Path(r"D:\PROYECTOS\CANALES DE YOUTUBE Y TIKTOK"),
+        Path(r"D:\PROYECTOS\YOUTUBE AUTOMATION"),
+        Path(r"D:\PROYECTOS"),
+        Path(r"C:\Users\Johan\Downloads"),
+        Path(r"C:\Users\Johan\Documents"),
+        Path(r"D:\NAS CLONADOR"),
+    ]
+    for root in roots:
+        if not root.exists():
+            continue
+        try:
+            for entry in os.scandir(root):
+                if entry.is_dir() and entry.name.lower() == clean:
+                    return {"ok": True, "path": entry.path}
+        except PermissionError:
+            pass
+        try:
+            for entry in os.scandir(root):
+                if entry.is_dir():
+                    try:
+                        for sub in os.scandir(entry.path):
+                            if sub.is_dir() and sub.name.lower() == clean:
+                                return {"ok": True, "path": sub.path}
+                    except PermissionError:
+                        pass
+        except PermissionError:
+            pass
+    sug = str(Path(r"D:\PROYECTOS\CANALES DE YOUTUBE Y TIKTOK\NICHOS") / name)
+    return {"ok": True, "path": sug}
+
+
 @app.post("/api/dialog/pick-folder")
 async def dialog_pick_folder():
     """INT-091 · abre el diálogo NATIVO de Windows (Explorador de archivos)
@@ -1412,13 +1628,98 @@ async def dialog_pick_folder():
     · cancelada → {"ok": false, "cancelled": true}
     El path devuelto viaja luego en POST /api/projects como
     custom_workspace_path y el pipeline lo respeta ABSOLUTO (INT-091)."""
-    aceptado, ruta = _pick_folder_dialog()
+    import asyncio
+    aceptado, ruta = await asyncio.to_thread(_pick_folder_dialog)
     if not aceptado:
         return {"ok": False, "cancelled": True}
     return {"ok": True, "path": ruta}
 
 
+@app.get("/api/dialog/browse-dirs")
+async def dialog_browse_dirs(path: str = ""):
+    """Explorador visual in-browser: navega discos y carpetas de la máquina sin depender de ventanas emergentes.
+    [A16 · P0.3] exige RAÍZ CONFIGURADA (DIALOG_ROOTS en .env, separada por
+    «;»): sin raíces declaradas el explorador está DESHABILITADO y cualquier
+    ruta fuera de ellas responde ok:false — ya no hay browsing libre de todo
+    el disco (que era un listador de filesystem para cualquier origen).
+    La elección TOTALMENTE libre sigue existiendo vía el selector NATIVO de
+    Windows (POST /api/pick-folder), que no expone el filesystem a la web."""
+    import os
+    clean_p = (path or "").strip().strip('"').strip()
+    roots = _dialog_roots()
+    if not roots:
+        return {"ok": False, "error": "explorador deshabilitado: define DIALOG_ROOTS en backend/.env (rutas separadas por «;»)"}
+    if not clean_p:
+        dirs = [{"name": f"Raíz: {r}", "path": str(r)} for r in roots]
+        return {"ok": True, "current": "", "parent": "", "dirs": dirs}
+
+    target = Path(clean_p).resolve()
+    if not _en_dialog_roots(target, roots):
+        return {"ok": False, "error": "ruta fuera de las raíces configuradas (DIALOG_ROOTS)"}
+    if not target.exists() or not target.is_dir():
+        return {"ok": False, "error": f"Carpeta no encontrada: {target}"}
+
+    parent = str(target.parent) if (target.parent != target and _en_dialog_roots(target.parent, roots)) else ""
+    subdirs = []
+    try:
+        for entry in os.scandir(target):
+            if entry.is_dir() and not entry.name.startswith("."):
+                subdirs.append({"name": entry.name, "path": entry.path})
+        subdirs.sort(key=lambda x: x["name"].lower())
+    except PermissionError:
+        pass
+    return {"ok": True, "current": str(target), "parent": parent, "dirs": subdirs}
+
+
+@app.post("/api/dialog/create-dir")
+async def dialog_create_dir(body: dict):
+    """Crea una carpeta nueva en la ruta seleccionada.
+    [A16 · P0.3] SOLO bajo una raíz configurada (DIALOG_ROOTS): crear
+    directorios arbitrarios en el disco (p.ej. C:\\Users\\…\\Startup) era
+    escritura libre para cualquier cliente con Origin local."""
+    ruta = (body.get("path") or "").strip().strip('"')
+    if not ruta:
+        return {"ok": False, "error": "Ruta requerida"}
+    roots = _dialog_roots()
+    if not roots:
+        return {"ok": False, "error": "explorador deshabilitado: define DIALOG_ROOTS en backend/.env"}
+    p = Path(ruta).resolve()
+    if not _en_dialog_roots(p, roots):
+        return {"ok": False, "error": "ruta fuera de las raíces configuradas (DIALOG_ROOTS)"}
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+        return {"ok": True, "path": str(p)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 # ── AGENTE 2 · Abrir Carpeta en el PC del usuario (1 clic en la web) ────
+def _dialog_roots() -> list[Path]:
+    """[A16 · P0.3] raíces configuradas para el explorador in-browser.
+    DIALOG_ROOTS en .env (separadas por «;»). Default: la carpeta de
+    workspaces (PROJECTS_DIR) — el uso legítimo del explorador es elegir
+    destino de proyectos; browse-dirs/create-dir mueren fuera de ellas."""
+    raw = (getattr(config, "DIALOG_ROOTS", "") or "").strip()
+    if not raw:
+        raw = str(config.PROJECTS_DIR)
+    roots = []
+    for part in raw.split(";"):
+        part = part.strip().strip('"')
+        if part:
+            try:
+                roots.append(Path(part).resolve())
+            except (OSError, ValueError):
+                continue
+    return roots
+
+
+def _en_dialog_roots(p: Path, roots: list[Path]) -> bool:
+    try:
+        return any(p == r or p.is_relative_to(r) for r in roots)
+    except (OSError, ValueError):
+        return False
+
+
 def _abrir_carpeta_sistema(ruta: Path) -> tuple[bool, str]:
     """Abre la carpeta en el explorador de archivos del SO (Windows primero:
     os.startfile es el mecanismo nativo del Explorador de archivos). En
@@ -1509,7 +1810,10 @@ async def delete_project(pid: str):
     job = db.active_job_for_project(pid)
     if job:
         orchestrator.cancel_job(job["id"])
-    shutil.rmtree(security.safe_project_output_dir(pid), ignore_errors=True)
+    # [A7 · P2.2] el rmtree de un proyecto con GB de vídeo es I/O lento:
+    # en hilo, no en el event loop.
+    await asyncio.to_thread(
+        shutil.rmtree, security.safe_project_output_dir(pid), True)
     project_workspace.purge_workspace(p)  # INT-086: vista organizada
     db.delete_project(pid)  # ahora también purga flow_jobs (integridad)
     return {"ok": True}
@@ -1538,43 +1842,7 @@ async def generate(pid: str, body: dict | None = None):
     return {"job_id": job_id}
 
 
-# ───────────────────────────────────────── módulo "Desde Nicho" (v2.6) ──
-@app.get("/api/niches")
-async def niches_list():
-    """Plantillas de nicho + nº de proyectos que usan cada una."""
-    templates = niches_svc.list_templates()
-    counts: dict[str, int] = {}
-    for p in db.list_projects(limit=500):
-        key = (p.get("niche") or "").strip().lower()
-        if key:
-            counts[key] = counts.get(key, 0) + 1
-    out = []
-    for t in templates:
-        t = dict(t)
-        t["projects"] = counts.get((t.get("name") or "").strip().lower(), 0)
-        t["folder"] = niches_svc.folder_name(t)
-        out.append(t)
-    return out
-
-
-@app.get("/api/niches/templates")
-async def niches_templates():
-    return niches_svc.list_templates()
-
-
-@app.post("/api/niches/templates")
-async def niches_template_save(body: dict):
-    try:
-        return niches_svc.upsert_template(body)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-
-@app.delete("/api/niches/templates/{tid}")
-async def niches_template_delete(tid: str):
-    if not niches_svc.delete_template(tid):
-        raise HTTPException(404, "plantilla no encontrada")
-    return {"ok": True}
+# [P3-1] Módulo Nichos migrado a routers/niches.py
 
 
 @app.get("/api/library")
@@ -1634,8 +1902,11 @@ async def project_video(pid: str, download: bool = False):
         raise HTTPException(404, "video no disponible")
     # INT-080: contención M5 — la columna video_url solo puede apuntar a
     # raíces seguras del backend; nunca a rutas arbitrarias del disco.
+    # [C1 · P0.1] además: EXCLUSIÓN de data/backups/** (env.bak, token.json.bak,
+    # .db) y validación de que sea vídeo REAL (magic bytes/ffprobe corto).
     video_fs = _path_contenida(p["video_url"])
-    if not video_fs or not video_fs.is_file():
+    if not video_fs or not video_fs.is_file() \
+            or not await asyncio.to_thread(_es_video_real, video_fs):
         raise HTTPException(404, "video no disponible")
     return FileResponse(
         video_fs,
@@ -1664,8 +1935,9 @@ async def project_contact_sheet(pid: str):
     p = db.get_project(pid)
     if not p or not p.get("video_url"):
         raise HTTPException(404, "video no disponible")
-    video_fs = _path_contenida(p["video_url"])  # INT-080: contención M5
-    if not video_fs or not video_fs.is_file():
+    video_fs = _path_contenida(p["video_url"])  # INT-080: contención M5 + P0.1
+    if not video_fs or not video_fs.is_file() \
+            or not await asyncio.to_thread(_es_video_real, video_fs):
         raise HTTPException(404, "video no disponible")
     out = security.safe_project_output_dir(_pid(pid)) / "contact_sheet.jpg"
     if not out.is_file():
@@ -1865,7 +2137,7 @@ async def regen_image(scene_id: str, body: dict):
     if not scene:
         raise HTTPException(404, "escena no existe")
     project = db.get_project(pid)
-    path, method = await imgs_pipeline.generate_scene_image(scene, project, int(scene["idx"]))
+    path, method = await _svc_lazy("pipeline.images").generate_scene_image(scene, project, int(scene["idx"]))
     db.update_scene(scene_id, image_path=str(path))
     return {"image": f"/api/scenes/{scene_id}/image?project_id={pid}&v={path}", "method": method}
 
@@ -1879,7 +2151,7 @@ async def regen_flow_scene(scene_id: str, body: dict):
     if not scene:
         raise HTTPException(404, "escena no existe")
     project = db.get_project(pid)
-    path, method = await imgs_pipeline.generate_scene_image(scene, project, int(scene["idx"]))
+    path, method = await _svc_lazy("pipeline.images").generate_scene_image(scene, project, int(scene["idx"]))
     db.update_scene(scene_id, image_path=str(path))
     return {
         "ok": True,
@@ -1961,10 +2233,11 @@ async def publish_status():
 
 @app.get("/api/publish/auth-url")
 async def publish_auth_url():
-    url = youtube_publish.build_auth_url()
-    if not url:
+    pair = youtube_publish.build_auth_url()
+    if not pair:
         raise HTTPException(400, "Falta client_secret.json en backend/data/")
-    return {"url": url}
+    url, state = pair
+    return {"url": url, "state": state}  # [AUDITORÍA 2026-11] state CSRF viaja al dashboard
 
 
 def _oauth_page(ok: bool, msg: str) -> str:
@@ -1984,10 +2257,11 @@ def _oauth_page(ok: bool, msg: str) -> str:
 
 
 @app.get("/api/publish/callback")
-async def publish_callback(code: str = "", error: str = ""):
+async def publish_callback(code: str = "", state: str = "", error: str = ""):
     """Retorno OAuth de Google (loopback, reemplaza el flujo OOB retirado):
-    intercambia el código, guarda el token en backend/data/token.json y
-    muestra confirmación. El usuario solo autoriza en el navegador."""
+    valida el state CSRF (single-use, auditoría 2026-11), intercambia el
+    código, guarda el token en backend/data/token.json y muestra
+    confirmación. El usuario solo autoriza en el navegador."""
     if error:
         return HTMLResponse(_oauth_page(False, f"Google devolvió: {error}"))
     if not code:
@@ -1997,9 +2271,13 @@ async def publish_callback(code: str = "", error: str = ""):
         return HTMLResponse(_oauth_page(False, "Falta backend/data/client_secret.json"),
                             status_code=400)
     try:
-        ok = youtube_publish.exchange_code(code)
+        # exchange_code valida y CONSUME el state (single-use); ValueError = CSRF
+        ok = youtube_publish.exchange_code(code, state)
         msg = ("Token guardado en backend/data/token.json. Ya puedes publicar "
                "desde el dashboard.") if ok else "No se pudo intercambiar el código."
+    except ValueError as e:
+        # state ausente/alterado/expirado → 400 explícito (protección CSRF)
+        return HTMLResponse(_oauth_page(False, str(e)), status_code=400)
     except Exception as e:  # noqa: BLE001
         ok = False
         msg = f"Error al intercambiar el código: {str(e)[:220]}"
@@ -2009,10 +2287,13 @@ async def publish_callback(code: str = "", error: str = ""):
 @app.post("/api/publish/exchange")
 async def publish_exchange(body: dict):
     code = (body.get("code") or "").strip()
+    state = (body.get("state") or "").strip()
     if not code:
         raise HTTPException(400, "falta el código")
-    try:  # M4: un fallo OAuth jamás vuelve a ser un 500
-        ok = youtube_publish.exchange_code(code)
+    try:  # M4: un fallo OAuth jamás vuelve a ser un 500; ValueError = CSRF
+        ok = youtube_publish.exchange_code(code, state)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, f"intercambio OAuth falló: {str(e)[:200]}") from e
     return {"ok": ok}
@@ -2038,6 +2319,22 @@ async def publish_video(pid: str, body: dict):
     if qa.get("worst") == "error":
         raise HTTPException(409, "QA del render final con errores — "
                                  "publicación bloqueada; re-renderiza el proyecto")
+    # [A14 · P1.7] GATE DE SUBTÍTULOS: un render sin subtítulos quemados no
+    # se publica (antes quedaba ready y se autopublicaba mudo de texto — la
+    # retención de Shorts depende del texto en pantalla). Se bloquea si
+    # subs_status.json declara burned=False (fallback silencioso), salvo
+    # override explícito en el body ({\"sin_subtitulos\": true}).
+    subs_status_file = OUTPUT_DIR / pid / "subs_status.json"
+    if subs_status_file.is_file() and not bool((body or {}).get("sin_subtitulos")):
+        try:
+            _subs = json.loads(subs_status_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            _subs = {}
+        if _subs.get("burned") is False:
+            raise HTTPException(
+                409, "subtítulos NO quemados (subs_status.json burned=false) — "
+                     "publicación bloqueada; re-renderiza o envía "
+                     "sin_subtitulos=true para forzar")
     if not youtube_publish.configured():
         raise HTTPException(400, "Configura client_secret.json (README §Publicar)")
     jid = db.create_job(pid, kind="publish")
@@ -2053,10 +2350,12 @@ async def publish_video(pid: str, body: dict):
             publish_at=body.get("publish_at"),
         )
     except Exception as e:  # noqa: BLE001
+        log.error("Error publicando en YouTube para proyecto %s: %s", pid, e, exc_info=True)
+        cur_p = db.get_project(pid) or {}
+        cur_meta = dict(cur_p.get("meta") or {})
         db.update_job(jid, status="failed", step="failed", error=str(e)[:500],
                       message=f"publish falló: {str(e)[:120]}")
-        db.update_project(pid, meta={**(db.get_project(pid).get("meta") or {}),
-                                     "publish_state": "FAILED"})
+        db.update_project(pid, meta={**cur_meta, "publish_state": "FAILED"})
         raise HTTPException(500, str(e)[:300])
     db.update_job(jid, status="done", step="done", message=f"publicado {vid}")
     db.update_project(pid, status="published", youtube_id=vid,
@@ -2281,7 +2580,8 @@ async def video_qa_endpoint(pid: str):
     _pid(pid)
     from services import video_qa
     try:
-        return video_qa.qa_project(pid)
+        # [A7 · P2.2] ffprobe/PIL del QA completo en hilo (event loop libre)
+        return await asyncio.to_thread(video_qa.qa_project, pid)
     except LookupError as e:
         raise HTTPException(404, str(e)) from e
 
@@ -2322,12 +2622,12 @@ async def agent_execute(body: dict):
         pmeta = {}
         if g.get("camara"):
             pmeta["camara"] = g["camara"]
-        return db.create_project(
+        return _post_create_init(db.create_project(
             title=(g.get("titulo") or f"Producción A2A ({requester})"),
             mode="production_json", style=g.get("estilo") or "auto",
             format=g.get("formato") or "short", voice=g.get("voz"),
             meta=pmeta, platforms=g.get("plataformas") or ["youtube"],
-            niche=g.get("nicho"))
+            niche=g.get("nicho")), None)
 
     try:
         rep = await prod_svc.ingest(
@@ -2531,8 +2831,9 @@ async def inspect_media_binary(body: dict):
 
 
 
-@app.api_route("/mcp", methods=["GET", "POST"])
-async def mcp_sin_barra(req: _Req):
+@app.post("/mcp", operation_id="mcp_proxy_sin_barra_post")  # P2-3: id único POR MÉTODO
+@app.get("/mcp", operation_id="mcp_proxy_sin_barra_get")  # (un id compartido en un
+async def mcp_sin_barra(req: _Req):  # api_route multi-método DUPLICA el id en OpenAPI)
     """Proxy de /mcp exacto → evita el 307 a /mcp/ para clientes MCP."""
     if req.method == "GET":
         return await mcp_server.info()
@@ -2575,6 +2876,59 @@ async def mcp_status():
     return await _mcpm.manager.status()
 
 
+@app.get("/api/mcp/resumen")
+async def mcp_resumen(nicho_id: str = "", notebook_id: str = ""):
+    """U1 · Agregador de estado SOLO LECTURA del «Ecosistema Google».
+
+    Calcula el semáforo humano por pieza (chrome CDP 9333, flow,
+    notebooklm, cuaderno seleccionado) con lo que YA devuelven
+    /api/mcp/status y google_login_status — NO conecta nada y no toca
+    mcp_manager (la conexión sigue siendo manual/del dueño).
+
+    «todo_conectado»/«listo_para_pipeline» solo son True si TODAS las
+    piezas requeridas están ok; «siguiente_paso» dice en español claro
+    qué hacer (p. ej. «Abre el Chrome de Flow: pulsa Conectar todo»).
+    Query opcionales: nicho_id (lee el cuaderno recordado del nicho en el
+    registro de nichos) y notebook_id (elección vigente de la UI)."""
+    from services import registro_produccion
+    from services.mcp_resumen import resumen_ecosistema
+    st = await _mcpm.manager.status()                 # solo lectura
+    gs = await _mcpm.manager.google_login_status()    # solo lectura
+    nicho_nb = None
+    nicho = (nicho_id or "").strip()
+    if nicho:
+        try:
+            entrada = registro_produccion.registro_nicho(nicho)
+            nicho_nb = (entrada or {}).get("notebook_id") or None
+        except ValueError:
+            nicho_nb = None          # ID inválido: se ignora, honesto
+    nid = ((notebook_id or "").strip() or nicho_nb
+           or str(getattr(config, "NOTEBOOKLM_NOTEBOOK_ID", "") or "").strip()
+           or None)
+    return resumen_ecosistema(st.get("services") or {}, gs,
+                              notebook_id=nid)
+
+
+@app.get("/api/mcp/catalogo/{service}")
+async def mcp_catalogo(service: str):
+    """Y1 · Catálogo COMPLETO de tools del servicio: {service, server_info,
+    tools:[{name, description COMPLETA, inputSchema}]}.
+
+    SOLO LECTURA y sobre la conexión YA ACTIVA del backend (conn.tools del
+    handshake MCP): NO conecta, NO lanza procesos de servidores MCP
+    duplicados y NUNCA ejecuta ninguna tool. Si el servicio no está
+    conectado responde 409 con la acción siguiente («conecta primero
+    desde el panel»); servicio desconocido → 404.
+    Protegido como el resto de /api (hereda auth_guard/csrf_guard)."""
+    try:
+        return await _mcpm.manager.tools_catalog(service, auto_connect=False)
+    except _mcpm.MCPManagerError as e:
+        if e.code == "BAD_SERVICE":
+            raise HTTPException(404, str(e)) from e
+        raise HTTPException(
+            409, f"{e} — conecta primero desde el panel") from e
+
+
 @app.post("/api/mcp/execute")
 async def mcp_execute(body: dict):
     """Despacha una tool al servidor MCP activo (§1).
@@ -2611,11 +2965,12 @@ async def mcp_test_pipeline(body: dict):
 
 
 @app.post("/api/mcp/list-notebooks")
-async def mcp_list_notebooks(body: dict):
+async def mcp_list_notebooks(body: dict = None):
     """Lista los notebooks de la cuenta vía la tool de listado del MCP de
     NotebookLM (notebook_list / list_notebooks). Alimenta el dropdown
     «📋 Listar mis Notebooks» del panel para fijar el notebook activo con
     1 click (HOTFIX INT-023.4: fin de copiar UUIDs desde la URL)."""
+    body = body or {}
     try:
         return await _mcpm.manager.list_notebooks(
             notebook_id=(body.get("notebook_id") or "").strip() or None)
@@ -2657,10 +3012,12 @@ async def mcp_launch_clean_login():
 
 
 @app.post("/api/mcp/connect-all-google")
-async def mcp_connect_all_google():
+async def mcp_connect_all_google(body: dict | None = None):
     """🚀 1-Clic: Sanea perfil, levanta Chrome interactivo en puerto 9333 y conecta Flow + NotebookLM."""
+    b = body or {}
+    timeout = b.get("timeout_s") or b.get("cdp_timeout_s")
     try:
-        return await _mcpm.manager.connect_all_google()
+        return await _mcpm.manager.connect_all_google(cdp_timeout_s=float(timeout) if timeout else None)
     except Exception as e:
         raise HTTPException(500, f"Error al conectar servicios Google: {e}") from e
 
@@ -2972,7 +3329,8 @@ async def avatar_lipsync_musetalk(avatar_id: str, body: dict):
 
     # Convertir a WAV 16-bit PCM estándar para el análisis fonético
     cmd = ["ffmpeg", "-y", "-i", str(mp3_path), "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le", str(wav_path)]
-    subprocess.run(cmd, capture_output=True, check=True)
+    # [A7 · P2.2] ffmpeg fuera del event loop (antes congelaba health/jobs)
+    await asyncio.to_thread(lambda: subprocess.run(cmd, capture_output=True, check=True))
 
     # INT-072: HF Spaces hiperrealista primero ($0.00) con fail-open al motor
     # local determinista. La decisión vive en render_avatar_animation.
@@ -2993,14 +3351,24 @@ async def avatar_lipsync_musetalk(avatar_id: str, body: dict):
 
 @app.post("/api/product/badge")
 async def product_badge(body: dict):
-    """🛍️ INT-055: Genera un badge de conversión e-commerce en PNG transparente."""
+    """🛍️ INT-055: Genera un badge de conversión e-commerce en PNG transparente.
+    [A1 · P0.2] `type` saneado (security.safe_filename) y el destino final
+    validado con resolve()+is_relative_to(static_assets): un type
+    "../../boot" ya no escribe fuera de static/assets (400 si escapa)."""
     from services import ecommerce_overlays
-    badge_type = body.get("type") or "rating"
+    badge_type = (body.get("type") or "rating").strip()
+    try:
+        safe_type = security.safe_filename(
+            badge_type.replace("/", "_").replace("\\", "_") or "rating")
+    except ValueError:
+        raise HTTPException(400, "tipo de badge inválido")
     text_main = body.get("text")
     tag = body.get("tag")
     out_dir = STATIC_DIR / "assets"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_file = out_dir / f"badge_{badge_type}.png"
+    out_file = (out_dir / f"badge_{safe_type}.png").resolve()
+    if not out_file.is_relative_to(out_dir.resolve()):
+        raise HTTPException(400, "tipo de badge escapa del directorio de assets")
     p = ecommerce_overlays.generate_ecommerce_badge(
         badge_type=badge_type,
         text_main=text_main,
@@ -3159,13 +3527,16 @@ async def product_studio_preview(body: dict):
     out_dir = STATIC_DIR / "studio_previews"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    import urllib.request
     import time
     timestamp = int(time.time())
     raw_img = out_dir / f"raw_{timestamp}.png"
-    req = urllib.request.Request(image_url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        raw_img.write_bytes(resp.read())
+    # P0-2: urlopen seguía redirects sin revalidar (el validar_url de arriba
+    # solo cubría la URL original) → safe_fetch_bytes revalida cada salto.
+    # [A7 · P2.2] la descarga (urllib sincrónico) corre en hilo: hasta 15 s
+    # de event loop congelado antes.
+    raw_img.write_bytes(await asyncio.to_thread(
+        security.safe_fetch_bytes,
+        image_url, timeout=15, max_bytes=15 * 1024 * 1024))
 
     cutout = out_dir / f"cutout_{timestamp}.png"
     ecommerce_overlays.remove_product_background(raw_img, cutout)
@@ -3316,16 +3687,31 @@ async def pipeline_run(body: dict):
     """Lanza la corrida completa con el notebookId activo del MCP Manager
     (payload → .env fallback dentro de mcp_manager). Single-flight: Flow
     serializa en el Chrome dedicado, así que una segunda corrida en marcha
-    se rechaza con 409."""
+    se rechaza con 409. BG2: acepta un campo opcional "blueprint" (puerta
+    DECLARADA {label, title, scenes}) — con blueprint válido la etapa 2 NO
+    llama a Gemini (engine "external:<label>"); inválido → 400
+    INVALID_BLUEPRINT."""
     idea = (body.get("idea") or "").strip()
     if not idea:
         raise HTTPException(400, "idea requerida (¿qué video produce el pipeline?)")
+    raw_ms = body.get("max_scenes")
+    max_scenes = None
+    if raw_ms is not None:
+        try:
+            max_scenes = int(raw_ms)
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, "max_scenes debe ser un entero entre 1 y 12") from e
+        if not (1 <= max_scenes <= 12):
+            raise HTTPException(400, "max_scenes debe ser un entero entre 1 y 12")
     try:
         run = _pipe.orchestrator.create_run(
             idea=idea,
             notebook_id=(body.get("notebook_id") or "").strip() or None,
             fmt=body.get("format") if body.get("format") in ("short", "long") else "short",
-            style=(body.get("style") or "auto").strip())
+            style=(body.get("style") or "auto").strip(),
+            max_scenes=max_scenes,
+            nicho_id=body.get("nicho_id"),
+            blueprint=body.get("blueprint"))
         _pipe.orchestrator.start_run(run["run_id"])
     except _pipe.PipelineError as e:
         status = 409 if e.code == "PIPELINE_BUSY" else 400
@@ -3612,8 +3998,10 @@ async def pipeline_render_file(run_id: str):
     return FileResponse(out, media_type="video/mp4", filename=out.name)
 
 
-@app.api_route("/", methods=["GET", "HEAD"])
-async def index(request: Request):
+@app.head("/", operation_id="dashboard_index_head",
+          include_in_schema=False)  # P2-3: HEAD fuera del esquema (un id POR MÉTODO)
+@app.get("/", operation_id="dashboard_index")  # (un id compartido en un api_route
+async def index(request: Request):  # multi-método DUPLICA el id en OpenAPI)
     """INT-082 · dos mejoras del informe de revisión en vivo en la raíz:
     · Mejora 4 (cache-busting unificado): las TRES versiones de assets que
       declara index.html (style.css, auth.js, app.js) salen ahora del token

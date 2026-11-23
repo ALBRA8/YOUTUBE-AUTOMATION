@@ -14,6 +14,7 @@ capa que solo existe con un servidor real levantado:
 
 Uso:  cd yt_automation_v2 && python3 tests/test_live_boot.py
 """
+import os
 
 # [D5] consola UTF-8 aunque el host use cp1252: baterías ejecutadas a mano
 # SIN variables de entorno no deben morir por imprimir "──" u otros glifos.
@@ -24,12 +25,18 @@ for _d5s in (_d5sys.stdout, _d5sys.stderr):
     except Exception:
         pass
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 TESTS_DIR = Path(__file__).resolve().parent
 _RESUMEN = re.compile(r"(\d+)\s+OK\s*·\s*(\d+)\s+fallos")
+
+if sys.platform == "win32" and not shutil.which("bash"):
+    print("── live_boot_smoke.sh: omitido en Windows sin bash (entorno Linux/CI requerido)")
+    print("\n0 OK · 0 fallos")
+    sys.exit(0)
 
 SCRIPTS = [
     ("live_boot_smoke.sh", "boot vivo (uvicorn + CORS + endpoints base)"),

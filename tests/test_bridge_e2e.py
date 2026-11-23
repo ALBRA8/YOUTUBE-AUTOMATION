@@ -19,6 +19,10 @@ Dos capas de verificación (todo Node, sin Chrome ni sesión de Google):
      bloqueo: la extensión 2.2.0 solo buscaba labs.google y Flow migró con
      redirect 308); el origin check del popup acepta el dominio actual y
      rechaza impostores; la extensión sigue siendo v2.2.x.
+  5. CRIPTO [AUDITORÍA 2026-11]: bridge_crypto_mock.js — la apiKey ya NO vive
+     en claro en chrome.storage.local (AES-256-GCM, clave en storage.session):
+     guardado cifrado, restart del SW, cierre de Chrome (pérdida con gracia),
+     ciphertext corrupto, migración legacy e IV fresco.
 
 Si esta batería pasa, el contrato backend↔extensión está verificado en la
 capa navegador re-ejecutable (la corrida E2E con Google Flow REAL sigue
@@ -180,7 +184,20 @@ def main() -> int:
     check("slateInjectFn presente y sin dependencia de dominio (sin labs)",
           bool(_cuerpo) and "labs" not in _cuerpo.lower())
 
-    print("── 5. limpieza")
+    print("── 5. CRIPTO AES-GCM: apiKey cifrada en storage (auditoría 2026-11)")
+    crypto_harness = Path(__file__).resolve().parent / "bridge_crypto_mock.js"
+    proc_c = subprocess.run([node, str(crypto_harness)], capture_output=True, text=True,
+                            timeout=120, cwd=str(REPO), encoding="utf-8", errors="replace")
+    salida_c = (proc_c.stdout or "") + (proc_c.stderr or "")
+    check("harness de cripto corre sin FATAL", "FATAL" not in salida_c, salida_c[-200:])
+    check("harness de cripto exit 0", proc_c.returncode == 0, f"exit={proc_c.returncode}")
+    check("harness de cripto reporta 0 fallos", "· 0 fallos" in proc_c.stdout,
+          proc_c.stdout.strip().splitlines()[-1] if proc_c.stdout else "")
+    for grupo in ("storage.local SIN apiKey en claro", "restart del SW",
+                  "cierre de Chrome", "migración legacy", "IV fresco"):
+        check(f"grupo cripto presente: {grupo}", grupo in proc_c.stdout)
+
+    print("── 6. limpieza")
     check("batería sin efectos sobre el repo (solo lectura + subprocess)", True)
 
     print(f"\n═══ {OK} OK · {FAIL} fallos ═══")

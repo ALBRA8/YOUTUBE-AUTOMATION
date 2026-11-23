@@ -36,11 +36,13 @@ import json
 import os
 import sqlite3
 import sys
+import threading
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import config
 import database as db
 from config import OUTPUT_DIR
 from pipeline.flow_export import DEFAULT_BRAND, build_script_json
@@ -57,8 +59,8 @@ IMG_FORMAT_EXT = {"PNG": ".png", "JPEG": ".jpg", "WEBP": ".webp"}
 
 # ── [D2] trazas temporales opt-in + reintento acotado del BEGIN IMMEDIATE ────
 # FLOW_JOBS_TRACE=1 imprime por stderr tiempos de la adquisición del lock y
-# del I/O dentro de complete()/claim_next(): diagnóstico de contención MEDIDO
-# (no adivinado). Overhead cero cuando está desactivada.
+# del I/O de complete()/claim_next(): diagnóstico de contención MEDIDO (no
+# adivinado). Overhead cero cuando está desactivada.
 _TRACE = os.getenv("FLOW_JOBS_TRACE", "").strip().lower() not in ("", "0", "false")
 _T0_PROC = time.perf_counter()
 
@@ -85,17 +87,13 @@ def _begin_inmediato(con, etiqueta: str = "") -> None:
     """[D2] BEGIN IMMEDIATE con REINTENTO ACOTADO ante SQLITE_BUSY.
 
     ÚNICO punto arreglado: la ADQUISICIÓN del lock de escritura. Si otro
-    writer (p. ej. un complete() con ffprobe dentro de la tx en una máquina
-    saturada) mantiene el lock y el busy_timeout de la conexión vence
+    writer mantiene el lock y el busy_timeout de la conexión vence
     (database.connect usa timeout=15), sqlite3 levanta OperationalError
     «database is locked» → antes el trabajo se PERDÍA (evidencia del dueño:
     test_concurrencia 16/2 junto a otra batería). Ahora: hasta 3 intentos
-    con backoff 50/150/400 ms.
-
-    El reintento es SEGURO porque ocurre ANTES de leer o escribir cualquier
-    fila (sin filas tocadas no hay nada que roll-backear ni tokens que
-    invalidar): la semántica del token/nonce queda INTACTA y NO se añade
-    ningún re-check de token (trampa conocida que rompe complete())."""
+    con backoff 50/150/400 ms. El reintento es SEGURO porque ocurre ANTES de
+    leer o escribir cualquier fila: la semántica del token/nonce queda
+    INTACTA y NO se añade ningún re-check de token (trampa conocida)."""
     ultimo = len(_BACKOFF_BEGIN_S) - 1
     for intento, espera in enumerate(_BACKOFF_BEGIN_S):
         try:
@@ -221,10 +219,23 @@ def enqueue_project(pid: str, fmt: str = "transformacion",
                OR (status='claimed' AND
                    (lease_until IS NULL OR lease_until < ?)))""",
             (pid, now))
+        # [A11 · P1.4] dedup también contra claimed VIGENTES (trabajo en
+        # vuelo que la DELETE de arriba conservó): sin esto, re-encolar un
+        # proyecto con jobs claimed creaba un SEGUNDO job queued para la
+        # misma (kind, escena, part) — doble trabajo Flow y doble cobro.
+        en_vuelo = {
+            (r["kind"], int(r["scene_number"]), int(r["part"] or 1))
+            for r in con.execute(
+                """SELECT kind, scene_number, part FROM flow_jobs
+                   WHERE project_id=? AND status='claimed'
+                   AND lease_until IS NOT NULL AND lease_until >= ?""",
+                (pid, now))
+        }
         for sc in data["scenes"]:
             no = sc["scene_number"]
             meta = {"title": sc.get("title") or ""}
-            if ("image", no, 1) not in done_prev:
+            if ("image", no, 1) not in done_prev \
+                    and ("image", no, 1) not in en_vuelo:
                 spec = ec.build_execution_spec(sc, kind="image",
                                                project_format=project_format)
                 con.execute(
@@ -241,7 +252,8 @@ def enqueue_project(pid: str, fmt: str = "transformacion",
                 created += 1
                 images += 1
             vp = sc.get("video_prompt")
-            if vp and ("video", no, 1) not in done_prev:
+            if vp and ("video", no, 1) not in done_prev \
+                    and ("video", no, 1) not in en_vuelo:
                 spec = ec.build_execution_spec(sc, kind="video",
                                                project_format=project_format)
                 con.execute(
@@ -258,8 +270,46 @@ def enqueue_project(pid: str, fmt: str = "transformacion",
                      "queued", 0, MAX_ATTEMPTS["video"], now, now))
                 created += 1
                 videos += 1
+    # Q3 · la fase Flow de la producción empieza aquí: dispara (sin
+    # bloquear, sin fallar) la sincronización registro↔Flow del proyecto.
+    _programar_disparo_sync(pid)
     return {"ok": True, "project_id": pid, "created": created,
             "images": images, "videos": videos}
+
+
+# ── Q3 · disparo de la sincronización con Flow (fire-and-forget) ──────
+_TAREAS_DISPARO: set = set()   # refs vivas anti-GC de las tareas programadas
+
+
+def _disparo_sync(pid: str) -> None:
+    """Punto de inyección para tests (dobles): llama al disparo del registro
+    (que tiene su propio gate FLOW_REGISTRO_SYNC y jamás lanza)."""
+    from services import registro_produccion
+    registro_produccion.disparo_sync_flow(pid)
+
+
+def _programar_disparo_sync(pid: str) -> None:
+    """Q3 · Programa el disparo de la sincronización con Flow SIN bloquear
+    la fase de Flow (fire-and-forget; el fallo jamás afecta al enqueue).
+
+    El adaptador del registro usa asyncio.run, que NO puede correr dentro
+    de un event loop: desde contexto async se envía a un hilo worker vía
+    asyncio.to_thread; desde contexto síncrono (p. ej. tool MCP
+    flow_encolar), hilo daemon directo. Con FLOW_REGISTRO_SYNC apagado
+    (default) ni siquiera se programa: el gate autoritativo vive en
+    registro_produccion.disparo_sync_flow."""
+    if not getattr(config, "FLOW_REGISTRO_SYNC", False):
+        return
+    import asyncio as _asyncio
+    try:
+        loop = _asyncio.get_running_loop()
+    except RuntimeError:            # contexto síncrono → hilo daemon
+        threading.Thread(target=_disparo_sync, args=(pid,), daemon=True,
+                         name=f"flow-sync-{pid}").start()
+        return
+    tarea = loop.create_task(_asyncio.to_thread(_disparo_sync, pid))
+    _TAREAS_DISPARO.add(tarea)
+    tarea.add_done_callback(_TAREAS_DISPARO.discard)
 
 
 # ── claim atómico + recuperación de leases ───────────────────────────────────
@@ -328,13 +378,9 @@ def claim_next(worker: str, pid: str | None = None) -> dict | None:
     ascendente). BEGIN IMMEDIATE evita dobles claims entre workers."""
     con = db.connect()
     try:
-        t_begin = time.perf_counter()
-        _begin_inmediato(con, f"claim {worker}")
-        _trazar("claim_next: BEGIN adquirido", t_begin, f"worker={worker} pid={pid}")
+        _begin_inmediato(con)
         cutoff = _iso(_now())
-        t_rec = time.perf_counter()
         _recover_en_con(con, cutoff)  # barrido anti-zombie (2 fases, ver arriba)
-        _trazar("claim_next: barrido recover_expired", t_rec)
         if pid:
             row = con.execute(
                 """SELECT * FROM flow_jobs WHERE status='queued' AND project_id=?
@@ -351,13 +397,18 @@ def claim_next(worker: str, pid: str | None = None) -> dict | None:
         kind = row["kind"]
         lease_until = _iso(_now() + timedelta(seconds=LEASE_S.get(kind, 600)))
         token = _token()
+        # [C5 · P1.3] el exec_state se REINICIA en cada claim: evidencia POR
+        # INTENTO (§12). Antes, un job que falló con PROVIDER_FAILURE quedaba
+        # queued con exec_state terminal: el 2º intento moría en la barrera
+        # §7.1 de complete() como CONFIG_UNVERIFIABLE con causa falsa ("asset
+        # sin gate") cuando lo real era un reintento legítimo. Al reclamar se
+        # vuelve a CLAIMED: el gate /generate-consent debe re-verificarse por
+        # intento (es exactamente el contrato).
         con.execute(
             """UPDATE flow_jobs SET status='claimed', worker=?, job_token=?,
-               lease_until=?, updated_at=?,
-               exec_state=CASE WHEN exec_state IS NULL OR exec_state=?
-                          THEN ? ELSE exec_state END
+               lease_until=?, updated_at=?, exec_state=?
                WHERE id=?""",
-            (worker, token, lease_until, cutoff, ec.EXEC_STATE_QUEUED,
+            (worker, token, lease_until, cutoff,
              ec.EXEC_STATE_CLAIMED, row["id"]))
         con.commit()
     except Exception:
@@ -365,6 +416,12 @@ def claim_next(worker: str, pid: str | None = None) -> dict | None:
         raise
     finally:
         con.close()
+    # [C5 · P1.3] el payload del claim refleja el REINICIO: la fila leída
+    # antes del UPDATE traía el exec_state del intento anterior
+    # (PROVIDER_FAILURE/CONFIG_*) — el dict devuelto miente si no se
+    # sincroniza con lo recién escrito.
+    row = dict(row)
+    row["exec_state"] = ec.EXEC_STATE_CLAIMED
     job = _row_to_job(row)
     job.update({"job_token": token, "lease_until": lease_until,
                 "worker": worker})
@@ -411,7 +468,9 @@ def heartbeat(job_id: str, token: str, worker=None) -> dict | None:
     guardia: un heartbeat de otro worker o con lease vencida → None (409)."""
     con = db.connect()
     try:
-        _begin_inmediato(con)
+        t_begin = time.perf_counter()
+        _begin_inmediato(con, f"complete {job_id[:8]}")
+        _trazar("complete: tx#1 BEGIN adquirido", t_begin, f"job={job_id[:8]}")
         row = _claimed_by_token(con, job_id, token, worker=worker,
                                 require_lease=True)
         if not row:
@@ -456,24 +515,34 @@ def complete(job_id: str, token: str, data: bytes,
 
     Devuelve {ok, asset_path, project_done, renderable, contract} o None si
     el token/estado no es válido (409). Lanza ValueError si el asset no pasa
-    validación (422) o si INCUMPLE EL CONTRATO (CONTRACT_VIOLATION →
-    ASSET_INVALID terminal: el job queda dead, jamás reencola, jamás DONE —
-    un asset de 5s con spec de 8s no puede terminar en done).
+    validación (422) o si INCUMPLE EL CONTRATO (CONTRACT_VIOLATION o
+    CONTRACT_UNVERIFIABLE → ASSET_INVALID terminal: el job queda dead,
+    jamás reencola, jamás DONE — un asset de 5s con spec de 8s no puede
+    terminar en done, y un asset INVERIFICABLE tampoco puede afirmarse done).
 
     [PHASE 1 · M7] worker (verify-if-provided) + lease vigente exigidos en la
     guardia. [PHASE 1 · M8] el UPDATE final a done persiste binding_json: el
     binding v1 verificable de la ejecución (job_id + worker + token + lease +
     sha256 del asset); Flow NO expone hoy identidad de proyecto verificable,
-    así que flow_identity_state queda "not_verifiable" SIEMPRE (no se inventa)."""
+    así que flow_identity_state queda "not_verifiable" SIEMPRE (no se inventa).
+
+    [C2 · P2.1] TRANSACCIÓN CORTA: la escritura SQLite cubre SOLO
+    (1) validar el claim + barrera §7.1 y (2) la escritura final condicional
+    por token (el mismo nonce de heartbeat/fail — SIN re-check adicional,
+    patrón conocido: romper aquí devuelve None y el job no se aplica).
+    El trabajo pesado — mkdir, _save_image/_save_video (PIL/ffprobe),
+    probe_asset y validate_asset_contract — se hace FUERA del lock con los
+    campos ya materializados de la tx#1; entre ambas tx el job sigue
+    claimed con su token: si otro worker lo recuperó, el UPDATE condicional
+    de la tx#2 cae a 0 filas → None (409), nunca pisar un claim ajeno."""
     if not data:
         raise ValueError("body vacío: envía el binario del asset")
     violation = None
     barrier_error = None
     con = db.connect()
     try:
-        t_begin = time.perf_counter()
-        _begin_inmediato(con, f"complete {job_id[:8]}")
-        _trazar("complete: BEGIN adquirido", t_begin, f"job={job_id[:8]} worker={worker}")
+        # ── tx#1 · validar claim + barrera §7.1 + materializar campos ──
+        _begin_inmediato(con)
         row = _claimed_by_token(con, job_id, token, worker=worker,
                                 require_lease=True)
         if not row:
@@ -483,8 +552,10 @@ def complete(job_id: str, token: str, data: bytes,
         kind = row["kind"]
         no = int(row["scene_number"])
         part = int(row["part"] or 1)
-        flow_dir = OUTPUT_DIR / pid / "flow"
-        flow_dir.mkdir(parents=True, exist_ok=True)
+        spec_raw = row["execution_spec"]
+        prev_contract_raw = row["contract_result"]
+        claim_worker = row["worker"]
+        cierre_p2 = bool(row["prompt_adapted"])  # [flow-adaptation v1]
 
         # [execution-contract v1.1] §7.1 — BARRERA PRE-GENERACIÓN (backstop
         # server-side, corrige CF-E2E-01): un video cuyo spec exige
@@ -530,84 +601,115 @@ def complete(job_id: str, token: str, data: bytes,
                     barrier_error = ("CONFIG_UNVERIFIABLE: asset entregado "
                                      "sin consentimiento contractual del "
                                      "gate (§7.1) — " + razon)
-
-        if barrier_error is None:
-            t_io = time.perf_counter()
-            if kind == "image":
-                asset_path = _save_image(flow_dir, no, data)
+                else:
+                    con.commit()
             else:
-                asset_path = _save_video(flow_dir, no, part, data)
-            _trazar("complete: I/O asset (PIL/ffprobe) DENTRO de la tx",
-                    t_io, f"kind={kind} escena={no}")
+                con.commit()
+        else:
+            con.commit()
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
 
-            # [execution-contract v1] §13 — REQUESTED vs OBSERVED FLOW vs ACTUAL
-            # ASSET. El spec viaja en la fila (columna execution_spec); la
-            # medición real del MP4 con ffprobe manda sobre cualquier promesa.
-            contract_result = None
-            spec = None
-            if kind == "video" and row["execution_spec"]:
-                try:
-                    spec = json.loads(row["execution_spec"])
-                except (TypeError, ValueError):
-                    spec = None
-            if spec is not None:
-                actual = ec.probe_asset(asset_path)
+    if barrier_error is None:
+        # ── FUERA DEL LOCK [C2 · P2.1]: disco + PIL + ffprobe + contrato ──
+        flow_dir = OUTPUT_DIR / pid / "flow"
+        flow_dir.mkdir(parents=True, exist_ok=True)
+        t_io = time.perf_counter()
+        if kind == "image":
+            asset_path = _save_image(flow_dir, no, data)
+        else:
+            asset_path = _save_video(flow_dir, no, part, data)
+
+        # [execution-contract v1] §13 — REQUESTED vs OBSERVED FLOW vs ACTUAL
+        # ASSET. El spec viaja en la fila (columna execution_spec); la
+        # medición real del MP4 con ffprobe manda sobre cualquier promesa.
+        contract_result = None
+        spec = None
+        if kind == "video" and spec_raw:
+            try:
+                spec = json.loads(spec_raw)
+            except (TypeError, ValueError):
+                spec = None
+        if spec is not None:
+            actual = ec.probe_asset(asset_path)
+            observed = None
+            try:
+                observed = json.loads(prev_contract_raw or "null") \
+                    if isinstance(prev_contract_raw, str) else None
+            except (TypeError, ValueError):
                 observed = None
-                try:
-                    observed = json.loads(row["contract_result"] or "null") \
-                        if isinstance(row["contract_result"], str) else None
-                except (TypeError, ValueError):
-                    observed = None
-                contract_result = ec.validate_asset_contract(
-                    spec, actual=actual,
-                    observed=(observed or {}).get("observed_flow")
-                    if isinstance(observed, dict) else None,
-                    outputs_count=1)
-                if contract_result["verdict"] == ec.CONTRACT_VIOLATION:
-                    violation = contract_result
+            contract_result = ec.validate_asset_contract(
+                spec, actual=actual,
+                observed=(observed or {}).get("observed_flow")
+                if isinstance(observed, dict) else None,
+                outputs_count=1)
+            if contract_result["verdict"] in (ec.CONTRACT_VIOLATION,
+                                              ec.CONTRACT_UNVERIFIABLE):
+                # [A10 · P1.1] UNVERIFIABLE también es terminal: un asset
+                # que no se puede VERIFICAR jamás puede afirmarse DONE
+                # (antes el veredicto UNVERIFIABLE caía al else y terminaba
+                # done con contrato sin verificar — el sistema mentía).
+                violation = contract_result
 
+        # binding materializado antes del commit (identidad verificable v1)
+        binding = {
+            "albra_project_id": pid,
+            "job_id": job_id,
+            "scene_number": no,
+            "worker": worker or claim_worker,
+            "asset_sha256": hashlib.sha256(data).hexdigest(),
+            "flow_identity_state": "not_verifiable",
+            "flow_identity": None,
+            "recorded_at": _iso(_now()),
+        }
+
+        # ── tx#2 · escritura FINAL condicional por token (nonce del claim) ──
+        con = db.connect()
+        try:
+            _trazar("complete: I/O fuera del lock (PIL/ffprobe)", t_io, f"kind={kind} escena={no}")
+            t_begin2 = time.perf_counter()
+            _begin_inmediato(con, f"complete-tx2 {job_id[:8]}")
+            _trazar("complete: tx#2 BEGIN adquirido", t_begin2)
             if violation is not None:
-                # §13: CONTRACT_VIOLATION → NO DONE. Terminal ASSET_INVALID:
-                # dead inmediato (fail() posterior con este token dará 409 y la
-                # extensión no reintentará), contract_result persistido, error
-                # estructurado que flow_adaptation clasifica sin adaptar prompt.
-                con.execute(
+                # §13: CONTRACT_VIOLATION/UNVERIFIABLE → NO DONE. Terminal
+                # ASSET_INVALID: dead inmediato (fail() posterior con este
+                # token dará 409 y la extensión no reintentará),
+                # contract_result persistido, error estructurado que
+                # flow_adaptation clasifica sin adaptar prompt.
+                cur = con.execute(
                     """UPDATE flow_jobs SET status='dead', exec_state=?,
                        contract_result=?, error=?, worker=NULL, job_token=NULL,
-                       lease_until=NULL, updated_at=? WHERE id=?""",
+                       lease_until=NULL, updated_at=?
+                       WHERE id=? AND status='claimed' AND job_token=?""",
                     (ec.EXEC_STATE_ASSET_INVALID,
                      json.dumps(violation, ensure_ascii=False),
                      ec.contract_error_prefix(violation)[:500], _iso(_now()),
-                     job_id))
+                     job_id, token))
+                if cur.rowcount != 1:
+                    con.rollback()
+                    return None
                 con.commit()
             else:
-                # [PHASE 1 · M8] binding de ejecución (dentro de la tx, antes
-                # del UPDATE a done). Identidad verificable v1 = job_id +
-                # worker (el que entrega el endpoint o el del claim) + token +
-                # lease (ya verificadas por la guardia) + sha256 del asset.
-                # flow_identity: Flow no expone identidad de proyecto
-                # verificable hoy → "not_verifiable" SIEMPRE, jamás inventado.
-                binding = {
-                    "albra_project_id": pid,
-                    "job_id": job_id,
-                    "scene_number": no,
-                    "worker": worker or row["worker"],
-                    "asset_sha256": hashlib.sha256(data).hexdigest(),
-                    "flow_identity_state": "not_verifiable",
-                    "flow_identity": None,
-                    "recorded_at": _iso(_now()),
-                }
                 con.execute(
                     """UPDATE flow_jobs SET status='done', asset_path=?, error=NULL,
                        exec_state=?, contract_result=?, lease_until=?,
                        binding_json=?, updated_at=?
-                       WHERE id=?""",
+                       WHERE id=? AND status='claimed' AND job_token=?""",
                     (str(asset_path), ec.EXEC_STATE_CONTRACT_OK,
                      json.dumps(contract_result, ensure_ascii=False)
                      if contract_result else None,
                      None, json.dumps(binding, ensure_ascii=False),
-                     _iso(_now()), job_id))
-                cierre_p2 = bool(row["prompt_adapted"])  # [flow-adaptation v1]
+                     _iso(_now()), job_id, token))
+                # Guard de la escritura final: si el nonce cambió entre tx#1
+                # y tx#2 (otro worker recuperó el job), changes()=0 → None
+                # (409). Es el MISMO patrón nonce de heartbeat/fail: no hay
+                # ningún re-check ADICIONAL fuera de esta escritura.
+                if con.execute("SELECT changes()").fetchone()[0] != 1:
+                    con.rollback()
+                    return None
                 pending = con.execute(
                     """SELECT COUNT(*) c FROM flow_jobs WHERE project_id=?
                        AND status != 'done'""", (pid,)).fetchone()["c"]
@@ -615,15 +717,13 @@ def complete(job_id: str, token: str, data: bytes,
                 renderable = False
                 if project_done:
                     renderable = _apply_assets_to_scenes(con, pid)
-                t_commit = time.perf_counter()
                 con.commit()
-                _trazar("complete: COMMIT (tx completa)", t_commit,
-                        f"job={job_id[:8]} project_done={project_done}")
-    except Exception:
-        con.rollback()
-        raise
-    finally:
-        con.close()
+        except Exception:
+            con.rollback()
+            raise
+        finally:
+            con.close()
+
     if barrier_error is not None:
         _mem_obs(f"job flow video escena {no} BARRERA §7.1: "
                  f"asset sin consentimiento del gate ({barrier_error[:120]})",
@@ -747,7 +847,9 @@ def fail(job_id: str, token: str, error: str, worker=None) -> dict | None:
                       or err.startswith("timeout-local:"))
     con = db.connect()
     try:
-        _begin_inmediato(con)
+        t_begin = time.perf_counter()
+        _begin_inmediato(con, f"fail {job_id[:8]}")
+        _trazar("fail: BEGIN adquirido", t_begin, f"job={job_id[:8]}")
         row = _claimed_by_token(con, job_id, token, worker=worker,
                                 require_lease=True)
         if not row:
@@ -931,7 +1033,9 @@ def set_exec_state(job_id: str, token: str, state: str,
         return {"ok": False, "error": "invalid_state"}
     con = db.connect()
     try:
-        _begin_inmediato(con)
+        t_begin = time.perf_counter()
+        _begin_inmediato(con, f"set_exec_state {job_id[:8]}")
+        _trazar("set_exec_state: BEGIN adquirido", t_begin, f"job={job_id[:8]}")
         row = _claimed_by_token(con, job_id, token, worker=worker)
         if not row:
             con.rollback()
@@ -1032,7 +1136,9 @@ def generation_consent(job_id: str, token: str,
         if isinstance(ev.get("control_results"), dict) else {}
     con = db.connect()
     try:
-        _begin_inmediato(con)
+        t_begin = time.perf_counter()
+        _begin_inmediato(con, f"consent {job_id[:8]}")
+        _trazar("generation_consent: BEGIN adquirido", t_begin, f"job={job_id[:8]}")
         row = _claimed_by_token(con, job_id, token, worker=worker)
         if not row:
             con.rollback()
@@ -1099,13 +1205,10 @@ def generation_consent(job_id: str, token: str,
 
 
 def status_for_project(pid: str) -> dict:
-    # [PHASE 1 · A6/M11] la consulta de estado desatasca leases vencidas y
-    # purga done/dead con retención — sin esperar al próximo claim. Jamás
-    # tumba la respuesta si la recuperación falla (lock ocupado, etc.).
-    try:
-        recover_expired()
-    except Exception:  # noqa: BLE001 — observabilidad, nunca crítico
-        pass
+    # [A9 · P2.3] el GET de estado es SOLO LECTURA: el barrido de leases
+    # vencidas (recover_expired) vive en claim_next (caminos calientes de la
+    # cola). Antes cada consulta de estado ejecutaba BEGIN IMMEDIATE de
+    # recuperación: lecturas de UI escribían y competían por el lock.
     with db.connect() as con:
         rows = con.execute(
             """SELECT id, kind, scene_number, part, status, attempts,

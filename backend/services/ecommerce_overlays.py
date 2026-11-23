@@ -111,7 +111,11 @@ def remove_product_background(
     feather: int = 3
 ) -> Path:
     """Remueve fondos claros de fotos de catálogo de e-commerce y genera un PNG transparente (INT-056)."""
-    import cv2
+    try:
+        import cv2
+    except ImportError as e:
+        raise ImportError("instala opencv-python-headless para el modo e-commerce") from e
+
     img = cv2.imread(str(image_path))
     if img is None:
         raise ValueError(f"No se pudo cargar la imagen: {image_path}")
@@ -257,7 +261,9 @@ def build_ecommerce_ffmpeg_filter(
     position: str = "top"
 ) -> str:
     """Genera la expresión de filtro FFmpeg para incrustar el sticker de conversión animado."""
-    badge_escaped = str(badge_path).replace("\\", "/").replace(":", "\\:")
+    # BH2: el PNG del badge entra por -i (argv) y el filtro usa ÍNDICES de
+    # entrada — la ruta nunca se incrusta en el filtro (se eliminó la variable
+    # muerta 'badge_escaped', cuyo escape era incorrecto y no se usaba).
     end_sec = round(start_sec + duration_sec, 2)
     enable_expr = f"between(t,{start_sec},{end_sec})"
 

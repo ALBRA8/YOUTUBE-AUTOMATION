@@ -33,6 +33,7 @@ import logging
 import os
 import re
 import time
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -59,7 +60,27 @@ _STAGES_ACTIVE = {ST_QUEUED, ST_PREFLIGHT, ST_STAGE1, ST_STAGE2, ST_STAGE3,
                   ST_STAGE4}
 
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{6,80}$")
-_PATH_LINE_RE = re.compile(r"([A-Za-z]:\\[^\s]+|/[^\s]+)\s*$")
+_NICHO_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")
+MAX_NICHO_CONTEXT_BYTES = 64 * 1024  # 64 KB
+
+# BH1: rutas de imagen/video que Flow devuelve en su texto — ahora CON
+# espacios, tildes y unidad de Windows (p. ej.
+# "D:\PROYECTOS\YOUTUBE AUTOMATION\…\ancla.jpg"). El patrón antiguo
+# ([A-Za-z]:\\[^\s]+|/[^\s]+) cortaba en el primer espacio y perdía la ruta.
+_MEDIA_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov")
+_WIN_DRIVE_RE = re.compile(r"[A-Za-z]:[/\\]")
+_UNIX_PATH_RE = re.compile(r"(?:^|[\s\"'=(])(/.+)$")
+
+# ── BG2: puerta DECLARADA de blueprint externo (nunca oculta) ────────────
+# POST /api/pipeline/run acepta "blueprint" {label, title, scenes}. La
+# validación es EXTRICTA y cualquier caso inválido → INVALID_BLUEPRINT (sin
+# reparación silenciosa ni truncado). Con blueprint válido la etapa 2 NO
+# llama a Gemini: engine "external:<label>", gemini_model "" y
+# blueprint_source "external" visible en /api/pipeline/status.
+EXTERNAL_BLUEPRINT_MAX_BYTES = 20 * 1024          # payload total <=20 KB
+_EXTERNAL_LABEL_RE = re.compile(r"[A-Za-z0-9 _.\-]{1,30}")
+_EXTERNAL_BP_KEYS = {"label", "title", "scenes"}
+_EXTERNAL_SCENE_KEYS = {"title", "narration", "image_prompt"}
 
 _STEPS = (
     (ST_PREFLIGHT, "[0/3] Pre-flight: verificando sesión de ambos MCP…"),
@@ -79,26 +100,265 @@ class PipelineError(Exception):
 
 
 def _cfg(name: str, default: Any) -> Any:
-    return getattr(config, name, default)
+    val = getattr(config, name, None)
+    if val is not None and val != "":
+        return val
+    env_val = os.environ.get(name)
+    if env_val is not None:
+        return env_val
+    return default
+
+
+def _path_from_line(line: str) -> str:
+    r"""BH1: extrae la ruta completa de imagen/video que contiene UNA línea
+    de la respuesta de Flow. Acepta letra de unidad de Windows (X:\ o X:/)
+    o barra inicial POSIX, CON espacios y tildes. Devuelve "" si la línea no
+    contiene una ruta válida."""
+    s = (line or "").strip().lstrip("- ").strip().strip('"').strip("'").strip()
+    if not s or not s.lower().endswith(_MEDIA_EXTS):
+        return ""
+    cand = ""
+    drives = list(_WIN_DRIVE_RE.finditer(s))
+    if drives:
+        cand = s[drives[-1].start():]          # desde la última unidad al final
+    else:
+        m = _UNIX_PATH_RE.search(s)
+        if m:
+            cand = m.group(1)
+    cand = cand.strip().strip('"').strip().strip("'").strip()
+    if len(cand) < 6:                           # mínimo: /a.png | X:\x.png
+        return ""
+    if cand.lower().startswith("//") or "://" in cand:
+        return ""                               # URL, no ruta de disco
+    if any(ch in cand for ch in '<>|'):
+        return ""                               # inválidos en ruta
+    return cand if cand.lower().endswith(_MEDIA_EXTS) else ""
 
 
 def _last_path(text: str) -> str:
     """Extrae la última ruta de archivo de la respuesta textual de Flow.
-    Los servidores GoogleFlowMCP responden con '…:\\n<ruta local>'."""
+    Los servidores GoogleFlowMCP responden con '…:\\n<ruta local>'.
+    BH1: toma la ÚLTIMA línea no vacía que contenga una ruta completa
+    terminada en extensión de imagen o video (.png .jpg .jpeg .webp .mp4
+    .mov), con unidad de Windows o barra inicial, admitiendo espacios y
+    tildes (antes se cortaba en el primer espacio)."""
     for line in reversed((text or "").strip().splitlines()):
-        line = line.strip().lstrip("- ").strip()
-        m = _PATH_LINE_RE.search(line)
-        if m:
-            return m.group(1).strip()
+        if not line.strip():
+            continue
+        p = _path_from_line(line)
+        if p:
+            return p
     return ""
+
+
+def _recent_media_in_dir(out_dir: str | Path, t0: float) -> str:
+    """BH1 respaldo: si el texto de Flow no trae ruta, usa el archivo MÁS
+    RECIENTE de outDir con extensión de imagen/video válida y fecha posterior
+    al inicio de la llamada (t0, con tolerancia de 2 s por granularidad del
+    FS). "" si no hay nada que cumpla — el caller falla con su mensaje de
+    siempre; jamás inventa una ruta."""
+    try:
+        rd = Path(out_dir)
+        mejor, mejor_m = "", -1.0
+        for p in rd.iterdir():
+            if not p.name.lower().endswith(_MEDIA_EXTS):
+                continue
+            try:
+                if not p.is_file():
+                    continue
+                m = p.stat().st_mtime
+            except OSError:
+                continue
+            if m >= t0 - 2.0 and m >= mejor_m:
+                mejor, mejor_m = str(p), m
+        return mejor
+    except OSError:
+        return ""
 
 
 def _asset_name_from_file(path_text: str) -> str:
     """Nombre de asset Flow para un archivo local generado (stem saneado).
-    flow.js nombra los archivos sin caracteres raros; defensa extra igualmente."""
+    flow.js nombra los archivos sin caracteres raros; defensa extra igualmente.
+    BI1/BJ4: ya NO se usa para derivar el startFrame — el asset real se
+    identifica por la línea "Asset: <name> [id:<mediaId>]" de la salida de
+    flow_generate_image (_parse_generated_asset); se conserva solo como
+    utilidad de saneo para casos futuros."""
     stem = Path(path_text).stem.strip()
     stem = re.sub(r"[^A-Za-z0-9_\-]", "_", stem)[:64] or "frame"
     return stem
+
+
+# ── BJ4: startFrame = "id:<mediaId>" del asset REAL en Flow ───────────────
+# Flow nombra sus assets por el CONTENIDO del prompt (p. ej. "Red apple
+# character peeking"), no por el archivo local descargado (que es una
+# previsualización reducida, p. ej. 286x512). Desde BJ2 el tool
+# flow_generate_image emite una línea "Asset: <name> [id:<mediaId>]" por
+# imagen ANTES de las rutas: se parsea y el video se llama con
+# startFrame="id:<mediaId>" — inequívoco aunque Flow repita nombres. Si la
+# línea no viene, respaldo HONESTO: subir la copia local con nombre
+# explícito único (copia reducida) y, si también falla, error claro sin
+# adivinar.
+_ASSET_LINE_RE = re.compile(
+    r"^\s*Asset:\s*(?P<name>.+?)\s*\[id:\s*(?P<id>[^\]\s]+)\]\s*$",
+    re.IGNORECASE)
+
+
+def _parse_generated_asset(text: str) -> tuple[str, str]:
+    """BJ4: extrae (nombre, mediaId) de la ÚLTIMA línea "Asset: <name>
+    [id:<mediaId>]" de la salida de flow_generate_image (el orquestador
+    siempre genera con count=1, pero si hubiera varias, la última es la más
+    reciente). ("", "") si la salida no trae línea Asset: — el caller usa el
+    respaldo de subida, JAMÁS adivina."""
+    for line in reversed((text or "").splitlines()):
+        m = _ASSET_LINE_RE.match(line)
+        if m:
+            return m.group("name").strip(), m.group("id").strip()
+    return "", ""
+
+
+def _asset_in_listing(name: str, aid: str,
+                      listing: list[tuple[str, str | None]]) -> bool:
+    """BJ4: ¿el start-frame (nombre, id) sigue existiendo en Flow?
+    Si el listado trae ids (formato BJ2 real), el id MANDA cuando la escena
+    lo tiene: un id ausente del listado significa que ESE asset ya no está
+    aunque otro se llame igual (duplicados) → False. Si la escena no tiene
+    id (respaldo de subida) o el listado no trae ids (compatibilidad), se
+    coincide por nombre exacto. listing de _parse_asset_listing."""
+    nombres = {n for n, _ in listing}
+    ids = {a for _, a in listing if a}
+    if ids and aid:
+        return aid in ids
+    return bool(name) and name in nombres
+
+
+# ids inline en el LISTADO de assets (BJ2 real: "- <name> [id:<mediaId>]";
+# se admite también la variante entre paréntesis por compatibilidad).
+_ASSET_ID_RE = re.compile(r"\[id:\s*([^\]\s]+)\]|\(id:\s*([^)\s]+)\)",
+                           re.IGNORECASE)
+
+
+def _parse_asset_listing(text: str) -> list[tuple[str, str | None]]:
+    """Parsea la salida de flow_list_assets → [(nombre, id|None), …].
+    BJ2: el formato REAL del tool es "- <name> [id:<mediaId>]" por asset;
+    siguen admitiéndose por compatibilidad: viñetas sin id ("- Nombre"),
+    líneas planas, id inline entre paréntesis ("- Nombre (id: xyz)"),
+    "(the project has no images yet)", "[]"/"{}" y JSON
+    [{"name": …, "id": …}]. Un id inline se separa del nombre. Nunca
+    inventa entradas."""
+    t = (text or "").strip()
+    if not t or "has no images yet" in t:
+        return []
+    if t.startswith("[") or t.startswith("{"):
+        try:
+            data = json.loads(t)
+        except (ValueError, TypeError):
+            data = None
+        if isinstance(data, list):
+            out: list[tuple[str, str | None]] = []
+            for it in data:
+                if isinstance(it, str) and it.strip():
+                    out.append((it.strip(), None))
+                elif (isinstance(it, dict) and isinstance(it.get("name"), str)
+                      and it.get("name").strip()):
+                    aid = it.get("id")
+                    out.append((it["name"].strip(),
+                                aid.strip() if isinstance(aid, str)
+                                and aid.strip() else None))
+            return out
+        if isinstance(data, dict):
+            inner = data.get("assets")
+            if isinstance(inner, list):
+                return _parse_asset_listing(
+                    json.dumps(inner, ensure_ascii=False))
+            return []
+    out = []
+    for line in t.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("- "):
+            line = line[2:].strip()          # prefijo ANTES del id: índices correctos
+        if not line or set(line) <= {"-"}:   # vacía o viñeta sin texto
+            continue
+        m = _ASSET_ID_RE.search(line)
+        aid = ""
+        if m:
+            aid = (m.group(1) or m.group(2) or "").strip()
+            line = (line[:m.start()] + line[m.end():]).strip(" -(\"'").strip()
+        if not line:
+            continue
+        out.append((line, aid or None))
+    return out
+
+
+def _strip_control_chars(s: str) -> str:
+    """BG2: quita caracteres de control (categoría Unicode Cc) de un string.
+    Normalización declarada de la puerta externa — nunca rechaza por ellos."""
+    return "".join(c for c in s if unicodedata.category(c) != "Cc")
+
+
+def validate_external_blueprint(bp: Any, max_scenes: int | None = None) -> dict:
+    """BG2: valida y normaliza un blueprint externo (puerta declarada).
+    Esquema EXACTO:
+      {"label": str 1-30 [A-Za-z0-9 _.-], "title": str <=120,
+       "scenes": [{"title" <=80, "narration" <=300, "image_prompt" <=1200}]}
+    · 1..12 escenas; si hay más que max_scenes → rechazo (NUNCA truncar).
+    · solo strings; los caracteres de control se QUITAN (normalización).
+    · payload total <=20 KB.
+    Cualquier otro caso inválido → PipelineError INVALID_BLUEPRINT."""
+    def _invalid(msg: str) -> PipelineError:
+        return PipelineError(
+            f"blueprint externo inválido: {msg}", "INVALID_BLUEPRINT")
+
+    if not isinstance(bp, dict):
+        raise _invalid("debe ser un objeto JSON {label, title, scenes}")
+    try:
+        size = len(json.dumps(bp, ensure_ascii=False).encode("utf-8"))
+    except (TypeError, ValueError) as e:
+        raise _invalid(f"no serializable a JSON ({type(e).__name__})") from e
+    if size > EXTERNAL_BLUEPRINT_MAX_BYTES:
+        raise _invalid(f"payload {size} bytes supera el límite de "
+                       f"{EXTERNAL_BLUEPRINT_MAX_BYTES} bytes")
+    if set(bp.keys()) != _EXTERNAL_BP_KEYS:
+        recibidas = ", ".join(sorted(str(k) for k in bp.keys())) or "(ninguna)"
+        raise _invalid("claves exactas requeridas: label, title, scenes "
+                       f"(recibidas: {recibidas})")
+    label = bp.get("label")
+    if not isinstance(label, str) or not _EXTERNAL_LABEL_RE.fullmatch(label):
+        raise _invalid("label debe ser un string de 1-30 caracteres "
+                       "[A-Za-z0-9 _.-]")
+    title = bp.get("title")
+    if not isinstance(title, str):
+        raise _invalid("title debe ser un string")
+    title = _strip_control_chars(title)
+    if len(title) > 120:
+        raise _invalid(f"title {len(title)} caracteres supera el máximo de 120")
+    scenes_in = bp.get("scenes")
+    if not isinstance(scenes_in, list):
+        raise _invalid("scenes debe ser una lista")
+    if not (1 <= len(scenes_in) <= 12):
+        raise _invalid(f"{len(scenes_in)} escenas fuera del rango 1-12")
+    if max_scenes is not None and len(scenes_in) > max_scenes:
+        # BG2: rechazo explícito — NUNCA truncar en silencio
+        raise _invalid(f"{len(scenes_in)} escenas superan max_scenes={max_scenes}")
+    scenes_out: list[dict] = []
+    for i, sc in enumerate(scenes_in):
+        if not isinstance(sc, dict) or set(sc.keys()) != _EXTERNAL_SCENE_KEYS:
+            raise _invalid(f"escena {i + 1}: claves exactas requeridas: "
+                           "title, narration, image_prompt")
+        clean: dict[str, str] = {}
+        for k, lim in (("title", 80), ("narration", 300),
+                       ("image_prompt", 1200)):
+            v = sc.get(k)
+            if not isinstance(v, str):
+                raise _invalid(f"escena {i + 1}: '{k}' debe ser un string")
+            v = _strip_control_chars(v)
+            if len(v) > lim:
+                raise _invalid(f"escena {i + 1}: '{k}' con {len(v)} caracteres "
+                               f"supera el máximo de {lim}")
+            clean[k] = v
+        scenes_out.append(clean)
+    return {"label": label, "title": title, "scenes": scenes_out}
 
 
 class PipelineOrchestrator:
@@ -139,11 +399,54 @@ class PipelineOrchestrator:
                                   "progress_pct": 0, "output": "",
                                   "error_code": "", "error_detail": "",
                                   "started_at": "", "finished_at": ""})
+        run.setdefault("context_source", "")
+        run.setdefault("nicho_id", None)
+        # backfill BG2: corridas creadas antes de la puerta de blueprint externo
+        run.setdefault("blueprint_source", "")
+        run.setdefault("external_blueprint", None)
         return run
+
+    def _load_local_context(self, nicho_id: str | None) -> str | None:
+        """Carga el contexto local de respaldo en backend/data/nichos/<nicho_id>/contexto.md.
+        Valida que nicho_id cumpla con ^[a-z0-9][a-z0-9_-]{0,40}$, previene traversal y symlinks,
+        y lee hasta un máximo de 64 KB UTF-8."""
+        if not nicho_id:
+            return None
+        nid = str(nicho_id).strip()
+        if not _NICHO_ID_RE.match(nid):
+            raise PipelineError(f"nicho_id inválido: '{nid[:40]}'", "INVALID_NICHO_ID")
+
+        nichos_dir = (config.DATA_DIR / "nichos").resolve()
+        target_dir = (nichos_dir / nid).resolve()
+        target_file = (target_dir / "contexto.md").resolve()
+
+        try:
+            target_dir.relative_to(nichos_dir)
+            target_file.relative_to(target_dir)
+        except (ValueError, RuntimeError):
+            raise PipelineError(f"nicho_id fuera de nichos: '{nid}'", "INVALID_NICHO_ID")
+
+        if target_dir.is_symlink() or target_file.is_symlink():
+            raise PipelineError(f"symlinks no permitidos en nicho_id: '{nid}'", "INVALID_NICHO_ID")
+
+        if not target_file.is_file():
+            return None
+
+        try:
+            content_bytes = target_file.read_bytes()
+            if len(content_bytes) > MAX_NICHO_CONTEXT_BYTES:
+                content_bytes = content_bytes[:MAX_NICHO_CONTEXT_BYTES]
+            return content_bytes.decode("utf-8", errors="replace")
+        except OSError as e:
+            log.warning("[pipeline] Error leyendo contexto local de nicho '%s': %s", nid, e)
+            return None
 
     # ──────────────────────────────── API pública ──
     def create_run(self, idea: str, notebook_id: str | None = None,
-                   fmt: str = "short", style: str = "auto") -> dict:
+                   fmt: str = "short", style: str = "auto",
+                   max_scenes: int | None = None,
+                   nicho_id: str | None = None,
+                   blueprint: dict | None = None) -> dict:
         idea = (idea or "").strip()
         if not idea:
             raise PipelineError("idea requerida para el pipeline", "IDEA_REQUIRED")
@@ -151,6 +454,25 @@ class PipelineOrchestrator:
             raise PipelineError(
                 f"ya hay un pipeline en marcha ({self._busy}) — espera su fin "
                 f"o usa retry-scenes", "PIPELINE_BUSY")
+        if max_scenes is not None:
+            try:
+                max_scenes = int(max_scenes)
+            except (ValueError, TypeError) as e:
+                raise PipelineError("max_scenes debe ser un entero entre 1 y 12", "INVALID_MAX_SCENES") from e
+            if not (1 <= max_scenes <= 12):
+                raise PipelineError("max_scenes debe ser un entero entre 1 y 12", "INVALID_MAX_SCENES")
+        # BG2: blueprint externo (puerta declarada) — se valida EN LA CREACIÓN
+        # para que un blueprint inválido jamás llegue a arrancar una corrida.
+        external_bp = None
+        if blueprint is not None:
+            external_bp = validate_external_blueprint(blueprint, max_scenes)
+        if nicho_id is not None:
+            nicho_id = str(nicho_id).strip()
+            if nicho_id:
+                if not _NICHO_ID_RE.match(nicho_id):
+                    raise PipelineError(f"nicho_id inválido: '{nicho_id[:40]}'", "INVALID_NICHO_ID")
+            else:
+                nicho_id = None
         now = time.strftime("%Y%m%d_%H%M%S")
         run_id = f"run_{now}_{uuid.uuid4().hex[:6]}"
         run = {
@@ -158,8 +480,11 @@ class PipelineOrchestrator:
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "idea": idea[:500],
             "notebook_id": (notebook_id or "").strip(),
+            "nicho_id": nicho_id,
+            "context_source": "",
             "format": fmt if fmt in ("short", "long") else "short",
             "style": (style or "auto").strip()[:40] or "auto",
+            "max_scenes": max_scenes,
             "stage": ST_QUEUED,
             "error_code": "",
             "error_detail": "",
@@ -168,6 +493,10 @@ class PipelineOrchestrator:
             "progress_pct": 0,
             "context_chars": 0,
             "blueprint_title": "",
+            "engine": "",
+            "gemini_model": "",
+            "blueprint_source": "",             # BG2: "external" si blueprint externo
+            "external_blueprint": external_bp,  # BG2: blueprint normalizado o None
             "scenes": [],
             "dispatched": 0,
             "done_count": 0,
@@ -454,22 +783,78 @@ class PipelineOrchestrator:
         self._save(run)
         log.error("[pipeline %s] %s: %s", run["run_id"], code, detail[:200])
 
+    async def _exposed_tools(self, service: str) -> set[str]:
+        """Consulta el conjunto de nombres de tools expuestas por el servidor MCP.
+        Usa tools_catalog si existe o inspecciona la conexión viva; ante fallos
+        operacionales devuelve set() sin capturar Exception genérica."""
+        if hasattr(self.manager, "tools_catalog"):
+            try:
+                cat = await self.manager.tools_catalog(service, auto_connect=True)
+                return {t.get("name") for t in (cat.get("tools") or []) if t.get("name")}
+            except (mcpm.MCPManagerError, OSError, asyncio.TimeoutError, KeyError, AttributeError, TypeError) as e:
+                log.debug(f"[_exposed_tools {service}] tools_catalog no disponible: {e}")
+        elif hasattr(self.manager, "_conns"):
+            try:
+                conn = getattr(self.manager, "_conns", {}).get(service)
+                if conn and getattr(conn, "tools", None):
+                    return {t.get("name") for t in conn.tools if t.get("name")}
+            except (KeyError, AttributeError, TypeError):
+                pass
+        return set()
+
+    async def _flow_keepalive(self, run: dict, interval: float = 45.0,
+                              timeout: float = 30.0) -> None:
+        """D2: keepalive CDP acotado a la corrida (etapas 0-2): ping periódico a
+        flow_list_assets para que el transporte CDP de Flow no se duerma mientras
+        Gemini genera el blueprint (Stage 2 puede tardar minutos). Los errores
+        SOLO se registran — nunca se lanzan ni tumban la corrida. Cancelable:
+        _run cancela la tarea que la ejecuta en TODAS las salidas (finally)."""
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                try:
+                    res = await self.manager.execute(
+                        "google-flow", "flow_list_assets", {}, timeout=timeout)
+                    log.info("[pipeline %s] Keepalive Flow CDP: ok=%s",
+                             run.get("run_id"), res.get("ok"))
+                except (mcpm.MCPManagerError, RuntimeError, OSError, TimeoutError,
+                        asyncio.TimeoutError) as e:
+                    # Los errores solo se registran, nunca se lanzan
+                    log.warning("[pipeline %s] Keepalive Flow CDP falló (ignorado): %s",
+                                run.get("run_id"), e)
+        except asyncio.CancelledError:
+            pass
+
     async def _run(self, run_id: str) -> None:
         run = self._load(run_id)
+        keepalive_task: asyncio.Task | None = None
+
+        async def _cancel_keepalive() -> None:
+            nonlocal keepalive_task
+            if keepalive_task and not keepalive_task.done():
+                keepalive_task.cancel()
+                try:
+                    await keepalive_task
+                except (asyncio.CancelledError, RuntimeError, OSError):
+                    pass
+                keepalive_task = None
+
         try:
             # ── pre-flight gatekeeper (§2): aborta ANTES de gastar tokens ──
             self._set_step(run, ST_PREFLIGHT, "running")
             run["progress_pct"] = 5
-            pre_n = await self.manager.test_pipeline(
-                "notebooklm", notebook_id=run["notebook_id"] or None)
+            is_local_mode = str(_cfg("PIPELINE_CONTEXT_SOURCE", "") or "").strip().lower() == "local"
+            if not is_local_mode:
+                pre_n = await self.manager.test_pipeline(
+                    "notebooklm", notebook_id=run["notebook_id"] or None)
+                if not pre_n.get("ok"):
+                    code = ("PRE_FLIGHT_AUTH" if pre_n.get("state") == mcpm.ST_AUTH_REQUIRED
+                            else "PRE_FLIGHT_NOTEBOOKLM")
+                    self._fail(run, code,
+                               f"NotebookLM no listo: state={pre_n.get('state')} "
+                               f"auth={pre_n.get('auth')} {pre_n.get('detail') or pre_n.get('auth_detail') or ''}")
+                    return
             pre_f = await self.manager.test_pipeline("google-flow")
-            if not pre_n.get("ok"):
-                code = ("PRE_FLIGHT_AUTH" if pre_n.get("state") == mcpm.ST_AUTH_REQUIRED
-                        else "PRE_FLIGHT_NOTEBOOKLM")
-                self._fail(run, code,
-                           f"NotebookLM no listo: state={pre_n.get('state')} "
-                           f"auth={pre_n.get('auth')} {pre_n.get('detail') or pre_n.get('auth_detail') or ''}")
-                return
             if not pre_f.get("ok"):
                 code = ("PRE_FLIGHT_AUTH" if pre_f.get("state") == mcpm.ST_AUTH_REQUIRED
                         else "PRE_FLIGHT_FLOW")
@@ -483,13 +868,13 @@ class PipelineOrchestrator:
             # produce un id, [0/3] ABORTA con PRE_FLIGHT_MISSING_NOTEBOOK_ID antes de
             # gastar tokens — nunca se llega a Stage 1 con notebook_id vacío.
             nid = (run["notebook_id"] or "").strip()
-            if not nid:
+            if not nid and not is_local_mode:
                 nid = str(_cfg("NOTEBOOKLM_NOTEBOOK_ID", "") or "").strip()
                 if nid:
                     run["notebook_id"] = nid          # env → estado (visibilidad total)
                     self._save(run)
-            pre_detail = "notebooklm ✅ · google-flow ✅"
-            if not nid:
+            pre_detail = "local-context ✅ · google-flow ✅" if is_local_mode else "notebooklm ✅ · google-flow ✅"
+            if not nid and not is_local_mode:
                 disc = getattr(self.manager, "discover_notebook_id", None)
                 auto = ""
                 if disc:
@@ -517,93 +902,297 @@ class PipelineOrchestrator:
                                "Capturar sesión».")
                     return
             self._set_step(run, ST_PREFLIGHT, "ok", pre_detail)
+            # D2: Keepalive acotado a la corrida durante etapas 0 a 2
+            ka_interval = float(_cfg("FLOW_KEEPALIVE_INTERVAL", 45.0))
+            ka_timeout = float(_cfg("FLOW_KEEPALIVE_TIMEOUT", 30.0))
+            keepalive_task = asyncio.create_task(
+                self._flow_keepalive(run, ka_interval, ka_timeout))
 
-            # ── Stage 1: contexto de NotebookLM (solo-lectura) ──
+            # ── Stage 1: contexto de NotebookLM (solo-lectura) o Local ──
             self._set_step(run, ST_STAGE1, "running")
             run["progress_pct"] = 25
-            tool = str(_cfg("NOTEBOOKLM_CONTEXT_TOOL", "chat_ask") or "").strip()
-            query = str(_cfg(
-                "NOTEBOOKLM_CONTEXT_QUERY",
-                "Extrae del notebook la biblia de investigación para producir un "
-                "video: puntos clave y datos verificables, arco narrativo sugerido, "
-                "y una descripción física CONSISTENTE del personaje principal "
-                "(look, ropa, rasgos) reutilizable en todas las escenas.") or "").strip()
-            try:
-                # HOTFIX INT-023.4: inyección EXPLÍCITA del id resuelto en los
-                # arguments (defensa en profundidad; mcp_manager re-valida/inyecta).
-                id_key = str(_cfg("NOTEBOOKLM_ID_KEY", "notebook_id") or "notebook_id")
-                args = {"query": query}
-                if (run["notebook_id"] or "").strip():
-                    args[id_key] = run["notebook_id"].strip()
-                res = await self.manager.execute(
-                    "notebooklm", tool, args,
-                    timeout=float(_cfg("NOTEBOOKLM_MCP_TIMEOUT", 60.0)),
-                    notebook_id=run["notebook_id"] or None)
-            except mcpm.MCPManagerError as e:
-                code = ("PRE_FLIGHT_MISSING_NOTEBOOK_ID"
-                        if e.code == "MISSING_NOTEBOOK_ID" else "CONTEXT_EXTRACTION_FAILED")
-                self._fail(run, code, f"tool '{tool}': [{e.code}] {e}")
-                return
-            context = (res.get("text") or "").strip()
-            if not context:
-                self._fail(run, "CONTEXT_EMPTY",
-                           f"la tool '{tool}' devolvió texto vacío — revisa el "
-                           f"notebookId y NOTEBOOKLM_CONTEXT_TOOL")
-                return
+            nicho_id = run.get("nicho_id")
+            context = None
+            context_source = ""
+
+            # 2) Si PIPELINE_CONTEXT_SOURCE == "local", saltar NotebookLM por completo
+            if str(_cfg("PIPELINE_CONTEXT_SOURCE", "") or "").strip().lower() == "local":
+                local_ctx = self._load_local_context(nicho_id)
+                if local_ctx:
+                    context = local_ctx
+                    context_source = "local"
+                    log.warning(
+                        "[pipeline %s] PIPELINE_CONTEXT_SOURCE=local: "
+                        "usando contexto local de '%s' (%d caracteres)",
+                        run["run_id"], nicho_id, len(context)
+                    )
+                else:
+                    self._fail(
+                        run, "CONTEXT_EMPTY",
+                        f"Sin sesión de NotebookLM y sin contexto local del nicho '{nicho_id or ''}'"
+                    )
+                    return
+
+            if context is None:
+                tool = str(_cfg("NOTEBOOKLM_CONTEXT_TOOL", "notebook_query") or "").strip()
+                query = str(_cfg(
+                    "NOTEBOOKLM_CONTEXT_QUERY",
+                    "Extrae del notebook la biblia de investigación para producir un "
+                    "video: puntos clave y datos verificables, arco narrativo sugerido, "
+                    "y una descripción física CONSISTENTE del personaje principal "
+                    "(look, ropa, rasgos) reutilizable en todas las escenas.") or "").strip()
+
+                # BB1: si el servidor no expone la tool configurada pero sí notebook_query, usar notebook_query y loguear aviso
+                if tool != "notebook_query":
+                    exposed_tools = await self._exposed_tools("notebooklm")
+                    if exposed_tools and tool not in exposed_tools and "notebook_query" in exposed_tools:
+                        log.warning(
+                            f"[pipeline {run['run_id']}] El servidor NotebookLM no expone '{tool}' "
+                            f"pero sí 'notebook_query' — usando 'notebook_query'"
+                        )
+                        tool = "notebook_query"
+
+                auth_error_detected = False
+                auth_error_msg = ""
+                res = None
+
+                try:
+                    # HOTFIX INT-023.4: inyección EXPLÍCITA del id resuelto en los
+                    # arguments (defensa en profundidad; mcp_manager re-valida/inyecta).
+                    id_key = str(_cfg("NOTEBOOKLM_ID_KEY", "notebook_id") or "notebook_id")
+                    args = {"query": query}
+                    if (run["notebook_id"] or "").strip():
+                        args[id_key] = run["notebook_id"].strip()
+                    res = await self.manager.execute(
+                        "notebooklm", tool, args,
+                        timeout=float(_cfg("NOTEBOOKLM_MCP_TIMEOUT", 60.0)),
+                        notebook_id=run["notebook_id"] or None)
+                except mcpm.MCPManagerError as e:
+                    if e.code == "TOOL_UNKNOWN" and tool != "notebook_query":
+                        exposed = await self._exposed_tools("notebooklm")
+                        if "notebook_query" in exposed or not exposed:
+                            log.warning(
+                                f"[pipeline {run['run_id']}] El servidor NotebookLM no expone '{tool}' "
+                                f"pero sí 'notebook_query' — fallback a 'notebook_query'"
+                            )
+                            tool = "notebook_query"
+                            try:
+                                res = await self.manager.execute(
+                                    "notebooklm", tool, args,
+                                    timeout=float(_cfg("NOTEBOOKLM_MCP_TIMEOUT", 60.0)),
+                                    notebook_id=run["notebook_id"] or None)
+                            except mcpm.MCPManagerError as e2:
+                                if e2.code in ("AUTH_REQUIRED", "SESSION_INVALID", "TIMEOUT") or any(k in str(e2).lower() for k in ("auth", "expired", "400", "bad request", "forbidden", "403", "timeout")):
+                                    auth_error_detected = True
+                                    auth_error_msg = str(e2)
+                                else:
+                                    code = ("PRE_FLIGHT_MISSING_NOTEBOOK_ID"
+                                            if e2.code == "MISSING_NOTEBOOK_ID" else "CONTEXT_EXTRACTION_FAILED")
+                                    self._fail(run, code, f"tool '{tool}': [{e2.code}] {e2}")
+                                    return
+                        else:
+                            self._fail(run, "CONTEXT_EXTRACTION_FAILED", f"tool '{tool}': [{e.code}] {e}")
+                            return
+                    elif e.code in ("AUTH_REQUIRED", "SESSION_INVALID", "TIMEOUT") or any(k in str(e).lower() for k in ("auth", "expired", "400", "bad request", "forbidden", "403", "timeout")):
+                        auth_error_detected = True
+                        auth_error_msg = str(e)
+                    else:
+                        code = ("PRE_FLIGHT_MISSING_NOTEBOOK_ID"
+                                if e.code == "MISSING_NOTEBOOK_ID" else "CONTEXT_EXTRACTION_FAILED")
+                        self._fail(run, code, f"tool '{tool}': [{e.code}] {e}")
+                        return
+
+                if not auth_error_detected and res is not None:
+                    raw_text = (res.get("text") or "").strip()
+                    parsed_json = None
+                    if raw_text:
+                        try:
+                            loaded = json.loads(raw_text)
+                            if isinstance(loaded, dict):
+                                parsed_json = loaded
+                        except (json.JSONDecodeError, ValueError):
+                            parsed_json = None
+
+                    if parsed_json is not None:
+                        # BB2/BB3: si "text" es JSON, usar solo el campo "answer".
+                        st = parsed_json.get("status")
+                        ans = parsed_json.get("answer")
+                        ans_str = str(ans or "").strip()
+                        err_msg = str(parsed_json.get("error") or parsed_json.get("message") or "").strip()
+
+                        if st != "success":
+                            if any(k in err_msg.lower() for k in ("authentication expired", "re-authenticate", "auth", "400", "bad request", "forbidden", "403")):
+                                auth_error_detected = True
+                                auth_error_msg = err_msg
+                            else:
+                                if err_msg:
+                                    detail = f"el cuaderno no tiene fuentes o no respondió: {err_msg}"
+                                else:
+                                    detail = "el cuaderno no tiene fuentes o no respondió: sube fuentes en NotebookLM"
+                                self._fail(run, "CONTEXT_EMPTY", detail)
+                                return
+                        elif not ans_str:
+                            self._fail(
+                                run, "CONTEXT_EMPTY",
+                                "el cuaderno no tiene fuentes o no respondió: sube fuentes en NotebookLM"
+                            )
+                            return
+                        else:
+                            context = ans_str
+                            context_source = "notebooklm"
+                    else:
+                        # Si el texto no es JSON, comportamiento actual
+                        context = raw_text
+                        if not context:
+                            self._fail(run, "CONTEXT_EMPTY",
+                                       f"la tool '{tool}' devolvió texto vacío — revisa el "
+                                       f"notebookId y NOTEBOOKLM_CONTEXT_TOOL")
+                            return
+                        context_source = "notebooklm"
+
+                # 1) Si la consulta a NotebookLM devolvió error de autenticación:
+                if auth_error_detected:
+                    local_ctx = self._load_local_context(nicho_id)
+                    if local_ctx:
+                        context = local_ctx
+                        context_source = "local"
+                        log.warning(
+                            "[pipeline %s] NotebookLM no autenticado ('%s'): "
+                            "usando contexto local de '%s' (%d caracteres)",
+                            run["run_id"], auth_error_msg, nicho_id, len(context)
+                        )
+                    else:
+                        detail = f"el cuaderno no respondió: {auth_error_msg or 'Authentication expired'}"
+                        self._fail(
+                            run, "CONTEXT_EMPTY",
+                            f"{detail} — Sin sesión de NotebookLM y sin contexto local del nicho"
+                        )
+                        return
+
             rd = self._run_dir(run["run_id"])
             rd.mkdir(parents=True, exist_ok=True)
             (rd / "context.md").write_text(context, encoding="utf-8")
             run["context_chars"] = len(context)
-            self._set_step(run, ST_STAGE1, "ok",
-                           f"{len(context)} caracteres extraídos del notebook "
-                           f"«{run['notebook_id'] or '(env fallback)'}»")
+            run["context_source"] = context_source
+            if context_source == "local":
+                self._set_step(run, ST_STAGE1, "ok",
+                               f"{len(context)} caracteres cargados del contexto local "
+                               f"de nicho «{nicho_id or ''}»")
+            else:
+                self._set_step(run, ST_STAGE1, "ok",
+                               f"{len(context)} caracteres extraídos del notebook "
+                               f"«{run['notebook_id'] or '(env fallback)'}»")
 
             # ── Stage 2: blueprint con el generador EXISTENTE (sin tocarlo) ──
             self._set_step(run, ST_STAGE2, "running")
             run["progress_pct"] = 45
-            idea_enriched = (
-                f"{run['idea']}\n\n[Contexto verificado extraído de NotebookLM — "
-                f"úsalo como bíblia de investigación: hechos, arco narrativo y "
-                f"descripción consistente del personaje]:\n"
-                + context[:int(_cfg("PIPELINE_CONTEXT_MAX_CHARS", 6000))])
-            try:
-                raw = await script_gen.from_idea(idea_enriched, run["style"],
-                                                 run["format"], None, None)
-                res2 = script_gen.build_result(raw)
-            except Exception as e:  # noqa: BLE001 — surfaced, no tumba el backend
-                self._fail(run, "BLUEPRINT_FAILED", str(e)[:300])
-                return
-            scenes = []
-            for i, sc in enumerate(res2.get("scenes") or []):
-                scenes.append({
-                    "scene_id": f"s{i + 1}",
-                    "title": sc.get("title") or f"Escena {i + 1}",
-                    "narration": sc.get("narration") or "",
-                    "image_prompt": sc.get("image_prompt") or "",
-                    "status": "pending",
-                    "attempts": 0,
-                    "video_file": "",
-                    "detail": "",
-                })
-            if not scenes:
-                self._fail(run, "BLUEPRINT_EMPTY",
-                           "el generador no devolvió escenas — revisa GEMINI_API_KEY "
-                           "o el contenido del notebook")
-                return
-            blueprint = {"title": res2.get("title") or run["idea"][:60],
-                         "hook": res2.get("hook", ""), "cta": res2.get("cta", ""),
-                         "engine": res2.get("engine", ""),
-                         "notebook_id": run["notebook_id"],
-                         "format": run["format"], "style": run["style"],
-                         "context_source": "notebooklm", "scenes": scenes}
+            ext_bp = run.get("external_blueprint")
+            if ext_bp:
+                # BG2: puerta DECLARADA — el blueprint llegó validado en
+                # create_run y Gemini NO se llama en esta etapa. Visible:
+                # engine "external:<label>", gemini_model "" y
+                # blueprint_source "external" en /api/pipeline/status.
+                log.warning("[pipeline %s] Blueprint EXTERNO %s: no generado por Gemini",
+                            run["run_id"], ext_bp["label"])
+                scenes = []
+                for i, sc in enumerate(ext_bp["scenes"]):
+                    scenes.append({
+                        "scene_id": f"s{i + 1}",
+                        "title": sc.get("title") or f"Escena {i + 1}",
+                        "narration": sc.get("narration") or "",
+                        "image_prompt": sc.get("image_prompt") or "",
+                        "status": "pending",
+                        "attempts": 0,
+                        "video_file": "",
+                        "start_frame_asset": "",   # BI1/BJ4: nombre Flow real
+                        "start_frame_asset_id": "",   # BJ4: mediaId del asset
+                        "detail": "",
+                    })
+                active_model = ""
+                blueprint = {"title": ext_bp.get("title") or run["idea"][:60],
+                             "hook": "", "cta": "",
+                             "engine": f"external:{ext_bp['label']}",
+                             "notebook_id": run["notebook_id"],
+                             "format": run["format"], "style": run["style"],
+                             "context_source": run.get("context_source", "notebooklm"),
+                             "gemini_model": "",
+                             "blueprint_source": "external",
+                             "scenes": scenes}
+            else:
+                idea_enriched = (
+                    f"{run['idea']}\n\n[Contexto verificado extraído de NotebookLM — "
+                    f"úsalo como bíblia de investigación: hechos, arco narrativo y "
+                    f"descripción consistente del personaje]:\n"
+                    + context[:int(_cfg("PIPELINE_CONTEXT_MAX_CHARS", 6000))])
+                try:
+                    raw = await script_gen.from_idea(idea_enriched, run["style"],
+                                                     run["format"], None, None)
+                    res2 = script_gen.build_result(raw)
+                except Exception as e:  # noqa: BLE001 — surfaced, no tumba el backend
+                    self._fail(run, "BLUEPRINT_FAILED", str(e)[:300])
+                    return
+
+                if res2.get("engine") == "local-demo" and os.environ.get("PIPELINE_ALLOW_DEMO") != "1":
+                    # BG1: motivo REAL registrado por script_gen (código y tipo,
+                    # sin claves). Sin error registrado → no había GEMINI_API_KEY
+                    # (hecho, no la sugerencia fija eliminada).
+                    motivo = (script_gen.describe_gemini_error()
+                              or "sin GEMINI_API_KEY configurada")
+                    self._fail(run, "BLUEPRINT_DEMO",
+                               f"Gemini falló: {motivo} — "
+                               "el guion salió del generador demo y no se despacha a Flow")
+                    return
+
+                scenes = []
+                for i, sc in enumerate(res2.get("scenes") or []):
+                    scenes.append({
+                        "scene_id": f"s{i + 1}",
+                        "title": sc.get("title") or f"Escena {i + 1}",
+                        "narration": sc.get("narration") or "",
+                        "image_prompt": sc.get("image_prompt") or "",
+                        "status": "pending",
+                        "attempts": 0,
+                        "video_file": "",
+                        "start_frame_asset": "",   # BI1/BJ4: nombre Flow real
+                        "start_frame_asset_id": "",   # BJ4: mediaId del asset
+                        "detail": "",
+                    })
+                if not scenes:
+                    self._fail(run, "BLUEPRINT_EMPTY",
+                               "el generador no devolvió escenas — revisa GEMINI_API_KEY "
+                               "o el contenido del notebook")
+                    return
+
+                ms = run.get("max_scenes")
+                if ms and len(scenes) > ms:
+                    scenes = (scenes[:ms - 1] + [scenes[-1]]) if ms > 1 else [scenes[-1]]
+                    for idx, sc in enumerate(scenes):
+                        sc["scene_id"] = f"s{idx + 1}"
+                from services import gemini_client
+                active_model = gemini_client.get_active_text_model()
+                blueprint = {"title": res2.get("title") or run["idea"][:60],
+                             "hook": res2.get("hook", ""), "cta": res2.get("cta", ""),
+                             "engine": res2.get("engine", "") or f"gemini ({active_model})",
+                             "notebook_id": run["notebook_id"],
+                             "format": run["format"], "style": run["style"],
+                             "context_source": run.get("context_source", "notebooklm"),
+                             "gemini_model": active_model,
+                             "scenes": scenes}
             (rd / "blueprint.json").write_text(
                 json.dumps(blueprint, ensure_ascii=False, indent=1),
                 encoding="utf-8")
             run["scenes"] = json.loads(json.dumps(blueprint["scenes"]))
             run["blueprint_title"] = blueprint["title"]
+            run["engine"] = blueprint["engine"]
+            run["gemini_model"] = active_model
+            if ext_bp:
+                run["blueprint_source"] = "external"
             self._set_step(run, ST_STAGE2, "ok",
                            f"«{blueprint['title']}» — {len(scenes)} escenas "
                            f"(motor: {blueprint['engine']})")
+
+            # D2: Cancelar keepalive al empezar la etapa 3 (el calentamiento ya cubre la transición)
+            await _cancel_keepalive()
 
             # ── Stage 3: despacho a Flow (consistencia de personaje) ──
             self._set_step(run, ST_STAGE3, "running")
@@ -636,6 +1225,11 @@ class PipelineOrchestrator:
         except Exception as e:  # noqa: BLE001 — nunca colgar el backend por una corrida
             self._fail(run, "PIPELINE_CRASH", str(e)[:300])
         finally:
+            # D2: el keepalive se cancela en CUALQUIER salida (fin normal, fallo
+            # de etapa 1/2, excepción de la corrida o cancelación externa) —
+            # junto al single-flight de _busy, para no dejar tareas huérfanas
+            # de keepalive viviendo más allá de la corrida.
+            await _cancel_keepalive()
             if self._busy == run_id:
                 self._busy = None
 
@@ -666,11 +1260,12 @@ class PipelineOrchestrator:
             prompt = ("Personaje principal CONSISTENTE para una serie de videos, "
                       "retrato completo, fondo neutro, iluminación uniforme. "
                       + (ctx[:400] if ctx else ""))
+            t0 = time.time()   # BH1: respaldo por fecha posterior a la llamada
             text = await self._flow_call(run, "flow_generate_image", {
                 "prompt": prompt, "aspect": "1:1", "count": 1,
                 "model": str(_cfg("FLOW_MCP_MODEL", "2") or "2"),
                 "outDir": str(rd)})
-            local = _last_path(text)
+            local = _last_path(text) or _recent_media_in_dir(rd, t0)
             if not local:
                 raise mcpm.MCPManagerError(
                     "flow_generate_image no devolvió ruta del ancla de personaje",
@@ -682,9 +1277,35 @@ class PipelineOrchestrator:
         self._save(run)
         return ref_name
 
+    async def _list_assets(self, run: dict) -> list[tuple[str, str | None]] | None:
+        """flow_list_assets parseado → [(nombre, id|None), …] (BJ2: el tool
+        real trae "- <name> [id:<mediaId>]"). None si el listado FALLA (el
+        caller trata ese caso como no confirmable → regenerar imagen, sin
+        adivinar); [] si Flow no tiene assets."""
+        try:
+            res = await self.manager.execute(
+                "google-flow", "flow_list_assets", {}, timeout=30.0)
+            if not res.get("ok"):
+                log.warning("[pipeline %s] flow_list_assets respondió ok=False",
+                            run.get("run_id"))
+                return None
+            return _parse_asset_listing(res.get("text") or "")
+        except (mcpm.MCPManagerError, RuntimeError, OSError, TimeoutError,
+                asyncio.TimeoutError) as e:
+            log.warning("[pipeline %s] flow_list_assets falló: %s",
+                        run.get("run_id"), e)
+            return None
+
     async def _stage3(self, run: dict, only_scene_ids: set[str] | None = None) -> None:
         """Despacho por escena. Una escena que falla NO aborta la corrida:
-        se registra scene_id + detalle y se continúa (§2 del mandato)."""
+        se registra scene_id + detalle y se continúa (§2 del mandato).
+        BJ4: el startFrame se pasa como "id:<mediaId>" — se parsea la línea
+        "Asset: <name> [id:<mediaId>]" de la salida de flow_generate_image
+        (_parse_generated_asset); si no viene la línea, respaldo de subida
+        con nombre explícito f"{run_id}-{scene_id}" (copia reducida). Se
+        guardan nombre E id del start-frame en la escena: en retry, si la
+        escena ya tiene start-frame y el asset sigue en Flow (por id o
+        nombre), NO se regenera la imagen: solo el video."""
         # gate barato: Flow debe seguir conectado (retry incluido)
         pre = await self.manager.test_pipeline("google-flow")
         if not pre.get("ok"):
@@ -697,6 +1318,30 @@ class PipelineOrchestrator:
                     if s["scene_id"] not in run["failed_scene_ids"]:
                         run["failed_scene_ids"].append(s["scene_id"])
             raise PipelineError(detail, "FLOW_NOT_CONNECTED")
+
+        # D2: Calentamiento previo a Stage 3: llamada real a flow_list_assets (hasta 2 intentos)
+        warm_ok = False
+        last_warm_err = ""
+        for attempt in range(1, 3):
+            try:
+                res = await self.manager.execute(
+                    "google-flow", "flow_list_assets", {}, timeout=30.0)
+                if res.get("ok"):
+                    warm_ok = True
+                    break
+            except (mcpm.MCPManagerError, RuntimeError, OSError, TimeoutError, asyncio.TimeoutError) as e:
+                last_warm_err = str(e)
+                log.warning("[pipeline %s] Calentamiento Flow CDP intento %d falló: %s",
+                            run.get("run_id"), attempt, e)
+        if not warm_ok:
+            detail = f"Flow CDP no responde tras 2 intentos de calentamiento (FLOW_CDP_SLOW): {last_warm_err[:200]}"
+            for s in run["scenes"]:
+                if s["status"] in ("pending", "dispatched") and (
+                        not only_scene_ids or s["scene_id"] in only_scene_ids):
+                    s["status"], s["detail"] = "failed", detail[:200]
+                    if s["scene_id"] not in run["failed_scene_ids"]:
+                        run["failed_scene_ids"].append(s["scene_id"])
+            raise PipelineError(detail, "FLOW_CDP_SLOW")
         ref = await self._ensure_reference(run)
         aspect = "9:16" if run["format"] == "short" else "16:9"
         model = str(_cfg("FLOW_MCP_MODEL", "2") or "2")
@@ -714,26 +1359,99 @@ class PipelineOrchestrator:
             self._save(run)
             try:
                 # 1) start-frame de la escena con el personaje de referencia @{ref}
-                img_prompt = (f"Image 1 -> Personaje: @{{{ref}}}\n"
-                              f"{s['image_prompt'] or s['title']}").strip()
-                text = await self._flow_call(run, "flow_generate_image", {
-                    "prompt": img_prompt, "aspect": aspect, "count": 1,
-                    "model": model, "outDir": str(rd)})
-                frame = _last_path(text)
-                if not frame:
-                    raise mcpm.MCPManagerError(
-                        "flow_generate_image no devolvió ruta del start-frame",
-                        "TOOL_ERROR")
-                start_frame = _asset_name_from_file(frame)
+                #    BJ4: Flow nombra sus assets por el CONTENIDO del prompt — el
+                #    stem del archivo local NO es el nombre del asset. Se usa el
+                #    "id:<mediaId>" de la línea "Asset:" (inequívoco aunque Flow
+                #    repita nombres); sin línea Asset: → subida de respaldo con
+                #    nombre explícito único.
+                start_name = str(s.get("start_frame_asset") or "")
+                start_id = str(s.get("start_frame_asset_id") or "")
+                if start_name or start_id:
+                    # retry: si Flow aún lista el asset (por id, o por nombre
+                    # para estados BI1 sin id), NO regenerar la imagen: solo
+                    # el video (ahorra créditos).
+                    listing = await self._list_assets(run)
+                    if listing is not None and _asset_in_listing(
+                            start_name, start_id, listing):
+                        log.info("[pipeline %s] escena %s reutiliza start-frame "
+                                 "'%s'%s (no regenera imagen)",
+                                 run["run_id"], s["scene_id"], start_name,
+                                 f" [id:{start_id}]" if start_id else "")
+                    else:
+                        if listing is None:
+                            log.warning("[pipeline %s] escena %s: listado Flow "
+                                        "indisponible — no se puede confirmar el "
+                                        "start-frame '%s'; se regenera la imagen",
+                                        run["run_id"], s["scene_id"], start_name)
+                        else:
+                            log.warning("[pipeline %s] escena %s: el start-frame "
+                                        "'%s' ya NO está en Flow — se regenera "
+                                        "la imagen", run["run_id"],
+                                        s["scene_id"], start_name)
+                        start_name = start_id = ""
+                        s["start_frame_asset"] = ""
+                        s["start_frame_asset_id"] = ""
+                if not start_name and not start_id:
+                    img_prompt = (f"Image 1 -> Personaje: @{{{ref}}}\n"
+                                  f"{s['image_prompt'] or s['title']}").strip()
+                    t0 = time.time()   # BH1: respaldo por fecha posterior a la llamada
+                    text = await self._flow_call(run, "flow_generate_image", {
+                        "prompt": img_prompt, "aspect": aspect, "count": 1,
+                        "model": model, "outDir": str(rd)})
+                    frame = _last_path(text) or _recent_media_in_dir(rd, t0)
+                    if not frame:
+                        raise mcpm.MCPManagerError(
+                            "flow_generate_image no devolvió ruta del start-frame",
+                            "TOOL_ERROR")
+                    # BJ4: el tool (BJ2) emite "Asset: <name> [id:<mediaId>]"
+                    # ANTES de la ruta → el video va POR ID, inequívoco.
+                    nombre_asset, mid_asset = _parse_generated_asset(text)
+                    if mid_asset:
+                        start_name, start_id = nombre_asset, mid_asset
+                    else:
+                        # Sin línea "Asset:" (tool antiguo/respaldo) → subir la
+                        # copia local (previsualización reducida) con nombre
+                        # explícito único. Si la subida también falla → error
+                        # claro, sin adivinar.
+                        start_name = f"{run['run_id']}-{s['scene_id']}"
+                        start_id = ""
+                        log.warning(
+                            "[pipeline %s] escena %s: sin línea 'Asset:' en la "
+                            "salida de flow_generate_image — se sube la copia "
+                            "local reducida como '%s'", run["run_id"],
+                            s["scene_id"], start_name)
+                        try:
+                            await self._flow_call(run, "flow_upload_file",
+                                                  {"filePath": frame,
+                                                   "name": start_name,
+                                                   "replace": False})
+                        except mcpm.MCPManagerError as e:
+                            raise mcpm.MCPManagerError(
+                                f"sin línea 'Asset:' en flow_generate_image y "
+                                f"la subida de respaldo '{start_name}' falló: {e}",
+                                e.code) from e
+                    s["start_frame_asset"] = start_name
+                    s["start_frame_asset_id"] = start_id
                 # 2) video con movimiento coherente + narración de la escena
+                start_frame = f"id:{start_id}" if start_id else start_name
                 motion = (f"{s['image_prompt']}\nMovimiento de cámara y acción, "
                           f"plano continuo coherente: {s['narration'][:300]}").strip()
                 out_file = str(rd / f"scene_{s['scene_id']}.mp4")
+                t0 = time.time()   # BH1: respaldo por fecha posterior a la llamada
                 text = await self._flow_call(run, "flow_generate_video", {
                     "prompt": motion, "startFrame": start_frame,
                     "aspect": aspect, "outDir": str(rd), "outFile": out_file},
                     timeout=float(_cfg("FLOW_MCP_TIMEOUT", 120.0)))
-                video = _last_path(text) or out_file
+                video = _last_path(text) or _recent_media_in_dir(rd, t0) or out_file
+                # [A13 · P1.6] VERIFICAR en disco ANTES de marcar done: el tool
+                # puede responder 200 con texto de éxito sin haber dejado el
+                # MP4 (descarga truncada, disco lleno, rename fallido). Antes
+                # la escena quedaba done con video_file inexistente y el
+                # ensamblado moría después con el run en verde.
+                if not Path(video).is_file():
+                    raise mcpm.MCPManagerError(
+                        f"flow_generate_video respondió pero el archivo no "
+                        f"existe en disco: {video}", "TOOL_ERROR")
                 s["status"], s["video_file"] = "done", video
                 run["done_count"] += 1
                 log.info("[pipeline %s] escena %s OK → %s",

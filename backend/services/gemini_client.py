@@ -9,6 +9,8 @@ import base64
 import io
 import json
 import logging
+import re
+import time
 import wave
 from typing import Any
 
@@ -18,6 +20,94 @@ log = logging.getLogger("gemini")
 
 _client = None
 _client_key = None
+_remembered_text_model: str | None = None
+
+
+# ── [AUDITORÍA 2026-11 · logs] secretos fuera de los logs ────────────────────
+# Los errores de la API pueden ECOAR la credencial («API key not valid. …
+# [AIza…]», la URL del request con ?key=…, un Bearer del gateway…). Cualquier
+# `log.warning(…, e)` en crudo es una fuga a server.log/consola. Todo lo que
+# llegue a un log pasa por _sanitize_error.
+_REDACTED = "***REDACTADO***"
+
+
+def _sanitize_error(err: Any) -> str:
+    """Representación de un error SIN secretos. Redacta la API key
+    configurada, el formato Google (AIza…), Bearer …, y parámetros de URL
+    tipo key=/api_key=/token=. Jamás lanza (un fallo del saneador jamás
+    debe tumbar un reintento)."""
+    try:
+        s = str(err)
+        key = (getattr(config, "GEMINI_API_KEY", "") or "").strip()
+        if len(key) >= 8 and key in s:
+            s = s.replace(key, _REDACTED)
+        s = re.sub(r"AIza[0-9A-Za-z_\-]{10,}", _REDACTED, s)
+        s = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._\-]{8,}", r"\1" + _REDACTED, s)
+        s = re.sub(
+            r"(?i)(api[_-]?key|[?&]key|access[_-]?token|refresh[_-]?token)"
+            r"=([A-Za-z0-9._\-]{8,})",
+            lambda m: m.group(1) + "=" + _REDACTED, s)
+        return s
+    except Exception:  # noqa: BLE001
+        return "<error no serializable>"
+
+
+# ── [BG1 · 2026-11] política de reintento consciente del error ────────────
+# · 429 RESOURCE_EXHAUSTED → NO se reintenta sobre el mismo modelo (cuota
+#   diaria: reintentar solo quema intentos) — la cadena de modelos pasa al
+#   siguiente candidato de GEMINI_TEXT_MODEL_FALLBACKS.
+# · 503 UNAVAILABLE → se reintenta con esperas de 5 y 15 s ANTES de pasar al
+#   siguiente modelo (alta demanda transitoria).
+# · 404 NOT_FOUND → sin reintento (modelo inexistente; cadena al siguiente).
+_RETRY_503_WAITS = (5.0, 15.0)
+
+
+def _api_status(e: BaseException) -> str:
+    """Clasifica un error de la API de Gemini: '404' | '429' | '503' | ''.
+    Acepta .code/.status_code del SDK o el código en el texto (p. ej.
+    '429 RESOURCE_EXHAUSTED'). Sin try/except a propósito (P2-2 trinquete):
+    solo getattr/str/regex sobre excepciones reales — operaciones que no
+    fallan en la práctica; un fallo teórico saldría honesto, no en silencio."""
+    code = getattr(e, "code", None) or getattr(e, "status_code", None)
+    s = str(e)
+    sl = s.lower()
+    if code == 429 or "resource_exhausted" in sl:
+        return "429"
+    if code == 503 or "unavailable" in sl:
+        return "503"
+    if (code == 404 or "not_found" in sl or "no longer available" in sl
+            or re.search(r"\b404\b", s)):
+        return "404"
+    return ""
+
+
+def get_active_text_model() -> str:
+    """Devuelve el modelo de texto activo o recordado en el proceso."""
+    global _remembered_text_model
+    if _remembered_text_model:
+        return _remembered_text_model
+    return getattr(config, "GEMINI_TEXT_MODEL", "gemini-3.8-flash")
+
+
+def set_remembered_text_model(model: str | None) -> None:
+    """Fija manualmente el modelo recordado (útil para tests)."""
+    global _remembered_text_model
+    _remembered_text_model = model
+
+
+def _get_text_model_candidates(model: str | None = None) -> list[str]:
+    """Genera la lista ordenada y desduplicada de candidatos de modelo de texto."""
+    if model:
+        return [model]
+    candidates: list[str] = []
+    primary = _remembered_text_model or getattr(config, "GEMINI_TEXT_MODEL", "gemini-3.8-flash")
+    if primary:
+        candidates.append(primary)
+    fallbacks = getattr(config, "GEMINI_TEXT_MODEL_FALLBACKS", [])
+    for fb in fallbacks:
+        if fb and fb not in candidates:
+            candidates.append(fb)
+    return candidates or ["gemini-3.8-flash"]
 
 
 def available() -> bool:
@@ -40,66 +130,146 @@ async def _retry(coro_factory, tries: int = 3, base: float = 2.0,
     """Reintentos con backoff exponencial + TIMEOUT por intento (§reintentos:
     timeout explícito). Antes una llamada colgada de Gemini estancaba el paso
     del pipeline indefinidamente; ahora cada intento vence a `timeout` s y
-    cuenta como fallo reintentable."""
+    cuenta como fallo reintentable.
+    BG1: la política es consciente del error — 404/429 suben de inmediato
+    (sin quemar reintentos sobre el mismo modelo; decide la cadena de
+    modelos) y 503 se reintenta con esperas de 5 y 15 s antes de pasar al
+    siguiente candidato."""
     for attempt in range(tries):
+        t0 = time.monotonic()
         try:
             return await asyncio.wait_for(coro_factory(), timeout=timeout)
         except Exception as e:  # noqa: BLE001
-            if attempt == tries - 1:
+            elapsed = time.monotonic() - t0
+            status = _api_status(e)
+            if status in ("404", "429") or attempt == tries - 1:
                 raise
-            wait = base ** attempt
-            log.warning("Gemini intento %d falló (%s). Reintento en %.0fs", attempt + 1, e, wait)
+            if status == "503":
+                wait = _RETRY_503_WAITS[min(attempt, len(_RETRY_503_WAITS) - 1)]
+            else:
+                wait = base ** attempt
+            sanitized = _sanitize_error(e)
+            if not str(e).strip() or not sanitized:
+                sanitized = type(e).__name__
+            log.warning("Gemini intento %d falló tras %.2fs (%s). Reintento en %.0fs",
+                        attempt + 1, elapsed, sanitized, wait)
             await asyncio.sleep(wait)
 
 
 # ─────────────────────────────────────────────────────────────── TEXTO ──
 async def generate_json(prompt: str, schema: dict | None = None,
-                        system: str | None = None, model: str | None = None) -> Any:
+                        system: str | None = None, model: str | None = None,
+                        low_reasoning: bool = False) -> Any:
     """Genera contenido estructurado JSON. Lanza si no hay key.
-    `model` sobreescribe GEMINI_TEXT_MODEL (candidatos si el modelo fue retirado)."""
+    `model` sobreescribe GEMINI_TEXT_MODEL. Si falla con 404 NOT_FOUND,
+    429 RESOURCE_EXHAUSTED o 503 UNAVAILABLE (tras sus esperas de 5/15 s),
+    prueba la cadena de GEMINI_TEXT_MODEL_FALLBACKS y recuerda el primero
+    que funcione. Agotada la cadena, falla con el motivo real."""
+    global _remembered_text_model
     if not available():
         raise RuntimeError("GEMINI_API_KEY no configurada")
 
-    def _call():
-        from google.genai import types
-        cfg: dict[str, Any] = {
-            "response_mime_type": "application/json",
-            "temperature": 0.9,
-        }
-        if schema:
-            cfg["response_schema"] = schema
-        if system:
-            cfg["system_instruction"] = system
-        return client().models.generate_content(
-            model=model or config.GEMINI_TEXT_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(**cfg),
-        )
+    candidates = _get_text_model_candidates(model)
+    last_exc = None
 
-    def _parse():
-        txt = resp.text
-        return json.loads(txt)
+    for cand in candidates:
+        def _call():
+            from google.genai import types
+            cfg: dict[str, Any] = {
+                "response_mime_type": "application/json",
+                "temperature": 0.9,
+            }
+            if schema:
+                cfg["response_schema"] = schema
+            if system:
+                cfg["system_instruction"] = system
+            if low_reasoning and hasattr(types, "ThinkingConfig"):
+                try:
+                    cfg["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+                except Exception:
+                    pass
+            return client().models.generate_content(
+                model=cand,
+                contents=prompt,
+                config=types.GenerateContentConfig(**cfg),
+            )
 
-    resp = await _retry(lambda: asyncio.to_thread(_call))
-    return await asyncio.to_thread(_parse)
+        def _parse():
+            txt = resp.text
+            return json.loads(txt)
+
+        try:
+            resp = await _retry(lambda: asyncio.to_thread(_call))
+            parsed = await asyncio.to_thread(_parse)
+            if cand != _remembered_text_model:
+                _remembered_text_model = cand
+                log.info("[gemini_client] modelo de texto fijado a: %s", cand)
+            return parsed
+        except (Exception,) as e:  # noqa: BLE001
+            last_exc = e
+            status = _api_status(e)
+            # BG1: 404 (modelo inexistente), 429 (cuota — sin reintento en el
+            # mismo modelo) y 503 (tras agotar sus esperas de 5/15 s) pasan al
+            # siguiente candidato; cualquier otro error sube tal cual (motivo
+            # real para el llamador).
+            if status in ("404", "429", "503") and cand != candidates[-1]:
+                log.warning(
+                    "[gemini_client] modelo '%s' no disponible (%s) — probando siguiente candidato...",
+                    cand,
+                    {"404": "404/NOT_FOUND",
+                     "429": "429/RESOURCE_EXHAUSTED",
+                     "503": "503/UNAVAILABLE"}[status],
+                )
+                continue
+            raise
+
+    if last_exc:
+        raise last_exc
 
 
 async def generate_text(prompt: str, system: str | None = None,
                         model: str | None = None) -> str:
+    global _remembered_text_model
     if not available():
         raise RuntimeError("GEMINI_API_KEY no configurada")
 
-    def _call():
-        from google.genai import types
-        cfg = {"temperature": 0.9}
-        if system:
-            cfg["system_instruction"] = system
-        return client().models.generate_content(
-            model=model or config.GEMINI_TEXT_MODEL, contents=prompt,
-            config=types.GenerateContentConfig(**cfg))
+    candidates = _get_text_model_candidates(model)
+    last_exc = None
 
-    resp = await _retry(lambda: asyncio.to_thread(_call))
-    return resp.text
+    for cand in candidates:
+        def _call():
+            from google.genai import types
+            cfg = {"temperature": 0.9}
+            if system:
+                cfg["system_instruction"] = system
+            return client().models.generate_content(
+                model=cand, contents=prompt,
+                config=types.GenerateContentConfig(**cfg))
+
+        try:
+            resp = await _retry(lambda: asyncio.to_thread(_call))
+            if cand != _remembered_text_model:
+                _remembered_text_model = cand
+                log.info("[gemini_client] modelo de texto fijado a: %s", cand)
+            return resp.text
+        except (Exception,) as e:  # noqa: BLE001
+            last_exc = e
+            status = _api_status(e)
+            # BG1: misma cadena que generate_json (404/429/503 → siguiente
+            # candidato; otros errores suben con el motivo real).
+            if status in ("404", "429", "503") and cand != candidates[-1]:
+                log.warning(
+                    "[gemini_client] modelo '%s' no disponible (%s) — probando siguiente candidato...",
+                    cand,
+                    {"404": "404/NOT_FOUND",
+                     "429": "429/RESOURCE_EXHAUSTED",
+                     "503": "503/UNAVAILABLE"}[status],
+                )
+                continue
+            raise
+
+    if last_exc:
+        raise last_exc
 
 
 # ────────────────────────────────────────────────────────────── IMAGEN ──

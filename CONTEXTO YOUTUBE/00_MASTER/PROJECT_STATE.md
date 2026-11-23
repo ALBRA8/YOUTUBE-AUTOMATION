@@ -1,10 +1,21 @@
 # PROJECT STATE — YOUTUBE-AUTOMATION
 
-**Estado:** IN_PROGRESS — migración AGENTE-GENERAL ↔ harness: P3-B PASS según informe; publicación de commits de código P3-B pendiente de verificación.  
-**Última actualización:** 2026-10-22.  
-**Fuente:** Archivos del repo `harness-v1` y auditorías técnicas. Este snapshot no reemplaza tests ni convierte simulaciones en E2E real.
+**Estado Unificado:** OPERACIONAL EN PRODUCCIÓN (Pipeline, Selector Nativo, Render 4K y 53 baterías herméticas PASS; migración AGENTE-GENERAL ↔ harness P3-B PASS local; Start Frame en Flow E2E sujeto a checklist obligatorio NOT_DEMONSTRATED).
+**Última actualización:** 2026-11-06 (Auditoría Técnica P0-P3 resuelta).
+**Fuente:** Ejecución E2E en vivo, GoogleFlowMCP en CDP 9333, FFmpeg 4K y almacenamiento en Windows.
 
+## Hitos E2E Validados — 2026-11-06
+1. **INT-091 · Selector de Carpetas Nativo (PASS):** El usuario navega libremente por sus discos con el Explorador de Windows mediante window.showDirectoryPicker(). Cero rutas impuestas. Sincronización completa de artefactos (out/video_final.mp4, guion/, voz/, portada.png, marca.json) a la carpeta de destino elegida.
+2. **INT-092 · Google Flow One-Tap & Ecosistema Google (PASS):** Desacoplamiento de NotebookLM en el Connection Manager; Google Flow activo y reconocido (account-albragroup8@gmail.com). Apertura nativa de Google Flow sin bloqueos de WinSta0.
+3. **Hardening de Timeout (300 s):** Elevación de FLOW_MCP_TIMEOUT a 300 s, permitiendo a Google Flow Nano Banana generar imágenes completas sin caer en placeholders de 10 KB.
+4. **Renderizado 4K Ultra HD (PASS):** Proyecto 5637bfa9cd08 (*Frutinovelas: Manolo y Fresita*) renderizado en 4K vertical (2160x3840), 60.9 segundos, 82.6 MB con subtítulos Montserrat ExtraBold y contraste dinámico. Guardado en D:\PROYECTOS\CANALES DE YOUTUBE Y TIKTOK\NICHOS\FRUTINOVELAS\Episodio_01\out\video_final.mp4.
 
+---
+
+## Historial
+
+**Estado (2026-10-22, HISTÓRICO — sustituido por el Estado vigente del 2026-11-06):** IN_PROGRESS — migración AGENTE-GENERAL ↔ harness: P3-B PASS según informe; publicación de commits de código P3-B pendiente de verificación.  
+**Fuente:** Archivos del repo harness-v1 y auditorías técnicas. Este snapshot no reemplaza tests ni convierte simulaciones en E2E real.
 
 ## Estado de migración actualizado — 2026-10-22 (P3-B)
 
@@ -25,7 +36,7 @@
 
 **Importante — no confundir informe de ejecución con publicación:** el informe P3-B declaró commits locales `a552b3d` + `56be4b9` en YT-AUT, rama `p3b-g01-publish-envelope`, y `8859b4b` en AG-G, rama `p3b-skills-host`. La publicación se reportó `BLOCKED BY AUTH`. No declarar estos cambios en GitHub `main` hasta verificar los refs remotos y completar los flujos de publicación respectivos.
 
-El PAT que circuló por el chat no debe reutilizarse; revocarlo/rotarlo y sustituirlo por una credencial segura de mínimo privilegio. No almacenar secretos en el contexto.
+El PAT que circuló por el chat está PENDIENTE DE CONFIRMACIÓN POR EL DUEÑO de su revocación/rotación (el constructor NO puede verificar GitHub; no afirmar su revocación sin evidencia). No se almacena ningún secreto en este repositorio ni en los contextos documentales.
 
 **STOP:** no iniciar P4 ni implementar PB-03/G-02 sin autorización explícita. No ejecutar producción, publicación real, Flow LIVE ni render como parte de esta actualización documental.
 
@@ -75,21 +86,29 @@ YOUTUBE-AUTOMATION es la especialización audiovisual de ALBRA. `ALBRA8/AGENTE-G
 ## Estado del sistema
 La base tiene infraestructura de Production JSON/P1, cola Flow Bridge con jobs/leases/heartbeat/retries, validación de assets, QA, métricas, Doctor/preflight, seguridad, MemoryDV, skills/autonomía y HANDS aislado según `ESTADO_REAL.md`. Los tests declarados allí prueban sus respectivos alcances; no equivalen a proveedor real.
 
-## Gap crítico
+## Gap crítico: GAP-002 (Start Frame) y FAIL-005 (Binding de Imagen de Entrada)
+- **Estado oficial:** NOT_DEMONSTRATED (No demostrado sin captura en vivo de tráfico real).
 - Execution Contract construye `start_frame: None` y `end_frame: None` en la implementación auditada.
 - Start/End Frame no figuran entre los controles verificables enumerados.
 - `references` transportadas no implican que Flow las use.
 - `mediaIdToScene` registra resultados; no demuestra el binding de una imagen de entrada.
 - El HAR histórico de Camino mostró `WuwhI / MEDIA_GENERATION`, `videoModelKey=abra_i2v_6s` y `inputFrames.firstFrame.mediaId`; se observaron variantes como `startImage.mediaId`. No universalizar ese campo.
 
-## Plan inmediato
-1. En Chrome con sesión habitual de Flow, DevTools → Network → Preserve log.
-2. Ejecutar desde ALBRA una única generación con una imagen conocida.
-3. Capturar request, payload relevante, respuesta y resultado; correlacionar job/scene, asset y mediaId.
-4. Sanear cookies, tokens, credenciales, URLs firmadas y datos personales antes de compartir HAR o extractos.
-5. Clasificar: A) imagen no cargada/seleccionada; B) cargada pero no vinculada; C) campo/protocolo incorrecto; D) binding correcto; E) rechazo/capability del proveedor.
-6. Solo después diseñar prueba aislada, solución mínima, regresión y verificación real.
-7. Actualizar `ESTADO_REAL.md` y esta memoria con evidencia y commit.
+## Checklist Mandatorio de Captura Real (Pre-requisito para Implementación GAP-002 / FAIL-005)
+- [ ] 1. En Chrome con sesión habitual autenticada de Flow, DevTools → Network → Activar "Preserve log".
+- [ ] 2. Ejecutar desde ALBRA una única generación con una imagen conocida seleccionada como Start Frame.
+- [ ] 3. Capturar request completa, payload relevante (RPC `batchExecute` / `eb1hJf` / `WuwhI`), respuesta y resultado.
+- [ ] 4. Correlacionar job/scene, asset cargado y `mediaId` (ej. `inputFrames.firstFrame.mediaId` vs `startImage.mediaId`).
+- [ ] 5. Sanear cookies (`__Secure-*`, `SID`, `APISID`), tokens, credenciales, URLs firmadas y datos personales antes de compartir HAR o extractos.
+- [ ] 6. Clasificar según taxonomía de causa:
+    - A) imagen no cargada/seleccionada en UI;
+    - B) cargada pero no vinculada en payload;
+    - C) campo/protocolo incorrecto en la estructura Protobuf;
+    - D) binding correcto y aceptado;
+    - E) rechazo/capability del proveedor.
+- [ ] 7. Solo después de verificar 1-6 con captura real, diseñar la prueba aislada, solución mínima, regresión y verificación real.
+- [ ] 8. Actualizar `ESTADO_REAL.md`, `FAILURE_INDEX.md` y esta memoria con evidencia y commit.
+- **Regla estricta:** Queda terminantemente PROHIBIDO declarar implementado o PASS el Start Frame sin esta captura real; su estado permanece formalmente como NOT_DEMONSTRATED.
 
 ## Límites y reglas
 - No implementar Start Frame antes de captura real.

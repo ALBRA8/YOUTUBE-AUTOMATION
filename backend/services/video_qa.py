@@ -25,10 +25,12 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
 
+import config  # P1-5: umbral de placeholders centralizado
 from config import OUTPUT_DIR
 from database import get_project, get_scenes
 
@@ -186,6 +188,17 @@ def qa_image(path: str | Path) -> dict:
     if w < MIN_DIM or h < MIN_DIM:
         info["flags"].append({"sev": "error",
                               "msg": f"dimensión degenerada {w}x{h} (<{MIN_DIM}px)"})
+    # P2-1: Inspección de método (placeholder PIL fallback)
+    sf = p.with_suffix(".style.json")
+    if sf.is_file():
+        try:
+            m = (json.loads(sf.read_text(encoding="utf-8")) or {}).get("method")
+            if m == "placeholder":
+                info["is_placeholder"] = True
+                info["flags"].append({"sev": "warn", "msg": "imagen generada con degradado placeholder (PIL fallback)"})
+        except Exception:
+            pass
+
     if not info["flags"]:
         info["flags"].append({"sev": "ok",
                               "msg": f"imagen válida {w}x{h} {info.get('format')}"})
@@ -322,8 +335,40 @@ def qa_project(pid: str) -> dict:
     video_url = (project or {}).get("video_url")
     if video_url and Path(str(video_url)).exists():
         final_info = qa_video(video_url, final=True)
+        # [M · P1.9] COHERENCIA TEMPORAL: la duración REAL del render final
+        # se compara con la Σ de las duraciones esperadas por escena
+        # (meta.duration de cada escena; la narración manda). Desfase > 12%
+        # (o > 1.5 s en renders cortos) → flag warn: vídeos de escenas
+        # truncadas/estiradas por el ensamblado ya no pasan desapercibidos.
+        try:
+            esperada = sum(
+                float(sc.get("duration") or 0.0) for sc in (scenes or []))
+        except (TypeError, ValueError):
+            esperada = 0.0
+        real = float(final_info.get("duration_s") or 0.0)
+        if esperada > 0 and real > 0:
+            tolerancia = max(1.5, esperada * 0.12)
+            desvio = abs(real - esperada)
+            final_info["expected_duration_s"] = round(esperada, 3)
+            final_info["duration_tolerance_s"] = round(tolerancia, 3)
+            if desvio > tolerancia:
+                final_info["flags"].append({
+                    "sev": "warn",
+                    "msg": f"duración real {real:.1f}s ≠ Σ esperada "
+                           f"{esperada:.1f}s (desvío {desvio:.1f}s > "
+                           f"tolerancia {tolerancia:.1f}s) — escenas "
+                           f"truncadas o repetidas en el ensamblado"})
 
-    errors = n_img_err + n_vid_err
+    # P2-1: Control de umbral de placeholders en Video QA
+    max_ph = config.max_allowed_placeholders()  # P1-5: fuente única
+    n_ph = sum(1 for s in per_scene if (s.get("image") or {}).get("is_placeholder"))
+    if n_ph > max_ph:
+        for s in per_scene:
+            if (s.get("image") or {}).get("is_placeholder"):
+                s["image"]["flags"].append({"sev": "error",
+                                            "msg": f"placeholder supera umbral permitido ({n_ph} > {max_ph})"})
+
+    errors = n_img_err + n_vid_err + (1 if n_ph > max_ph else 0)
     if final_info and _worst(final_info["flags"]) == "error":
         errors += 1
     return {"ok": True, "project_id": pid,
@@ -332,7 +377,8 @@ def qa_project(pid: str) -> dict:
                                               else "ok"),
             "scenes": per_scene, "final": final_info,
             "summary": {"scenes": len(scenes), "image_errors": n_img_err,
-                        "clip_errors": n_vid_err,
+                        "clip_errors": n_vid_err, "placeholders": n_ph,
+                        "max_allowed_placeholders": max_ph,
                         "final_present": bool(final_info)}}
 
 

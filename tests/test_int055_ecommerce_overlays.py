@@ -53,6 +53,7 @@ def test_generate_custom_badge(tmp_path: Path):
 
 def test_remove_product_background(tmp_path: Path):
     """Verifica la remoción de fondo claro en fotos de catálogo sintéticas."""
+    pytest.importorskip("cv2")
     # Crear imagen sintética: 300x300 blanca con un círculo rojo en el centro
     synth_raw = tmp_path / "product_white_bg.jpg"
     arr = np.full((300, 300, 3), 255, dtype=np.uint8)
@@ -74,6 +75,25 @@ def test_remove_product_background(tmp_path: Path):
         # El centro debe ser opaco (alfa > 200)
         center_pixel = cut.getpixel((150, 150))
         assert center_pixel[3] > 200
+
+
+def test_remove_product_background_missing_cv2_raises_clear_error(tmp_path: Path, monkeypatch):
+    """Verifica que sin cv2 se lance ImportError con mensaje claro."""
+    import builtins
+    orig_import = builtins.__import__
+
+    def mock_import(name, *args, **kwargs):
+        if name == "cv2":
+            raise ImportError("No module named 'cv2'")
+        return orig_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", mock_import)
+    synth_raw = tmp_path / "product_white_bg.jpg"
+    synth_raw.write_bytes(b"dummy")
+    out_cutout = tmp_path / "product_cutout.png"
+
+    with pytest.raises(ImportError, match="instala opencv-python-headless para el modo e-commerce"):
+        remove_product_background(synth_raw, out_cutout)
 
 
 def test_create_studio_background():

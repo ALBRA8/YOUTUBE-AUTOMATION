@@ -41,3 +41,4 @@ numpy>=1.26
 # importan (deferido) — los endpoints de e-commerce /api/product/* fallan con
 # ImportError sin él. PIN EXACTO (verificado en verde con la suite):
 opencv-python-headless==4.13.0.90
+psutil>=5.9                  # P6.3: enumeración de procesos Chrome en mcp_manager (sustituye PowerShell WMI)

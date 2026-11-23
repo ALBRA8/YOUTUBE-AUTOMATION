@@ -7,8 +7,10 @@ los proyectos, configuraciones y tokens.
 Qué hace:
 - create_backup(): copia CONSISTENTE de la SQLite con la API oficial
   sqlite3.Connection.backup() (segura aunque haya writers activos en WAL).
-  Añade token.json de YouTube (re-vincular canales es un dolor) y .env
-  (protege contra un guardado corrupto desde Ajustes). Todo local.
+  [C1 · P0.1] YA NO copia token.json ni .env: eran secretos en CLARO
+  (GEMINI_API_KEY, HF_TOKEN, OAuth de YouTube) acumulándose en
+  data/backups/ y servibles por endpoints de media antes del candado.
+  La restauración de secretos es manual bajo llave (ver abajo).
 - list_backups() / restore_backup(name): restaurar ANTES deja un backup de
   seguridad "pre-restore" para que restaurar nunca sea destructivo.
 - Rotación: se conservan los últimos BACKUP_KEEP (default 14) de arranque/
@@ -18,16 +20,15 @@ Qué hace:
 Restaurar a mano (disaster recovery, otro PC):
   1. Copia backend/data/backups/<backup>.db → backend/data/yt_automation.db
      (borra también yt_automation.db-wal y .shm si existen)
-  2. Copia token.json.bak → backend/data/token.json (si había canal)
-  3. Copia env.bak → backend/.env
-  4. Arranca con start.sh / start.bat — proyectos y videos JSON intactos.
+  2. Secretos (token YouTube / .env): restaurarlos MANUALMENTE desde el
+     gestor de contraseñas — NO viven en data/backups/ (C1).
+  3. Arranca con launchers/start.sh / launchers/start.bat — proyectos y videos JSON intactos.
      (los MP4 en data/output/ NO se respaldan: regenerables o respaldo
      externo a criterio del operador)
 """
 import asyncio
 import logging
 import re
-import shutil
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -49,8 +50,15 @@ def _stamp(reason: str) -> str:
     return f"yt_automation_{ts}_{reason}.db"
 
 
+_LEGACY_SECRET_COPIES = ("token.json.bak", "env.bak")  # [C1 · P0.1] a purgar
+
+
 def create_backup(reason: str = "manual") -> dict | None:
-    """Backup consistente de la DB + token.json + .env. Devuelve el registro."""
+    """Backup consistente de la DB. Devuelve el registro.
+
+    [C1 · P0.1] ya NO acompaña token.json/.env: eran secretos en claro.
+    Además PURGA cualquier copia legada (env.bak/token.json.bak) que quede
+    de versiones anteriores — el secreto no vuelve a reposar en claro."""
     if reason not in ("arranque", "auto", "manual", "pre-restore"):
         reason = "manual"
     try:
@@ -63,14 +71,13 @@ def create_backup(reason: str = "manual") -> dict | None:
             src.backup(dst)          # API oficial: consistente con WAL activo
         dst.close()
         src.close()
-        # compañeros de viaje (si existen)
-        for src_f, dst_name in ((Path(config.YT_TOKEN_FILE), "token.json.bak"),
-                                (config.ENV_PATH, "env.bak")):
+        # [C1 · P0.1] purga de copias de secretos legadas (una vez por backup;
+        # idempotente y silenciosa si ya no existen)
+        for legacy in _LEGACY_SECRET_COPIES:
             try:
-                if Path(src_f).exists():
-                    shutil.copy2(src_f, BACKUP_DIR / dst_name)
-            except Exception as e:  # noqa: BLE001
-                log.warning("backup de %s falló: %s", dst_name, str(e)[:80])
+                (BACKUP_DIR / legacy).unlink(missing_ok=True)
+            except OSError as e:
+                log.warning("no se pudo purgar %s: %s", legacy, str(e)[:80])
         _rotate()
         return {"name": name, "size": dest_path.stat().st_size,
                 "reason": reason, "ts": time.time()}
@@ -134,11 +141,13 @@ def restore_backup(name: str) -> dict:
 
 async def _auto_loop() -> None:
     """Backup automático cada INTERVAL_H horas (tarea en segundo plano).
-    El primer disparo es al INTERVALO (el de arranque ya cubrió el boot)."""
+    El primer disparo es al INTERVALO (el de arranque ya cubrió el boot).
+    [M · P2.6] la SQLite se copia FUERA del event loop (to_thread): antes
+    bloqueaba health/dashboard/jobs durante el volcado."""
     await asyncio.sleep(INTERVAL_H * 3600)
     while True:
         try:
-            r = create_backup("auto")
+            r = await asyncio.to_thread(create_backup, "auto")
             if r:
                 log.info("backup automático: %s (%.1f KB)",
                          r["name"], r["size"] / 1024)
@@ -147,5 +156,15 @@ async def _auto_loop() -> None:
         await asyncio.sleep(INTERVAL_H * 3600)
 
 
-def start_scheduler() -> None:
-    asyncio.get_event_loop().create_task(_auto_loop())
+_auto_task: asyncio.Task | None = None
+
+
+def start_scheduler() -> asyncio.Task | None:
+    """[M · P2.6] guarda la REFERENCIA de la tarea (el GC podía recolectarla:
+    el backup automático moría en silencio) y devuelve el handle para
+    cancelación limpia en shutdown. Idempotente: no duplica tareas."""
+    global _auto_task
+    if _auto_task is not None and not _auto_task.done():
+        return _auto_task
+    _auto_task = asyncio.get_event_loop().create_task(_auto_loop())
+    return _auto_task
