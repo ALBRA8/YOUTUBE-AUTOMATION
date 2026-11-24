@@ -85,14 +85,15 @@ server.registerTool('flow_generate_video', {
     + 'Returns the local MP4 file path and which asset was used.',
   inputSchema: {
     prompt: z.string().min(1).describe('Video animation prompt describing motion and camera behavior'),
-    startFrame: z.string().min(1).describe('Flow asset as "id:<mediaId>" (unambiguous) or exact asset name (case-insensitive; first match wins), e.g. "id:9f2c-..." or "crystal_orb"'),
+    startFrame: z.string().min(1).describe('Flow asset NAME (preferred, from the "Asset:" lines) or "id:<mediaId>" (still supported)'),
+    startFrameId: z.string().optional().describe('Optional mediaId of the same asset (from "Asset: ... [id:...]"). Used as a fallback if the name is truncated or ambiguous.'),
     aspect: z.enum(ASPECTS).default('9:16').describe('Aspect ratio: 9:16, 16:9, etc.'),
     outDir: z.string().optional().describe(`Folder to save into (default ${DEFAULT_OUT})`),
     outFile: z.string().optional().describe('Specific destination file path for the MP4 video'),
   },
-}, async ({ prompt, startFrame, aspect, outDir, outFile }) => {
+}, async ({ prompt, startFrame, startFrameId, aspect, outDir, outFile }) => {
   try {
-    const r = await serial(() => generateVideo({ prompt, startFrame, aspect, outDir: outDir || DEFAULT_OUT, outFile }));
+    const r = await serial(() => generateVideo({ prompt, startFrame, startFrameId: startFrameId || '', aspect, outDir: outDir || DEFAULT_OUT, outFile }));
     // BJ3: la salida indica qué asset se usó (nombre + mediaId) cuando se resolvió.
     const used = r.usedAsset
       ? ` (asset "${r.usedAsset.name}"${r.usedAsset.mediaId ? ` [id:${r.usedAsset.mediaId}]` : ''})`

@@ -157,6 +157,8 @@ def harvest_scenes(run: dict, run_dir: Path,
         idx_name = f"scene_{i:03d}"
         dest_video = scenes_dir / f"{idx_name}.mp4"
         dest_image = scenes_dir / f"{idx_name}.png"
+        sub_val = (s.get("subtitle_text") or "").strip()
+        nar_val = (s.get("narration") or "").strip()
         entry = {
             "scene_id": s.get("scene_id") or f"s{i}",
             "idx": i,
@@ -164,7 +166,8 @@ def harvest_scenes(run: dict, run_dir: Path,
             "asset_type": "placeholder",
             "narration_audio_path": "",
             "duration_sec": 0.0,
-            "subtitle_text": (s.get("narration") or "").strip(),
+            "narration": nar_val,
+            "subtitle_text": sub_val,
             "status": "failed",
             "source": "",
         }
@@ -201,7 +204,7 @@ def harvest_scenes(run: dict, run_dir: Path,
         if dur is None and entry["asset_type"] == "video":
             dur = probe_duration(dest_video)
         if dur is None:
-            dur = estimate_duration(entry["subtitle_text"])
+            dur = estimate_duration(entry["subtitle_text"] or entry.get("narration") or "")
         entry["duration_sec"] = round(float(dur), 3)
         # placeholders (§3 del mandato: el testeo nunca se deadlocka)
         if entry["status"] != "ready":

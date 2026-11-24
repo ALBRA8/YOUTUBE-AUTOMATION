@@ -15,6 +15,13 @@ export const FLOW_CDP_CONNECT_TIMEOUT_MS = (() => {
   const n = Number(process.env.FLOW_CDP_CONNECT_TIMEOUT_MS);
   return Number.isFinite(n) && n > 0 ? n : 120000;
 })();
+// [BL3] El selector de assets (button.asset-item) tarda 20-30 s en frío y el
+// timeout fijo de 10 s hacía fallar la generación con ancla a la primera.
+// 45000 ms por defecto, configurable con FLOW_PICKER_TIMEOUT_MS.
+export const FLOW_PICKER_TIMEOUT_MS = (() => {
+  const n = Number(process.env.FLOW_PICKER_TIMEOUT_MS);
+  return Number.isFinite(n) && n > 0 ? n : 45000;
+})();
 // INT-074: Google migró Flow al dominio canónico https://flow.google.com/
 // (labs.google/fx/tools/flow redirige allí). Default actualizado y siempre
 // normalizado con slash final para que `${FLOW_URL}project/${id}` siga siendo válido.

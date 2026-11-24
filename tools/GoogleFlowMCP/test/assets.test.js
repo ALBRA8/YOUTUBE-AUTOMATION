@@ -56,9 +56,10 @@ test('extractTiles: nombre + mediaId por tile; descarta tiles sin mediaId', () =
     tileEl({ name: '  Espacios  ', image: img({ mediaId: 'm2' }) }),
   ]);
   assert.deepEqual(extractTiles(root), [
-    { name: 'Red apple character peeking', mediaId: 'm1' },
-    { name: 'Manzana roja (copia)', mediaId: '9f2c1111-2222-3333-4444-555566667777' },
-    { name: 'Espacios', mediaId: 'm2' },
+    { name: 'Red apple character peeking', mediaId: 'm1', src: '' },
+    { name: 'Manzana roja (copia)', mediaId: '9f2c1111-2222-3333-4444-555566667777',
+      src: 'https://x/image/9f2c1111-2222-3333-4444-555566667777/i.png' },
+    { name: 'Espacios', mediaId: 'm2', src: '' },
   ]);
 });
 
@@ -78,9 +79,9 @@ test('extractPickerAssets: botones asset-item del overlay (nombre sin recortar s
     btn({ name: 'sin id', image: img({}) }),
   ]);
   assert.deepEqual(extractPickerAssets(root), [
-    { name: 'Foto uno', mediaId: 'p1' },
-    { name: 'Foto dos', mediaId: 'p2' },
-    { name: 'sin id', mediaId: '' },
+    { name: 'Foto uno', mediaId: 'p1', src: '', imgAttrs: [] },
+    { name: 'Foto dos', mediaId: 'p2', src: '', imgAttrs: [] },
+    { name: 'sin id', mediaId: '', src: '', imgAttrs: [] },
   ]);
 });
 
@@ -142,8 +143,10 @@ test('pickStartFrameAsset (BJ3): "id:<mediaId>" por id; nombre exacto case-insen
   // por nombre — exacto sin mayúsculas; con varias, la primera
   assert.deepEqual(pickStartFrameAsset(assets, 'red apple'), { name: 'Red Apple', mediaId: 'm1' });
   assert.deepEqual(pickStartFrameAsset(assets, 'OTRA'), { name: 'Otra', mediaId: 'm3' });
-  // sin coincidencia exacta → null (nada de parciales ni adivinanzas)
-  assert.equal(pickStartFrameAsset(assets, 'red'), null);
+  // BL1: la SUBCADENA es un recurso de último nivel (el nombre truncado del
+  // selector no coincide exacto con el completo de la línea "Asset:")
+  assert.deepEqual(pickStartFrameAsset(assets, 'red'), { name: 'Red Apple', mediaId: 'm1' });
+  assert.equal(pickStartFrameAsset(assets, 'zzz-no-existe'), null);
   assert.equal(pickStartFrameAsset(assets, ''), null);
   assert.equal(pickStartFrameAsset([], 'x'), null);
 });
@@ -155,14 +158,14 @@ test('startFrameNotFoundError (BJ3): lista hasta 8 nombres visibles', () => {
   assert.match(err, /a1 \| a2 \| a3 \| a4 \| a5 \| a6 \| a7 \| a8/);
   assert.doesNotMatch(err, /a9/);   // máximo 8
   const vacio = startFrameNotFoundError('x', []);
-  assert.match(vacio, /Visible: \(none visible\)/);
+  assert.match(vacio, /Visible: \((none visible|selector vacío)\)/);
 });
 
 // ── contratos de fuente (cableado real, patrón INT-073) ────────────────────
 test('BJ1 · connect(): timeout propio + UN reintento + duración por stderr', () => {
   assert.match(flowSrc, /FLOW_CDP_CONNECT_TIMEOUT_MS/);
   assert.match(flowSrc,
-    /import \{ CDP_PORT, FLOW_URL, ensureChrome, FLOW_CDP_CONNECT_TIMEOUT_MS \} from '\.\/chrome\.js';/);
+    /import \{ CDP_PORT, FLOW_URL, ensureChrome, FLOW_CDP_CONNECT_TIMEOUT_MS, FLOW_PICKER_TIMEOUT_MS \} from '\.\/chrome\.js';/);
   assert.match(flowSrc,
     /connectOverCDP\(`http:\/\/127\.0\.0\.1:\$\{CDP_PORT\}`, \{ timeout: FLOW_CDP_CONNECT_TIMEOUT_MS \}\)/);
   // reintento ÚNICO: connectOnce se llama en el try y una vez en el catch
@@ -214,14 +217,19 @@ test('BJ2 · mcp.js: salida de imágenes vía generatedImagesText (Asset: antes 
   assert.doesNotMatch(mcpSrc, /r\.files\.join\('\\n'\)/);
 });
 
-test('BJ3 · flow.js: selección pura del start-frame y error con nombres visibles', () => {
+test('BL1/BL3 · flow.js: cascada de resolución + selector con timeout configurable', () => {
   assert.match(flowSrc, /const candidates = await page\.evaluate\(extractPickerAssets\);/);
-  assert.match(flowSrc, /const match = pickStartFrameAsset\(candidates, spec\);/);
+  assert.match(flowSrc, /const match = resolveStartFrame\(candidates, spec, tile\);/);
   assert.match(flowSrc, /throw new Error\(startFrameNotFoundError\(spec, candidates, 8\)\);/);
-  assert.match(flowSrc, /img\[data-media-id="\$\{match\.mediaId\}"\]/);
+  // selección por POSICIÓN DOM (no depende de atributos que el diálogo no expone)
+  assert.match(flowSrc, /\.locator\('\.cdk-overlay-container button\.asset-item'\)\.nth\(match\.index\)/);
+  assert.doesNotMatch(flowSrc, /img\[data-media-id="\$\{match\.mediaId\}"\]/);
   assert.match(flowSrc, /let usedAsset = null;/);
   assert.match(flowSrc, /startFrame: spec,/);
-  assert.match(flowSrc, /usedAsset,   \/\/ BJ3/);
+  assert.match(flowSrc, /usedAsset = match\.asset;/);
+  // BL3: timeout configurable + un reintento que reabre el selector
+  assert.match(flowSrc, /FLOW_PICKER_TIMEOUT_MS/);
+  assert.doesNotMatch(flowSrc, /timeout: 45000/);   // ya no hay literales
 });
 
 test('BJ3 · mcp.js: la salida del video indica qué asset se usó', () => {

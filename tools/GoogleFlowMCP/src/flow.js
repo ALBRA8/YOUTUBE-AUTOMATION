@@ -6,8 +6,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
-import { CDP_PORT, FLOW_URL, ensureChrome, FLOW_CDP_CONNECT_TIMEOUT_MS } from './chrome.js';
-import { extractPickerAssets, extractTiles, newTiles, pickStartFrameAsset, startFrameNotFoundError } from './assets.js';
+import { CDP_PORT, FLOW_URL, ensureChrome, FLOW_CDP_CONNECT_TIMEOUT_MS, FLOW_PICKER_TIMEOUT_MS } from './chrome.js';
+import { extractPickerAssets, extractTiles, newTiles, resolveStartFrame, startFrameNotFoundError } from './assets.js';
 
 export const MODELS = {
   'pro': 'Nano Banana Pro',
@@ -156,8 +156,20 @@ const addMenuButton = (page) => page.locator('button[mattooltip*="contenido mult
 
 async function openPicker(page) {
   if (await uploadButton(page).isVisible().catch(() => false)) return;
-  await addMenuButton(page).click();
-  await uploadButton(page).waitFor({ state: 'visible', timeout: 10000 });
+  const t0 = Date.now();
+  for (let intento = 0; intento < 2; intento++) {
+    await addMenuButton(page).click();
+    try {
+      // [BJ5] 45 s + UN reintento: en frío el picker tarda 20-30 s y el
+      // timeout de 10 s hacía fallar la generación con ancla a la primera.
+      await uploadButton(page).waitFor({ state: 'visible', timeout: FLOW_PICKER_TIMEOUT_MS });
+      console.error(`[flow] picker listo en ${Date.now() - t0} ms`);
+      return;
+    } catch (e) {
+      if (intento) throw e;
+      await closePicker(page); // reintento: limpiar overlay y reabrir
+    }
+  }
 }
 
 // Closes the asset picker and any stray menu: an open overlay leaves an invisible backdrop
@@ -202,7 +214,7 @@ export async function uploadFile({ filePath, name, replace = false }) {
     const before = new Set((await tiles(page)).map((t) => t.mediaId));
     await openPicker(page);
     const [chooser] = await Promise.all([
-      page.waitForEvent('filechooser', { timeout: 10000 }),
+      page.waitForEvent('filechooser', { timeout: FLOW_PICKER_TIMEOUT_MS }),
       uploadButton(page).click(),
     ]);
     await chooser.setFiles(filePath);
@@ -249,12 +261,21 @@ async function insertMention(page, name) {
   const chips = page.locator('span.mention-chip'); // viven dentro del editor, sea ProseMirror o no
   const before = await chips.count();
   await page.keyboard.type('@'); // a typed "@" opens the asset picker with its search focused
-  await picker(page).waitFor({ state: 'visible', timeout: 10000 });
+  // [BJ5] 10 s fijos fallaban en frío (medido: 25,72 s para listar assets).
+  const t0 = Date.now();
+  try {
+    await picker(page).waitFor({ state: 'visible', timeout: FLOW_PICKER_TIMEOUT_MS });
+  } catch {
+    await page.keyboard.press('Escape');
+    await page.keyboard.type('@');
+    await picker(page).waitFor({ state: 'visible', timeout: FLOW_PICKER_TIMEOUT_MS });
+  }
+  console.error(`[flow] picker visible en ${Date.now() - t0} ms`);
   await page.keyboard.type(name, { delay: 20 });
   const option = page.locator('button.asset-item').filter({
     has: page.locator('.asset-title', { hasText: new RegExp(`^\\s*${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`) }),
   }).first();
-  await option.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {
+  await option.waitFor({ state: 'visible', timeout: FLOW_PICKER_TIMEOUT_MS }).catch(() => {
     throw new Error(`No asset named "${name}" in the Flow project. Upload it first (flow_upload_file).`);
   });
   await option.click();
@@ -433,6 +454,7 @@ async function configureVideo(page, { aspect = '9:16' }) {
 export async function generateVideo({
   prompt,
   startFrame,
+  startFrameId = '',
   aspect = '9:16',
   outDir = DEFAULT_OUT,
   outFile,
@@ -483,24 +505,43 @@ export async function generateVideo({
     const iniciarBtn = page.locator('div.frame-trigger button.empty-chip, .frame-trigger .empty-chip, div.frame-trigger button').filter({ hasText: /iniciar|start\s*frame|add\s*frame|empezar/i }).first();
     if (await iniciarBtn.isVisible()) {
       await iniciarBtn.click();
-      await page.waitForTimeout(1000);
+      // [BL3] esperar el selector con timeout configurable y UN reintento que
+      // lo reabre; antes era un waitForTimeout(1000) ciego + 10 s fijos.
+      const tPicker = Date.now();
+      try {
+        await picker(page).waitFor({ state: 'visible', timeout: FLOW_PICKER_TIMEOUT_MS });
+      } catch {
+        await page.keyboard.press('Escape');
+        await iniciarBtn.click();
+        await picker(page).waitFor({ state: 'visible', timeout: FLOW_PICKER_TIMEOUT_MS });
+      }
+      console.error(`[flow] selector de start-frame visible en ${Date.now() - tPicker} ms`);
 
-      // BJ3: candidatos visibles del selector + selección PURA (assets.js,
-      // testeada sin navegador): "id:<mediaId>" por mediaId; nombre por
-      // coincidencia exacta sin mayúsculas/minúsculas, la primera (más
-      // reciente) si hay varias.
+      // [BJ5] El piloto real falló aquí: 10 s fijos y SIN reintento, mientras
+      // Flow en frío tarda 20-30 s (flow_list_assets: 25,72 s medidos). Se
+      // sube a 45 s y se reintenta UNA vez cerrando el overlay.
+      const grid = await tiles(page);
+      const wantId = /^id:/i.test(spec) ? spec.slice(3).trim()
+        : String(startFrameId || '').trim().replace(/^id:/i, '');
+      const gridTile = wantId ? grid.find((t) => t.mediaId === wantId) || null : null;
+      const tile = {
+        name: (gridTile && gridTile.name) || '',
+        mediaId: wantId || (gridTile && gridTile.mediaId) || '',
+        src: (gridTile && gridTile.src) || '',
+      };
       const candidates = await page.evaluate(extractPickerAssets);
-      const match = pickStartFrameAsset(candidates, spec);
+      const match = resolveStartFrame(candidates, spec, tile);
       if (!match) {
         await page.keyboard.press('Escape');
         throw new Error(startFrameNotFoundError(spec, candidates, 8));
       }
+      // Traza por stderr: stdout es el canal JSON-RPC y no se puede contaminar.
+      console.error(`[flow] startFrame ${spec} -> "${match.asset.name}" via ${match.matchedBy}`
+        + (match.duplicates > 1 ? ` (${match.duplicates} homónimos, se usa el más reciente)` : ''));
 
-      const targetOption = /^id:/i.test(spec)
-        ? page.locator('.cdk-overlay-container button.asset-item').filter({ has: page.locator(`img[data-media-id="${match.mediaId}"]`) }).first()
-        : page.locator('.cdk-overlay-container button.asset-item').filter({
-            has: page.locator('.asset-title, span.footer-title', { hasText: new RegExp(`^\\s*${match.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i') }),
-          }).first();
+      // .nth(index): misma posición DOM que leyó extractPickerAssets, así que
+      // NO depende de data-media-id (que el diálogo no expone en esta versión).
+      const targetOption = page.locator('.cdk-overlay-container button.asset-item').nth(match.index);
 
       if ((await targetOption.count()) === 0) {
         await page.keyboard.press('Escape');
@@ -515,7 +556,7 @@ export async function generateVideo({
         await addBtn.click();
         await page.waitForTimeout(1000);
       }
-      usedAsset = match;
+      usedAsset = match.asset;
     }
 
     const slotImg = page.locator('div.frame-trigger img, .frame-trigger img, flow-image-ingredient-chip img');

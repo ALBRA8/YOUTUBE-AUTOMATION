@@ -317,6 +317,7 @@ BATERIAS = [
                                  # desambiguados por id; retry reutiliza el
                                  # start-frame (por id o nombre) sin
                                  # regenerar imagen; ancla intacta (11)
+    "test_bm_external_blueprint_video_prompt.py", # BM1-BM4: campos opcionales video_prompt (<=600) y subtitle_text (<=200) (6)
     "test_registro_baterias.py", # [D6/D4/D7] GUARDIÁN del registro canónico
                                  # (todo test_*.py ∈ BATERIAS ∪ EXCLUDED) +
                                  # baterías de minidrama registradas con

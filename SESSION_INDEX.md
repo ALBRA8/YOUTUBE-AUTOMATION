@@ -5,6 +5,33 @@
 
 ---
 
+## Sesión 2026-11-24 · CIERRE BM (blueprint externo: video_prompt y subtitle_text)
+
+- **Base**: `f4c6025` (main) + cambios BL (resiliencia de startFrame por nombre/id y reintentos de imagen).
+  Entorno: Windows (Python 3.14.3).
+- **BM1**: Validación de blueprint externo en `backend/services/pipeline_orchestrator.py`:
+  - `video_prompt` opcional (<=600 caracteres) y `subtitle_text` opcional (<=200 caracteres).
+  - Validación de string estricta, caracteres de control de categoría Unicode `Cc` eliminados en normalización declarada.
+  - Rechazo con código `INVALID_BLUEPRINT` si no es string, si se superan los límites de longitud o si se introducen claves no permitidas.
+- **BM2**: Etapa 3 (`_stage3`):
+  - Si la escena contiene `video_prompt`, se usa directamente como el prompt de `flow_generate_video` tal cual.
+  - Si no está presente, se mantiene la composición tradicional (`image_prompt` + movimiento de cámara y acción + `narration[:300]`).
+- **BM3**: Etapa 4 (`asset_harvester.py` y `video_assembler.py`):
+  - `harvest_scenes`: `entry["subtitle_text"]` preserva el texto limpio si existe, con fallback a `narration` cuando no existe.
+  - `plan_render`: la entrada de la escena en `scene_plans` lleva `"subtitle_text"` cuando existe; si no existe, conserva el comportamiento actual.
+  - Subtítulos quemados (`build_srt` y `karaoke_subtitles.build_ass_from_scenes`): usan `subtitle_text` y NO la narración con direcciones de voz.
+- **BM4**: `/api/pipeline/status` y `orchestrator.get_status`:
+  - Exponen `video_prompt` y `subtitle_text` en cada escena devuelta (con backfill automático a `""` para corridas previas).
+- **Verificación y Suites**:
+  - `tests/test_bm_external_blueprint_video_prompt.py`: 6 checks herméticos cubriendo BM1, BM2, BM3 y BM4.
+  - `npm test --prefix tools/GoogleFlowMCP`: 38 tests, 38 pass, 0 fail.
+  - `compileall`: exit code 0 en backend y tests.
+  - `ruff (F821,E9,F63,F7,F82)`: All checks passed!
+  - `pytest` COMPLETO: 970 passed, 4 skipped, 0 failed.
+  - `tests/run_all.py`: 72 baterías registradas en `BATERIAS`.
+
+---
+
 ## Sesión 2026-11-24 · CIERRE BK1-BK2 + BK3 (calentamiento Stage 3, D7 sin DNS, lock↔venv, lipo)
 
 - **Base**: `b1012c1` (main, árbol limpio; luego `8f9c8d8` para BK3).

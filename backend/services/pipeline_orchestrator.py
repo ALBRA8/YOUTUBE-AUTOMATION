@@ -80,7 +80,10 @@ _UNIX_PATH_RE = re.compile(r"(?:^|[\s\"'=(])(/.+)$")
 EXTERNAL_BLUEPRINT_MAX_BYTES = 20 * 1024          # payload total <=20 KB
 _EXTERNAL_LABEL_RE = re.compile(r"[A-Za-z0-9 _.\-]{1,30}")
 _EXTERNAL_BP_KEYS = {"label", "title", "scenes"}
-_EXTERNAL_SCENE_KEYS = {"title", "narration", "image_prompt"}
+_EXTERNAL_SCENE_REQUIRED_KEYS = {"title", "narration", "image_prompt"}
+_EXTERNAL_SCENE_OPTIONAL_KEYS = {"video_prompt", "subtitle_text"}
+_EXTERNAL_SCENE_ALL_KEYS = _EXTERNAL_SCENE_REQUIRED_KEYS | _EXTERNAL_SCENE_OPTIONAL_KEYS
+_EXTERNAL_SCENE_KEYS = _EXTERNAL_SCENE_REQUIRED_KEYS
 
 _STEPS = (
     (ST_PREFLIGHT, "[0/3] Pre-flight: verificando sesión de ambos MCP…"),
@@ -363,9 +366,11 @@ def validate_external_blueprint(bp: Any, max_scenes: int | None = None) -> dict:
         raise _invalid(f"{len(scenes_in)} escenas superan max_scenes={max_scenes}")
     scenes_out: list[dict] = []
     for i, sc in enumerate(scenes_in):
-        if not isinstance(sc, dict) or set(sc.keys()) != _EXTERNAL_SCENE_KEYS:
+        if (not isinstance(sc, dict)
+                or not _EXTERNAL_SCENE_REQUIRED_KEYS.issubset(sc.keys())
+                or not set(sc.keys()).issubset(_EXTERNAL_SCENE_ALL_KEYS)):
             raise _invalid(f"escena {i + 1}: claves exactas requeridas: "
-                           "title, narration, image_prompt")
+                           "title, narration, image_prompt (opcionales: video_prompt, subtitle_text)")
         clean: dict[str, str] = {}
         for k, lim in (("title", 80), ("narration", 300),
                        ("image_prompt", 1200)):
@@ -377,6 +382,17 @@ def validate_external_blueprint(bp: Any, max_scenes: int | None = None) -> dict:
                 raise _invalid(f"escena {i + 1}: '{k}' con {len(v)} caracteres "
                                f"supera el máximo de {lim}")
             clean[k] = v
+        # BM1: campos opcionales video_prompt (<=600) y subtitle_text (<=200)
+        for k, lim in (("video_prompt", 600), ("subtitle_text", 200)):
+            if k in sc:
+                v = sc.get(k)
+                if not isinstance(v, str):
+                    raise _invalid(f"escena {i + 1}: '{k}' debe ser un string")
+                v = _strip_control_chars(v)
+                if len(v) > lim:
+                    raise _invalid(f"escena {i + 1}: '{k}' con {len(v)} caracteres "
+                                   f"supera el máximo de {lim}")
+                clean[k] = v
         scenes_out.append(clean)
     return {"label": label, "title": title, "scenes": scenes_out}
 
@@ -424,6 +440,10 @@ class PipelineOrchestrator:
         # backfill BG2: corridas creadas antes de la puerta de blueprint externo
         run.setdefault("blueprint_source", "")
         run.setdefault("external_blueprint", None)
+        # backfill BM4: campos opcionales por escena expuestos en /api/pipeline/status
+        for s in run.get("scenes") or []:
+            s.setdefault("video_prompt", "")
+            s.setdefault("subtitle_text", "")
         return run
 
     def _load_local_context(self, nicho_id: str | None) -> str | None:
@@ -1121,6 +1141,8 @@ class PipelineOrchestrator:
                         "title": sc.get("title") or f"Escena {i + 1}",
                         "narration": sc.get("narration") or "",
                         "image_prompt": sc.get("image_prompt") or "",
+                        "video_prompt": sc.get("video_prompt") or "",
+                        "subtitle_text": sc.get("subtitle_text") or "",
                         "status": "pending",
                         "attempts": 0,
                         "video_file": "",
@@ -1170,6 +1192,8 @@ class PipelineOrchestrator:
                         "title": sc.get("title") or f"Escena {i + 1}",
                         "narration": sc.get("narration") or "",
                         "image_prompt": sc.get("image_prompt") or "",
+                        "video_prompt": sc.get("video_prompt") or "",
+                        "subtitle_text": sc.get("subtitle_text") or "",
                         "status": "pending",
                         "attempts": 0,
                         "video_file": "",
@@ -1419,9 +1443,30 @@ class PipelineOrchestrator:
                     img_prompt = (f"Image 1 -> Personaje: @{{{ref}}}\n"
                                   f"{s['image_prompt'] or s['title']}").strip()
                     t0 = time.time()   # BH1: respaldo por fecha posterior a la llamada
-                    text = await self._flow_call(run, "flow_generate_image", {
-                        "prompt": img_prompt, "aspect": aspect, "count": 1,
-                        "model": model, "outDir": str(rd)})
+                    # [BL4] Las imágenes NO gastan créditos: se reintentan hasta
+                    # 2 veces ante CUALQUIER fallo del tool (timeouts de UI del
+                    # selector incluidos: en el piloto s1 murió a la primera por
+                    # un timeout de 10 s del picker en frío).
+                    _img_args = {"prompt": img_prompt, "aspect": aspect, "count": 1,
+                                 "model": model, "outDir": str(rd)}
+                    text = ""
+                    _ultimo_err: Exception | None = None
+                    for _intento in range(3):          # 1 llamada + 2 reintentos
+                        try:
+                            if _intento:
+                                log.warning("[pipeline %s] escena %s: reintento "
+                                            "flow_generate_image %d/2 tras: %s",
+                                            run["run_id"], s["scene_id"], _intento,
+                                            str(_ultimo_err)[:160])
+                                t0 = time.time()
+                            text = await self._flow_call(
+                                run, "flow_generate_image", _img_args)
+                            _ultimo_err = None
+                            break
+                        except Exception as _e:        # noqa: BLE001 — se relanza
+                            _ultimo_err = _e
+                    if _ultimo_err is not None:
+                        raise _ultimo_err
                     frame = _last_path(text) or _recent_media_in_dir(rd, t0)
                     if not frame:
                         raise mcpm.MCPManagerError(
@@ -1457,13 +1502,24 @@ class PipelineOrchestrator:
                     s["start_frame_asset"] = start_name
                     s["start_frame_asset_id"] = start_id
                 # 2) video con movimiento coherente + narración de la escena
+                # [BL2] El NOMBRE es lo que funcionó en la prueba manual: se
+                # envía como startFrame (el tool resuelve por nombre primero) y
+                # el mediaId aparte como startFrameId, que es el respaldo cuando
+                # el nombre viene truncado con "…". El prefijo "id:" sigue
+                # siendo válido como fallback si no hubiera nombre.
                 start_frame = f"id:{start_id}" if start_id else start_name
-                motion = (f"{s['image_prompt']}\nMovimiento de cámara y acción, "
-                          f"plano continuo coherente: {s['narration'][:300]}").strip()
+                # BM2: si hay video_prompt, es el prompt de flow_generate_video tal cual;
+                # si no, se mantiene la composición actual (movimiento + narration[:300]).
+                if s.get("video_prompt"):
+                    motion = s["video_prompt"]
+                else:
+                    motion = (f"{s['image_prompt']}\nMovimiento de cámara y acción, "
+                              f"plano continuo coherente: {s['narration'][:300]}").strip()
                 out_file = str(rd / f"scene_{s['scene_id']}.mp4")
                 t0 = time.time()   # BH1: respaldo por fecha posterior a la llamada
                 text = await self._flow_call(run, "flow_generate_video", {
                     "prompt": motion, "startFrame": start_frame,
+                    "startFrameId": start_id or "",
                     "aspect": aspect, "outDir": str(rd), "outFile": out_file},
                     timeout=float(_cfg("FLOW_MCP_TIMEOUT", 120.0)))
                 video = _last_path(text) or _recent_media_in_dir(rd, t0) or out_file

@@ -227,7 +227,7 @@ def build_srt(entries: list[dict]) -> str:
     n = 0
     for e in entries:
         dur = float(e.get("duration_sec") or 0)
-        text = (e.get("subtitle_text") or "").strip()
+        text = (e.get("subtitle_text") or e.get("narration") or "").strip()
         if text:
             n += 1
             start = cursor
@@ -408,8 +408,12 @@ def plan_render(manifest: dict, run_dir: Path, music_path: str = "",
     for e in usable:
         p = plan_scene(e, run_dir)
         built = build_scene_cmd(e, p, run_dir)
-        plans.append({"scene_id": e.get("scene_id"), "mode": p["mode"],
-                      "target": p["target"]})
+        plan_entry = {"scene_id": e.get("scene_id"), "mode": p["mode"],
+                      "target": p["target"]}
+        # BM3: la entrada de la escena en el plan de render lleva subtitle_text cuando existe
+        if e.get("subtitle_text"):
+            plan_entry["subtitle_text"] = e["subtitle_text"]
+        plans.append(plan_entry)
         steps.append({"stage": "scenes", "desc": f"normaliza {e.get('scene_id')} "
                                                   f"({p['mode']} → {p['target']:.2f}s)",
                       "cmd": built["cmd"]})
