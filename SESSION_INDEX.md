@@ -5,6 +5,60 @@
 
 ---
 
+## Sesión 2026-11-24 · CIERRE BK1-BK2 + BK3 (calentamiento Stage 3, D7 sin DNS, lock↔venv, lipo)
+
+- **Base**: `b1012c1` (main, árbol limpio; luego `8f9c8d8` para BK3).
+  Entorno: clon Linux del sandbox (Python 3.12.16).
+- **BK1**: el calentamiento Stage 3 (`_stage3`, D2) ya no usa `timeout=30.0`
+  para `flow_list_assets` — helper `_flow_warm_timeout()` =
+  `FLOW_CDP_CONNECT_TIMEOUT_MS/1000 + 30` (**150 s por defecto**, misma
+  constante y default 120000 ms que el MCP server `chrome.js`), con los MISMOS
+  2 intentos; política del JS replicada (vacío/0/negativo/NaN → default).
+  Test hermético: 11 checks nuevos en `test_be_flow_cdp_stability.py`
+  (fórmula 60000→90/30000→60/180000→210; inválidos→150; USO REAL: la llamada
+  de calentamiento pasa 150.0/90.0 s al manager doble) → batería 18 passed.
+- **BK2**: el check D7 de `test_registro_baterias.py` apunta a la IP literal
+  **192.0.2.1** (RFC 5737 TEST-NET-1) en vez de `example.com` —
+  `getaddrinfo` con IP numérica no consulta DNS: el check ya no depende de
+  resolución de nombres; la guardia sigue quemando el `connect()` no-loopback
+  («hermética D7»). Guardián standalone: **20 OK · 0 fallos**.
+- **Commit BK1-BK2**: `8f9c8d8` — push `b1012c1..8f9c8d8`; CI verde
+  (run 45279582164: `ci` success 4m26s + `ci-windows` success 7m02s).
+  Gates literales: compileall exit 0; ruff F821,E9,F63,F7,F82 «All checks
+  passed!»; pytest COMPLETO **964 passed, 1 warning**; run_all serie
+  **2994 OK · 0 fallos · 0 SKIP en 71 baterías**; BD real sha256/mtime/size
+  idénticos antes/después (`9afa69dd9cb924e2…` / 114688 B).
+- **BK3 (lock ↔ venv real, sin tocar versiones)**: el reciclaje del sandbox
+  dejó el intérprete de cierre sin 10 pins del lock (google-genai, edge-tts,
+  yt-dlp, faster-whisper, ctranslate2, onnxruntime, av, google-api-*,
+  google-auth*) → re-instalados EXACTOS con `pip install -r
+  backend/requirements-lock.txt` («Successfully installed av-18.1.0
+  ctranslate2-4.9.0 … google-genai-3.6.1 … yt-dlp-2026.10.26»);
+  `opencv-python-headless==4.13.0.90` y `psutil==7.2.2` con import real OK.
+  **Hueco P4.2 residual cerrado**: `aiohttp==3.13.3`, `beautifulsoup4==4.14.3`
+  y `playwright==1.57.0` estaban IMPORTADOS por backend (mcp_manager.py ×6,
+  ugc_ad_generator.py:101) sin estar en lock/requirements/dev → añadidos al
+  lock (26→29 pins, sección BK3 con consumidores citados) y a
+  requirements.txt (protocolo del propio lock, tras suite verde). El freeze
+  crudo del intérprete de cierre (430 dists) se descarta a propósito como
+  lock: incluiría tooling de test/sandbox que rompería la guardia en la
+  máquina del dueño y el CI.
+- **BK3 lipo (dry-run primero)**: `podar_google_profile.py` → 0.0 MB en el
+  clon (perfil placeholder 4.0 KB; el 254.7 MB real es solo del dueño) y
+  `--ejecutar` exit 0 con Cookies/Login Data/Preferences intactos;
+  `dedup_biblioteca.py` → 0 copias convertibles (biblioteca 36 KB en el clon;
+  122.2 MB reales del dueño) y `--ejecutar` exit 0; `backend/.venv_3.14_roto`
+  AUSENTE (artefacto del dueño, cerrado en F2).
+- **Resultados literales BK3**: guardia F1 standalone **33 OK · 0 fallos**
+  (exit 0, 29 pins); `python tests/run_all.py` — **2997 OK · 0 fallos ·
+  0 SKIP en 71 baterías**; pytest COMPLETO **964 passed, 1 warning** (z4-ruff
+  cazó que el reciclaje borró `ruff` del venv → reinstalado 0.17.6, gate
+  verde; z4 está en EXCLUDED_BATTERIES — solo corre bajo pytest, por eso
+  run_all no lo vio); BD real intacta. Nota honesta: los pasos con
+  `backend\.venv\Scripts` y `Remove-Item` son solo de la máquina del dueño
+  (Windows) — aquí se ejecutó el equivalente POSIX completo.
+- **Commit BK3**: ver `git log -1` (hash en el cierre de la sesión).
+
 ## Sesión 2026-11-23 · CIERRE F1-F10 (últimos huecos, lipo, CRLF y CI Windows)
 
 - **Base**: `c3de757` (main, árbol limpio). Mandato: cerrar los ÚLTIMOS huecos

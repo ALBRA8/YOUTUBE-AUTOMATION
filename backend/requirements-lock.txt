@@ -1,6 +1,6 @@
 # ── YOUTUBE AUTOMATION v2.0 — LOCKFILE (P4.2/P4.3) ──────────────────────────
-# Pins EXACTOS verificados en una instalación verde (pytest 870/0 ·
-# run_all hermético OK). Propósito:
+# Pins EXACTOS verificados en una instalación verde (pytest 964/0 ·
+# run_all 2994 OK · regeneración BK3 desde el venv REAL de cierre). Propósito:
 #   1. La máquina local y el CI instalan EXACTAMENTE lo mismo:
 #        pip install -r backend/requirements-lock.txt
 #      (mismo comando local y en CI — P4.3).
@@ -51,3 +51,16 @@ google-api-python-client==2.202.0
 google-auth==2.62.2
 google-auth-oauthlib==1.5.0
 cachetools==7.0.5
+
+# BK3 (2026-11-24): dependencias de producto IMPORTADAS por backend que el
+# lock no declaraba — la misma clase del incidente P4.2/F1 («importado pero
+# no declarado»): hoy solo funcionan porque el venv real las tiene instaladas
+# ad hoc y el CI no ejecuta esas rutas. Pins tomados del venv REAL de cierre
+# (importlib.metadata del intérprete que da 964/0 y 2994 OK), SIN tocar
+# versiones — consumidores:
+#   aiohttp        <- services/mcp_manager.py:1450/1526/1575 (transporte MCP)
+#   beautifulsoup4 <- services/ugc_ad_generator.py:101 (parsing HTML)
+#   playwright     <- services/mcp_manager.py:1623/1946/1980 (sync_playwright CDP)
+aiohttp==3.13.3
+beautifulsoup4==4.14.3
+playwright==1.57.0

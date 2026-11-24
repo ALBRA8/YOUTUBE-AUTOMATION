@@ -42,3 +42,13 @@ numpy>=1.26
 # ImportError sin él. PIN EXACTO (verificado en verde con la suite):
 opencv-python-headless==4.13.0.90
 psutil>=5.9                  # P6.3: enumeración de procesos Chrome en mcp_manager (sustituye PowerShell WMI)
+
+# [BK3 · 2026-11-24] importadas por backend y antes SOLO transitivas/ad hoc —
+# la clase del incidente P4.2 («importado pero no declarado»): el lock ya las
+# pinnea exacto; aquí el mínimo que el producto necesita.
+#   aiohttp        <- services/mcp_manager.py (transporte MCP)
+#   beautifulsoup4 <- services/ugc_ad_generator.py (parsing HTML)
+#   playwright     <- services/mcp_manager.py (sync_playwright CDP)
+aiohttp>=3.13
+beautifulsoup4>=4.14
+playwright>=1.57
