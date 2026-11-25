@@ -4,6 +4,7 @@ YOUTUBE AUTOMATION v2.0 — Servidor principal (FastAPI)
 Dashboard en http://127.0.0.1:8000  ·  progreso por SSE  ·  coste $0/video
 """
 import asyncio
+import difflib
 import os
 import time
 import io
@@ -3682,6 +3683,23 @@ async def get_rendered_file(file_name: str, download: bool = False):
 from services import pipeline_orchestrator as _pipe  # noqa: E402
 
 
+# ── [BN1 · 2026-11] claves de primer nivel de POST /api/pipeline/run ────────
+# Una clave desconocida (p. ej. "external_blueprint" en vez de "blueprint")
+# antes se IGNORABA en silencio: el blueprint no llegaba a create_run, la
+# etapa 2 caía en Gemini gastando una corrida, y el llamador no tenía forma
+# de enterarse. Ahora el endpoint RECHAZA el payload con 422 y sugiere la
+# clave válida más parecida (difflib) — el error de tipeo se ve ANTES de
+# lanzar nada. Las claves internas/body de otros endpoints no cambian.
+_CLAVES_PIPELINE_RUN = ("blueprint", "format", "idea", "max_scenes",
+                        "nicho_id", "notebook_id", "style")
+
+
+def _sugerencia_clave(desconocida: str) -> str:
+    """La clave válida más parecida como « (¿quisiste decir 'x'?)» o ''."""
+    cercana = difflib.get_close_matches(desconocida, _CLAVES_PIPELINE_RUN, n=1)
+    return f" (¿quisiste decir '{cercana[0]}'?)" if cercana else ""
+
+
 @app.post("/api/pipeline/run")
 async def pipeline_run(body: dict):
     """Lanza la corrida completa con el notebookId activo del MCP Manager
@@ -3690,7 +3708,16 @@ async def pipeline_run(body: dict):
     se rechaza con 409. BG2: acepta un campo opcional "blueprint" (puerta
     DECLARADA {label, title, scenes}) — con blueprint válido la etapa 2 NO
     llama a Gemini (engine "external:<label>"); inválido → 400
-    INVALID_BLUEPRINT."""
+    INVALID_BLUEPRINT. BN1: las claves de primer nivel desconocidas se
+    rechazan con 422 sugiriendo la más parecida («external_blueprint» →
+    ¿quisiste decir 'blueprint'?) en vez de ignorarse y caer en Gemini por
+    un error de tipeo."""
+    desconocidas = [k for k in body if k not in _CLAVES_PIPELINE_RUN]
+    if desconocidas:
+        detalle = ", ".join(f"'{k}'{_sugerencia_clave(k)}" for k in desconocidas)
+        raise HTTPException(
+            422, "clave(s) de primer nivel desconocida(s) en el payload: "
+            f"{detalle}. Claves válidas: {', '.join(_CLAVES_PIPELINE_RUN)}")
     idea = (body.get("idea") or "").strip()
     if not idea:
         raise HTTPException(400, "idea requerida (¿qué video produce el pipeline?)")

@@ -110,6 +110,40 @@ def _get_text_model_candidates(model: str | None = None) -> list[str]:
     return candidates or ["gemini-3.8-flash"]
 
 
+# ── [BN2 · 2026-11] alias «-latest»: solo publicados en v1beta ───────────────
+# El SDK google-genai 3.6.1 rutea TODOS los modelos por la versión por
+# defecto del cliente (GOOGLE_AI_API_DEFAULT_VERSION='v1'), pero los alias
+# de familia «-latest» (gemini-flash-latest, gemini-flash-lite-latest, …)
+# SOLO están publicados en v1beta: por v1 devuelven 404 NOT_FOUND y la
+# cadena de modelos los descartaba injustamente (en vivo 2026-11-19:
+# gemini-flash-latest 404 por v1 mientras gemini-3.8-flash devolvía 200 —
+# el candidato sano se quemaba por la versión equivocada). Política BN2:
+#   · Candidato alias «-latest» → se intenta PRIMERO por v1beta
+#     (HttpOptions POR REQUEST: el cliente global no se muta) y, solo ante
+#     404/NOT_FOUND, se agota también v1 antes de descartarlo (prueba ambas
+#     versiones antes de descartarlo).
+#   · 429 (cuota del modelo) y 503 (caída) NO prueban la otra versión:
+#     la cuota y el backend son los mismos en v1/v1beta → pasan al siguiente
+#     candidato con la política BG1 intacta.
+#   · Resto de modelos: comportamiento BD 2C intacto (UN intento con la
+#     versión por defecto del SDK; el guardia BD 2C cuenta 1 intento por
+#     candidato y sigue siendo literalmente cierto).
+_SUFIJO_ALIAS_LATEST = "-latest"
+
+
+def _es_alias_latest(modelo: str) -> bool:
+    """True para la familia de alias «-latest» (solo publicados en v1beta)."""
+    return isinstance(modelo, str) and modelo.endswith(_SUFIJO_ALIAS_LATEST)
+
+
+def _versiones_de_candidato(modelo: str) -> tuple[str | None, ...]:
+    """Versiones de API a probar para un candidato de modelo, EN ORDEN.
+    None = la versión por defecto del SDK (v1 en google-genai 3.6.1)."""
+    if _es_alias_latest(modelo):
+        return ("v1beta", "v1")
+    return (None,)
+
+
 def available() -> bool:
     return bool(config.GEMINI_API_KEY)
 
@@ -164,7 +198,9 @@ async def generate_json(prompt: str, schema: dict | None = None,
     `model` sobreescribe GEMINI_TEXT_MODEL. Si falla con 404 NOT_FOUND,
     429 RESOURCE_EXHAUSTED o 503 UNAVAILABLE (tras sus esperas de 5/15 s),
     prueba la cadena de GEMINI_TEXT_MODEL_FALLBACKS y recuerda el primero
-    que funcione. Agotada la cadena, falla con el motivo real."""
+    que funcione. Agotada la cadena, falla con el motivo real.
+    BN2: los alias «-latest» se intentan primero por v1beta (por v1 dan
+    404) y solo ante 404 se agota también v1 antes de descartarlos."""
     global _remembered_text_model
     if not available():
         raise RuntimeError("GEMINI_API_KEY no configurada")
@@ -173,7 +209,9 @@ async def generate_json(prompt: str, schema: dict | None = None,
     last_exc = None
 
     for cand in candidates:
-        def _call():
+        versiones = _versiones_de_candidato(cand)
+
+        def _call(ver=versiones[0]):
             from google.genai import types
             cfg: dict[str, Any] = {
                 "response_mime_type": "application/json",
@@ -188,6 +226,10 @@ async def generate_json(prompt: str, schema: dict | None = None,
                     cfg["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
                 except Exception:
                     pass
+            if ver is not None and hasattr(types, "HttpOptions"):
+                # BN2: versión API POR REQUEST → la URL de este intento lleva
+                # v1beta/v1 sin mutar el cliente global (otros hilos intactos).
+                cfg["http_options"] = types.HttpOptions(api_version=ver)
             return client().models.generate_content(
                 model=cand,
                 contents=prompt,
@@ -198,30 +240,43 @@ async def generate_json(prompt: str, schema: dict | None = None,
             txt = resp.text
             return json.loads(txt)
 
-        try:
-            resp = await _retry(lambda: asyncio.to_thread(_call))
-            parsed = await asyncio.to_thread(_parse)
-            if cand != _remembered_text_model:
-                _remembered_text_model = cand
-                log.info("[gemini_client] modelo de texto fijado a: %s", cand)
-            return parsed
-        except (Exception,) as e:  # noqa: BLE001
-            last_exc = e
-            status = _api_status(e)
-            # BG1: 404 (modelo inexistente), 429 (cuota — sin reintento en el
-            # mismo modelo) y 503 (tras agotar sus esperas de 5/15 s) pasan al
-            # siguiente candidato; cualquier otro error sube tal cual (motivo
-            # real para el llamador).
-            if status in ("404", "429", "503") and cand != candidates[-1]:
-                log.warning(
-                    "[gemini_client] modelo '%s' no disponible (%s) — probando siguiente candidato...",
-                    cand,
-                    {"404": "404/NOT_FOUND",
-                     "429": "429/RESOURCE_EXHAUSTED",
-                     "503": "503/UNAVAILABLE"}[status],
-                )
-                continue
-            raise
+        for idx, ver in enumerate(versiones):
+            try:
+                resp = await _retry(lambda: asyncio.to_thread(_call, ver))
+                parsed = await asyncio.to_thread(_parse)
+                if cand != _remembered_text_model:
+                    _remembered_text_model = cand
+                    log.info("[gemini_client] modelo de texto fijado a: %s", cand)
+                return parsed
+            except (Exception,) as e:  # noqa: BLE001
+                last_exc = e
+                status = _api_status(e)
+                # BN2: 404/NOT_FOUND del alias en la versión probada → la
+                # otra versión del MISMO modelo antes de descartarlo (la
+                # cuota no interviene; es puramente de publicación).
+                if status == "404" and idx < len(versiones) - 1:
+                    log.warning(
+                        "[gemini_client] modelo '%s' 404/NOT_FOUND por %s — "
+                        "probando el mismo alias por la versión %s...",
+                        cand,
+                        ver or "v1 (default SDK)",
+                        versiones[idx + 1],
+                    )
+                    continue
+                # BG1: 404 (modelo inexistente), 429 (cuota — sin reintento en el
+                # mismo modelo) y 503 (tras agotar sus esperas de 5/15 s) pasan al
+                # siguiente candidato; cualquier otro error sube tal cual (motivo
+                # real para el llamador).
+                if status in ("404", "429", "503") and cand != candidates[-1]:
+                    log.warning(
+                        "[gemini_client] modelo '%s' no disponible (%s) — probando siguiente candidato...",
+                        cand,
+                        {"404": "404/NOT_FOUND",
+                         "429": "429/RESOURCE_EXHAUSTED",
+                         "503": "503/UNAVAILABLE"}[status],
+                    )
+                    break
+                raise
 
     if last_exc:
         raise last_exc
@@ -237,36 +292,53 @@ async def generate_text(prompt: str, system: str | None = None,
     last_exc = None
 
     for cand in candidates:
-        def _call():
+        versiones = _versiones_de_candidato(cand)
+
+        def _call(ver=versiones[0]):
             from google.genai import types
             cfg = {"temperature": 0.9}
             if system:
                 cfg["system_instruction"] = system
+            if ver is not None and hasattr(types, "HttpOptions"):
+                # BN2: versión API POR REQUEST (misma política que generate_json).
+                cfg["http_options"] = types.HttpOptions(api_version=ver)
             return client().models.generate_content(
                 model=cand, contents=prompt,
                 config=types.GenerateContentConfig(**cfg))
 
-        try:
-            resp = await _retry(lambda: asyncio.to_thread(_call))
-            if cand != _remembered_text_model:
-                _remembered_text_model = cand
-                log.info("[gemini_client] modelo de texto fijado a: %s", cand)
-            return resp.text
-        except (Exception,) as e:  # noqa: BLE001
-            last_exc = e
-            status = _api_status(e)
-            # BG1: misma cadena que generate_json (404/429/503 → siguiente
-            # candidato; otros errores suben con el motivo real).
-            if status in ("404", "429", "503") and cand != candidates[-1]:
-                log.warning(
-                    "[gemini_client] modelo '%s' no disponible (%s) — probando siguiente candidato...",
-                    cand,
-                    {"404": "404/NOT_FOUND",
-                     "429": "429/RESOURCE_EXHAUSTED",
-                     "503": "503/UNAVAILABLE"}[status],
-                )
-                continue
-            raise
+        for idx, ver in enumerate(versiones):
+            try:
+                resp = await _retry(lambda: asyncio.to_thread(_call, ver))
+                if cand != _remembered_text_model:
+                    _remembered_text_model = cand
+                    log.info("[gemini_client] modelo de texto fijado a: %s", cand)
+                return resp.text
+            except (Exception,) as e:  # noqa: BLE001
+                last_exc = e
+                status = _api_status(e)
+                # BN2: 404 en la versión probada del alias → la otra versión
+                # del mismo modelo antes de descartarlo.
+                if status == "404" and idx < len(versiones) - 1:
+                    log.warning(
+                        "[gemini_client] modelo '%s' 404/NOT_FOUND por %s — "
+                        "probando el mismo alias por la versión %s...",
+                        cand,
+                        ver or "v1 (default SDK)",
+                        versiones[idx + 1],
+                    )
+                    continue
+                # BG1: misma cadena que generate_json (404/429/503 → siguiente
+                # candidato; otros errores suben con el motivo real).
+                if status in ("404", "429", "503") and cand != candidates[-1]:
+                    log.warning(
+                        "[gemini_client] modelo '%s' no disponible (%s) — probando siguiente candidato...",
+                        cand,
+                        {"404": "404/NOT_FOUND",
+                         "429": "429/RESOURCE_EXHAUSTED",
+                         "503": "503/UNAVAILABLE"}[status],
+                    )
+                    break
+                raise
 
     if last_exc:
         raise last_exc

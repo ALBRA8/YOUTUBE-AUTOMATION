@@ -5,6 +5,49 @@
 
 ---
 
+## Sesión 2026-11-26 · CIERRE BN (claves desconocidas → 422 con sugerencia; alias Gemini «-latest» por v1beta)
+
+- **Base**: `a7dfb9e` (main, árbol limpio). Entorno: clon Linux del sandbox
+  (Python 3.12.16); `backend/.venv` recreado desde el lock tras el reciclaje
+  del sandbox → guardia F1 33 OK · 0 fallos.
+- **BN1** — `POST /api/pipeline/run` RECHAZA claves de primer nivel
+  desconocidas con **422** + sugerencia difflib (literal:
+  `external_blueprint` → «¿quisiste decir 'blueprint'?») + catálogo
+  «Claves válidas: blueprint, format, idea, max_scenes, nicho_id,
+  notebook_id, style». Antes se ignoraban en silencio y la etapa 2 caía en
+  Gemini gastando la corrida. Whitelist `_CLAVES_PIPELINE_RUN` +
+  `_sugerencia_clave()` en `backend/main.py`; la validación corre ANTES del
+  orquestador (`create_run` jamás se invoca con payload inválido; sugerencias
+  sin falsos positivos). Las 7 claves válidas siguen aceptándose (corrida
+  externa completa 200).
+- **BN2** — google-genai 3.6.1 rutea TODO por `GOOGLE_AI_API_DEFAULT_
+  VERSION='v1'`, pero los alias «-latest» (gemini-flash-latest / -lite-
+  latest / pro-latest) solo están publicados en **v1beta** → 404 NOT_FOUND
+  injusto que quemaba el candidato sano (vivo 2026-11-19: flash-latest 404
+  por v1, 3.8-flash 200). Ahora `gemini_client.generate_json/generate_text`
+  intenta la familia `-latest` **PRIMERO por v1beta** con **HttpOptions POR
+  REQUEST** (cliente global intacto); solo ante 404 se agota también v1
+  (prueba ambas versiones antes de descartarlo); 429/503 sin segunda versión
+  → siguiente candidato BG1; modelos no-alias: UN intento con la versión
+  default (BD 2C intacto). URL literal capturada sin red: `…/v1beta/models/
+  gemini-flash-latest:generateContent` (y `…/v1/models/gemini-3.8-flash:…`).
+  Sin cambios en `flow_export._MODEL_CANDIDATES` ni
+  `config.DEFAULT_GEMINI_FALLBACKS`.
+- **Batería nueva**: `tests/test_bn_pipeline_keys_y_gemini_v1beta.py`
+  (13 checks herméticos, standalone «13 OK · 0 fallos»), registrada en
+  `BATERIAS` → 73 baterías. Regresión directa: BD+BG+BM+orchestrator+bb5
+  = 61 passed.
+- **Verificación y suites**: compileall exit 0; ruff (F821,E9,F63,F7,F82)
+  All checks passed!; pytest COMPLETO **983 passed, 2 warnings** (138.75 s);
+  run_all `--workers 6` **3016 OK · 0 fallos · 0 SKIP en 73 baterías**
+  (exit 0, doble corrida idempotente); npm test GoogleFlowMCP **38/38**;
+  lock_drift 33 OK · 0 fallos; auditoria_repairs 46 OK · 0 fallos;
+  import main 404/415/423 ms; BD real sha256/mtime/size idénticos
+  (9afa69dd9cb924e2… / 1795461897 / 114688 B).
+- **Commit**: ver `git log -1` (hash en el cierre de la sesión).
+
+---
+
 ## Sesión 2026-11-24 · CIERRE BM (blueprint externo: video_prompt y subtitle_text)
 
 - **Base**: `f4c6025` (main) + cambios BL (resiliencia de startFrame por nombre/id y reintentos de imagen).

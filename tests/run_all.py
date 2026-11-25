@@ -318,6 +318,14 @@ BATERIAS = [
                                  # start-frame (por id o nombre) sin
                                  # regenerar imagen; ancla intacta (11)
     "test_bm_external_blueprint_video_prompt.py", # BM1-BM4: campos opcionales video_prompt (<=600) y subtitle_text (<=200) (6)
+    "test_bn_pipeline_keys_y_gemini_v1beta.py", # BN1-BN2: claves de primer nivel
+                                 # desconocidas en POST /api/pipeline/run → 422
+                                 # con sugerencia difflib («external_blueprint» →
+                                 # ¿quisiste decir 'blueprint'?) en vez de caer
+                                 # en Gemini; alias «-latest» de Gemini se intenta
+                                 # PRIMERO por v1beta (por v1 dan 404) y solo ante
+                                 # 404 se agota también v1; 429/503 sin segunda
+                                 # versión; modelos no-alias intactos (BD 2C) (13)
     "test_registro_baterias.py", # [D6/D4/D7] GUARDIÁN del registro canónico
                                  # (todo test_*.py ∈ BATERIAS ∪ EXCLUDED) +
                                  # baterías de minidrama registradas con
