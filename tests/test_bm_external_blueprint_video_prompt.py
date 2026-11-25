@@ -417,3 +417,24 @@ def test_bm4_status_exposes_both_fields_per_scene():
         old_sc = st_old["scenes"][0]
         assert "video_prompt" in old_sc and old_sc["video_prompt"] == ""
         assert "subtitle_text" in old_sc and old_sc["subtitle_text"] == ""
+
+
+if __name__ == "__main__":
+    # Resumen parseable exigido por run_all (regla D6/D8): sin este bloque la
+    # batería termina exit 0 SIN ejecutar nada como script y run_all la marca
+    # «SIN RESUMEN (¿crash?)» — cazado en el cierre LIPO (2026-11-25).
+    class _Resumen:
+        def __init__(self) -> None:
+            self.ok = self.fallos = 0
+
+        def pytest_runtest_logreport(self, report):
+            if report.when == "call":
+                if report.passed:
+                    self.ok += 1
+                elif report.failed:
+                    self.fallos += 1
+
+    _res = _Resumen()
+    _code = pytest.main([__file__, "-q"], plugins=[_res])
+    print(f"\n{_res.ok} OK · {_res.fallos} fallos")
+    sys.exit(int(_code))
