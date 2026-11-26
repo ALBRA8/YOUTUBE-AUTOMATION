@@ -1,7 +1,7 @@
 # CONTEXTO YOUTUBE — INDEX
 
 **Estado:** INTEGRATED IN MAIN / IN_PROGRESS
-**Última actualización:** 2026-10-23 (P1 PASS · P1.5 publicado · P2 PASS · P3-A PASS · P3-B PASS y PUBLICADO: PR #68 → `69c79da` AG-G · `1c384b1` YT-AUT)
+**Última actualización:** 2026-11-25 (Recuperación total Google Flow CDP y MP4 verificado en SES-2026-11-25-01; Piloto 3 escenas con diagnóstico de contrato API en SES-2026-11-25-02) (P1 PASS · P1.5 publicado · P2 PASS · P3-A PASS · P3-B PASS y PUBLICADO: PR #68 → `69c79da` AG-G · `1c384b1` YT-AUT)
 
 | Área | Archivo | Estado | Propósito |
 |---|---|---|---|

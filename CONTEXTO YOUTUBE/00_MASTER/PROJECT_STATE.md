@@ -1,8 +1,23 @@
 # PROJECT STATE — YOUTUBE-AUTOMATION
 
-**Estado Unificado:** OPERACIONAL EN PRODUCCIÓN (Pipeline, Selector Nativo, Render 4K y 53 baterías herméticas PASS; migración AGENTE-GENERAL ↔ harness P3-B PASS local; Start Frame en Flow E2E sujeto a checklist obligatorio NOT_DEMONSTRATED).
-**Última actualización:** 2026-11-06 (Auditoría Técnica P0-P3 resuelta).
+**Estado Unificado:** OPERACIONAL EN PRODUCCIÓN (Pipeline, Selector Nativo, Render 4K, Google Flow CDP recuperado y Generación Real de Vídeo DEMOSTRADA; migración AGENTE-GENERAL ↔ harness P3-B PASS local).
+**Última actualización:** 2026-11-25 (Recuperación total de Google Flow CDP y prueba real de generación de vídeo con descarga de MP4 completada: SES-2026-11-25-01).
 **Fuente:** Ejecución E2E en vivo, GoogleFlowMCP en CDP 9333, FFmpeg 4K y almacenamiento en Windows.
+
+## Hito Recuperación Google Flow y Generación Real de Vídeo — 2026-11-25
+1. **Diagnóstico y Purga Quirúrgica de Chrome Zombi (PASS):** Se aislaron 11 procesos zombi bajo el perfil `FlowImageChrome` (PID raíz 11896) reteniendo el puerto 9333 con targets `browser_ui` (`omnibox-popup`) que bloqueaban el attach global de Playwright. Se terminaron de forma selectiva liberando el puerto 9333, preservando intactos los 17 procesos del Chrome personal del usuario.
+2. **Reconexión Inmediata CDP (PASS):** Reinicio limpio de Chrome con `POST /api/mcp/connect-all-google`. Conexión de Playwright y MCP en **924 ms** (`[flow] CDP connect OK en 924ms`).
+3. **Listado de Assets en Flow (PASS):** `flow_list_assets` vía `POST /api/mcp/execute` devolvió los 27 assets del proyecto en 36.5 s, confirmando la salud del canal.
+4. **Generación 100% Real de Vídeo en Google Flow (PASS / DEMOSTRADA):** `flow_generate_video` ejecutado con el ancla `personaje` (`id:02b5fa3d-179c-488a-b99b-64cc219a573e`), generado en 84 s en Flow Fotogramas y descargado como MP4 a disco en 107.1 s totales:
+   - Archivo: `tools/GoogleFlowMCP/output/2026-11-25T06-18-29-slow-zoom-in-on-the-red-apple-character-.mp4`
+   - Tamaño: 1,342,954 bytes (1.28 MB), duración 8.01 s, resolución 720x1280 (9:16 vertical), códecs h264 a 24 fps + aac.
+   - Ver SES-2026-11-25-01.
+5. **Prueba Piloto 3 Escenas y Precisión del Contrato API (SES-2026-11-25-02):** La corrida `run_20261125_030514_9c6874` confirmó estabilidad continua del keepalive CDP (0.9s-4.6s) e ingesta de contexto local. Se diagnosticó que el endpoint `/api/pipeline/run` exige la clave `"blueprint"` en el payload para omitir Stage 2 (Gemini); el envío con `"external_blueprint"` causó invocación a Gemini y aborto por guard BB5 (`BLUEPRINT_DEMO`) al no estar disponibles los modelos externos.
+
+
+## Hito Prueba de Aceptación Real (BL / BM) — 2026-11-24
+1. **Soporte de Blueprint Externo con video_prompt y subtitle_text (BM1-BM4) (PASS):** Corrida `run_20261124_171918_061b13` en vivo con blueprint externo `claude` (3 escenas). Gemini omitido exitosamente, blueprint persistido en `blueprint.json` y expuesto íntegramente en `/api/pipeline/status`.
+2. **Diagnóstico del Bloqueo CDP (FAIL-007) (RESUELTO EN SES-2026-11-25-01):** Diagnóstico forense comprobó que la pestaña Flow respondía vía WebSocket directo, pero el attach global del navegador en Playwright se colgaba por targets de UI del omnibox. Resuelto y verificado con éxito en la sesión del 25 de noviembre.
 
 ## Hitos E2E Validados — 2026-11-06
 1. **INT-091 · Selector de Carpetas Nativo (PASS):** El usuario navega libremente por sus discos con el Explorador de Windows mediante window.showDirectoryPicker(). Cero rutas impuestas. Sincronización completa de artefactos (out/video_final.mp4, guion/, voz/, portada.png, marca.json) a la carpeta de destino elegida.

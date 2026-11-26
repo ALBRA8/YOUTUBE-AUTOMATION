@@ -91,3 +91,24 @@
 - **Resultado:** compileall rc=0; ruff F821,E9,F63,F7,F82 verde; pytest COMPLETO 875 passed · 0 failed; run_all.py 66 baterías · 2847 OK · 0 fallos; trinquete 286 intacto (no subido).
 - **Referencia:** `SES-2026-11-21-01_KEEPALIVE_ANY_EXIT_Y_BATERIA_RUN_REAL.md`.
 
+## SES-2026-11-24-01 — Prueba de Aceptación Real (BL1-BL4 + BM1-BM4) y Diagnóstico Flow CDP
+- **Estado:** BLOQUEADO EN STAGE 3 / PARCIALMENTE DEMOSTRADO (BM1-BM4 verificados; BL1-BL4 bloqueados por CDP).
+- **Hecho:** Ejecución de prueba de aceptación de punta a punta en el PC del usuario (sin cambios de código, HEAD `ac9340d`). Pre-requisitos verificados (cv2, psutil, sin PIPELINE_ALLOW_DEMO, backend 200 OK, Flow conectado con auth=ok y ancla `personaje` confirmada). Corrida `run_20261124_171918_061b13` lanzada con blueprint externo (`claude`, 3 escenas con `video_prompt` y `subtitle_text`). Stage 1 OK (5719 caracteres de NotebookLM), Stage 2 OK (bypass de Gemini, persistencia de `video_prompt` y `subtitle_text` en `blueprint.json` y exposición en `/api/pipeline/status` confirmando BM1 y BM4). Stage 3 abortó por `FLOW_CDP_SLOW` en pre-calentamiento tras 2 timeouts de 150 s en `tools/call`. Diagnóstico forense identificó targets internos `browser_ui` (`chrome://omnibox-popup.top-chrome/`) provocando cuelgue en el attach global de `chromium.connectOverCDP` en Playwright.
+- **Resultado:** BM1, BM2, BM4 demostrados en pipeline; BM3 pendiente de render; BL1-BL4 bloqueados por CDP.
+- **Referencia:** `SES-2026-11-24-01_PRUEBA_ACEPTACION_REAL_BL_BM_Y_DIAGNOSTICO_CDP.md`.
+
+## SES-2026-11-25-01 — Recuperación Google Flow CDP, Limpieza de Procesos Zombi y Generación Real de Vídeo
+- **Estado:** CLOSED / PASS (RECUPERACIÓN TOTAL Y GENERACIÓN REAL DEMOSTRADA).
+- **Hecho:** Diagnóstico forense de procesos Chrome en Windows. Identificación de 11 procesos zombi bajo el perfil dedicado `FlowImageChrome` (PID raíz 11896) reteniendo el puerto 9333 con targets `browser_ui` (`omnibox-popup`) que colgaban Playwright. Ejecución de purga selectiva sin afectar los 17 procesos del Chrome personal del usuario. Liberación comprobada del puerto 9333. Reinicio limpio vía `connect-all-google` con conexión CDP exitosa en 924 ms. Comprobación de `flow_list_assets` vía `POST /api/mcp/execute` (27 assets listados en 36.5 s). Ejecución de generación de vídeo 100% real con Google Flow (`flow_generate_video`) usando el ancla `personaje` (`id:02b5fa3d-179c-488a-b99b-64cc219a573e`), generada en 84 s y descargada a disco.
+- **Resultado:** Archivo MP4 de 1.28 MB (1,342,954 bytes), duración 8.01 s, resolución vertical 720x1280 (9:16), códec h264 a 24 fps + aac, validado con ffprobe. Cero regresiones en el código fuente; sistema plenamente operativo.
+- **Referencia:** `SES-2026-11-25-01_RECUPERACION_FLOW_CDP_LIMPIEZA_Y_GENERACION_REAL.md`.
+
+## SES-2026-11-25-02 — Prueba de Aceptación Piloto 3 Escenas y Diagnóstico de Clave en Contrato de API
+- **Estado:** BLOQUEADO EN STAGE 2 / DIAGNOSTICADO CON EVIDENCIA LITERAL (FLOW CDP ESTABLE; BLOQUEO POR BLUEPRINT_DEMO).
+- **Hecho:** Ejecución de prueba de aceptación real sobre el pipeline (corrida `run_20261125_030514_9c6874`). Prechequeo Paso 0 completado con éxito (Chrome 158 en 9333, health 200, 26 assets listados). Lanzamiento con blueprint de 3 escenas conteniendo `video_prompt` y `subtitle_text`. En Stage 1, fallback a contexto local de `frutinovelas` cargó 2875 caracteres. Keepalive en segundo plano contra Flow CDP respondió de forma continua (0.9s-4.6s) sin timeouts. En Stage 2, el pipeline invocó a Gemini debido a que el payload utilizó la clave `"external_blueprint"` en lugar de `"blueprint"` (esperada por `main.py:276`). Gemini respondió con 503/404, activando el guard BB5 que abortó la corrida con `BLUEPRINT_DEMO` evitando contenido no canónico en Flow.
+- **Resultado:** Flow CDP verificado 100% estable; BL1-BL4 y BM1-BM4 no ejercitados por aborto en Stage 2 derivado de la discrepancia de clave en el payload.
+- **Referencia:** `SES-2026-11-25-02_PRUEBA_ACEPTACION_PILOTO_BLOQUEO_BLUEPRINT_DEMO.md`.
+
+
+
+

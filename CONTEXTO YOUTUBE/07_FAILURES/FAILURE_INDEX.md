@@ -44,3 +44,12 @@
 - **P3-2 (API-001 Migración a Lifespan y Hardening de Excepciones):** Eliminados handlers obsoletos `@app.on_event("startup")` migrando a context manager `lifespan(app)`; erradicadas excepciones devoradas con `pass` silencioso en el pipeline y publicación, incorporando logs con contexto y trazabilidad completa. Test: `test_p3_2_lifespan_and_error_handling.py`.
 - **P3-3 (DOC-001 Corrección de Métricas y Estado):** Corregido `ESTADO_REAL.md` (declaraba 35 baterías, hay 53 reales; reparada tabla rota de EXECUTION CONTRACT), unificados los bloques de Estado de `PROJECT_STATE.md`; la revocación del PAT histórico queda PENDIENTE DE CONFIRMACIÓN POR EL DUEÑO (no hay evidencia verificable en el repo).
 
+## FAIL-007 — Bloqueo de Playwright connectOverCDP por targets browser_ui en Chrome (FLOW_CDP_SLOW)
+- **Estado:** RESOLVED / DEMONSTRATED (2026-11-25 en SES-2026-11-25-01).
+- **Incidencia:** En la corrida real de aceptación `run_20261124_171918_061b13`, el pipeline abortó en Stage 3 con `FLOW_CDP_SLOW: Flow CDP no responde tras 2 intentos de calentamiento (FLOW_CDP_SLOW): timeout de 150s en tools/call`.
+- **Causa Raíz:** `chromium.connectOverCDP` en Playwright conecta a `ws://127.0.0.1:9333/devtools/browser/...` e intenta descubrir y adjuntarse a todos los targets activos de Chrome. La presencia de targets internos de la UI de Chrome (`chrome://omnibox-popup.top-chrome/` de tipo `browser_ui`) colgados en instancias zombi de `FlowImageChrome` provocaba que el handshake de Playwright no completara y agotara el timeout (`120000ms exceeded`).
+- **Remediación:** Purga selectiva de los procesos zombi de `FlowImageChrome` (PID raíz 11896 y 10 hijos renderers) liberando el puerto 9333 sin afectar al Chrome personal del usuario. Re-arranque limpio vía `connect-all-google`.
+- **Verificación:** Conexión CDP restablecida en 924 ms, `flow_list_assets` OK (27 assets) y generación de vídeo real completada en 84 s (MP4 1.28 MB, 8.01 s, validado con ffprobe). Ver `SES-2026-11-25-01`.
+
+
+
