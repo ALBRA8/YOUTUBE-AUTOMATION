@@ -201,8 +201,16 @@ async def execute_tests():
     # sesión Google caída → AUTH_REQUIRED surfaced
     async def auth_fail(tool, arguments):
         raise mcpm.MCPManagerError("list_notebooks: not signed in", "TOOL_ERROR")
+    # Hermeticidad: el fallback CDP de list_notebooks consulta Chrome de verdad
+    # (goto 9333). Con un Chrome vivo en la máquina, ese fallback devuelve
+    # notebooks y ENMASCARA la clasificación de error que probamos aquí. Se
+    # desactiva explícitamente: la prueba es de clasificación, no de CDP.
+    async def _cdp_vacio(port):
+        return []
+
     m4 = mcpm.MCPClientManager()
     m4._conns["notebooklm"] = _fake_conn(["list_notebooks"], auth_fail)
+    m4._cdp_list_notebooks_direct = _cdp_vacio
     try:
         await m4.list_notebooks()
         check("auth caído al listar → AUTH_REQUIRED", False)
@@ -213,6 +221,7 @@ async def execute_tests():
         return "(sin notebooks)"
     m5 = mcpm.MCPClientManager()
     m5._conns["notebooklm"] = _fake_conn(["list_notebooks"], empty_list)
+    m5._cdp_list_notebooks_direct = _cdp_vacio
     try:
         await m5.list_notebooks()
         check("listado ilegible → LIST_EMPTY", False)

@@ -1,66 +1,134 @@
-# ── YOUTUBE AUTOMATION v2.0 — LOCKFILE (P4.2/P4.3) ──────────────────────────
-# Pins EXACTOS verificados en una instalación verde (pytest 964/0 ·
-# run_all 2994 OK · regeneración BK3 desde el venv REAL de cierre). Propósito:
-#   1. La máquina local y el CI instalan EXACTAMENTE lo mismo:
-#        pip install -r backend/requirements-lock.txt
-#      (mismo comando local y en CI — P4.3).
-#   2. Elimina la clase de incidente «opencv-python-headless estaba en
-#      requirements y NO estaba instalado» (P4.2): con el lockfile, un
-#      `pip install -r` ya no deja endpoints de e-commerce rotos.
-#   3. av se mantiene <19 (metadata_errors; ver requirements.txt) aunque
-#      PyAV 19 ya exista: el pin evita que un pip upgrade rompa
-#      faster-whisper a mitad del pipeline.
-# Regenerar tras ACTUALIZAR a propósito:  pip freeze > requirements-lock.txt
-# (y mover las líneas nuevas a requirements.txt solo tras suite verde).
-# ─────────────────────────────────────────────────────────────────────────────
-
-# núcleo HTTP / API
-fastapi==0.128.0
-starlette==0.50.0
-pydantic==2.12.5
-uvicorn==0.44.0
-websockets==16.0
-python-multipart==0.0.24
-python-dotenv==1.2.2
-anyio==4.13.0
-httpx==0.28.1
-
-# IA
-google-genai==3.6.1
-edge-tts==7.3.1
-gradio_client==2.0.3
-yt-dlp==2026.10.26
-
-# video / audio / imágenes
-pillow==11.3.0
-numpy==2.1.3
-opencv-python-headless==4.13.0.90
-
-# subtítulos palabra a palabra (faster-whisper) — PIN av<19 obligatorio
-faster-whisper==1.2.1
-ctranslate2==4.9.0
-onnxruntime==1.32.0
+﻿aiofile==3.12.3
+aiohappyeyeballs==2.7.1
+aiohttp==3.14.5
+aiosignal==1.4.0
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.16.0
+APScheduler==3.11.3
+attrs==26.1.0
+Authlib==1.9.5
 av==18.1.0
-
-# modo fábrica
-APScheduler==3.11.2
-psutil==7.2.2
-
-# autopublish YouTube
-google-api-python-client==2.202.0
-google-auth==2.62.2
+beartype==0.23.1
+beautifulsoup4==4.15.0
+cachetools==8.0.0
+caio==0.12.10
+certifi==2026.10.23
+cffi==2.1.1
+charset-normalizer==3.5.2
+click==8.5.1
+colorama==0.4.6
+cryptography==50.0.2
+ctranslate2==4.8.5
+cyclopts==5.4.0
+distro==1.9.0
+dnspython==2.9.2
+docstring_parser==0.18.0
+edge-tts==7.3.1
+email-validator==2.3.0
+exceptiongroup==1.3.1
+fastapi==0.162.2
+faster-whisper==1.2.1
+fastmcp==4.1.7
+fastmcp-slim==4.1.7
+filelock==4.2.10
+flatbuffers==25.12.19
+frozenlist==1.8.0
+fsspec==2026.9.0
+google-api-core==2.44.0
+google-api-python-client==2.201.0
+google-auth==2.62.1
+google-auth-httplib2==0.4.4
 google-auth-oauthlib==1.5.0
-cachetools==7.0.5
-
-# BK3 (2026-11-24): dependencias de producto IMPORTADAS por backend que el
-# lock no declaraba — la misma clase del incidente P4.2/F1 («importado pero
-# no declarado»): hoy solo funcionan porque el venv real las tiene instaladas
-# ad hoc y el CI no ejecuta esas rutas. Pins tomados del venv REAL de cierre
-# (importlib.metadata del intérprete que da 964/0 y 2994 OK), SIN tocar
-# versiones — consumidores:
-#   aiohttp        <- services/mcp_manager.py:1450/1526/1575 (transporte MCP)
-#   beautifulsoup4 <- services/ugc_ad_generator.py:101 (parsing HTML)
-#   playwright     <- services/mcp_manager.py:1623/1946/1980 (sync_playwright CDP)
-aiohttp==3.13.3
-beautifulsoup4==4.14.3
-playwright==1.57.0
+google-genai==3.0.0
+googleapis-common-protos==1.76.0
+gradio_client==2.7.2
+greenlet==3.5.6
+griffelib==2.4.1
+h11==0.16.0
+hf-xet==1.8.0
+httpcore==1.0.9
+httpcore2==2.16.0
+httplib2==0.32.1
+httptools==0.9.0
+httpx==0.28.1
+httpx2==2.16.0
+huggingface_hub==2.4.0
+idna==3.20
+iniconfig==2.3.1
+itsdangerous==2.2.0
+Jinja2==3.1.6
+joserfc==1.8.0
+jsonref==1.1.0
+jsonschema==4.26.0
+jsonschema-path==0.5.0
+jsonschema-specifications==2025.9.1
+markdown-it-py==4.2.0
+MarkupSafe==3.0.4
+mcp==2.3.0
+mcp-types==2.3.0
+mdurl==0.1.2
+multidict==7.2.1
+numpy==2.5.4
+oauthlib==4.0.1
+onnxruntime==1.31.1
+openapi-pydantic==0.6.0
+opencv-python-headless==5.1.0.95
+opentelemetry-api==1.45.2
+packaging==26.3
+pathable==0.6.0
+pillow==13.0.0
+platformdirs==4.14.5
+playwright==1.65.2
+pluggy==1.7.0
+propcache==0.5.4
+proto-plus==1.29.0
+protobuf==7.36.2
+psutil==7.2.2
+py-key-value-aio==0.4.6
+pyasn1==0.6.5
+pyasn1_modules==0.4.2
+pycparser==3.12
+pydantic==2.14.3
+pydantic-settings==2.16.2
+pydantic_core==2.50.4
+Pygments==2.21.0
+PyJWT==2.15.1
+pyparsing==3.3.3
+pyperclip==1.11.0
+pytest==9.2.0
+pytest-asyncio==1.4.1.post1
+python-dotenv==1.2.4
+python-multipart==0.0.33
+pywin32==312
+PyYAML==6.0.3
+referencing==0.37.0
+requests==2.34.2
+requests-oauthlib==2.0.0
+rich==15.0.0
+rich-rst==2.2.0
+rpds-py==2026.9.1
+ruff==0.17.4
+setuptools==84.2.1
+sniffio==1.3.1
+soupsieve==4.1.3
+sse-starlette==3.7.0
+starlette==1.10.0
+tabulate==0.10.0
+tenacity==9.1.4
+tokenizers==0.23.3
+tqdm==4.70.1
+truststore==0.10.5
+typing-inspection==0.4.5
+typing_extensions==4.16.0
+tzdata==2026.6
+tzlocal==5.4.5
+uncalled-for==0.6.0
+uritemplate==4.2.0
+urllib3==2.8.0
+uvicorn==0.54.0
+watchfiles==1.3.0
+websockets==17.4
+wheel==0.48.0
+yarl==1.25.1
+yt-dlp==2026.10.26
